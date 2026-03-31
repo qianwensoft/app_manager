@@ -1,0 +1,29 @@
+# 本地零依赖启动：SQLite + 内嵌存储，无需 MySQL
+# 用法（在项目根目录执行，见 README）：
+#   ./app-manager server/config.sqlite.yaml
+
+server:
+  port: 8080
+  host: 0.0.0.0
+  mode: release
+
+database:
+  type: sqlite
+  # 可省略；省略时默认 ./data/app-manager.db（相对当前工作目录）
+  dsn: ./data/app-manager.db
+
+storage:
+  path: ./uploads
+  max_size_mb: 500
+
+adb:
+  path: adb
+  timeout: 30
+
+# 录屏转 MP4 时填写；留空则在 PATH 中查找 ffmpeg
+ffmpeg:
+  path: ""
+
+jwt:
+  secret: change-me-in-production
+  expire_hour: 24

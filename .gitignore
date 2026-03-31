@@ -1,0 +1,38 @@
+# 本地配置（勿提交真实 DSN/密钥）
+server/config.yaml
+.env
+scripts/sync-agent-apk.env
+
+# Go 构建产物
+app-manager
+*.exe
+*.test
+/bin/
+
+# 运行时目录与数据库
+uploads/
+data/
+*.db
+server/uploads/
+server/data/
+
+# 前端依赖与构建
+web/node_modules/
+web/dist/
+
+# Android / Gradle
+agent/.gradle/
+agent/**/build/
+agent/**/.cxx/
+agent/local.properties
+*.apk
+*.aab
+
+# IDE 与系统
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log

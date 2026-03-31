@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true">
+
+<LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="24dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="AppManager Agent"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="4dp" />
+
+    <TextView
+        android:id="@+id/tvAppVersion"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="14sp"
+        android:textColor="#666"
+        android:layout_marginBottom="16dp" />
+
+    <TextView
+        android:id="@+id/tvDeviceInfo"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="设备信息加载中..."
+        android:textSize="14sp"
+        android:textColor="#333"
+        android:padding="12dp"
+        android:background="#F5F5F5"
+        android:layout_marginBottom="24dp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Server 地址"
+        android:textSize="14sp"
+        android:textColor="#666"
+        android:layout_marginBottom="4dp" />
+
+    <EditText
+        android:id="@+id/etServerUrl"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="wss://192.168.1.x:8080"
+        android:inputType="textUri"
+        android:layout_marginBottom="16dp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="设备 Token"
+        android:textSize="14sp"
+        android:textColor="#666"
+        android:layout_marginBottom="4dp" />
+
+    <EditText
+        android:id="@+id/etToken"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="从 Server 获取的设备 Token"
+        android:inputType="textPassword"
+        android:layout_marginBottom="16dp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="设备别名"
+        android:textSize="14sp"
+        android:textColor="#666"
+        android:layout_marginBottom="4dp" />
+
+    <EditText
+        android:id="@+id/etDeviceAlias"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="设备别名（可选）"
+        android:inputType="text"
+        android:layout_marginBottom="16dp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="分组名称"
+        android:textSize="14sp"
+        android:textColor="#666"
+        android:layout_marginBottom="4dp" />
+
+    <EditText
+        android:id="@+id/etGroupName"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="分组名称（可选）"
+        android:inputType="text"
+        android:layout_marginBottom="24dp" />
+
+    <CheckBox
+        android:id="@+id/cbAutoAccept"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="自动接受屏幕录制和投射请求"
+        android:layout_marginBottom="12dp" />
+
+    <CheckBox
+        android:id="@+id/cbAllowRemoteScreen"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="允许远程查看屏幕（Web 打开屏幕前须勾选）"
+        android:layout_marginBottom="12dp" />
+
+    <CheckBox
+        android:id="@+id/cbAllowRemoteFilePull"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="允许远程拉取文件（仅外部存储路径，经 Agent 上传）"
+        android:layout_marginBottom="24dp" />
+
+    <Button
+        android:id="@+id/btnSave"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="保存并启动服务"
+        android:layout_marginBottom="12dp" />
+
+    <Button
+        android:id="@+id/btnScanQR"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="扫码接入"
+        android:layout_marginBottom="12dp" />
+
+    <Button
+        android:id="@+id/btnDeviceInfo"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="查看设备信息"
+        style="@style/Widget.MaterialComponents.Button.OutlinedButton" />
+
+</LinearLayout>
+</ScrollView>

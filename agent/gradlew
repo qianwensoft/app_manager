@@ -1,0 +1,4 @@
+#!/bin/sh
+# Simple Gradle wrapper that delegates to the local Gradle 8.9 installation
+GRADLE_HOME=/Users/frank/.gradle/wrapper/dists/gradle-8.9-bin/90cnw93cvbtalezasaz0blq0a/gradle-8.9
+exec "$GRADLE_HOME/bin/gradle" "$@"

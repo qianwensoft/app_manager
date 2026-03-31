@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AppManager Agent</string>
+    <string name="accessibility_service_description">允许远程控制设备屏幕</string>
+    <string name="toast_screen_capture_prompt">正在请求屏幕录制权限。若未弹出系统对话框，请下拉通知栏点「授权投屏」或手动打开本应用。</string>
+    <string name="notify_waiting_screen_auth">等待屏幕录制授权</string>
+    <string name="notify_action_grant_screen">授权投屏</string>
+    <string name="agent_version_label">Agent 版本：%1$s</string>
+</resources>

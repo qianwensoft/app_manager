@@ -1,0 +1,24 @@
+# 复制为 config.yaml 后按需修改（config.yaml 已被 .gitignore 忽略）
+server:
+  port: 8080
+  host: 0.0.0.0
+  mode: debug
+
+database:
+  type: mysql
+  dsn: "user:password@tcp(127.0.0.1:3306)/app_manager?charset=utf8mb4&parseTime=True&loc=Local"
+
+storage:
+  path: ./uploads
+  max_size_mb: 500
+
+adb:
+  path: adb
+  timeout: 30
+
+ffmpeg:
+  path: ""
+
+jwt:
+  secret: change-me-in-production
+  expire_hour: 24
