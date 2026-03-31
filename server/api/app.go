@@ -134,11 +134,16 @@ func DeleteApp(c *gin.Context) {
 
 func InstallApp(c *gin.Context) {
 	var req struct {
-		DeviceIDs []uint `json:"device_ids" binding:"required"`
+		DeviceIDs         []uint `json:"device_ids" binding:"required"`
+		StartAfterInstall *bool  `json:"start_after_install"` // 默认 true：与历史行为一致
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+	startAfter := true
+	if req.StartAfterInstall != nil {
+		startAfter = *req.StartAfterInstall
 	}
 	var app models.App
 	if err := database.DB.First(&app, c.Param("id")).Error; err != nil {
@@ -148,12 +153,13 @@ func InstallApp(c *gin.Context) {
 	var tasks []models.InstallTask
 	for _, deviceID := range req.DeviceIDs {
 		t := models.InstallTask{
-			AppID:           app.ID,
-			DeviceID:        deviceID,
-			Action:          "install",
-			Status:          "pending",
-			AgentFetchToken: randomInstallFetchToken(),
-			CreatedBy:       c.GetUint("user_id"),
+			AppID:             app.ID,
+			DeviceID:          deviceID,
+			Action:            "install",
+			Status:            "pending",
+			StartAfterInstall: startAfter,
+			AgentFetchToken:   randomInstallFetchToken(),
+			CreatedBy:         c.GetUint("user_id"),
 		}
 		database.DB.Create(&t)
 		task.Q.Submit(t.ID)

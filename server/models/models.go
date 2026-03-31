@@ -22,6 +22,8 @@ type Device struct {
 	CPUInfo        string    `json:"cpu_info"`
 	TotalMemory    int64     `json:"total_memory"`
 	TotalStorage   int64     `json:"total_storage"`
+	// Agent 心跳：/data 已用空间（MB）；ADB 路径可能未写入
+	StorageUsed    int64     `json:"storage_used"`
 	Resolution     string    `json:"resolution"`
 	IPAddress      string    `json:"ip_address"`
 	Status         string    `gorm:"size:20;default:'offline'" json:"status"`
@@ -41,9 +43,8 @@ type Device struct {
 	GroupName      string    `gorm:"size:100;default:''" json:"group_name"`
 	ServerAlias    string    `gorm:"size:100;default:''" json:"server_alias"`
 	AgentAlias     string     `gorm:"size:100;default:''" json:"agent_alias"`
-	// 由 Agent 心跳上报：是否允许 Web 远程查看屏幕 / 经 Agent 拉文件
-	AllowRemoteScreen   bool `gorm:"default:false" json:"allow_remote_screen"`
-	AllowRemoteFilePull bool `gorm:"default:false" json:"allow_remote_file_pull"`
+	// 由 Agent 心跳上报：是否允许 Web 远程查看屏幕
+	AllowRemoteScreen bool `gorm:"default:false" json:"allow_remote_screen"`
 	// Agent 上报的已安装应用（第三方），JSON 数组，供 Web 在无 ADB 时展示
 	AgentInstalledAppsJSON string `gorm:"column:agent_installed_apps_json;type:text" json:"-"`
 	// 指针：MySQL 在 NO_ZERO_DATE 下禁止 '0000-00-00'，未上线/未心跳时为 NULL
@@ -91,13 +92,14 @@ type ApiKey struct {
 }
 
 type InstallTask struct {
-	ID              uint       `gorm:"primaryKey" json:"id"`
-	AppID           uint       `json:"app_id"`
-	DeviceID        uint       `json:"device_id"`
-	Action          string     `gorm:"size:20" json:"action"`
-	Status          string     `gorm:"size:20;default:'pending'" json:"status"`
-	Output          string     `gorm:"type:text" json:"output"`
-	AgentFetchToken string     `gorm:"size:64;default:''" json:"-"` // Agent 拉取 APK 凭据，与 X-Device-Token 一起校验
+	ID                uint       `gorm:"primaryKey" json:"id"`
+	AppID             uint       `json:"app_id"`
+	DeviceID          uint       `json:"device_id"`
+	Action            string     `gorm:"size:20" json:"action"`
+	Status            string     `gorm:"size:20;default:'pending'" json:"status"`
+	Output            string     `gorm:"type:text" json:"output"`
+	StartAfterInstall bool       `gorm:"default:true" json:"start_after_install"` // 安装成功后是否尝试拉起主界面（ADB monkey 或 Agent start_app）
+	AgentFetchToken   string     `gorm:"size:64;default:''" json:"-"`             // Agent 拉取 APK 凭据，与 X-Device-Token 一起校验
 	CreatedBy       uint       `json:"created_by"`
 	CreatedAt       time.Time  `json:"created_at"`
 	FinishedAt      *time.Time `json:"finished_at"`

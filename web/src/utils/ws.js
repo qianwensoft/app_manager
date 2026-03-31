@@ -10,6 +10,7 @@ export class WSClient {
     this.url = `${WS_BASE}${path}`
     this.onOpen = onOpen || (() => {})
     this.onMessage = onMessage || (() => {})
+    /** onClose(code, reason) */
     this.onClose = onClose || (() => {})
     this.onError = onError || (() => {})
     this.reconnect = reconnect
@@ -20,7 +21,8 @@ export class WSClient {
 
   connect() {
     const auth = useAuthStore()
-    const url = `${this.url}?token=${auth.token}`
+    const t = auth.token ? encodeURIComponent(auth.token) : ''
+    const url = t ? `${this.url}?token=${t}` : this.url
     this.ws = new WebSocket(url)
     this.ws.binaryType = 'arraybuffer'
 
@@ -39,8 +41,8 @@ export class WSClient {
       this.onMessage(data)
     }
     this.ws.onerror = (e) => this.onError(e)
-    this.ws.onclose = () => {
-      this.onClose()
+    this.ws.onclose = (ev) => {
+      this.onClose(ev?.code, ev?.reason || '')
       if (this.reconnect && !this.closed) {
         const delay = Math.min(1000 * 2 ** this.attempts, 30000)
         this.attempts++

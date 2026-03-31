@@ -39,6 +39,9 @@ data class DeviceInfoData(
     @SerializedName("cpu_usage") val cpuUsage: Float,
     @SerializedName("memory_used") val memoryUsed: Long,
     @SerializedName("memory_total") val memoryTotal: Long,
+    /** /data 分区，MB，与服务端 Device.total_storage 一致 */
+    @SerializedName("storage_used") val storageUsed: Long = 0L,
+    @SerializedName("storage_total") val storageTotal: Long = 0L,
     @SerializedName("network_type") val networkType: String,
     val ip: String,
     val model: String,
@@ -53,7 +56,6 @@ data class DeviceInfoData(
     @SerializedName("group_name") val groupName: String = "",
     val resolution: String = "",
     @SerializedName("allow_remote_screen") val allowRemoteScreen: Boolean = false,
-    @SerializedName("allow_remote_file_pull") val allowRemoteFilePull: Boolean = false,
     /** Agent APK 版本，供服务端设备档案展示 */
     @SerializedName("agent_version") val agentVersion: String = ""
 )
@@ -120,9 +122,9 @@ object CommandAction {
     const val CAPTURE_SCREENSHOT = "capture_screenshot"
     const val SPEED_TEST_PING = "speed_test_ping"
     const val SPEED_TEST_THROUGHPUT = "speed_test_throughput"
-    const val READ_FILE = "read_file"
-    const val LIST_FILES = "list_files"
     const val LIST_INSTALLED_APPS = "list_installed_apps"
+    /** 将已安装包的 APK（多 split 时为 zip）POST 到服务端供浏览器下载 */
+    const val EXPORT_INSTALLED_APK = "export_installed_apk"
     /** 立即采集并上报 device_info（含 Wi‑Fi SSID 等），供 Web 刷新 */
     const val PUSH_DEVICE_INFO = "push_device_info"
 }

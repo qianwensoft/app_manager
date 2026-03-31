@@ -10,8 +10,18 @@
           <el-descriptions-item label="SDK">{{ device.sdk_version }}</el-descriptions-item>
           <el-descriptions-item label="Agent 版本">{{ device.agent_version || '-' }}</el-descriptions-item>
           <el-descriptions-item label="分辨率">{{ device.resolution }}</el-descriptions-item>
-          <el-descriptions-item label="内存">{{ device.total_memory }} MB</el-descriptions-item>
-          <el-descriptions-item label="存储">{{ device.total_storage }} MB</el-descriptions-item>
+          <el-descriptions-item label="内存">
+            <template v-if="device.memory_total > 0">{{ device.memory_used ?? 0 }} / {{ device.memory_total }} MB</template>
+            <template v-else-if="device.total_memory > 0">{{ device.total_memory }} MB</template>
+            <template v-else>—</template>
+          </el-descriptions-item>
+          <el-descriptions-item label="存储">
+            <template v-if="device.total_storage > 0">
+              <template v-if="device.agent_connected">{{ device.storage_used ?? 0 }} / {{ device.total_storage }} MB</template>
+              <template v-else>{{ device.total_storage }} MB</template>
+            </template>
+            <template v-else>—</template>
+          </el-descriptions-item>
           <el-descriptions-item label="IP">{{ device.ip || device.ip_address || '-' }}</el-descriptions-item>
           <el-descriptions-item label="网络类型">{{ device.network_type || '-' }}</el-descriptions-item>
           <el-descriptions-item label="Wi‑Fi 名称">{{ formatWifiSsid(device.wifi_ssid) }}</el-descriptions-item>
@@ -36,11 +46,6 @@
               {{ device.allow_remote_screen ? '端上已允许' : '端上未允许' }}
             </el-tag>
           </el-descriptions-item>
-          <el-descriptions-item label="远程拉取文件">
-            <el-tag :type="device.allow_remote_file_pull ? 'success' : 'info'" size="small">
-              {{ device.allow_remote_file_pull ? '端上已允许' : '端上未允许' }}
-            </el-tag>
-          </el-descriptions-item>
           <el-descriptions-item label="Agent Token" :span="2">
             <span v-if="device.agent_token">{{ device.agent_token }}</span>
             <el-text v-else type="warning">未绑定 — 屏幕/Shell/Logcat 需与手机端一致，请到「设备管理」填写扫码页上的 Token</el-text>
@@ -57,6 +62,9 @@
         />
 
         <el-divider content-position="left">快捷操作</el-divider>
+        <el-checkbox v-model="apkInstallAndLaunch" style="margin-bottom:10px;display:block">
+          安装完成后启动应用
+        </el-checkbox>
         <el-space wrap style="margin-bottom:16px">
           <el-button @click="$router.push(`/screen?device=${device.id}`)">查看屏幕</el-button>
           <el-button @click="$router.push(`/shell?device=${device.id}`)">Shell</el-button>
@@ -74,42 +82,8 @@
           </el-upload>
         </el-space>
         <div style="font-size:12px;color:#909399;margin:-8px 0 16px;max-width:720px">
-          「安装 APK」会先上传到服务器再下发安装任务，与「应用管理」一致；需设备 ADB 可用且账号为管理员/运维。
+          「安装 APK」会先上传到服务器再下发安装任务；纯 Agent 设备由手机端完成系统安装界面。需账号为管理员/运维。
         </div>
-
-        <el-divider content-position="left">Agent 拉取文件（无 ADB）</el-divider>
-        <div v-if="device.agent_connected && device.allow_remote_file_pull" style="margin-bottom:16px;max-width:640px">
-          <el-space wrap alignment="center">
-            <el-input
-              v-model="agentPullPath"
-              placeholder="例如 /sdcard/Download/example.txt"
-              style="width:min(100%, 360px)"
-              clearable
-            />
-            <el-button type="primary" :loading="agentPulling" @click="doAgentPull">下载</el-button>
-          </el-space>
-          <div style="font-size:12px;color:#909399;margin-top:8px">
-            仅允许外部存储路径（如 /sdcard、/storage/emulated/0），单文件上限 50MB。
-          </div>
-        </div>
-        <el-alert
-          v-else-if="device.agent_connected"
-          type="info"
-          :closable="false"
-          show-icon
-          style="margin-bottom:16px;max-width:640px"
-          title="远程拉文件未开启"
-          description="请在 Android Agent 主界面勾选「允许远程拉取文件」并保存，状态会随心跳更新。"
-        />
-        <el-alert
-          v-else
-          type="warning"
-          :closable="false"
-          show-icon
-          style="margin-bottom:16px;max-width:640px"
-          title="Agent 离线"
-          description="设备上线后即可通过 Agent 拉取文件（需端上授权）。"
-        />
 
         <el-descriptions v-if="speedResult" :column="2" border style="margin-top:12px;max-width:640px" title="最近一次测速（服务器 ↔ Agent）">
           <el-descriptions-item label="WS 往返 (RTT)">{{ speedResult.rtt_ms != null ? `${speedResult.rtt_ms} ms` : '-' }}</el-descriptions-item>
@@ -161,52 +135,6 @@
         </div>
       </el-tab-pane>
 
-      <el-tab-pane label="设备管理" name="manage">
-        <el-form :model="editForm" label-width="100px" style="max-width:500px">
-          <el-form-item label="设备名称">
-            <el-input v-model="editForm.name" />
-          </el-form-item>
-          <el-form-item label="服务端别名">
-            <el-input v-model="editForm.server_alias" placeholder="可选" />
-          </el-form-item>
-          <el-form-item label="分组">
-            <el-input v-model="editForm.group_name" placeholder="可选" />
-          </el-form-item>
-          <el-form-item label="Agent Token">
-            <el-input v-model="editForm.agent_token" placeholder="与 Agent 应用内/扫码 JSON 中 deviceToken 一致" clearable />
-            <div style="font-size:12px;color:#909399;margin-top:4px">留空并保存可清空绑定；须全局唯一</div>
-          </el-form-item>
-          <el-form-item>
-            <el-button type="primary" @click="saveEdit">保存修改</el-button>
-          </el-form-item>
-        </el-form>
-        <el-divider />
-        <el-button type="danger" @click="deleteDevice">删除设备</el-button>
-      </el-tab-pane>
-
-      <el-tab-pane label="已安装应用" name="apps">
-        <el-space wrap style="margin-bottom:12px;align-items:center">
-          <el-input v-model="appFilter" placeholder="搜索包名" style="width:300px" />
-          <el-button :loading="appsRefreshing" :disabled="!device?.agent_connected" @click="refreshAppsFromAgent">
-            从 Agent 刷新
-          </el-button>
-        </el-space>
-        <div v-if="device?.agent_connected" style="font-size:12px;color:#909399;margin:-4px 0 8px">
-          Agent 在线时列表来自手机同步；安装/卸载后请点击「从 Agent 刷新」。
-        </div>
-        <el-table :data="filteredApps" border height="500">
-          <el-table-column prop="package_name" label="包名" />
-          <el-table-column prop="version_name" label="版本" width="120" />
-          <el-table-column label="操作" width="200">
-            <template #default="{ row }">
-              <el-button size="small" @click="startApp(row.package_name)">启动</el-button>
-              <el-button size="small" type="warning" @click="stopApp(row.package_name)">停止</el-button>
-              <el-button size="small" type="danger" @click="clearApp(row.package_name)">清数据</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-      </el-tab-pane>
-
       <el-tab-pane label="文件管理" name="files">
         <el-space direction="vertical" alignment="stretch" :size="16" style="width:100%;max-width:960px">
           <el-alert
@@ -216,74 +144,6 @@
             title="说明"
             description="录屏为 Agent 结束录屏后上传的 MP4（远程屏幕页可勾选录制音频）；截图可下载到本机或 ADB 截图后存档到服务器；音频可单独上传归档。"
           />
-
-          <template v-if="device.agent_connected && device.allow_remote_file_pull">
-            <div>
-              <div style="font-weight:600;margin-bottom:8px">Agent 设备存储浏览</div>
-              <el-space wrap style="margin-bottom:8px;align-items:center">
-                <el-input
-                  v-model="agentBrowsePath"
-                  placeholder="当前目录，可编辑后回车"
-                  style="width:min(100%, 440px)"
-                  clearable
-                  @keyup.enter="loadAgentBrowse"
-                />
-                <el-button size="small" type="primary" :loading="agentBrowseLoading" @click="loadAgentBrowse">
-                  刷新
-                </el-button>
-                <el-button size="small" :disabled="!canAgentBrowseUp" @click="agentBrowseParent">上级目录</el-button>
-              </el-space>
-              <div style="font-size:12px;color:#909399;margin:-4px 0 8px">
-                与设备信息页「拉取文件」相同规则：仅 /sdcard、/storage/emulated/0 等路径；单目录最多 500 项；单文件下载上限 50MB（需运维/管理员权限）。双击文件夹进入目录；图片/视频双击可在线查看。
-              </div>
-              <el-table :data="agentBrowseEntries" border v-loading="agentBrowseLoading" empty-text="空目录或点击刷新">
-                <el-table-column label="名称" min-width="200" show-overflow-tooltip>
-                  <template #default="{ row }">
-                    <span
-                      class="agent-browse-name"
-                      :class="{
-                        'agent-browse-name--dir': row.is_dir,
-                        'agent-browse-name--preview': !row.is_dir && agentPreviewKindForName(row.name)
-                      }"
-                      @dblclick="onAgentBrowseNameDblClick(row)"
-                    >
-                      {{ row.name }}
-                    </span>
-                  </template>
-                </el-table-column>
-                <el-table-column label="类型" width="88">
-                  <template #default="{ row }">{{ row.is_dir ? '文件夹' : '文件' }}</template>
-                </el-table-column>
-                <el-table-column label="大小" width="100">
-                  <template #default="{ row }">{{ row.is_dir ? '—' : formatFileSize(row.size) }}</template>
-                </el-table-column>
-                <el-table-column label="修改时间" width="170">
-                  <template #default="{ row }">{{ formatAgentEntryDate(row) }}</template>
-                </el-table-column>
-                <el-table-column label="操作" width="200" fixed="right">
-                  <template #default="{ row }">
-                    <el-button v-if="row.is_dir" size="small" type="primary" link @click="enterAgentDir(row)">
-                      打开
-                    </el-button>
-                    <template v-else>
-                      <el-button
-                        v-if="agentPreviewKindForName(row.name)"
-                        size="small"
-                        type="primary"
-                        link
-                        :loading="agentPreviewLoading && agentPreviewLoadingPath === joinAgentPath(agentBrowsePath, row.name)"
-                        @click="openAgentPreview(row)"
-                      >
-                        查看
-                      </el-button>
-                      <el-button size="small" type="primary" link @click="downloadAgentEntry(row)">下载</el-button>
-                    </template>
-                  </template>
-                </el-table-column>
-              </el-table>
-            </div>
-            <el-divider />
-          </template>
 
           <div>
             <div style="font-weight:600;margin-bottom:8px">录屏</div>
@@ -392,6 +252,70 @@
           </div>
         </el-space>
       </el-tab-pane>
+
+      <el-tab-pane label="已安装应用" name="apps">
+        <el-space wrap style="margin-bottom:12px;align-items:center">
+          <el-input v-model="appFilter" placeholder="搜索包名或应用名" style="width:300px" />
+          <el-button :loading="appsRefreshing" :disabled="!device?.agent_connected" @click="refreshAppsFromAgent">
+            从 Agent 刷新
+          </el-button>
+        </el-space>
+        <div v-if="device?.agent_connected" style="font-size:12px;color:#909399;margin:-4px 0 8px">
+          列表含系统应用；安装/卸载后请点「从 Agent 刷新」。下载 APK 依赖系统是否允许读取安装包路径，失败时请用 ADB 或 Root 环境。
+        </div>
+        <el-table :data="filteredApps" border height="500">
+          <el-table-column prop="app_label" label="应用名" min-width="140" show-overflow-tooltip />
+          <el-table-column prop="package_name" label="包名" min-width="180" show-overflow-tooltip />
+          <el-table-column label="类型" width="88">
+            <template #default="{ row }">
+              <el-tag v-if="row.is_system" type="info" size="small">系统</el-tag>
+              <el-tag v-else type="success" size="small">用户</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="version_name" label="版本" width="120" />
+          <el-table-column label="操作" width="310" fixed="right">
+            <template #default="{ row }">
+              <el-button
+                v-if="canMutate"
+                size="small"
+                type="primary"
+                plain
+                :loading="pullApkPkg === row.package_name"
+                :disabled="!device?.agent_connected"
+                @click="downloadApkFromDevice(row)"
+              >
+                下载 APK
+              </el-button>
+              <el-button size="small" @click="startApp(row.package_name)">启动</el-button>
+              <el-button size="small" type="warning" @click="stopApp(row.package_name)">停止</el-button>
+              <el-button size="small" type="danger" @click="clearApp(row.package_name)">清数据</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
+
+      <el-tab-pane label="设备管理" name="manage">
+        <el-form :model="editForm" label-width="100px" style="max-width:500px">
+          <el-form-item label="设备名称">
+            <el-input v-model="editForm.name" />
+          </el-form-item>
+          <el-form-item label="服务端别名">
+            <el-input v-model="editForm.server_alias" placeholder="可选" />
+          </el-form-item>
+          <el-form-item label="分组">
+            <el-input v-model="editForm.group_name" placeholder="可选" />
+          </el-form-item>
+          <el-form-item label="Agent Token">
+            <el-input v-model="editForm.agent_token" placeholder="与 Agent 应用内/扫码 JSON 中 deviceToken 一致" clearable />
+            <div style="font-size:12px;color:#909399;margin-top:4px">留空并保存可清空绑定；须全局唯一</div>
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" @click="saveEdit">保存修改</el-button>
+          </el-form-item>
+        </el-form>
+        <el-divider />
+        <el-button type="danger" @click="deleteDevice">删除设备</el-button>
+      </el-tab-pane>
     </el-tabs>
 
     <el-dialog
@@ -411,30 +335,6 @@
       />
     </el-dialog>
 
-    <el-dialog
-      v-model="agentPreviewVisible"
-      :title="agentPreviewTitle || '预览'"
-      width="min(920px, 96vw)"
-      destroy-on-close
-      align-center
-      @closed="onAgentPreviewDialogClosed"
-    >
-      <div v-loading="agentPreviewLoading" class="agent-preview-wrap">
-        <img
-          v-if="!agentPreviewLoading && agentPreviewKind === 'image' && agentPreviewUrl"
-          :src="agentPreviewUrl"
-          class="agent-preview-img"
-          alt=""
-        />
-        <video
-          v-if="!agentPreviewLoading && agentPreviewKind === 'video' && agentPreviewUrl"
-          :src="agentPreviewUrl"
-          controls
-          playsinline
-          class="file-hub-video"
-        />
-      </div>
-    </el-dialog>
   </div>
 </template>
 
@@ -461,23 +361,19 @@ const speedResult = ref(null)
 const keycode = ref(3)
 const inputText = ref('')
 const editForm = ref({ name: '', server_alias: '', group_name: '', agent_token: '' })
-const agentPullPath = ref('/sdcard/Download/')
-const agentPulling = ref(false)
-const agentBrowsePath = ref('/sdcard')
-const agentBrowseLoading = ref(false)
-const agentBrowseEntries = ref([])
 const apkInstalling = ref(false)
+const apkInstallAndLaunch = ref(true)
 const appsRefreshing = ref(false)
-
-const AGENT_BROWSE_ROOTS = ['/sdcard', '/storage/emulated/0', '/storage/self/primary']
-
-const canAgentBrowseUp = computed(() => {
-  const p = (agentBrowsePath.value || '').replace(/\/+$/, '')
-  return !AGENT_BROWSE_ROOTS.includes(p)
-})
+const pullApkPkg = ref('')
 
 const activeMainTab = ref(
-  route.query.tab === 'files' ? 'files' : route.query.tab === 'apps' ? 'apps' : 'info'
+  route.query.tab === 'files'
+    ? 'files'
+    : route.query.tab === 'apps'
+      ? 'apps'
+      : route.query.tab === 'manage'
+        ? 'manage'
+        : 'info'
 )
 const fileHub = ref({ recordings: [], media: [] })
 const fileHubLoading = ref(false)
@@ -486,65 +382,19 @@ const audioUploading = ref(false)
 const recordingPlayerVisible = ref(false)
 const recordingPlayerId = ref(null)
 
-/** Agent 存储浏览：按扩展名判断是否可浏览器内预览（经 pull-file 拉 Blob） */
-const AGENT_PREVIEW_IMAGE_EXT = new Set([
-  '.jpg',
-  '.jpeg',
-  '.png',
-  '.gif',
-  '.webp',
-  '.bmp',
-  '.svg',
-  '.ico',
-  '.heic',
-  '.heif',
-  '.avif'
-])
-const AGENT_PREVIEW_VIDEO_EXT = new Set([
-  '.mp4',
-  '.webm',
-  '.ogg',
-  '.ogv',
-  '.mov',
-  '.m4v',
-  '.mkv',
-  '.avi',
-  '.3gp',
-  '.3g2'
-])
-
-function agentPreviewExt(name) {
-  if (!name || typeof name !== 'string') return ''
-  const i = name.lastIndexOf('.')
-  return i >= 0 ? name.slice(i).toLowerCase() : ''
-}
-
-function agentPreviewKindForName(name) {
-  const ext = agentPreviewExt(name)
-  if (AGENT_PREVIEW_IMAGE_EXT.has(ext)) return 'image'
-  if (AGENT_PREVIEW_VIDEO_EXT.has(ext)) return 'video'
-  return null
-}
-
-const agentPreviewVisible = ref(false)
-const agentPreviewTitle = ref('')
-const agentPreviewKind = ref('')
-const agentPreviewUrl = ref(null)
-const agentPreviewLoading = ref(false)
-const agentPreviewLoadingPath = ref('')
-let agentPreviewReqSeq = 0
-
 watch(
   () => route.query.tab,
   (t) => {
     if (t === 'files') {
       activeMainTab.value = 'files'
       loadFileHub()
-      loadAgentBrowseIfOk()
     }
     if (t === 'apps') {
       activeMainTab.value = 'apps'
       loadApps()
+    }
+    if (t === 'manage') {
+      activeMainTab.value = 'manage'
     }
   }
 )
@@ -558,9 +408,15 @@ const canMutate = computed(() => {
 const screenshots = computed(() => (fileHub.value.media || []).filter((m) => m.category === 'screenshot'))
 const audios = computed(() => (fileHub.value.media || []).filter((m) => m.category === 'audio'))
 
-const filteredApps = computed(() =>
-  apps.value.filter(a => a.package_name.includes(appFilter.value))
-)
+const filteredApps = computed(() => {
+  const q = appFilter.value.trim().toLowerCase()
+  if (!q) return apps.value
+  return apps.value.filter((a) => {
+    const pkg = (a.package_name || '').toLowerCase()
+    const label = (a.app_label || '').toLowerCase()
+    return pkg.includes(q) || label.includes(q)
+  })
+})
 
 const streamTok = () => localStorage.getItem('token') || ''
 
@@ -588,148 +444,9 @@ const formatFileDate = (date) => {
 const onMainTabChange = (name) => {
   if (name === 'files') {
     loadFileHub()
-    loadAgentBrowseIfOk()
   }
   if (name === 'apps') {
     loadApps()
-  }
-}
-
-const joinAgentPath = (dir, name) => {
-  const d = (dir || '').replace(/\/+$/, '')
-  const n = (name || '').replace(/^\/+/, '')
-  return `${d}/${n}`
-}
-
-const formatAgentEntryDate = (row) => {
-  const ms = row?.modified_ms
-  if (ms == null || ms === 0) return '—'
-  const d = new Date(Number(ms))
-  if (Number.isNaN(d.getTime())) return '—'
-  return d.toLocaleString()
-}
-
-const loadAgentBrowseIfOk = () => {
-  if (device.value?.agent_connected && device.value?.allow_remote_file_pull) loadAgentBrowse()
-}
-
-const loadAgentBrowse = async () => {
-  if (!device.value?.agent_connected || !device.value?.allow_remote_file_pull) return
-  agentBrowseLoading.value = true
-  try {
-    const res = await deviceApi.agentListFiles(route.params.id, agentBrowsePath.value.trim() || '/sdcard')
-    const box = res.data || {}
-    if (box.path) agentBrowsePath.value = box.path
-    agentBrowseEntries.value = Array.isArray(box.entries) ? box.entries : []
-  } catch {
-    agentBrowseEntries.value = []
-    // 错误提示由 http 拦截器统一弹出
-  } finally {
-    agentBrowseLoading.value = false
-  }
-}
-
-const agentBrowseParent = () => {
-  const p = (agentBrowsePath.value || '').replace(/\/+$/, '')
-  const i = p.lastIndexOf('/')
-  if (i <= 0) return
-  const parent = p.slice(0, i) || '/sdcard'
-  agentBrowsePath.value = parent
-  loadAgentBrowse()
-}
-
-const enterAgentDir = (row) => {
-  agentBrowsePath.value = joinAgentPath(agentBrowsePath.value, row.name)
-  loadAgentBrowse()
-}
-
-const onAgentBrowseNameDblClick = (row) => {
-  if (row?.is_dir) enterAgentDir(row)
-  else if (agentPreviewKindForName(row.name)) openAgentPreview(row)
-}
-
-const revokeAgentPreviewUrl = () => {
-  if (agentPreviewUrl.value) {
-    URL.revokeObjectURL(agentPreviewUrl.value)
-    agentPreviewUrl.value = null
-  }
-}
-
-const onAgentPreviewDialogClosed = () => {
-  revokeAgentPreviewUrl()
-  agentPreviewKind.value = ''
-  agentPreviewTitle.value = ''
-  agentPreviewLoadingPath.value = ''
-}
-
-const openAgentPreview = async (row) => {
-  const kind = agentPreviewKindForName(row?.name)
-  if (!kind || row?.is_dir) return
-  const full = joinAgentPath(agentBrowsePath.value, row.name)
-  const seq = ++agentPreviewReqSeq
-  revokeAgentPreviewUrl()
-  agentPreviewKind.value = kind
-  agentPreviewTitle.value = row.name
-  agentPreviewVisible.value = true
-  agentPreviewLoading.value = true
-  agentPreviewLoadingPath.value = full
-  const n = ElNotification({
-    title: '正在加载预览',
-    message: '经 Agent 拉取文件可能需要较长时间。',
-    type: 'info',
-    duration: 0
-  })
-  try {
-    const { blob } = await deviceApi.agentPullFile(route.params.id, full)
-    if (seq !== agentPreviewReqSeq) return
-    agentPreviewUrl.value = URL.createObjectURL(blob)
-  } catch (e) {
-    if (seq !== agentPreviewReqSeq) return
-    agentPreviewVisible.value = false
-    ElMessage.error(e.message || '加载失败')
-  } finally {
-    n.close()
-    if (seq === agentPreviewReqSeq) {
-      agentPreviewLoading.value = false
-      agentPreviewLoadingPath.value = ''
-    }
-  }
-}
-
-const downloadAgentEntry = async (row) => {
-  const full = joinAgentPath(agentBrowsePath.value, row.name)
-  agentPullPath.value = full
-  await doAgentPullPath(full)
-}
-
-/** 拉取指定路径（与输入框解耦，供浏览表与手动输入共用） */
-const doAgentPullPath = async (path) => {
-  const p = (path || '').trim()
-  if (!p) {
-    ElMessage.warning('请输入路径')
-    return
-  }
-  agentPulling.value = true
-  const n = ElNotification({
-    title: '正在拉取文件',
-    message: '经 Agent 下载大文件可能需要较长时间，请勿重复点击。',
-    type: 'info',
-    duration: 0
-  })
-  try {
-    const { blob, filename } = await deviceApi.agentPullFile(route.params.id, p)
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename || 'download'
-    a.click()
-    URL.revokeObjectURL(url)
-    ElMessage.success('已保存到下载目录')
-  } catch (e) {
-    ElMessage.error(e.message || '拉取失败')
-  } finally {
-    n.close()
-    agentPulling.value = false
   }
 }
 
@@ -915,7 +632,7 @@ const refreshAppsFromAgent = async () => {
   appsRefreshing.value = true
   const n = ElNotification({
     title: '正在从 Agent 刷新应用列表',
-    message: '枚举已安装应用可能需要近一分钟，请勿重复点击。',
+    message: '枚举已安装应用（含系统应用）可能需要近一分钟，请勿重复点击。',
     type: 'info',
     duration: 0
   })
@@ -929,6 +646,35 @@ const refreshAppsFromAgent = async () => {
   } finally {
     n.close()
     appsRefreshing.value = false
+  }
+}
+
+const downloadApkFromDevice = async (row) => {
+  if (!device.value?.agent_connected) {
+    ElMessage.warning('需要 Agent 在线')
+    return
+  }
+  pullApkPkg.value = row.package_name
+  const n = ElNotification({
+    title: '正在从设备导出安装包',
+    message: '大应用或分包应用耗时较长，请勿关闭页面。',
+    type: 'info',
+    duration: 0
+  })
+  try {
+    const { blob, filename } = await deviceApi.pullInstalledApk(route.params.id, row.package_name)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+    ElMessage.success('已开始下载')
+  } catch (e) {
+    ElMessage.error(e.message || '导出失败')
+  } finally {
+    n.close()
+    pullApkPkg.value = ''
   }
 }
 
@@ -983,7 +729,7 @@ const installApkToCurrentDevice = async (opt) => {
     const res = await appApi.uploadApp(fd)
     const app = res?.data
     if (!app?.id) throw new Error('上传返回数据异常')
-    await appApi.installApp(app.id, [devId])
+    await appApi.installApp(app.id, [devId], { start_after_install: apkInstallAndLaunch.value })
     ElMessage.success('已上传并提交安装任务，可在「应用管理」或任务列表查看进度')
     opt.onSuccess?.(res)
   } catch (e) {
@@ -994,15 +740,6 @@ const installApkToCurrentDevice = async (opt) => {
     n.close()
     apkInstalling.value = false
   }
-}
-
-const doAgentPull = async () => {
-  const p = agentPullPath.value.trim()
-  if (!p) {
-    ElMessage.warning('请输入设备上的文件路径')
-    return
-  }
-  await doAgentPullPath(p)
 }
 
 const screenshot = async () => {
@@ -1071,13 +808,11 @@ onMounted(async () => {
   auth.fetchMe().catch(() => {})
   if (route.query.tab === 'files') {
     loadFileHub()
-    loadAgentBrowseIfOk()
   }
   profileStomp.connect()
 })
 onUnmounted(() => {
   profileStomp.disconnect()
-  revokeAgentPreviewUrl()
 })
 </script>
 
@@ -1090,27 +825,4 @@ onUnmounted(() => {
   vertical-align: middle;
 }
 
-.agent-browse-name--dir {
-  cursor: pointer;
-  user-select: none;
-}
-
-.agent-browse-name--preview {
-  cursor: zoom-in;
-}
-
-.agent-preview-wrap {
-  min-height: 160px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.agent-preview-img {
-  max-width: 100%;
-  max-height: 72vh;
-  object-fit: contain;
-  vertical-align: middle;
-  border-radius: 4px;
-}
 </style>

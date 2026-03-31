@@ -24,7 +24,7 @@ object SystemCommandHandler {
             Brand: ${Build.BRAND}
             Android: ${Build.VERSION.RELEASE}
             Memory: ${memInfo.used}MB / ${memInfo.total}MB
-            Storage: ${storageInfo.used}GB / ${storageInfo.total}GB
+            Storage: ${storageInfo.usedMB}MB / ${storageInfo.totalMB}MB
         """.trimIndent()
         CommandDispatcher.sendResult(service, msg.commandId, true, info)
     }

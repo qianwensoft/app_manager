@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -23,6 +24,12 @@ import (
 
 func getADB() *adb.Client {
 	return adb.NewClient(config.C.ADB.Path, config.C.ADB.Timeout)
+}
+
+func randomAgentRequestID() string {
+	b := make([]byte, 10)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 // serialUsableWithAdb 为 false 时表示扫码占位设备（serial 形如 agent-xxx），不能执行 adb -s。
@@ -183,6 +190,9 @@ func GetDeviceInfo(c *gin.Context) {
 			"cpu_usage":           device.CPUUsage,
 			"memory_used":         device.MemoryUsed,
 			"memory_total":        device.MemoryTotal,
+			"total_memory":        device.TotalMemory,
+			"total_storage":       device.TotalStorage,
+			"storage_used":        device.StorageUsed,
 			"network_type":        device.NetworkType,
 			"wifi_ssid":           device.WifiSSID,
 			"wifi_signal":         device.WifiSignal,
@@ -262,7 +272,7 @@ func RefreshDeviceAppsFromAgent(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Agent 未在线，无法刷新已安装应用"})
 		return
 	}
-	rid := randomFilePullID()
+	rid := randomAgentRequestID()
 	ch := agent.RegisterInstalledAppsWait(rid)
 	_ = agent.AgentHub.Send(routeKey, map[string]interface{}{
 		"type":   "command",
@@ -290,6 +300,92 @@ func RefreshDeviceAppsFromAgent(c *gin.Context) {
 	}
 }
 
+// PullInstalledApkFromAgent 经在线 Agent 读取已安装包的 APK（多 split 时为 zip）并下载到浏览器。
+func PullInstalledApkFromAgent(c *gin.Context) {
+	device := getDeviceByID(c)
+	if device == nil {
+		return
+	}
+	var req struct {
+		PackageName string `json:"package_name" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	pkg := strings.TrimSpace(req.PackageName)
+	if pkg == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "empty package_name"})
+		return
+	}
+	routeKey, err := agent.AgentConnectionKey(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !agent.AgentHub.IsConnected(routeKey) {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Agent 未在线，无法导出 APK"})
+		return
+	}
+	rid := randomAgentRequestID()
+	ch := agent.RegisterPulledApkWait(rid, device.ID)
+	uploadPath := "/api/agent/pulled-apk-upload?request_id=" + url.QueryEscape(rid)
+	_ = agent.AgentHub.Send(routeKey, map[string]interface{}{
+		"type":   "command",
+		"action": "export_installed_apk",
+		"data": map[string]interface{}{
+			"request_id":   rid,
+			"package_name": pkg,
+			"upload_path":  uploadPath,
+		},
+	})
+	select {
+	case rep := <-ch:
+		if rep.Err != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": rep.Err})
+			return
+		}
+		if rep.Path == "" {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "无文件"})
+			return
+		}
+		defer os.Remove(rep.Path)
+		fname := rep.FileName
+		if fname == "" {
+			fname = fallbackPulledApkFilename(pkg, rep.Path)
+		}
+		c.Header("Content-Type", "application/octet-stream")
+		c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, fname))
+		c.File(rep.Path)
+	case <-time.After(12 * time.Minute):
+		agent.ForgetPulledApkWait(rid)
+		c.JSON(http.StatusGatewayTimeout, gin.H{"error": "导出 APK 超时（体积大或设备权限不足）"})
+	}
+}
+
+func fallbackPulledApkFilename(pkg, path string) string {
+	base := strings.Map(func(r rune) rune {
+		if r <= 31 || strings.ContainsRune("/\\:*?\"<>|", r) {
+			return '_'
+		}
+		return r
+	}, pkg)
+	if base == "" {
+		base = "app"
+	}
+	ext := ".apk"
+	fh, err := os.Open(path)
+	if err == nil {
+		head := make([]byte, 4)
+		_, _ = fh.Read(head)
+		_ = fh.Close()
+		if len(head) >= 4 && head[0] == 'P' && head[1] == 'K' && head[2] == 0x03 && head[3] == 0x04 {
+			ext = "_splits.zip"
+		}
+	}
+	return base + ext
+}
+
 // RefreshAgentDeviceInfoFromAgent 通知在线 Agent 立即上报 device_info（含 Wi‑Fi SSID 等），写入库后返回最新设备行。
 func RefreshAgentDeviceInfoFromAgent(c *gin.Context) {
 	device := getDeviceByID(c)
@@ -305,7 +401,7 @@ func RefreshAgentDeviceInfoFromAgent(c *gin.Context) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Agent 未在线，无法刷新端上网络与状态"})
 		return
 	}
-	rid := randomFilePullID()
+	rid := randomAgentRequestID()
 	ch := agent.RegisterDeviceInfoPushWait(rid)
 	_ = agent.AgentHub.Send(routeKey, map[string]interface{}{
 		"type":   "command",

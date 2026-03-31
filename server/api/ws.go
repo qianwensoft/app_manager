@@ -384,34 +384,6 @@ func init() {
 				UploadBytes:   wsMsgInt64(msg, "upload_bytes"),
 			}
 			agent.DeliverSpeedtestReply(reqID, rep)
-		case "file_read_result":
-			reqID, _ := msg["request_id"].(string)
-			if reqID == "" {
-				return
-			}
-			if wsMsgBool(msg, "success") {
-				return
-			}
-			errStr, _ := msg["error"].(string)
-			if errStr == "" {
-				errStr = "读文件失败"
-			}
-			agent.DeliverFileReadResult(reqID, "", errStr)
-		case "file_list_result":
-			reqID, _ := msg["request_id"].(string)
-			if reqID == "" {
-				return
-			}
-			if !wsMsgBool(msg, "success") {
-				errStr, _ := msg["error"].(string)
-				if errStr == "" {
-					errStr = "列出目录失败"
-				}
-				agent.DeliverListDirResult(reqID, nil, errStr)
-				return
-			}
-			entries := parseListDirEntries(msg["entries"])
-			agent.DeliverListDirResult(reqID, entries, "")
 		case "installed_apps_result":
 			reqID, _ := msg["request_id"].(string)
 			if reqID == "" {
@@ -523,33 +495,15 @@ func parseInstalledAppsEntries(v interface{}) []agent.InstalledAppEntry {
 			continue
 		}
 		vn, _ := m["version_name"].(string)
+		label, _ := m["app_label"].(string)
 		out = append(out, agent.InstalledAppEntry{
 			PackageName: pkg,
 			VersionName: vn,
 			VersionCode: int(wsMsgInt64(m, "version_code")),
+			AppLabel:    label,
+			IsSystem:    wsMsgBool(m, "is_system"),
 		})
 	}
 	return out
 }
 
-func parseListDirEntries(v interface{}) []agent.DirEntry {
-	arr, ok := v.([]interface{})
-	if !ok {
-		return nil
-	}
-	out := make([]agent.DirEntry, 0, len(arr))
-	for _, x := range arr {
-		m, ok := x.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		name, _ := m["name"].(string)
-		out = append(out, agent.DirEntry{
-			Name:       name,
-			IsDir:      wsMsgBool(m, "is_dir"),
-			Size:       wsMsgInt64(m, "size"),
-			ModifiedMs: wsMsgInt64(m, "modified_ms"),
-		})
-	}
-	return out
-}

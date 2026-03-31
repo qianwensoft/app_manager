@@ -15,6 +15,13 @@
           <span v-else style="font-size:14px;color:#303133">
             共享查看：<strong>{{ shareClaims?.device_label || '设备' }}</strong>
           </span>
+          <el-checkbox
+            v-if="!shareMode && auth.token && deviceId"
+            v-model="screenDropInstallAndLaunch"
+            style="margin-left:4px"
+          >
+            拖入 APK 安装后启动
+          </el-checkbox>
           <el-button
             v-if="!shareMode && auth.token && deviceId"
             type="success"
@@ -587,6 +594,8 @@ const fullscreenTargetEl = ref(null)
 const isNativeFullscreen = ref(false)
 /** 右侧快速操作面板默认收起 */
 const quickPanelOpen = ref(false)
+/** 屏幕页拖入 APK 安装任务：是否在安装成功后尝试启动应用 */
+const screenDropInstallAndLaunch = ref(true)
 const uploading = ref(false)
 const screenshotLoading = ref(false)
 const deviceResolution = ref({ width: 1080, height: 1920 })
@@ -1204,39 +1213,25 @@ function getVideoPictureRect() {
   return { picLeft, picTop, picW, picH, streamW: sw, streamH: sh }
 }
 
-/** 在 img 的 client 尺寸下，object-fit:contain 内真实画面相对元素左上角的矩形 */
-function getContainPictureRectInClient(v) {
-  const { sw, sh } = streamPixelSize(v)
-  const cw = v.clientWidth
-  const ch = v.clientHeight
-  if (!sw || !sh || cw <= 0 || ch <= 0) return null
-  const streamAspect = sw / sh
-  const boxAspect = cw / ch
-  if (boxAspect > streamAspect) {
-    const picH = ch
-    const picW = ch * streamAspect
-    return { left: (cw - picW) / 2, top: 0, width: picW, height: picH }
-  }
-  const picW = cw
-  const picH = cw / streamAspect
-  return { left: 0, top: (ch - picH) / 2, width: picW, height: picH }
-}
-
 function normalizedToDevice(nx, ny) {
   const out = outputDeviceSize()
-  let x = Math.round(nx * out.width)
-  let y = Math.round(ny * out.height)
   const maxX = Math.max(0, out.width - 1)
   const maxY = Math.max(0, out.height - 1)
+  let x = Math.round(nx * maxX)
+  let y = Math.round(ny * maxY)
   return {
     x: Math.max(0, Math.min(x, maxX)),
     y: Math.max(0, Math.min(y, maxY))
   }
 }
 
+/**
+ * 将视口坐标映射到设备像素：相对「当前页面上实际绘制的 Agent 画面」矩形（object-fit:contain 去掉黑边），
+ * 再按 stream→touch 比例换算。与 getBoundingClientRect 同源，随 CSS 布局、页面缩放、flex 尺寸变化一致。
+ */
 function mapCoordinates(clientX, clientY) {
   const pic = getVideoPictureRect()
-  if (!pic) {
+  if (!pic || pic.picW <= 0 || pic.picH <= 0) {
     return { x: 0, y: 0 }
   }
 
@@ -1248,30 +1243,10 @@ function mapCoordinates(clientX, clientY) {
 }
 
 /**
- * 优先用 offsetX/offsetY（相对 img 布局，与 object-fit 绘制同源），减少与 clientX + getBoundingClientRect 的亚像素/舍入偏差；
- * 拖出画面、target 非 img 时回退 viewport 映射。
+ * 统一用 pointer 的 clientX/clientY（与 img 的 getBoundingClientRect 同一视口坐标系）。
+ * 不使用 offsetX/offsetY：各浏览器对 object-fit:contain 下 img 的 offset 与可见内容框不一致，分享页/缩放时易产生偏移。
  */
 function mapPointerToDeviceCoords(e) {
-  const v = screenImg.value
-  if (
-    v &&
-    e.target === v &&
-    typeof e.offsetX === 'number' &&
-    typeof e.offsetY === 'number' &&
-    !Number.isNaN(e.offsetX) &&
-    !Number.isNaN(e.offsetY)
-  ) {
-    const inner = getContainPictureRectInClient(v)
-    if (inner && inner.width > 0 && inner.height > 0) {
-      let nx = (e.offsetX - inner.left) / inner.width
-      let ny = (e.offsetY - inner.top) / inner.height
-      if (nx >= -0.02 && nx <= 1.02 && ny >= -0.02 && ny <= 1.02) {
-        nx = Math.max(0, Math.min(1, nx))
-        ny = Math.max(0, Math.min(1, ny))
-        return normalizedToDevice(nx, ny)
-      }
-    }
-  }
   const { x: cx, y: cy } = pointerClientXY(e)
   return mapCoordinates(cx, cy)
 }
@@ -1503,11 +1478,18 @@ async function handleDrop(e) {
       const result = await res.json()
       const app = result.data || result
 
-      await fetch(`/api/apps/${app.id}/install`, {
+      const ins = await fetch(`/api/apps/${app.id}/install`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${auth.token}` },
-        body: JSON.stringify({ device_id: parseInt(deviceId.value) })
+        body: JSON.stringify({
+          device_ids: [Number(deviceId.value)],
+          start_after_install: screenDropInstallAndLaunch.value
+        })
       })
+      if (!ins.ok) {
+        const t = await ins.text()
+        throw new Error(t?.slice(0, 200) || `安装请求失败 HTTP ${ins.status}`)
+      }
       ElMessage.success('APK安装中...')
     } else {
       const formData = new FormData()

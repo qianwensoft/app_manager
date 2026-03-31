@@ -7,6 +7,8 @@ type InstalledAppEntry struct {
 	PackageName string `json:"package_name"`
 	VersionName string `json:"version_name"`
 	VersionCode int    `json:"version_code"`
+	AppLabel    string `json:"app_label,omitempty"`
+	IsSystem    bool   `json:"is_system"`
 }
 
 // InstalledAppsReply Web 等待 Agent 返回的已安装应用列表。

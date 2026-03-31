@@ -13,7 +13,8 @@ import java.io.FileReader
 object DeviceInfoUtil {
 
     data class MemoryInfo(val used: Long, val total: Long)
-    data class StorageInfo(val used: Long, val total: Long)
+    /** 内部存储（/data 分区），单位 MB，与服务端 total_storage 一致 */
+    data class StorageInfo(val usedMB: Long, val totalMB: Long)
 
     fun getMemoryInfo(context: Context): MemoryInfo {
         val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
@@ -27,10 +28,10 @@ object DeviceInfoUtil {
 
     fun getStorageInfo(): StorageInfo {
         val stat = StatFs(Environment.getDataDirectory().path)
-        val totalGB = stat.totalBytes / 1024 / 1024 / 1024
-        val availGB = stat.availableBytes / 1024 / 1024 / 1024
-        val usedGB = totalGB - availGB
-        return StorageInfo(usedGB, totalGB)
+        val totalMB = stat.totalBytes / (1024L * 1024L)
+        val availMB = stat.availableBytes / (1024L * 1024L)
+        val usedMB = (totalMB - availMB).coerceAtLeast(0L)
+        return StorageInfo(usedMB, totalMB)
     }
 
     fun getCpuInfo(): String {

@@ -26,6 +26,43 @@ export const revokeScreenShare = (deviceId, shareId) => http.delete(`/devices/${
 export const refreshDeviceApps = (id) =>
   http.post(`/devices/${id}/apps/refresh`, null, { timeout: 55000 })
 
+/**
+ * Agent 在线：从设备读取 APK（多 split 为 zip）并下载到本机。返回 { blob, filename }。
+ */
+export const pullInstalledApk = async (id, packageName) => {
+  const token = localStorage.getItem('token')
+  const res = await axios.post(
+    `/devices/${id}/apps/pull-apk`,
+    { package_name: packageName },
+    {
+      baseURL: http.defaults.baseURL,
+      timeout: 750000,
+      responseType: 'blob',
+      validateStatus: () => true,
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    }
+  )
+  const blob = res.data
+  if (res.status >= 400) {
+    let msg = `下载失败 (HTTP ${res.status})`
+    try {
+      const t = await blob.text()
+      const j = JSON.parse(t)
+      if (j.error) msg = j.error
+    } catch {
+      /* ignore */
+    }
+    throw new Error(msg)
+  }
+  let filename = `${packageName}.apk`
+  const cd = res.headers['content-disposition']
+  if (cd) {
+    const m = /filename="([^"]+)"/.exec(cd) || /filename=([^;]+)/.exec(cd)
+    if (m) filename = m[1].trim()
+  }
+  return { blob, filename }
+}
+
 // ADB 操作
 export const rebootDevice = (id) => http.post(`/devices/${id}/adb/reboot`)
 
@@ -87,48 +124,3 @@ export const renameRecording = (id, file_name) => http.patch(`/recordings/${id}`
 /** Agent 在线时请求端上立即上报 device_info（Wi‑Fi SSID 等），返回更新后的设备对象 */
 export const refreshAgentDeviceInfo = (id) =>
   http.post(`/devices/${id}/agent/refresh-info`, null, { timeout: 20000 })
-
-/** Agent 在线且允许拉取时，列出设备目录（GET ?path=） */
-export const agentListFiles = (id, path) =>
-  http.get(`/devices/${id}/adb/agent/files`, {
-    params: { path: path || '/sdcard' },
-    timeout: 40000
-  })
-
-/** Agent 在线且端上开启「允许远程拉取文件」时，经 Agent 读设备路径并下载（无 ADB） */
-export const agentPullFile = async (id, path) => {
-  const token = localStorage.getItem('token')
-  const res = await axios.post(
-    `/devices/${id}/adb/agent/pull-file`,
-    { path },
-    {
-      baseURL: http.defaults.baseURL,
-      timeout: 130000,
-      responseType: 'blob',
-      validateStatus: () => true,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {})
-      }
-    }
-  )
-  const blob = res.data
-  if (res.status >= 400) {
-    const text = await blob.text()
-    let msg = '拉取失败'
-    try {
-      const j = JSON.parse(text)
-      if (j.error) msg = j.error
-    } catch {
-      if (text) msg = text.slice(0, 300)
-    }
-    throw new Error(msg)
-  }
-  const cd = res.headers['content-disposition']
-  let name = 'download'
-  if (cd) {
-    const m = /filename\*?=(?:UTF-8'')?["']?([^"';]+)/i.exec(cd)
-    if (m) name = decodeURIComponent(m[1].trim())
-  }
-  return { blob, filename: name }
-}

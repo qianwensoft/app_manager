@@ -1,6 +1,28 @@
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig, loadEnv, createLogger } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import path from 'path'
+
+/** 关闭页签、HMR、后端重启时 /ws 代理常被 RST，Vite 会打 ECONNRESET —— 多为噪声 */
+function isBenignWsProxyLog(msg) {
+  const s = String(msg)
+  if (!/ECONNRESET|EPIPE|ECONNABORTED/i.test(s)) return false
+  return /ws proxy socket|proxy.*ECONNRESET|read ECONNRESET.*proxy/i.test(s)
+}
+
+function createFilteredLogger() {
+  const base = createLogger()
+  return {
+    ...base,
+    warn(msg, opts) {
+      if (isBenignWsProxyLog(msg)) return
+      base.warn(msg, opts)
+    },
+    error(msg, opts) {
+      if (isBenignWsProxyLog(msg)) return
+      base.error(msg, opts)
+    }
+  }
+}
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
@@ -8,6 +30,7 @@ export default defineConfig(({ mode }) => {
   const backend = env.VITE_PROXY_TARGET || 'http://127.0.0.1:8080'
 
   return {
+    customLogger: createFilteredLogger(),
     plugins: [vue()],
     resolve: {
       alias: { '@': path.resolve(__dirname, 'src') }
@@ -26,7 +49,25 @@ export default defineConfig(({ mode }) => {
           target: backend,
           ws: true,
           changeOrigin: true,
-          secure: false
+          secure: false,
+          configure: (proxy) => {
+            proxy.on('error', (err) => {
+              if (['ECONNRESET', 'EPIPE', 'ECONNABORTED'].includes(err?.code)) return
+              console.error('[vite proxy /ws]', err)
+            })
+            proxy.on('proxyReqWs', (_proxyReq, _req, socket) => {
+              socket?.on?.('error', (err) => {
+                if (['ECONNRESET', 'EPIPE', 'ECONNABORTED'].includes(err?.code)) return
+                console.error('[vite proxy /ws client]', err)
+              })
+            })
+            proxy.on('open', (proxySocket) => {
+              proxySocket?.on?.('error', (err) => {
+                if (['ECONNRESET', 'EPIPE', 'ECONNABORTED'].includes(err?.code)) return
+                console.error('[vite proxy /ws upstream]', err)
+              })
+            })
+          }
         }
       }
     }

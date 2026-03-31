@@ -95,7 +95,16 @@ func HandleHeartbeat(deviceID string, info map[string]interface{}) {
 		updates["memory_used"] = int64(memUsed)
 	}
 	if memTotal, ok := info["memory_total"].(float64); ok {
-		updates["memory_total"] = int64(memTotal)
+		mt := int64(memTotal)
+		updates["memory_total"] = mt
+		// Web 设备详情「内存」列与 ADB 入库字段 total_memory 对齐
+		updates["total_memory"] = mt
+	}
+	if stUsed, ok := info["storage_used"].(float64); ok {
+		updates["storage_used"] = int64(stUsed)
+	}
+	if stTotal, ok := info["storage_total"].(float64); ok {
+		updates["total_storage"] = int64(stTotal)
 	}
 	if ip, ok := info["ip"].(string); ok && ip != "" {
 		updates["ip"] = ip
@@ -138,9 +147,6 @@ func HandleHeartbeat(deviceID string, info map[string]interface{}) {
 	}
 	if b, ok := heartbeatBool(info["allow_remote_screen"]); ok {
 		updates["allow_remote_screen"] = b
-	}
-	if b, ok := heartbeatBool(info["allow_remote_file_pull"]); ok {
-		updates["allow_remote_file_pull"] = b
 	}
 	if av, ok := strFromInfo(info["agent_version"]); ok && av != "" {
 		updates["agent_version"] = av

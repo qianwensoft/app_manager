@@ -33,7 +33,8 @@ class DeviceInfoFragment : Fragment() {
         view.findViewById<TextView>(R.id.tvMemory).text = "内存: ${memInfo.used}MB / ${memInfo.total}MB"
 
         val storageInfo = DeviceInfoUtil.getStorageInfo()
-        view.findViewById<TextView>(R.id.tvStorage).text = "存储: ${storageInfo.used}GB / ${storageInfo.total}GB"
+        view.findViewById<TextView>(R.id.tvStorage).text =
+            "存储: ${storageInfo.usedMB}MB / ${storageInfo.totalMB}MB"
 
         val cpuInfo = DeviceInfoUtil.getCpuInfo()
         view.findViewById<TextView>(R.id.tvCpu).text = "CPU: $cpuInfo"

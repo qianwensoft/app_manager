@@ -33,8 +33,8 @@ func SetupRouter() *gin.Engine {
 	// Agent 测速 HTTP（凭 X-Device-Token）
 	r.GET("/api/agent/speed-test/download", AgentSpeedTestDownload)
 	r.POST("/api/agent/speed-test/upload", AgentSpeedTestUpload)
-	r.POST("/api/agent/files/upload", AgentFilePullUpload)
 	r.GET("/api/agent/install-apk", AgentInstallApkDownload)
+	r.POST("/api/agent/pulled-apk-upload", AgentPulledApkUpload)
 
 	// 免登录：分享页校验链接
 	r.GET("/api/screen-share/claims", ScreenShareClaims)
@@ -65,6 +65,7 @@ func SetupRouter() *gin.Engine {
 		d.GET("/:id/info", GetDeviceInfo)
 		d.GET("/:id/apps", GetDeviceApps)
 		d.POST("/:id/apps/refresh", RefreshDeviceAppsFromAgent)
+		d.POST("/:id/apps/pull-apk", auth.RequireRole("admin", "operator"), PullInstalledApkFromAgent)
 		d.POST("/:id/agent/refresh-info", RefreshAgentDeviceInfoFromAgent)
 		d.POST("/:id/speed-test", auth.RequireRole("admin", "operator"), DeviceSpeedTest)
 		d.GET("/:id/file-hub", ListDeviceFileHub)
@@ -88,8 +89,6 @@ func SetupRouter() *gin.Engine {
 		op.POST("/app/clear", AdbClearApp)
 		op.POST("/app/grant", AdbGrantPermission)
 		op.GET("/files", AdbListFiles)
-		op.GET("/agent/files", DeviceAgentListFiles)
-		op.POST("/agent/pull-file", DeviceAgentPullFile)
 		op.POST("/recording/start", StartRecording)
 		op.POST("/recording/stop", StopRecording)
 	}

@@ -97,26 +97,6 @@ object CommandDispatcher {
                             }
                         }
                     }
-                    CommandAction.READ_FILE -> {
-                        val m = msg.data as? Map<*, *>
-                        val rid = m?.get("request_id") as? String
-                        val p = m?.get("path") as? String
-                        if (rid != null && p != null) {
-                            service.handleAgentReadFile(rid, p)
-                        } else {
-                            Log.w(TAG, "read_file missing request_id or path")
-                        }
-                    }
-                    CommandAction.LIST_FILES -> {
-                        val m = msg.data as? Map<*, *>
-                        val rid = m?.get("request_id") as? String
-                        val p = m?.get("path") as? String
-                        if (rid != null && p != null) {
-                            service.handleAgentListDir(rid, p)
-                        } else {
-                            Log.w(TAG, "list_files missing request_id or path")
-                        }
-                    }
                     CommandAction.LIST_INSTALLED_APPS -> {
                         val m = msg.data as? Map<*, *>
                         val rid = m?.get("request_id") as? String
@@ -124,6 +104,17 @@ object CommandDispatcher {
                             service.sendInstalledAppsList(rid)
                         } else {
                             Log.w(TAG, "list_installed_apps missing request_id")
+                        }
+                    }
+                    CommandAction.EXPORT_INSTALLED_APK -> {
+                        val m = msg.data as? Map<*, *>
+                        val rid = m?.get("request_id") as? String
+                        val pkg = (m?.get("package_name") as? String)?.trim()
+                        val up = (m?.get("upload_path") as? String)?.trim()
+                        if (!rid.isNullOrBlank() && !pkg.isNullOrBlank() && !up.isNullOrBlank()) {
+                            AppCommandHandler.exportInstalledApk(service, pkg, up)
+                        } else {
+                            Log.w(TAG, "export_installed_apk missing request_id, package_name or upload_path")
                         }
                     }
                     CommandAction.PUSH_DEVICE_INFO -> {

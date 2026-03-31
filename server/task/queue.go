@@ -111,7 +111,7 @@ func execute(client *adb.Client, taskID uint) {
 		err = fmt.Errorf("unknown action %s", t.Action)
 	}
 
-	if err == nil && t.Action == "install" {
+	if err == nil && t.Action == "install" && t.StartAfterInstall {
 		if note := postInstallStartApp(client, device, app); note != "" {
 			if output != "" {
 				output += "；" + note

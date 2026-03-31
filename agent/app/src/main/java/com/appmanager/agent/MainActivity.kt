@@ -41,7 +41,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var etGroupName: EditText
     private lateinit var cbAutoAccept: CheckBox
     private lateinit var cbAllowRemoteScreen: CheckBox
-    private lateinit var cbAllowRemoteFilePull: CheckBox
     private lateinit var tvDeviceInfo: TextView
 
     private val profileUiReceiver = object : BroadcastReceiver() {
@@ -72,8 +71,7 @@ class MainActivity : AppCompatActivity() {
                     cur.copy(
                         serverUrl = serverUrl,
                         deviceToken = deviceToken,
-                        allowRemoteScreen = cbAllowRemoteScreen.isChecked,
-                        allowRemoteFilePull = cbAllowRemoteFilePull.isChecked
+                        allowRemoteScreen = cbAllowRemoteScreen.isChecked
                     )
                 )
                 startForegroundService(Intent(this, AgentService::class.java))
@@ -98,7 +96,6 @@ class MainActivity : AppCompatActivity() {
         etGroupName = findViewById(R.id.etGroupName)
         cbAutoAccept = findViewById(R.id.cbAutoAccept)
         cbAllowRemoteScreen = findViewById(R.id.cbAllowRemoteScreen)
-        cbAllowRemoteFilePull = findViewById(R.id.cbAllowRemoteFilePull)
         val btnSave = findViewById<Button>(R.id.btnSave)
         val btnScanQR = findViewById<Button>(R.id.btnScanQR)
         val btnDeviceInfo = findViewById<Button>(R.id.btnDeviceInfo)
@@ -109,7 +106,6 @@ class MainActivity : AppCompatActivity() {
         etGroupName.setText(config.groupName)
         cbAutoAccept.isChecked = config.autoAcceptScreenCapture
         cbAllowRemoteScreen.isChecked = config.allowRemoteScreen
-        cbAllowRemoteFilePull.isChecked = config.allowRemoteFilePull
 
         updateDeviceInfo(config)
 
@@ -129,8 +125,7 @@ class MainActivity : AppCompatActivity() {
                 deviceAlias = etDeviceAlias.text.toString().trim(),
                 groupName = etGroupName.text.toString().trim(),
                 autoAcceptScreenCapture = cbAutoAccept.isChecked,
-                allowRemoteScreen = cbAllowRemoteScreen.isChecked,
-                allowRemoteFilePull = cbAllowRemoteFilePull.isChecked
+                allowRemoteScreen = cbAllowRemoteScreen.isChecked
             )
             AgentConfig.save(this, newConfig)
             updateDeviceInfo(newConfig)

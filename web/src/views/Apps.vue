@@ -58,6 +58,13 @@
       <el-checkbox-group v-model="selectedDevices">
         <el-checkbox v-for="d in devices" :key="d.id" :label="d.id">{{ d.name || d.serial }}</el-checkbox>
       </el-checkbox-group>
+      <el-checkbox
+        v-if="installAction === 'install'"
+        v-model="installAndLaunch"
+        style="margin-top:12px;display:block"
+      >
+        安装完成后启动应用（无 ADB 的设备经 Agent 安装后会尝试拉起主界面）
+      </el-checkbox>
       <template #footer>
         <el-button @click="installDialog = false">取消</el-button>
         <el-button type="primary" @click="submitInstall">确认</el-button>
@@ -138,6 +145,7 @@ const saveDescription = async () => {
 
 const openInstall = (app) => {
   currentApp.value = app; installAction.value = 'install'
+  installAndLaunch.value = true
   selectedDevices.value = []; installDialog.value = true
 }
 const openUninstall = (app) => {
@@ -148,7 +156,9 @@ const openUninstall = (app) => {
 const submitInstall = async () => {
   if (!selectedDevices.value.length) return ElMessage.warning('请选择设备')
   if (installAction.value === 'install') {
-    await appApi.installApp(currentApp.value.id, selectedDevices.value)
+    await appApi.installApp(currentApp.value.id, selectedDevices.value, {
+      start_after_install: installAndLaunch.value
+    })
   } else {
     await appApi.uninstallApp(currentApp.value.id, selectedDevices.value)
   }

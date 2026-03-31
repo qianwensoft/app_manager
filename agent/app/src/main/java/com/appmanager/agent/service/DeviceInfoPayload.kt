@@ -74,6 +74,7 @@ private fun wifiInfo(context: Context): WifiInfo {
 /** 与 [DeviceInfoCollector] 周期上报、即时推送使用同一套采集逻辑 */
 fun collectDeviceInfoData(context: Context): DeviceInfoData {
     val memInfo = DeviceInfoUtil.getMemoryInfo(context)
+    val storageInfo = DeviceInfoUtil.getStorageInfo()
     val battery = DeviceInfoUtil.getBatteryLevel(context)
     val w = wifiInfo(context)
     val config = AgentConfig.get(context)
@@ -84,6 +85,8 @@ fun collectDeviceInfoData(context: Context): DeviceInfoData {
         cpuUsage = cpuUsage(),
         memoryUsed = memInfo.used,
         memoryTotal = memInfo.total,
+        storageUsed = storageInfo.usedMB,
+        storageTotal = storageInfo.totalMB,
         networkType = networkType(context),
         ip = localIp(),
         model = android.os.Build.MODEL,
@@ -98,7 +101,6 @@ fun collectDeviceInfoData(context: Context): DeviceInfoData {
         groupName = config.groupName,
         resolution = resolution,
         allowRemoteScreen = config.allowRemoteScreen,
-        allowRemoteFilePull = config.allowRemoteFilePull,
         agentVersion = AppVersions.displayLabel(context)
     )
 }

@@ -198,7 +198,19 @@ func looksLikePNG(b []byte) bool {
 	return b[0] == 0x89 && b[1] == 'P' && b[2] == 'N' && b[3] == 'G'
 }
 
+// KeyEvent 发送按键。息屏时系统常丢弃 input keyevent，故对多数键先发 WAKEUP(224) 再发目标键。
+// 不对 POWER(26)/GO_TO_SLEEP(223)/WAKEUP(224) 前置唤醒，避免「先亮屏再按电源」被立刻关掉等问题。
 func (c *Client) KeyEvent(serial string, keycode int) error {
+	const (
+		keycodePower      = 26
+		keycodeGoToSleep  = 223
+		keycodeWakeup     = 224
+	)
+	needWake := keycode != keycodeWakeup && keycode != keycodePower && keycode != keycodeGoToSleep
+	if needWake {
+		_, _ = c.Shell(serial, "input", "keyevent", fmt.Sprintf("%d", keycodeWakeup))
+		time.Sleep(280 * time.Millisecond)
+	}
 	_, err := c.Shell(serial, "input", "keyevent", fmt.Sprintf("%d", keycode))
 	return err
 }

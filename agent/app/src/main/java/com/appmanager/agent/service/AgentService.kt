@@ -38,14 +38,9 @@ import kotlinx.coroutines.withContext
 import kotlin.math.min
 import java.io.IOException
 import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.MediaType.Companion.toMediaTypeOrNull
-import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
-import java.io.File
-import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 class AgentService : LifecycleService() {
@@ -54,9 +49,6 @@ class AgentService : LifecycleService() {
         const val ACTION_START_SCREEN = "START_SCREEN_CAPTURE"
         const val EXTRA_RESULT_CODE = "resultCode"
         const val EXTRA_DATA = "data"
-        private const val MAX_AGENT_PULL_BYTES = 50L * 1024 * 1024
-        private const val MAX_AGENT_LIST_DIR = 500
-
         @Volatile
         private var installCallbackRef: java.lang.ref.WeakReference<AgentService>? = null
 
@@ -112,12 +104,6 @@ class AgentService : LifecycleService() {
 
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(serviceJob + Dispatchers.Default)
-
-    private val filePullUploadClient = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(120, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .build()
 
     override fun onCreate() {
         super.onCreate()
@@ -468,7 +454,7 @@ class AgentService : LifecycleService() {
     // ─── Shell ────────────────────────────────────────────────────────────────
     fun startShell() {
         stopShell()
-        shellManager = ShellManager(webSocket, deviceToken)
+        shellManager = ShellManager(webSocket, deviceToken, applicationContext)
         shellManager?.start()
     }
 
@@ -600,126 +586,13 @@ class AgentService : LifecycleService() {
         }
     }
 
-    /** Web 经 Agent 拉文件：读本地后 multipart 上传到服务器，成功不写 WS；失败发 file_read_result。 */
-    fun handleAgentReadFile(requestId: String, rawPath: String) {
-        serviceScope.launch(Dispatchers.IO) {
-            val config = AgentConfig.get(this@AgentService)
-            if (!config.allowRemoteFilePull) {
-                sendFileReadFailure(requestId, "设备未开启「允许远程拉取文件」")
-                return@launch
-            }
-            val safe = canonicalizeAgentPullPath(rawPath)
-            if (safe == null) {
-                sendFileReadFailure(requestId, "路径不合法")
-                return@launch
-            }
-            val file = File(safe)
-            if (!file.isFile || !file.canRead()) {
-                sendFileReadFailure(requestId, "无法读取文件")
-                return@launch
-            }
-            val len = file.length()
-            if (len > MAX_AGENT_PULL_BYTES) {
-                sendFileReadFailure(requestId, "文件过大（上限 50MB）")
-                return@launch
-            }
-            val base = ServerUrlUtil.httpBaseFromWs(config.serverUrl).trimEnd('/')
-            val token = config.deviceToken.trim()
-            if (token.isEmpty() || base.isBlank()) {
-                sendFileReadFailure(requestId, "未配置服务器或 Token")
-                return@launch
-            }
-            try {
-                val mt = "application/octet-stream".toMediaTypeOrNull()
-                val body = MultipartBody.Builder()
-                    .setType(MultipartBody.FORM)
-                    .addFormDataPart("request_id", requestId)
-                    .addFormDataPart("file", file.name, file.asRequestBody(mt))
-                    .build()
-                val req = Request.Builder()
-                    .url("$base/api/agent/files/upload")
-                    .header("X-Device-Token", token)
-                    .post(body)
-                    .build()
-                filePullUploadClient.newCall(req).execute().use { resp ->
-                    if (!resp.isSuccessful) {
-                        val errBody = resp.body?.string()?.take(400)
-                        sendFileReadFailure(
-                            requestId,
-                            errBody?.ifBlank { null } ?: "上传失败 HTTP ${resp.code}"
-                        )
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "handleAgentReadFile", e)
-                sendFileReadFailure(requestId, e.message ?: "读文件或上传失败")
-            }
-        }
-    }
-
-    /** Web 经 Agent 列目录（仅允许外部存储路径，与 read_file 一致）。 */
-    fun handleAgentListDir(requestId: String, rawPath: String) {
-        serviceScope.launch(Dispatchers.IO) {
-            val config = AgentConfig.get(this@AgentService)
-            if (!config.allowRemoteFilePull) {
-                sendFileListFailure(requestId, "设备未开启「允许远程拉取文件」")
-                return@launch
-            }
-            val safe = canonicalizeAgentPullPath(rawPath)
-            if (safe == null) {
-                sendFileListFailure(requestId, "路径不合法")
-                return@launch
-            }
-            val dir = File(safe)
-            if (!dir.exists()) {
-                sendFileListFailure(requestId, "路径不存在")
-                return@launch
-            }
-            if (!dir.isDirectory) {
-                sendFileListFailure(requestId, "不是目录")
-                return@launch
-            }
-            if (!dir.canRead()) {
-                sendFileListFailure(requestId, "无权限读取目录")
-                return@launch
-            }
-            val listed = try {
-                dir.listFiles()
-            } catch (e: Exception) {
-                Log.e(TAG, "handleAgentListDir listFiles", e)
-                sendFileListFailure(requestId, e.message ?: "列出目录失败")
-                return@launch
-            }
-            if (listed == null) {
-                sendFileListFailure(requestId, "无法列出目录")
-                return@launch
-            }
-            val sorted = listed
-                .filter { it.name != "." && it.name != ".." }
-                .sortedWith(
-                    compareBy<File> { !it.isDirectory }
-                        .thenBy { it.name.lowercase(Locale.getDefault()) }
-                )
-            val entries = sorted.take(MAX_AGENT_LIST_DIR).map { f ->
-                mapOf(
-                    "name" to f.name,
-                    "is_dir" to f.isDirectory,
-                    "size" to (if (f.isDirectory) 0L else f.length()),
-                    "modified_ms" to f.lastModified()
-                )
-            }
-            sendFileListSuccess(requestId, entries)
-        }
-    }
-
-    /** Web 刷新已安装应用：枚举非系统应用（与端内应用列表一致）。 */
+    /** Web 刷新已安装应用：枚举本机全部包（含系统应用），含应用名与是否系统包。 */
     fun sendInstalledAppsList(requestId: String) {
         serviceScope.launch(Dispatchers.Default) {
             try {
                 val pm = packageManager
                 val apps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
                     .asSequence()
-                    .filter { it.flags and ApplicationInfo.FLAG_SYSTEM == 0 }
                     .mapNotNull { app ->
                         try {
                             val pi = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -737,10 +610,18 @@ class AgentService : LifecycleService() {
                                 @Suppress("DEPRECATION")
                                 pi.versionCode
                             }
+                            val label = try {
+                                pm.getApplicationLabel(app).toString()
+                            } catch (_: Exception) {
+                                app.packageName
+                            }
+                            val isSystem = (app.flags and ApplicationInfo.FLAG_SYSTEM) != 0
                             mapOf(
                                 "package_name" to app.packageName,
                                 "version_name" to (pi.versionName ?: ""),
-                                "version_code" to vc
+                                "version_code" to vc,
+                                "app_label" to label,
+                                "is_system" to isSystem
                             )
                         } catch (_: Exception) {
                             null
@@ -778,65 +659,4 @@ class AgentService : LifecycleService() {
         }
     }
 
-    private suspend fun sendFileListSuccess(requestId: String, entries: List<Map<String, Any?>>) {
-        withContext(Dispatchers.Main) {
-            if (::webSocket.isInitialized) {
-                webSocket.send(
-                    mapOf(
-                        "type" to "file_list_result",
-                        "request_id" to requestId,
-                        "success" to true,
-                        "entries" to entries
-                    )
-                )
-            }
-        }
-    }
-
-    private suspend fun sendFileListFailure(requestId: String, error: String) {
-        withContext(Dispatchers.Main) {
-            if (::webSocket.isInitialized) {
-                webSocket.send(
-                    mapOf(
-                        "type" to "file_list_result",
-                        "request_id" to requestId,
-                        "success" to false,
-                        "error" to error
-                    )
-                )
-            }
-        }
-    }
-
-    private suspend fun sendFileReadFailure(requestId: String, error: String) {
-        withContext(Dispatchers.Main) {
-            if (::webSocket.isInitialized) {
-                webSocket.send(
-                    mapOf(
-                        "type" to "file_read_result",
-                        "request_id" to requestId,
-                        "success" to false,
-                        "error" to error
-                    )
-                )
-            }
-        }
-    }
-
-    /** 与 server sanitizeAgentFilePath 一致：仅外部存储路径。 */
-    private fun canonicalizeAgentPullPath(raw: String): String? {
-        val t = raw.trim()
-        if (t.isEmpty() || !t.startsWith("/")) return null
-        return try {
-            val canon = File(t).canonicalPath
-            if (!isAllowedAgentPullPath(canon)) null else canon
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    private fun isAllowedAgentPullPath(p: String): Boolean {
-        val allowed = listOf("/sdcard", "/storage/emulated/0", "/storage/self/primary")
-        return allowed.any { pre -> p == pre || p.startsWith("$pre/") }
-    }
 }

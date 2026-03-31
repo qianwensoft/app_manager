@@ -113,13 +113,6 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="允许远程查看屏幕（Web 打开屏幕前须勾选）"
-        android:layout_marginBottom="12dp" />
-
-    <CheckBox
-        android:id="@+id/cbAllowRemoteFilePull"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="允许远程拉取文件（仅外部存储路径，经 Agent 上传）"
         android:layout_marginBottom="24dp" />
 
     <Button
