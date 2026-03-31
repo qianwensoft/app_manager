@@ -20,6 +20,18 @@
 
 ---
 
+## 界面预览
+
+**设备详情** — Agent 在线状态、硬件/网络信息、快捷操作（远程屏幕、Shell、截图、测速等）。
+
+![设备详情](docs/screenshots/device-detail.png)
+
+**屏幕查看** — 实时画面传输、端到端延迟、分享链接与 Agent 投屏状态。
+
+![屏幕查看](docs/screenshots/screen-view.png)
+
+---
+
 ## 环境要求
 
 - **Go** 1.21+
@@ -123,6 +135,7 @@ server/          Go 服务（API、WebSocket、任务队列）
 web/             Vue 3 控制台
 agent/           Android Agent 工程
 scripts/         辅助脚本（如 APK 同步）
+docs/            文档与界面截图（README 引用）
 ```
 
 ---
