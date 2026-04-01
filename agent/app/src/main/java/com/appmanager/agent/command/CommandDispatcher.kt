@@ -134,6 +134,16 @@ object CommandDispatcher {
                     CommandAction.FS_UPLOAD_CHUNK -> FsCommandHandler.uploadChunk(msg, service)
                     CommandAction.FS_UPLOAD_END -> FsCommandHandler.uploadEnd(msg, service)
                     CommandAction.FS_UPLOAD_CANCEL -> FsCommandHandler.uploadCancel(msg, service)
+                    CommandAction.START_CUSTOM_EVENT_LISTEN -> {
+                        val rules = com.appmanager.agent.util.CustomEventBroadcastHelper
+                            .parseRulesFromServer(msg.data as? Map<*, *>)
+                        com.appmanager.agent.util.CustomEventBroadcastHelper.start(service, rules)
+                        Log.i(TAG, "Custom event listen started, rules=${rules?.size ?: 0} (using defaults=${rules == null})")
+                    }
+                    CommandAction.STOP_CUSTOM_EVENT_LISTEN -> {
+                        com.appmanager.agent.util.CustomEventBroadcastHelper.stop(service)
+                        Log.i(TAG, "Custom event listen stopped")
+                    }
                     else -> Log.w(TAG, "Unknown command action: ${msg.action}")
                 }
             }

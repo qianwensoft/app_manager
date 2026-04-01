@@ -12,6 +12,8 @@ type CustomEventGroup struct {
 	Name        string    `gorm:"size:100;not null" json:"name"`
 	Description string    `gorm:"type:text" json:"description"`
 	SortOrder   int       `gorm:"default:0" json:"sort_order"`
+	MQTTEnabled bool      `gorm:"default:false" json:"mqtt_enabled"`
+	MQTTTopic   string    `gorm:"size:200" json:"mqtt_topic"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
@@ -25,6 +27,8 @@ type CustomEventDefinition struct {
 	Name         string           `gorm:"size:120;not null" json:"name"`
 	Description  string           `gorm:"type:text" json:"description"`
 	Enabled      bool             `gorm:"default:true" json:"enabled"`
+	MQTTEnabled  bool             `gorm:"default:false" json:"mqtt_enabled"`
+	MQTTTopic    string           `gorm:"size:200" json:"mqtt_topic"`
 	BroadcastActionsJSON string   `gorm:"column:broadcast_actions_json;type:text" json:"-"`
 	ExtraKeysJSON        string   `gorm:"column:extra_keys_json;type:text" json:"-"`
 	CreatedAt    time.Time        `json:"created_at"`

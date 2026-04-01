@@ -1,7 +1,9 @@
 package event
 
 import (
+	"app-manager/database"
 	"app-manager/models"
+	"app-manager/mqtt"
 	"app-manager/stomp"
 	"encoding/json"
 	"fmt"
@@ -44,4 +46,24 @@ func PublishDeviceCustomEventSTOMP(rec models.DeviceEvent, d *models.Device) {
 	s := string(b)
 	stomp.DefaultHub.PublishJSON("/topic/events", s)
 	stomp.DefaultHub.PublishJSON(fmt.Sprintf("/topic/device/%d/events", rec.DeviceID), s)
+
+	forwardToMQTT(rec, payload)
+}
+
+func forwardToMQTT(rec models.DeviceEvent, payload map[string]interface{}) {
+	var def models.CustomEventDefinition
+	if err := database.DB.Preload("Group").Where("key = ?", rec.EventType).First(&def).Error; err != nil {
+		return
+	}
+
+	topic := ""
+	if def.MQTTEnabled && def.MQTTTopic != "" {
+		topic = def.MQTTTopic
+	} else if def.Group.MQTTEnabled && def.Group.MQTTTopic != "" {
+		topic = def.Group.MQTTTopic
+	}
+
+	if topic != "" {
+		_ = mqtt.Publish(topic, payload)
+	}
 }

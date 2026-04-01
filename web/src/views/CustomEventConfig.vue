@@ -102,6 +102,12 @@
         <el-form-item label="排序">
           <el-input-number v-model="groupDlg.form.sort_order" :min="0" />
         </el-form-item>
+        <el-form-item label="MQTT 转发">
+          <el-switch v-model="groupDlg.form.mqtt_enabled" />
+        </el-form-item>
+        <el-form-item v-if="groupDlg.form.mqtt_enabled" label="MQTT 主题">
+          <el-input v-model="groupDlg.form.mqtt_topic" placeholder="如：devices/events/group1" />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="groupDlg.visible = false">取消</el-button>
@@ -127,6 +133,13 @@
         </el-form-item>
         <el-form-item label="启用">
           <el-switch v-model="defDlg.form.enabled" />
+        </el-form-item>
+        <el-form-item label="MQTT 转发">
+          <el-switch v-model="defDlg.form.mqtt_enabled" />
+          <span style="margin-left: 8px; font-size: 12px; color: #999">优先级高于分组配置</span>
+        </el-form-item>
+        <el-form-item v-if="defDlg.form.mqtt_enabled" label="MQTT 主题">
+          <el-input v-model="defDlg.form.mqtt_topic" placeholder="如：devices/events/scan" />
         </el-form-item>
         <el-form-item label="广播动作" required>
           <el-input
@@ -171,7 +184,7 @@ const groupDlg = reactive({
   visible: false,
   editId: null,
   saving: false,
-  form: { name: '', description: '', sort_order: 0 }
+  form: { name: '', description: '', sort_order: 0, mqtt_enabled: false, mqtt_topic: '' }
 })
 
 const defDlg = reactive({
@@ -183,7 +196,9 @@ const defDlg = reactive({
     key: '',
     name: '',
     description: '',
-    enabled: true
+    enabled: true,
+    mqtt_enabled: false,
+    mqtt_topic: ''
   },
   actionsText: '',
   keysText: ''
@@ -220,8 +235,8 @@ watch(currentGroup, () => {
 function openGroupDialog(row) {
   groupDlg.editId = row?.id ?? null
   groupDlg.form = row
-    ? { name: row.name, description: row.description || '', sort_order: row.sort_order ?? 0 }
-    : { name: '', description: '', sort_order: 0 }
+    ? { name: row.name, description: row.description || '', sort_order: row.sort_order ?? 0, mqtt_enabled: row.mqtt_enabled ?? false, mqtt_topic: row.mqtt_topic || '' }
+    : { name: '', description: '', sort_order: 0, mqtt_enabled: false, mqtt_topic: '' }
   groupDlg.visible = true
 }
 
@@ -268,14 +283,18 @@ function openDefDialog(row) {
         key: row.key,
         name: row.name,
         description: row.description || '',
-        enabled: row.enabled !== false
+        enabled: row.enabled !== false,
+        mqtt_enabled: row.mqtt_enabled ?? false,
+        mqtt_topic: row.mqtt_topic || ''
       }
     : {
         group_id: gid,
         key: '',
         name: '',
         description: '',
-        enabled: true
+        enabled: true,
+        mqtt_enabled: false,
+        mqtt_topic: ''
       }
   defDlg.actionsText = row?.broadcast_actions?.length ? row.broadcast_actions.join('\n') : ''
   defDlg.keysText = row?.extra_keys?.length ? row.extra_keys.join('\n') : ''

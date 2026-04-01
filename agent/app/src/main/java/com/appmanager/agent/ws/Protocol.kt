@@ -143,4 +143,10 @@ object CommandAction {
     const val FS_UPLOAD_END = "fs_upload_end"
     /** 上传取消：data: { upload_id } */
     const val FS_UPLOAD_CANCEL = "fs_upload_cancel"
+
+    // ─── 自定义事件监听 ───────────────────────────────────────────────────────
+    /** 启动自定义事件监听：data: { rules: [{event_type, actions, extra_keys}] } */
+    const val START_CUSTOM_EVENT_LISTEN = "start_custom_event_listen"
+    /** 停止自定义事件监听 */
+    const val STOP_CUSTOM_EVENT_LISTEN = "stop_custom_event_listen"
 }

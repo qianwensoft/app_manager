@@ -27,3 +27,11 @@ ffmpeg:
 jwt:
   secret: change-me-in-production
   expire_hour: 24
+
+mqtt:
+  enabled: false
+  broker: tcp://localhost:1883
+  username: ""
+  password: ""
+  client_id: app-manager
+  qos: 1

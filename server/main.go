@@ -4,6 +4,7 @@ import (
 	"app-manager/api"
 	"app-manager/config"
 	"app-manager/database"
+	"app-manager/mqtt"
 	"app-manager/task"
 	"fmt"
 	"log"
@@ -33,6 +34,12 @@ func main() {
 	// 启动任务队列
 	task.Init(5)
 	defer task.Q.Stop()
+
+	// 初始化 MQTT
+	if err := mqtt.Init(); err != nil {
+		log.Printf("MQTT init failed: %v", err)
+	}
+	defer mqtt.Close()
 
 	// 设置 Gin 模式
 	// gin.SetMode(config.C.Server.Mode)

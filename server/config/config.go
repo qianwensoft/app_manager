@@ -14,6 +14,7 @@ type Config struct {
 	FFmpeg    FFmpegConfig    `yaml:"ffmpeg"`
 	JWT       JWTConfig       `yaml:"jwt"`
 	Heartbeat HeartbeatConfig `yaml:"heartbeat"`
+	MQTT      MQTTConfig      `yaml:"mqtt"`
 }
 
 type ServerConfig struct {
@@ -50,6 +51,15 @@ type JWTConfig struct {
 type HeartbeatConfig struct {
 	Interval int `yaml:"interval"` // 心跳间隔（秒）
 	Timeout  int `yaml:"timeout"`  // 超时时间（秒）
+}
+
+type MQTTConfig struct {
+	Enabled  bool   `yaml:"enabled"`
+	Broker   string `yaml:"broker"`
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
+	ClientID string `yaml:"client_id"`
+	QoS      byte   `yaml:"qos"`
 }
 
 var C *Config
