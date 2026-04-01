@@ -31,6 +31,7 @@
 | **录屏与录音** | 服务端录屏合成 MP4（需 ffmpeg）、**设备端录音** 并自动上传归档、在线播放 |
 | **截图存档** | ADB 截图或 Agent 截图保存到服务器、在线查看、支持重命名 |
 | **文件管理** | Agent 文件系统浏览、上传/下载文件、图片视频在线预览 |
+| **自定义事件** | 配置 Android 广播监听（如 PDA 扫码）、事件上报、支持 MQTT 转发到外部系统 |
 | **远程屏幕分享** | 生成 **分享链接**，免登录按权限查看画面（适合协助、演示、监考场景） |
 | **开放 API** | API Key + 权限范围，便于接入 CI / 内部系统 |
 | **审计** | 操作审计日志（管理员可见） |
@@ -108,6 +109,22 @@ go build -C server -o app-manager .
 - `JWT_SECRET` — JWT 密钥  
 - `ADB_PATH` — adb 可执行文件路径  
 - `FFMPEG_PATH` — ffmpeg 可执行文件路径  
+
+### MQTT 转发（可选）
+
+自定义事件支持转发到 MQTT broker，在配置文件中启用：
+
+```yaml
+mqtt:
+  enabled: true
+  broker: tcp://localhost:1883
+  username: ""
+  password: ""
+  client_id: app-manager
+  qos: 1
+```
+
+在「自定义事件配置」页面可为事件分组或单个事件定义配置 MQTT 主题，事件上报时自动转发。
 
 ---
 
