@@ -80,9 +80,6 @@ func StompWS(c *gin.Context) {
 			case stompDestDevices, stompDestEvents:
 				unsubs[subID] = stomp.DefaultHub.Subscribe(dest, subID, send)
 				log.Printf("STOMP SUBSCRIBE user=%d dest=%s sub=%s", c.GetUint("user_id"), dest, subID)
-			case stompDestEvents:
-				unsubs[subID] = stomp.DefaultHub.Subscribe(dest, subID, send)
-				log.Printf("STOMP SUBSCRIBE user=%d dest=%s sub=%s", c.GetUint("user_id"), dest, subID)
 			default:
 				mEv := stompDestDeviceEvents.FindStringSubmatch(dest)
 				if mEv != nil {
