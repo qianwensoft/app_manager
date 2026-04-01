@@ -55,6 +55,7 @@ func StartRecording(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "服务器录屏已开始"})
+	logAudit(c, "开始录屏", fmt.Sprintf("设备 %s 开始录屏", param), &devID)
 }
 
 func StopRecording(c *gin.Context) {
@@ -76,6 +77,9 @@ func StopRecording(c *gin.Context) {
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "服务器录屏已停止，正在编码保存"})
+	if devID, ok := agent.ResolveDeviceID(param); ok {
+		logAudit(c, "停止录屏", fmt.Sprintf("设备 %s 停止录屏", param), &devID)
+	}
 }
 
 // AgentRecordingUpload Agent 停止本地录屏后上传 MP4，写入 recordings 表供 Web 下载。

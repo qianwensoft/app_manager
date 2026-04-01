@@ -530,6 +530,7 @@ func AdbScreenshot(c *gin.Context) {
 		"file_name": row.FileName, "file_size": row.FileSize,
 		"content_type": row.ContentType, "created_at": row.CreatedAt,
 	}})
+	logAudit(c, "截图", fmt.Sprintf("设备 %s 截图并存档", device.Name), &device.ID)
 }
 
 func newScreenshotRequestID() string {
@@ -737,6 +738,7 @@ func StartAudioRecording(c *gin.Context) {
 		"type":   "command",
 		"action": "start_audio_recording",
 	})
+	logAudit(c, "开始录音", fmt.Sprintf("设备 %s 开始录音", c.Param("id")), nil)
 	c.JSON(http.StatusOK, gin.H{"message": "录音已开始"})
 }
 
@@ -754,6 +756,7 @@ func StopAudioRecording(c *gin.Context) {
 		"type":   "command",
 		"action": "stop_audio_recording",
 	})
+	logAudit(c, "停止录音", fmt.Sprintf("设备 %s 停止录音", c.Param("id")), nil)
 	c.JSON(http.StatusOK, gin.H{"message": "录音已停止"})
 }
 
@@ -761,4 +764,16 @@ func GetDeviceGroups(c *gin.Context) {
 	var groups []string
 	database.DB.Model(&models.Device{}).Distinct("group_name").Where("group_name != ''").Pluck("group_name", &groups)
 	c.JSON(http.StatusOK, gin.H{"data": groups})
+}
+
+func logAudit(c *gin.Context, action, command string, deviceID *uint) {
+	userID, _ := c.Get("user_id")
+	uid, _ := userID.(uint)
+	database.DB.Create(&models.AuditLog{
+		UserID:    uid,
+		DeviceID:  deviceID,
+		Action:    action,
+		Command:   command,
+		IPAddress: c.ClientIP(),
+	})
 }

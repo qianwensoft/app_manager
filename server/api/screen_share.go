@@ -69,6 +69,7 @@ func CreateScreenShare(c *gin.Context) {
 		return
 	}
 	sharePath := fmt.Sprintf("/share/screen?device=%d&share=%s", link.DeviceID, link.Token)
+	logAudit(c, "创建屏幕分享", fmt.Sprintf("设备 %s 创建屏幕分享链接", dev.Name), &dev.ID)
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
 			"id":         link.ID,
