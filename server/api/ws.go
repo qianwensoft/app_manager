@@ -8,11 +8,13 @@ import (
 	"app-manager/models"
 	"app-manager/screen"
 	"app-manager/shell"
+	"app-manager/stomp"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -327,11 +329,22 @@ func init() {
 			eventData, _ := msg["eventData"].(string)
 			if eventType != "" {
 				if devID, ok := agent.ResolveDeviceID(deviceID); ok {
-					database.DB.Create(&models.DeviceEvent{
+					ev := models.DeviceEvent{
 						DeviceID:  devID,
 						EventType: eventType,
 						EventData: eventData,
+					}
+					database.DB.Create(&ev)
+					body, _ := json.Marshal(gin.H{
+						"type":       "device_event",
+						"id":         ev.ID,
+						"device_id":  devID,
+						"event_type": eventType,
+						"event_data": eventData,
+						"created_at": ev.CreatedAt,
 					})
+					stomp.DefaultHub.PublishJSON("/topic/events", string(body))
+					stomp.DefaultHub.PublishJSON("/topic/device/"+strconv.FormatUint(uint64(devID), 10)+"/events", string(body))
 				}
 			}
 		case "screenshot_result":

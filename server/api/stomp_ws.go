@@ -15,8 +15,10 @@ import (
 )
 
 var stompDestDeviceRecording = regexp.MustCompile(`^/topic/device/(\d+)/recording$`)
+var stompDestDeviceEvents = regexp.MustCompile(`^/topic/device/(\d+)/events$`)
 
 const stompDestDevices = "/topic/devices"
+const stompDestEvents = "/topic/events"
 
 // StompWS STOMP 1.2 over WebSocket（需先经 StompWSAuth；浏览器用 query token=JWT）。订阅录屏进度：/topic/device/{id}/recording
 func StompWS(c *gin.Context) {
@@ -78,7 +80,20 @@ func StompWS(c *gin.Context) {
 			case stompDestDevices:
 				unsubs[subID] = stomp.DefaultHub.Subscribe(dest, subID, send)
 				log.Printf("STOMP SUBSCRIBE user=%d dest=%s sub=%s", c.GetUint("user_id"), dest, subID)
+			case stompDestEvents:
+				unsubs[subID] = stomp.DefaultHub.Subscribe(dest, subID, send)
+				log.Printf("STOMP SUBSCRIBE user=%d dest=%s sub=%s", c.GetUint("user_id"), dest, subID)
 			default:
+				mEv := stompDestDeviceEvents.FindStringSubmatch(dest)
+				if mEv != nil {
+					if _, err := strconv.ParseUint(mEv[1], 10, 64); err != nil {
+						send(stomp.EncodeFrame("ERROR", map[string]string{"message": "invalid device id"}, ""))
+						continue
+					}
+					unsubs[subID] = stomp.DefaultHub.Subscribe(dest, subID, send)
+					log.Printf("STOMP SUBSCRIBE user=%d dest=%s sub=%s", c.GetUint("user_id"), dest, subID)
+					continue
+				}
 				m := stompDestDeviceRecording.FindStringSubmatch(dest)
 				if m == nil {
 					send(stomp.EncodeFrame("ERROR", map[string]string{"message": "invalid destination"}, ""))

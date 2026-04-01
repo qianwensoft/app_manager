@@ -62,7 +62,7 @@ import { Refresh } from '@element-plus/icons-vue'
 import * as deviceApi from '@/api/device'
 import * as appApi from '@/api/app'
 import { getTasks } from '@/api/misc'
-import { createDeviceProfileStomp } from '@/utils/deviceProfileStomp'
+import { useEventListenerStore } from '@/stores/eventListeners'
 
 const devices = ref([])
 const apps = ref([])
@@ -96,18 +96,20 @@ const refresh = async () => {
   }
 }
 
-const profileStomp = createDeviceProfileStomp(
-  () => {
-    loadData()
-  },
-  () => localStorage.getItem('token')
-)
+const eventListeners = useEventListenerStore()
+let profileListenerId = null
 
 onMounted(() => {
   loadData()
-  profileStomp.connect()
+  profileListenerId = eventListeners.attachProfileListener({
+    sourceLabel: '总览',
+    deviceScopeId: null,
+    onEvent: () => loadData()
+  })
 })
-onUnmounted(() => profileStomp.disconnect())
+onUnmounted(() => {
+  if (profileListenerId) eventListeners.revoke(profileListenerId)
+})
 </script>
 
 <style scoped>

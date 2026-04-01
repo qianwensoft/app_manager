@@ -563,15 +563,16 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useEventListenerStore } from '@/stores/eventListeners'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { FullScreen, Close } from '@element-plus/icons-vue'
 import { Client } from '@stomp/stompjs'
 import * as deviceApi from '@/api/device'
-import { createDeviceProfileStomp } from '@/utils/deviceProfileStomp'
 import { WS_BASE } from '@/utils/ws'
 
 const route = useRoute()
 const auth = useAuthStore()
+const eventListeners = useEventListenerStore()
 const devices = ref([])
 const deviceId = ref(route.query.device != null ? String(route.query.device) : '')
 const shareToken = computed(() => String(route.query.share || '').trim())
@@ -761,6 +762,8 @@ const recordingPlayerTitle = computed(() => {
 
 let ws = null
 let stompClient = null
+let recordingListenerId = null
+let profileListenerId = null
 
 /**
  * 是否可对当前设备使用「无 WebSocket 时回退 ADB 点击」。
@@ -784,6 +787,12 @@ function primeResolutionFromDeviceList() {
 }
 
 function disconnectRecordingStomp() {
+  if (recordingListenerId) {
+    const rid = recordingListenerId
+    recordingListenerId = null
+    eventListeners.revoke(rid)
+    return
+  }
   try {
     stompClient?.deactivate()
   } catch (_) { /* noop */ }
@@ -849,6 +858,19 @@ function connectRecordingStomp() {
           onRecordingStompMessage(JSON.parse(message.body))
         } catch (e) {
           console.warn('STOMP recording message parse', e)
+        }
+      })
+      const d = devices.value.find((x) => String(x.id) === String(deviceId.value))
+      const label = d?.name || d?.serial || `设备 #${deviceId.value}`
+      recordingListenerId = eventListeners.registerRecordingListener({
+        deviceId: deviceId.value,
+        deviceLabel: label,
+        sourceLabel: '屏幕查看',
+        onRevoke: () => {
+          try {
+            client.deactivate()
+          } catch (_) { /* noop */ }
+          if (stompClient === client) stompClient = null
         }
       })
     },
@@ -1579,11 +1601,24 @@ watch(
   { immediate: true }
 )
 
-const profileStomp = createDeviceProfileStomp(
-  (j) => {
-    if (Number(j.device_id) === Number(deviceId.value)) loadScreenDevice()
+watch(
+  () => [deviceId.value, shareMode.value, auth.token],
+  () => {
+    if (profileListenerId) {
+      eventListeners.revoke(profileListenerId)
+      profileListenerId = null
+    }
+    if (shareMode.value || !auth.token || !deviceId.value) return
+    const d = devices.value.find((x) => String(x.id) === String(deviceId.value))
+    const label = d?.name || d?.serial || `设备 #${deviceId.value}`
+    profileListenerId = eventListeners.attachProfileListener({
+      sourceLabel: '屏幕查看',
+      deviceScopeId: deviceId.value,
+      deviceScopeLabel: label,
+      onEvent: () => loadScreenDevice()
+    })
   },
-  () => localStorage.getItem('token')
+  { immediate: true }
 )
 
 onMounted(async () => {
@@ -1599,7 +1634,6 @@ onMounted(async () => {
     connect()
     loadRecordings()
   }
-  if (auth.token) profileStomp.connect()
 })
 
 const saveAdbScreenshot = async () => {
@@ -1741,7 +1775,10 @@ const formatDate = (date) => {
 onUnmounted(() => {
   document.removeEventListener('fullscreenchange', syncNativeFullscreenState)
   document.removeEventListener('webkitfullscreenchange', syncNativeFullscreenState)
-  profileStomp.disconnect()
+  if (profileListenerId) {
+    eventListeners.revoke(profileListenerId)
+    profileListenerId = null
+  }
   closeAll()
 })
 </script>

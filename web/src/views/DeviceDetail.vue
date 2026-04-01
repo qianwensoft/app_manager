@@ -345,7 +345,7 @@ import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import * as deviceApi from '@/api/device'
 import * as appApi from '@/api/app'
-import { createDeviceProfileStomp } from '@/utils/deviceProfileStomp'
+import { useEventListenerStore } from '@/stores/eventListeners'
 
 const route = useRoute()
 const router = useRouter()
@@ -795,12 +795,8 @@ const deleteDevice = async () => {
   router.push('/devices')
 }
 
-const profileStomp = createDeviceProfileStomp(
-  (j) => {
-    if (Number(j.device_id) === Number(route.params.id)) load()
-  },
-  () => localStorage.getItem('token')
-)
+const eventListeners = useEventListenerStore()
+let profileListenerId = null
 
 onMounted(async () => {
   await load()
@@ -809,10 +805,14 @@ onMounted(async () => {
   if (route.query.tab === 'files') {
     loadFileHub()
   }
-  profileStomp.connect()
+  profileListenerId = eventListeners.attachProfileListener({
+    sourceLabel: '设备详情',
+    deviceScopeId: route.params.id,
+    onEvent: () => load()
+  })
 })
 onUnmounted(() => {
-  profileStomp.disconnect()
+  if (profileListenerId) eventListeners.revoke(profileListenerId)
 })
 </script>
 

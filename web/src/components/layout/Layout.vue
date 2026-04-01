@@ -33,6 +33,9 @@
         <el-menu-item index="/audit">
           <el-icon><Notebook /></el-icon><span>审计日志</span>
         </el-menu-item>
+        <el-menu-item index="/event-listeners">
+          <el-icon><Bell /></el-icon><span>事件监听</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     <el-container class="layout-right">
@@ -51,7 +54,7 @@
 import { computed } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useRoute, useRouter } from 'vue-router'
-import { Monitor, Phone, VideoCamera, Document, Box, List, Key, Notebook, Connection, Cpu } from '@element-plus/icons-vue'
+import { Monitor, Phone, VideoCamera, Document, Box, List, Key, Notebook, Connection, Cpu, Bell } from '@element-plus/icons-vue'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -64,6 +67,7 @@ const menuActive = computed(() => {
   const p = route.path
   if (p === '/' || p === '') return '/'
   if (p.startsWith('/devices')) return '/devices'
+  if (p.startsWith('/event-listeners')) return '/event-listeners'
   return p
 })
 

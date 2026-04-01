@@ -1,5 +1,5 @@
 <template>
-  <div style="display:flex;flex-direction:column;height:calc(100vh - 120px)">
+  <div class="shell-page-root">
     <div style="display:flex;gap:12px;margin-bottom:12px;align-items:center;flex-wrap:wrap">
       <el-select v-model="deviceId" placeholder="选择设备" style="width:220px" @change="connect">
         <el-option v-for="d in devices" :key="d.id" :label="d.name || d.serial" :value="d.id" />
@@ -9,7 +9,7 @@
       <el-text v-if="shellMode === 'adb'" type="success" size="small">ADB PTY（本机 adb 已连接设备）</el-text>
       <el-text v-else-if="shellMode === 'agent'" type="info" size="small">经 Agent：回车提交；Ctrl+C 中断运行中命令</el-text>
     </div>
-    <div ref="termRef" style="flex:1;min-height:240px;background:#000;border-radius:4px;padding:4px" />
+    <div ref="termRef" class="shell-term" />
   </div>
 </template>
 
@@ -43,18 +43,30 @@ let agentLineBuffer = ''
 /** 子进程常用 `\r` 刷新行（如 ping），在 xterm 自动换行后会产生错位缩进；规整为 `\n` */
 function normalizeAgentRemoteOutput(s) {
   if (typeof s !== 'string') return s
-  return s.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  // xterm 对 '\n' 默认不会回到行首；Agent 输出经常只发 '\n'，会导致下一行从旧列开始“错行”
+  // 使用 '\r\n' 规整为常见终端换行语义
+  return s.replace(/\r?\n/g, '\r\n')
 }
 
-const fitTerm = () => {
+function scheduleFit() {
+  // FitAddon 依赖容器尺寸与字体度量；在 ElementPlus 布局/字体加载后容易首次计算偏小，
+  // 造成 cols 过少 -> 行自动换行后视觉上像“居中/错位”。
   nextTick(() => {
-    try {
-      fitAddon?.fit()
-    } catch {
-      /* noop */
+    const doFit = () => {
+      try {
+        fitAddon?.fit()
+      } catch {
+        /* noop */
+      }
     }
+    requestAnimationFrame(() => {
+      doFit()
+      requestAnimationFrame(doFit)
+      setTimeout(doFit, 80)
+    })
   })
 }
+const fitTerm = () => scheduleFit()
 
 const onWinResize = () => fitTerm()
 
@@ -62,12 +74,17 @@ const initTerm = () => {
   term = new Terminal({
     cursorBlink: true,
     fontSize: 14,
+    convertEol: true,
+    fontFamily:
+      'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+    letterSpacing: 0,
+    lineHeight: 1.2,
     theme: { background: '#1e1e1e', foreground: '#d4d4d4' }
   })
   fitAddon = new FitAddon()
   term.loadAddon(fitAddon)
   term.open(termRef.value)
-  fitTerm()
+  scheduleFit()
   term.onData((data) => {
     if (!shellInputReady) {
       return
@@ -113,7 +130,7 @@ const connect = () => {
     onOpen: () => {
       connected.value = true
       hint.value = ''
-      fitTerm()
+      scheduleFit()
       term?.writeln('\x1b[90m正在建立 Shell…\x1b[0m')
     },
     onClose: (code, reason) => {
@@ -144,7 +161,7 @@ const connect = () => {
                 '\x1b[90mAgent：回车提交一行；Ctrl+C 可中断正在运行的命令（如 ping）。\x1b[0m'
               )
             }
-            nextTick(() => fitTerm())
+            scheduleFit()
             return
           }
         } catch {
@@ -156,6 +173,10 @@ const connect = () => {
       } else {
         term?.write(data)
       }
+      // 输出量大（如 ping）时，偶发容器尺寸变化或字体度量变化导致错位；轻量兜底重新 fit
+      if (shellMetaHandled && (shellMode.value === 'agent' || shellMode.value === 'adb')) {
+        scheduleFit()
+      }
     }
   })
   ws.connect()
@@ -165,6 +186,14 @@ onMounted(async () => {
   const res = await deviceApi.getDevices()
   devices.value = res.data
   initTerm()
+  // 字体加载前 xterm 可能用临时字体测量，导致 cols 偏小 -> 换行错位
+  try {
+    if (document?.fonts?.ready) {
+      document.fonts.ready.then(() => scheduleFit()).catch(() => {})
+    }
+  } catch {
+    /* noop */
+  }
   window.addEventListener('resize', onWinResize)
   nextTick(() => {
     if (termRef.value && typeof ResizeObserver !== 'undefined') {
@@ -183,3 +212,37 @@ onUnmounted(() => {
   term?.dispose()
 })
 </script>
+
+<style scoped>
+.shell-page-root {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 120px);
+}
+.shell-term {
+  flex: 1;
+  min-height: 240px;
+  background: #000;
+  border-radius: 4px;
+  padding: 0;
+  overflow: hidden;
+}
+/* 防止外层布局样式影响 xterm 内部对齐/缩放 */
+.shell-term :deep(.xterm) {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  left: 0;
+  text-align: left;
+  transform: none !important;
+  font-variant-ligatures: none;
+}
+.shell-term :deep(.xterm-screen),
+.shell-term :deep(.xterm-viewport) {
+  width: 100% !important;
+}
+.shell-term :deep(canvas) {
+  display: block;
+  margin: 0;
+}
+</style>

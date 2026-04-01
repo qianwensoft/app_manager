@@ -132,7 +132,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import * as deviceApi from '@/api/device'
-import { createDeviceProfileStomp } from '@/utils/deviceProfileStomp'
+import { useEventListenerStore } from '@/stores/eventListeners'
 
 const DEVICES_VIEW_MODE_KEY = 'app-manager-devices-view-mode'
 
@@ -222,16 +222,18 @@ const handleGroupSelect = (index) => {
   selectedGroup.value = index
 }
 
-const profileStomp = createDeviceProfileStomp(
-  () => {
-    load()
-  },
-  () => localStorage.getItem('token')
-)
+const eventListeners = useEventListenerStore()
+let profileListenerId = null
 
 onMounted(() => {
   load()
-  profileStomp.connect()
+  profileListenerId = eventListeners.attachProfileListener({
+    sourceLabel: '设备管理',
+    deviceScopeId: null,
+    onEvent: () => load()
+  })
 })
-onUnmounted(() => profileStomp.disconnect())
+onUnmounted(() => {
+  if (profileListenerId) eventListeners.revoke(profileListenerId)
+})
 </script>

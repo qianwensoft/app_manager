@@ -25,6 +25,7 @@ const routes = [
       { path: 'tasks', name: 'Tasks', meta: { title: '任务队列' }, component: () => import('@/views/Tasks.vue') },
       { path: 'apikeys', name: 'ApiKeys', meta: { title: '授权令牌' }, component: () => import('@/views/ApiKeys.vue') },
       { path: 'audit', name: 'AuditLog', meta: { title: '审计日志' }, component: () => import('@/views/AuditLog.vue') },
+      { path: 'event-listeners', name: 'EventListeners', meta: { title: '事件监听' }, component: () => import('@/views/EventListeners.vue') },
     ]
   }
 ]

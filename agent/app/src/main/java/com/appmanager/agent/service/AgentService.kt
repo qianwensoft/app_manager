@@ -258,12 +258,16 @@ class AgentService : LifecycleService() {
 
     fun handleWebRTCSignal(data: Map<String, Any>) {
         screenCaptureManager?.handleSignal(data)
-            ?: Log.w(TAG, "handleWebRTCSignal: screenCaptureManager is null")
+            ?: Log.d(TAG, "handleWebRTCSignal: ignored (screen capture not started yet)")
     }
 
+    /**
+     * Web 端在「屏幕查看」里下发的触控；仅当本机已走 MediaProjection 并 [startScreenCapture] 后才有 [screenCaptureManager]。
+     * 投屏未就绪时丢弃即可，用 debug 避免 logcat 里出现误导性的 Warning。
+     */
     fun handleScreenTouchRelay(json: String) {
         screenCaptureManager?.handleRelayTouch(json)
-            ?: Log.w(TAG, "handleScreenTouchRelay: screenCaptureManager is null")
+            ?: Log.d(TAG, "handleScreenTouchRelay: ignored (screen capture not active)")
     }
 
     /** Web 请求即时刷新：上报 device_info（含 Wi‑Fi SSID 等），并带 push_request_id 唤醒服务端 HTTP。 */
