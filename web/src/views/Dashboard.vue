@@ -44,7 +44,11 @@
         <el-table-column prop="serial" label="Serial" />
         <el-table-column prop="name" label="名称" />
         <el-table-column prop="model" label="型号" />
-        <el-table-column prop="ip_address" label="IP" />
+        <el-table-column label="网络" width="220">
+          <template #default="{ row }">
+            <NetworkCell :device="row" />
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="100">
           <template #default="{ row }">
             <el-button size="small" @click="$router.push(`/devices/${row.id}`)">详情</el-button>
@@ -62,14 +66,15 @@ import { Refresh } from '@element-plus/icons-vue'
 import * as deviceApi from '@/api/device'
 import * as appApi from '@/api/app'
 import { getTasks } from '@/api/misc'
-import { createDeviceProfileStomp } from '@/utils/deviceProfileStomp'
+import { useEventListenerStore } from '@/stores/eventListeners'
+import NetworkCell from '@/components/NetworkCell.vue'
 
 const devices = ref([])
 const apps = ref([])
 const tasks = ref([])
 const loading = ref(false)
 
-const onlineDevices = computed(() => devices.value.filter(d => d.status === 'online'))
+const onlineDevices = computed(() => devices.value.filter(d => d.status === 'online' || d.agent_connected))
 const stats = computed(() => ({
   total: devices.value.length,
   online: onlineDevices.value.length,
@@ -96,18 +101,20 @@ const refresh = async () => {
   }
 }
 
-const profileStomp = createDeviceProfileStomp(
-  () => {
-    loadData()
-  },
-  () => localStorage.getItem('token')
-)
+const eventListeners = useEventListenerStore()
+let profileListenerId = null
 
 onMounted(() => {
   loadData()
-  profileStomp.connect()
+  profileListenerId = eventListeners.attachProfileListener({
+    sourceLabel: '总览',
+    deviceScopeId: null,
+    onEvent: () => loadData()
+  })
 })
-onUnmounted(() => profileStomp.disconnect())
+onUnmounted(() => {
+  if (profileListenerId) eventListeners.revoke(profileListenerId)
+})
 </script>
 
 <style scoped>

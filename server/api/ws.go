@@ -4,6 +4,7 @@ import (
 	"app-manager/agent"
 	"app-manager/auth"
 	"app-manager/database"
+	"app-manager/event"
 	"app-manager/logcat"
 	"app-manager/models"
 	"app-manager/screen"
@@ -284,6 +285,7 @@ func init() {
 		screen.AbortServerRecording(deviceID)
 		screen.ResetCaptureRoute(deviceID)
 		screen.ScreenHub.CloseAllForDevice(deviceID)
+		DeactivateDeviceCustomListenStateForAgentKey(deviceID)
 	}
 	// Handle uplink messages from agents
 	agent.SetMessageHandler(func(deviceID string, msg map[string]interface{}) {
@@ -327,11 +329,19 @@ func init() {
 			eventData, _ := msg["eventData"].(string)
 			if eventType != "" {
 				if devID, ok := agent.ResolveDeviceID(deviceID); ok {
-					database.DB.Create(&models.DeviceEvent{
+					rec := models.DeviceEvent{
 						DeviceID:  devID,
 						EventType: eventType,
 						EventData: eventData,
-					})
+					}
+					if err := database.DB.Create(&rec).Error; err == nil {
+						var d models.Device
+						var devPtr *models.Device
+						if err := database.DB.First(&d, devID).Error; err == nil {
+							devPtr = &d
+						}
+						event.PublishDeviceCustomEventSTOMP(rec, devPtr)
+					}
 				}
 			}
 		case "screenshot_result":
@@ -399,6 +409,84 @@ func init() {
 			}
 			apps := parseInstalledAppsEntries(msg["apps"])
 			agent.DeliverInstalledAppsResult(reqID, apps, "")
+		case "fs_list_result":
+			reqID, _ := msg["request_id"].(string)
+			if reqID == "" {
+				return
+			}
+			if !wsMsgBool(msg, "success") {
+				errStr, _ := msg["error"].(string)
+				if errStr == "" {
+					errStr = "列目录失败"
+				}
+				agent.DeliverFsListResult(reqID, nil, "", errStr)
+				return
+			}
+			var entries []agent.FsListEntry
+			if arr, ok := msg["entries"].([]interface{}); ok {
+				for _, it := range arr {
+					m, ok := it.(map[string]interface{})
+					if !ok {
+						continue
+					}
+					name, _ := m["name"].(string)
+					typ, _ := m["type"].(string)
+					if name == "" || (typ != "file" && typ != "dir") {
+						continue
+					}
+					entries = append(entries, agent.FsListEntry{
+						Name:  name,
+						Type:  typ,
+						Size:  wsMsgInt64(m, "size"),
+						Mtime: wsMsgInt64(m, "mtime"),
+					})
+				}
+			}
+			nextTok, _ := msg["next_page_token"].(string)
+			agent.DeliverFsListResult(reqID, entries, nextTok, "")
+		case "fs_download_result":
+			reqID, _ := msg["request_id"].(string)
+			if reqID == "" {
+				return
+			}
+			if !wsMsgBool(msg, "success") {
+				errStr, _ := msg["error"].(string)
+				if errStr == "" {
+					errStr = "下载失败"
+				}
+				agent.DeliverFsDownloadResult(reqID, nil, errStr)
+				return
+			}
+			dataB64, _ := msg["data_base64"].(string)
+			data, err := base64.StdEncoding.DecodeString(dataB64)
+			if err != nil {
+				agent.DeliverFsDownloadResult(reqID, nil, "解码失败")
+				return
+			}
+			agent.DeliverFsDownloadResult(reqID, data, "")
+		case "fs_upload_progress":
+			uploadID, _ := msg["upload_id"].(string)
+			if uploadID == "" {
+				return
+			}
+			agent.DeliverFsUploadEvent(uploadID, agent.FsUploadEvent{
+				UploadID:      uploadID,
+				Type:          "fs_upload_progress",
+				ReceivedBytes: wsMsgInt64(msg, "received_bytes"),
+				Ok:            wsMsgBool(msg, "success"),
+				Error:         wsMsgStr(msg, "error"),
+			})
+		case "fs_upload_done":
+			uploadID, _ := msg["upload_id"].(string)
+			if uploadID == "" {
+				return
+			}
+			agent.DeliverFsUploadEvent(uploadID, agent.FsUploadEvent{
+				UploadID: uploadID,
+				Type:     "fs_upload_done",
+				Ok:       wsMsgBool(msg, "success"),
+				Error:    wsMsgStr(msg, "error"),
+			})
 		case "user_notice":
 			screen.ScreenHub.SendJSONToClient(deviceID, msg)
 		case "install_task_result":
@@ -462,6 +550,17 @@ func wsMsgInt64(m map[string]interface{}, k string) int64 {
 	default:
 		return 0
 	}
+}
+
+func wsMsgStr(m map[string]interface{}, k string) string {
+	v, ok := m[k]
+	if !ok || v == nil {
+		return ""
+	}
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return fmt.Sprint(v)
 }
 
 func wsMsgBool(m map[string]interface{}, k string) bool {

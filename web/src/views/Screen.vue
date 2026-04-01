@@ -182,6 +182,29 @@
                 <el-card shadow="never">
         <template #header>
           <div style="display:flex;justify-content:space-between;align-items:center">
+            <span style="font-weight:600">截图列表</span>
+            <el-button size="small" @click="loadRecordings" :icon="'Refresh'" circle />
+          </div>
+        </template>
+        <div class="screen-quick-recordings">
+          <div v-if="screenshots.length === 0" style="text-align:center;color:#909399;padding:20px">暂无截图</div>
+          <div v-for="shot in screenshots" :key="shot.id" style="padding:8px;border-bottom:1px solid #eee">
+            <div style="font-size:13px;margin-bottom:4px">{{ shot.file_name }}</div>
+            <div style="font-size:12px;color:#909399;margin-bottom:8px">
+              {{ formatSize(shot.file_size) }} · {{ formatDate(shot.created_at) }}
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px">
+              <el-button size="small" type="primary" plain @click="viewScreenshot(shot.id)">查看</el-button>
+              <el-button size="small" @click="downloadScreenshot(shot.id, shot.file_name)">下载</el-button>
+              <el-button size="small" type="danger" @click="deleteScreenshot(shot.id)">删除</el-button>
+            </div>
+          </div>
+        </div>
+      </el-card>
+
+                <el-card shadow="never">
+        <template #header>
+          <div style="display:flex;justify-content:space-between;align-items:center">
             <span style="font-weight:600">录屏文件</span>
             <el-button size="small" @click="loadRecordings" :icon="'Refresh'" circle />
           </div>
@@ -563,15 +586,16 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useEventListenerStore } from '@/stores/eventListeners'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { FullScreen, Close } from '@element-plus/icons-vue'
 import { Client } from '@stomp/stompjs'
 import * as deviceApi from '@/api/device'
-import { createDeviceProfileStomp } from '@/utils/deviceProfileStomp'
 import { WS_BASE } from '@/utils/ws'
 
 const route = useRoute()
 const auth = useAuthStore()
+const eventListeners = useEventListenerStore()
 const devices = ref([])
 const deviceId = ref(route.query.device != null ? String(route.query.device) : '')
 const shareToken = computed(() => String(route.query.share || '').trim())
@@ -606,6 +630,7 @@ const clickEffects = ref([])
 const showClickEffect = ref(true)
 const showRemoteClickEffect = ref(true)
 const recordings = ref([])
+const screenshots = ref([])
 const recordingPlayerVisible = ref(false)
 const recordingPlayerId = ref(null)
 const recordingPlayerRef = ref(null)
@@ -761,6 +786,8 @@ const recordingPlayerTitle = computed(() => {
 
 let ws = null
 let stompClient = null
+let recordingListenerId = null
+let profileListenerId = null
 
 /**
  * 是否可对当前设备使用「无 WebSocket 时回退 ADB 点击」。
@@ -784,6 +811,12 @@ function primeResolutionFromDeviceList() {
 }
 
 function disconnectRecordingStomp() {
+  if (recordingListenerId) {
+    const rid = recordingListenerId
+    recordingListenerId = null
+    eventListeners.revoke(rid)
+    return
+  }
   try {
     stompClient?.deactivate()
   } catch (_) { /* noop */ }
@@ -849,6 +882,19 @@ function connectRecordingStomp() {
           onRecordingStompMessage(JSON.parse(message.body))
         } catch (e) {
           console.warn('STOMP recording message parse', e)
+        }
+      })
+      const d = devices.value.find((x) => String(x.id) === String(deviceId.value))
+      const label = d?.name || d?.serial || `设备 #${deviceId.value}`
+      recordingListenerId = eventListeners.registerRecordingListener({
+        deviceId: deviceId.value,
+        deviceLabel: label,
+        sourceLabel: '屏幕查看',
+        onRevoke: () => {
+          try {
+            client.deactivate()
+          } catch (_) { /* noop */ }
+          if (stompClient === client) stompClient = null
         }
       })
     },
@@ -1579,11 +1625,24 @@ watch(
   { immediate: true }
 )
 
-const profileStomp = createDeviceProfileStomp(
-  (j) => {
-    if (Number(j.device_id) === Number(deviceId.value)) loadScreenDevice()
+watch(
+  () => [deviceId.value, shareMode.value, auth.token],
+  () => {
+    if (profileListenerId) {
+      eventListeners.revoke(profileListenerId)
+      profileListenerId = null
+    }
+    if (shareMode.value || !auth.token || !deviceId.value) return
+    const d = devices.value.find((x) => String(x.id) === String(deviceId.value))
+    const label = d?.name || d?.serial || `设备 #${deviceId.value}`
+    profileListenerId = eventListeners.attachProfileListener({
+      sourceLabel: '屏幕查看',
+      deviceScopeId: deviceId.value,
+      deviceScopeLabel: label,
+      onEvent: () => loadScreenDevice()
+    })
   },
-  () => localStorage.getItem('token')
+  { immediate: true }
 )
 
 onMounted(async () => {
@@ -1599,7 +1658,6 @@ onMounted(async () => {
     connect()
     loadRecordings()
   }
-  if (auth.token) profileStomp.connect()
 })
 
 const saveAdbScreenshot = async () => {
@@ -1612,14 +1670,14 @@ const saveAdbScreenshot = async () => {
     duration: 0
   })
   try {
-    const blob = await deviceApi.captureScreenshot(deviceId.value)
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `screenshot_${deviceId.value}_${Date.now()}.png`
-    a.click()
-    URL.revokeObjectURL(url)
-    ElMessage.success('截图已下载')
+    const res = await fetch(`/api/devices/${deviceId.value}/adb/screenshot`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${auth.token}` }
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || '截图失败')
+    ElMessage.success('截图已保存到服务器')
+    loadRecordings()
   } catch (e) {
     ElMessage.error(e.message || '截图失败')
   } finally {
@@ -1685,6 +1743,12 @@ const loadRecordings = async () => {
   })
   const data = await res.json()
   recordings.value = data.data || []
+
+  const hubRes = await fetch(`/api/devices/${deviceId.value}/file-hub`, {
+    headers: { 'Authorization': `Bearer ${auth.token}` }
+  })
+  const hubData = await hubRes.json()
+  screenshots.value = (hubData.data?.media || []).filter(m => m.category === 'screenshot')
 }
 
 const recordingStreamUrl = (id) => {
@@ -1726,6 +1790,23 @@ const deleteRecording = async (id) => {
   loadRecordings()
 }
 
+const viewScreenshot = (id) => {
+  window.open(`/api/device-media/${id}/stream?token=${auth.token}`, '_blank')
+}
+
+const downloadScreenshot = (id, fileName) => {
+  window.open(`/api/device-media/${id}/download?token=${auth.token}`, '_blank')
+}
+
+const deleteScreenshot = async (id) => {
+  await fetch(`/api/device-media/${id}`, {
+    method: 'DELETE',
+    headers: { 'Authorization': `Bearer ${auth.token}` }
+  })
+  ElMessage.success('删除成功')
+  loadRecordings()
+}
+
 const formatSize = (bytes) => {
   if (!bytes) return '0 B'
   const k = 1024
@@ -1741,7 +1822,10 @@ const formatDate = (date) => {
 onUnmounted(() => {
   document.removeEventListener('fullscreenchange', syncNativeFullscreenState)
   document.removeEventListener('webkitfullscreenchange', syncNativeFullscreenState)
-  profileStomp.disconnect()
+  if (profileListenerId) {
+    eventListeners.revoke(profileListenerId)
+    profileListenerId = null
+  }
   closeAll()
 })
 </script>

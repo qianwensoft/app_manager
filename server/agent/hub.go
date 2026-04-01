@@ -73,7 +73,7 @@ func (h *Hub) Send(deviceID string, msg interface{}) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("Sending to agent [%s]: %s", deviceID, string(data))
+	//log.Printf("Sending to agent [%s]: %s", deviceID, string(data))
 	c.send <- data
 	return nil
 }

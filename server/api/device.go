@@ -443,7 +443,10 @@ func AdbScreenshot(c *gin.Context) {
 		return
 	}
 
-	// 优先：Agent 在线时由端上 MediaProjection 截图（需已在 Web 打开「屏幕查看」并完成授权）
+	var pngData []byte
+	var screenshotErr error
+
+	// 优先：Agent 在线时由端上 MediaProjection 截图
 	if routeKey, keyErr := agent.AgentConnectionKey(c.Param("id")); keyErr == nil && agent.AgentHub.IsConnected(routeKey) {
 		reqID := newScreenshotRequestID()
 		ch := agent.RegisterScreenshotWait(reqID)
@@ -462,40 +465,71 @@ func AdbScreenshot(c *gin.Context) {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "截图数据为空"})
 				return
 			}
-			name := fmt.Sprintf("screenshot_%s_%s.png", device.Serial, time.Now().Format("20060102_150405"))
-			c.Header("Content-Type", "image/png")
-			c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, name))
-			c.Data(http.StatusOK, "image/png", res.PNG)
+			pngData = res.PNG
 		case <-time.After(25 * time.Second):
 			agent.ForgetScreenshotWait(reqID)
 			c.JSON(http.StatusGatewayTimeout, gin.H{"error": "截图超时。请确认 Agent 在线，并先在 Web 端打开「屏幕查看」完成录屏授权后再试。"})
+			return
 		}
-		return
+	} else {
+		if !serialUsableWithAdb(device.Serial) {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "当前设备仅通过 Agent 接入：请保持 Agent 在线并在 Web 打开「屏幕查看」授权后使用截图；或改用 USB/网络 ADB 绑定真实串号后使用本接口。",
+			})
+			return
+		}
+		tmp, err := os.CreateTemp("", "am_screenshot_*.png")
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		tmpPath := tmp.Name()
+		_ = tmp.Close()
+		defer os.Remove(tmpPath)
+
+		if err := getADB().Screenshot(device.Serial, tmpPath); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		pngData, screenshotErr = os.ReadFile(tmpPath)
+		if screenshotErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": screenshotErr.Error()})
+			return
+		}
 	}
 
-	if !serialUsableWithAdb(device.Serial) {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "当前设备仅通过 Agent 接入：请保持 Agent 在线并在 Web 打开「屏幕查看」授权后使用截图；或改用 USB/网络 ADB 绑定真实串号后使用本接口。",
-		})
-		return
-	}
-	// 使用系统临时目录，避免依赖 storage.path 权限或工作目录下的 ./uploads
-	tmp, err := os.CreateTemp("", "am_screenshot_*.png")
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-	tmpPath := tmp.Name()
-	_ = tmp.Close()
-	defer os.Remove(tmpPath)
-
-	if err := getADB().Screenshot(device.Serial, tmpPath); err != nil {
+	// 保存到服务器
+	dir := filepath.Join(config.C.Storage.Path, "device_media", fmt.Sprintf("device_%d", device.ID))
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 	name := fmt.Sprintf("screenshot_%s_%s.png", device.Serial, time.Now().Format("20060102_150405"))
-	c.Header("Content-Type", "image/png")
-	c.FileAttachment(tmpPath, name)
+	savePath := filepath.Join(dir, fmt.Sprintf("%d_%d.png", device.ID, time.Now().UnixMilli()))
+	if err := os.WriteFile(savePath, pngData, 0644); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	row := models.DeviceMedia{
+		DeviceID:    device.ID,
+		Category:    "screenshot",
+		FileName:    name,
+		FilePath:    savePath,
+		FileSize:    int64(len(pngData)),
+		ContentType: "image/png",
+	}
+	if err := database.DB.Create(&row).Error; err != nil {
+		_ = os.Remove(savePath)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{
+		"id": row.ID, "device_id": row.DeviceID, "category": row.Category,
+		"file_name": row.FileName, "file_size": row.FileSize,
+		"content_type": row.ContentType, "created_at": row.CreatedAt,
+	}})
 }
 
 func newScreenshotRequestID() string {
@@ -687,6 +721,40 @@ func AdbPushFile(c *gin.Context) {
 	getADB().Shell(device.Serial, cmd)
 
 	c.JSON(http.StatusOK, gin.H{"path": remotePath})
+}
+
+func StartAudioRecording(c *gin.Context) {
+	routeKey, err := agent.AgentConnectionKey(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	if !agent.AgentHub.IsConnected(routeKey) {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Agent 未在线"})
+		return
+	}
+	_ = agent.AgentHub.Send(routeKey, map[string]interface{}{
+		"type":   "command",
+		"action": "start_audio_recording",
+	})
+	c.JSON(http.StatusOK, gin.H{"message": "录音已开始"})
+}
+
+func StopAudioRecording(c *gin.Context) {
+	routeKey, err := agent.AgentConnectionKey(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	if !agent.AgentHub.IsConnected(routeKey) {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Agent 未在线"})
+		return
+	}
+	_ = agent.AgentHub.Send(routeKey, map[string]interface{}{
+		"type":   "command",
+		"action": "stop_audio_recording",
+	})
+	c.JSON(http.StatusOK, gin.H{"message": "录音已停止"})
 }
 
 func GetDeviceGroups(c *gin.Context) {

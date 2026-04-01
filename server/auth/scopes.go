@@ -13,6 +13,7 @@ const (
 	OpenAppsUpload  = "open:apps:upload"
 	OpenAppsInstall = "open:apps:install"
 	OpenTasksGet    = "open:tasks:get"
+	OpenEventsList  = "open:events:list"
 )
 
 // 屏幕分享链接授权范围
@@ -33,6 +34,7 @@ var OpenScopeDescriptions = []struct {
 	{OpenAppsUpload, "上传 APK"},
 	{OpenAppsInstall, "安装 APK 到设备"},
 	{OpenTasksGet, "查询安装任务"},
+	{OpenEventsList, "设备自定义事件列表（扫码等）"},
 }
 
 // ScreenShareScopeDescriptions 屏幕分享可选能力

@@ -23,6 +23,7 @@ import com.appmanager.agent.config.AgentConfig
 import com.appmanager.agent.util.DisplayUtil
 import com.appmanager.agent.util.AppVersions
 import com.appmanager.agent.util.ServerUrlUtil
+import com.appmanager.agent.util.CustomEventBroadcastHelper
 import com.appmanager.agent.util.EventReporter
 import com.appmanager.agent.ws.AgentWebSocket
 import com.appmanager.agent.ws.CommandAction
@@ -198,6 +199,7 @@ class AgentService : LifecycleService() {
         screenCaptureManager?.stop()
         shellManager?.stop()
         logcatManager?.stop()
+        CustomEventBroadcastHelper.stop(this)
         if (::webSocket.isInitialized) webSocket.disconnect()
         activeWsServerUrl = ""
         activeWsDeviceToken = ""
@@ -233,6 +235,7 @@ class AgentService : LifecycleService() {
 
     /** 切换服务器或 Token：停子模块、断旧 WebSocket，便于下面重新 new AgentWebSocket */
     private fun reconnectForNewEndpoint() {
+        CustomEventBroadcastHelper.stop(this)
         if (::heartbeatManager.isInitialized) heartbeatManager.stop()
         if (::deviceInfoCollector.isInitialized) deviceInfoCollector.stop()
         stopScreenCapture()
@@ -486,6 +489,108 @@ class AgentService : LifecycleService() {
 
     fun stopRecording() {
         Log.i(TAG, "stopRecording ignored (server-side recording)")
+    }
+
+    // ─── 录音 ─────────────────────────────────────────────────────────────────
+    private var audioRecorder: android.media.MediaRecorder? = null
+    private var audioFile: java.io.File? = null
+
+    fun startAudioRecording() {
+        if (audioRecorder != null) {
+            Log.w(TAG, "Audio recording already in progress")
+            return
+        }
+        try {
+            val file = java.io.File(cacheDir, "audio_${System.currentTimeMillis()}.m4a")
+            audioFile = file
+            audioRecorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                android.media.MediaRecorder(this)
+            } else {
+                @Suppress("DEPRECATION")
+                android.media.MediaRecorder()
+            }.apply {
+                setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
+                setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4)
+                setAudioEncoder(android.media.MediaRecorder.AudioEncoder.AAC)
+                setOutputFile(file.absolutePath)
+                prepare()
+                start()
+            }
+            Log.i(TAG, "Audio recording started: ${file.name}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start audio recording", e)
+            audioRecorder?.release()
+            audioRecorder = null
+            audioFile = null
+        }
+    }
+
+    fun stopAudioRecording() {
+        val recorder = audioRecorder ?: run {
+            Log.w(TAG, "No audio recording in progress")
+            return
+        }
+        val file = audioFile
+        try {
+            recorder.stop()
+            recorder.release()
+            audioRecorder = null
+            if (file != null && file.exists()) {
+                uploadAudioFile(file)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to stop audio recording", e)
+            recorder.release()
+            audioRecorder = null
+            file?.delete()
+            audioFile = null
+        }
+    }
+
+    private fun uploadAudioFile(file: java.io.File) {
+        serviceScope.launch {
+            try {
+                val config = AgentConfig.get(this@AgentService)
+                val url = "${config.serverUrl}/api/devices/${config.deviceToken}/media/upload"
+                val token = config.deviceToken
+                val bytes = withContext(Dispatchers.IO) { file.readBytes() }
+                val client = OkHttpClient.Builder()
+                    .connectTimeout(30, TimeUnit.SECONDS)
+                    .writeTimeout(60, TimeUnit.SECONDS)
+                    .readTimeout(30, TimeUnit.SECONDS)
+                    .build()
+                val boundary = "----Boundary${System.currentTimeMillis()}"
+                val body = buildMultipartBody(boundary, file.name, "audio/mp4", bytes, "audio")
+                val req = Request.Builder()
+                    .url(url)
+                    .header("Authorization", "Bearer $token")
+                    .post(body.toRequestBody("multipart/form-data; boundary=$boundary".toMediaType()))
+                    .build()
+                val resp = withContext(Dispatchers.IO) { client.newCall(req).execute() }
+                if (resp.isSuccessful) {
+                    Log.i(TAG, "Audio uploaded: ${file.name}")
+                } else {
+                    Log.e(TAG, "Audio upload failed: ${resp.code}")
+                }
+                resp.close()
+            } catch (e: Exception) {
+                Log.e(TAG, "Audio upload error", e)
+            } finally {
+                file.delete()
+                audioFile = null
+            }
+        }
+    }
+
+    private fun buildMultipartBody(boundary: String, fileName: String, contentType: String, data: ByteArray, category: String): ByteArray {
+        val builder = StringBuilder()
+        builder.append("--$boundary\r\n")
+        builder.append("Content-Disposition: form-data; name=\"file\"; filename=\"$fileName\"\r\n")
+        builder.append("Content-Type: $contentType\r\n\r\n")
+        val header = builder.toString().toByteArray(Charsets.UTF_8)
+        val footer = "\r\n--$boundary\r\n".toByteArray(Charsets.UTF_8)
+        val categoryField = "Content-Disposition: form-data; name=\"category\"\r\n\r\n$category\r\n--$boundary--\r\n".toByteArray(Charsets.UTF_8)
+        return header + data + footer + categoryField
     }
 
     // ─── 通知 ─────────────────────────────────────────────────────────────────

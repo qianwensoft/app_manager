@@ -79,54 +79,44 @@ object AppCommandHandler {
             .get()
             .build()
 
-        client.newCall(req).execute().use { response ->
-            if (!response.isSuccessful) {
-                AgentService.sendInstallTaskResult(
-                    commandId,
-                    false,
-                    "",
-                    "下载失败 HTTP ${response.code}"
-                )
-                return
-            }
-            val body = response.body ?: run {
-                AgentService.sendInstallTaskResult(commandId, false, "", "空响应体")
-                return
+        val apkFile = File(service.cacheDir, "install_${System.currentTimeMillis()}.apk")
+        try {
+            client.newCall(req).execute().use { response ->
+                if (!response.isSuccessful) {
+                    AgentService.sendInstallTaskResult(
+                        commandId,
+                        false,
+                        "",
+                        "下载失败 HTTP ${response.code}"
+                    )
+                    return
+                }
+                val body = response.body ?: run {
+                    AgentService.sendInstallTaskResult(commandId, false, "", "空响应体")
+                    return
+                }
+                apkFile.outputStream().use { out ->
+                    body.byteStream().copyTo(out)
+                }
             }
 
-            val installer = service.packageManager.packageInstaller
-            val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
-            val sessionId = installer.createSession(params)
-            val session = installer.openSession(sessionId)
-            try {
-                session.openWrite("base.apk", 0, -1).use { out ->
-                    body.byteStream().use { input -> input.copyTo(out) }
-                }
-                val callback = Intent(service, InstallStatusReceiver::class.java).apply {
-                    putExtra(InstallStatusReceiver.EXTRA_COMMAND_ID, commandId)
-                }
-                val piFlags = PendingIntent.FLAG_UPDATE_CURRENT or
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        PendingIntent.FLAG_IMMUTABLE
-                    } else {
-                        0
-                    }
-                val pendingIntent = PendingIntent.getBroadcast(
+            val intent = Intent(Intent.ACTION_VIEW)
+            intent.setDataAndType(
+                androidx.core.content.FileProvider.getUriForFile(
                     service,
-                    commandId.hashCode(),
-                    callback,
-                    piFlags
-                )
-                session.commit(pendingIntent.intentSender)
-            } catch (e: Exception) {
-                try {
-                    session.abandon()
-                } catch (_: Exception) {
-                }
-                throw e
-            } finally {
-                session.close()
-            }
+                    "${service.packageName}.fileprovider",
+                    apkFile
+                ),
+                "application/vnd.android.package-archive"
+            )
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            service.startActivity(intent)
+            AgentService.sendInstallTaskResult(commandId, true, "已打开安装界面", "")
+        } catch (e: Exception) {
+            Log.e(TAG, "Install error", e)
+            apkFile.delete()
+            AgentService.sendInstallTaskResult(commandId, false, "", e.message ?: "安装失败")
         }
     }
 

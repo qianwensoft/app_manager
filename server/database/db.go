@@ -48,9 +48,16 @@ func Init(dbCfg config.DatabaseConfig) error {
 		&models.AuditLog{},
 		&models.Recording{},
 		&models.DeviceMedia{},
+		&models.DeviceEvent{},
+		&models.CustomEventGroup{},
+		&models.CustomEventDefinition{},
+		&models.DeviceCustomListenState{},
+		&models.AgentUpdate{},
 	); err != nil {
 		return err
 	}
+
+	SeedDefaultCustomEvents(DB)
 
 	// 创建默认管理员
 	var count int64

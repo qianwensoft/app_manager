@@ -146,6 +146,87 @@
           />
 
           <div>
+            <div style="font-weight:600;margin-bottom:8px">Agent 文件</div>
+            <el-alert
+              v-if="!device?.agent_connected"
+              type="warning"
+              :closable="false"
+              show-icon
+              style="margin-bottom:12px"
+              title="Agent 未在线"
+              description="需 Agent 在线才可列出与上传文件。"
+            />
+            <el-alert
+              v-else
+              type="info"
+              :closable="false"
+              show-icon
+              style="margin-bottom:12px"
+              title="权限提示"
+              description="Android 10+ 受系统限制，可能无法写入 /sdcard/Download 等公共目录。建议优先使用 app://external_files（应用专属目录）。访问 /data/data 等私有目录通常会被拒绝。"
+            />
+
+            <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px">
+              <el-select v-model="agentFsPath" filterable allow-create placeholder="输入路径" style="width: 360px" size="small" @change="loadAgentFs">
+                <el-option v-for="p in agentFsQuickRoots" :key="p" :label="p" :value="p" />
+              </el-select>
+              <el-checkbox v-model="agentFsIncludeHidden" size="small" @change="loadAgentFs">显示隐藏文件</el-checkbox>
+              <el-button size="small" :loading="agentFsLoading" :disabled="!device?.agent_connected" @click="loadAgentFs">刷新</el-button>
+              <el-upload
+                :show-file-list="false"
+                :disabled="!device?.agent_connected || agentFsUploading"
+                :http-request="uploadAgentFileToCurrentPath"
+              >
+                <el-button size="small" type="primary" :loading="agentFsUploading" :disabled="!device?.agent_connected">
+                  上传到当前目录
+                </el-button>
+              </el-upload>
+              <el-text v-if="agentFsUploadHint" type="warning" size="small">{{ agentFsUploadHint }}</el-text>
+            </div>
+
+            <el-progress
+              v-if="agentFsUploading"
+              :percentage="agentFsUploadPct"
+              :status="agentFsUploadStatus"
+              style="margin: 6px 0 12px"
+            />
+
+            <el-table
+              :data="agentFsEntries"
+              border
+              size="small"
+              v-loading="agentFsLoading"
+              empty-text="暂无内容"
+            >
+              <el-table-column label="名称" min-width="220" show-overflow-tooltip>
+                <template #default="{ row }">
+                  <el-button v-if="row.type === 'dir'" link type="primary" @click="enterAgentDir(row.name)">
+                    {{ row.name }}
+                  </el-button>
+                  <span v-else>{{ row.name }}</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="type" label="类型" width="80" />
+              <el-table-column label="大小" width="120">
+                <template #default="{ row }">{{ row.type === 'file' ? formatFileSize(row.size) : '-' }}</template>
+              </el-table-column>
+              <el-table-column label="修改时间" width="180">
+                <template #default="{ row }">{{ formatFileDate(row.mtime) }}</template>
+              </el-table-column>
+              <el-table-column label="操作" width="120" fixed="right">
+                <template #default="{ row }">
+                  <el-button v-if="row.type === 'file' && isImageFile(row.name)" link type="primary" size="small" @click="previewAgentFile(row)">
+                    预览
+                  </el-button>
+                  <el-button v-else-if="row.type === 'file' && isVideoFile(row.name)" link type="primary" size="small" @click="previewAgentFile(row)">
+                    播放
+                  </el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+
+          <div>
             <div style="font-weight:600;margin-bottom:8px">录屏</div>
             <el-space wrap style="margin-bottom:8px">
               <el-button size="small" @click="loadFileHub" :loading="fileHubLoading">刷新</el-button>
@@ -205,8 +286,9 @@
               <el-table-column label="时间" width="170">
                 <template #default="{ row }">{{ formatFileDate(row.created_at) }}</template>
               </el-table-column>
-              <el-table-column v-if="canMutate" label="操作" width="180" fixed="right">
+              <el-table-column v-if="canMutate" label="操作" width="240" fixed="right">
                 <template #default="{ row }">
+                  <el-button size="small" @click="renameMediaRow(row)">重命名</el-button>
                   <el-button size="small" @click="downloadDeviceMediaFile(row.id)">下载</el-button>
                   <el-button size="small" type="danger" @click="deleteMediaRow(row)">删除</el-button>
                 </template>
@@ -221,14 +303,20 @@
             <p style="font-size:13px;color:#606266;margin:0 0 8px">
               录屏文件为视频容器，可能已含麦克风音轨；此处用于单独上传 m4a/mp3 等便于检索与归档。
             </p>
-            <el-upload
-              :http-request="onAudioUpload"
-              :show-file-list="false"
-              accept=".m4a,.mp3,.wav,.aac,.ogg,.flac"
-              :disabled="audioUploading || !canMutate"
-            >
-              <el-button type="primary" :loading="audioUploading" :disabled="!canMutate">上传音频</el-button>
-            </el-upload>
+            <div style="display:flex;gap:8px;margin-bottom:12px">
+              <el-button :type="isRecording ? 'danger' : 'success'" @click="toggleRecording" :disabled="!canMutate">
+                {{ isRecording ? '停止录音' : '开始录音' }}
+              </el-button>
+              <el-text v-if="isRecording" type="danger">录音中 {{ recordingDuration }}s</el-text>
+              <el-upload
+                :http-request="onAudioUpload"
+                :show-file-list="false"
+                accept=".m4a,.mp3,.wav,.aac,.ogg,.flac"
+                :disabled="audioUploading || !canMutate"
+              >
+                <el-button type="primary" :loading="audioUploading" :disabled="!canMutate">上传音频</el-button>
+              </el-upload>
+            </div>
             <el-table :data="audios" border style="margin-top:12px" empty-text="暂无音频">
               <el-table-column prop="file_name" label="文件名" min-width="180" show-overflow-tooltip />
               <el-table-column label="大小" width="100">
@@ -242,8 +330,9 @@
               <el-table-column label="时间" width="170">
                 <template #default="{ row }">{{ formatFileDate(row.created_at) }}</template>
               </el-table-column>
-              <el-table-column v-if="canMutate" label="操作" width="180" fixed="right">
+              <el-table-column v-if="canMutate" label="操作" width="240" fixed="right">
                 <template #default="{ row }">
+                  <el-button size="small" @click="renameMediaRow(row)">重命名</el-button>
                   <el-button size="small" @click="downloadDeviceMediaFile(row.id)">下载</el-button>
                   <el-button size="small" type="danger" @click="deleteMediaRow(row)">删除</el-button>
                 </template>
@@ -296,14 +385,14 @@
 
       <el-tab-pane label="设备管理" name="manage">
         <el-form :model="editForm" label-width="100px" style="max-width:500px">
-          <el-form-item label="设备名称">
-            <el-input v-model="editForm.name" />
-          </el-form-item>
-          <el-form-item label="服务端别名">
+          <el-form-item label="设备别名">
             <el-input v-model="editForm.server_alias" placeholder="可选" />
           </el-form-item>
           <el-form-item label="分组">
             <el-input v-model="editForm.group_name" placeholder="可选" />
+          </el-form-item>
+          <el-form-item label="名称">
+            <el-input v-model="editForm.name" />
           </el-form-item>
           <el-form-item label="Agent Token">
             <el-input v-model="editForm.agent_token" placeholder="与 Agent 应用内/扫码 JSON 中 deviceToken 一致" clearable />
@@ -335,6 +424,11 @@
       />
     </el-dialog>
 
+    <el-dialog v-model="agentFilePreviewVisible" :title="agentFilePreviewName" width="80%" destroy-on-close>
+      <img v-if="agentFilePreviewType === 'image'" :src="agentFilePreviewUrl" style="max-width:100%;display:block;margin:0 auto" />
+      <video v-else-if="agentFilePreviewType === 'video'" :src="agentFilePreviewUrl" controls playsinline style="max-width:100%;display:block;margin:0 auto" />
+    </el-dialog>
+
   </div>
 </template>
 
@@ -345,7 +439,9 @@ import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
 import * as deviceApi from '@/api/device'
 import * as appApi from '@/api/app'
-import { createDeviceProfileStomp } from '@/utils/deviceProfileStomp'
+import { useEventListenerStore } from '@/stores/eventListeners'
+import { WS_BASE } from '@/utils/ws'
+import http from '@/api/http'
 
 const route = useRoute()
 const router = useRouter()
@@ -366,6 +462,11 @@ const apkInstallAndLaunch = ref(true)
 const appsRefreshing = ref(false)
 const pullApkPkg = ref('')
 
+const agentFilePreviewVisible = ref(false)
+const agentFilePreviewType = ref('')
+const agentFilePreviewUrl = ref('')
+const agentFilePreviewName = ref('')
+
 const activeMainTab = ref(
   route.query.tab === 'files'
     ? 'files'
@@ -379,8 +480,179 @@ const fileHub = ref({ recordings: [], media: [] })
 const fileHubLoading = ref(false)
 const archiveShotLoading = ref(false)
 const audioUploading = ref(false)
+const isRecording = ref(false)
+const recordingDuration = ref(0)
+let recordingTimer = null
 const recordingPlayerVisible = ref(false)
 const recordingPlayerId = ref(null)
+
+// ─── Agent 文件系统 ─────────────────────────────────────────────────────────
+const agentFsQuickRoots = [
+  '/storage/emulated/0',
+  '/storage/emulated/0/Download',
+  'app://external_files',
+  'app://files',
+  'app://cache'
+]
+const agentFsPath = ref('/storage/emulated/0')
+const agentFsIncludeHidden = ref(false)
+const agentFsEntries = ref([])
+const agentFsLoading = ref(false)
+
+let agentFsWs = null
+const agentFsUploading = ref(false)
+const agentFsUploadPct = ref(0)
+const agentFsUploadStatus = ref('')
+const agentFsUploadHint = ref('')
+
+function ensurePathJoin(dir, name) {
+  const d = String(dir || '').replace(/\/+$/, '')
+  const n = String(name || '').replace(/^\/+/, '')
+  return d ? `${d}/${n}` : `/${n}`
+}
+
+function enterAgentDir(name) {
+  agentFsPath.value = ensurePathJoin(agentFsPath.value, name)
+  loadAgentFs()
+}
+
+async function loadAgentFs() {
+  if (!device.value?.agent_connected) return
+  agentFsLoading.value = true
+  try {
+    const res = await deviceApi.listAgentFs(route.params.id, agentFsPath.value, {
+      includeHidden: agentFsIncludeHidden.value
+    })
+    const box = res.data || {}
+    agentFsEntries.value = box.entries || []
+  } catch (e) {
+    agentFsEntries.value = []
+    ElMessage.error(e?.message || '列目录失败')
+  } finally {
+    agentFsLoading.value = false
+  }
+}
+
+function closeAgentFsWs() {
+  try {
+    agentFsWs?.close?.()
+  } catch {
+    /* noop */
+  }
+  agentFsWs = null
+}
+
+function openAgentFsWs() {
+  closeAgentFsWs()
+  const tok = auth.token || localStorage.getItem('token') || ''
+  const url = `${WS_BASE}/ws/agent-fs/${encodeURIComponent(route.params.id)}?token=${encodeURIComponent(tok)}`
+  const ws = new WebSocket(url)
+  ws.binaryType = 'arraybuffer'
+  ws.onmessage = (e) => {
+    let text = e.data
+    if (text instanceof ArrayBuffer) {
+      text = new TextDecoder('utf-8', { fatal: false }).decode(text)
+    }
+    if (typeof text !== 'string') return
+    try {
+      const j = JSON.parse(text)
+      if (j.type === 'fs_upload_progress') {
+        const rec = Number(j.received_bytes || 0)
+        const pct = Math.max(0, Math.min(100, Math.round((rec * 100) / (agentFsUploadTotalBytes || 1))))
+        agentFsUploadPct.value = pct
+      } else if (j.type === 'fs_upload_done') {
+        agentFsUploading.value = false
+        agentFsUploadStatus.value = j.success ? 'success' : 'exception'
+        if (!j.success) {
+          agentFsUploadHint.value = j.error || '上传失败'
+          ElMessage.error(agentFsUploadHint.value)
+        } else {
+          agentFsUploadHint.value = ''
+          ElMessage.success('上传完成')
+          loadAgentFs()
+        }
+        closeAgentFsWs()
+      } else if (j.type === 'error') {
+        agentFsUploadHint.value = j.error || '上传失败'
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  ws.onclose = () => {
+    if (agentFsUploading.value) {
+      agentFsUploading.value = false
+      agentFsUploadStatus.value = 'exception'
+      agentFsUploadHint.value = '连接已断开'
+    }
+  }
+  agentFsWs = ws
+}
+
+let agentFsUploadTotalBytes = 0
+
+async function uploadAgentFileToCurrentPath(opt) {
+  const f = opt?.file
+  if (!f || !device.value?.agent_connected) return
+  if (agentFsUploading.value) return
+  agentFsUploadHint.value = ''
+  agentFsUploadStatus.value = ''
+  agentFsUploadPct.value = 0
+  agentFsUploadTotalBytes = Number(f.size || 0)
+  if (agentFsUploadTotalBytes <= 0) {
+    ElMessage.error('文件为空')
+    return
+  }
+  agentFsUploading.value = true
+
+  const uploadId = `upl-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  openAgentFsWs()
+  // wait ws open
+  await new Promise((resolve, reject) => {
+    const ws = agentFsWs
+    if (!ws) return reject(new Error('ws not ready'))
+    if (ws.readyState === WebSocket.OPEN) return resolve()
+    const t = setTimeout(() => reject(new Error('连接超时')), 8000)
+    ws.onopen = () => {
+      clearTimeout(t)
+      resolve()
+    }
+    ws.onerror = () => {
+      clearTimeout(t)
+      reject(new Error('连接失败'))
+    }
+  }).catch((e) => {
+    agentFsUploading.value = false
+    agentFsUploadStatus.value = 'exception'
+    agentFsUploadHint.value = e.message || '连接失败'
+    closeAgentFsWs()
+    return null
+  })
+  if (!agentFsWs || agentFsWs.readyState !== WebSocket.OPEN) return
+
+  agentFsWs.send(
+    JSON.stringify({
+      type: 'upload_begin',
+      upload_id: uploadId,
+      path: agentFsPath.value,
+      file_name: f.name,
+      size: agentFsUploadTotalBytes
+    })
+  )
+
+  const chunkSize = 64 * 1024
+  let off = 0
+  while (off < f.size && agentFsWs && agentFsWs.readyState === WebSocket.OPEN) {
+    const blob = f.slice(off, off + chunkSize)
+    const buf = await blob.arrayBuffer()
+    agentFsWs.send(buf)
+    off += chunkSize
+    agentFsUploadPct.value = Math.max(agentFsUploadPct.value, Math.round((off * 100) / f.size))
+  }
+  if (agentFsWs && agentFsWs.readyState === WebSocket.OPEN) {
+    agentFsWs.send(JSON.stringify({ type: 'upload_end', upload_id: uploadId }))
+  }
+}
 
 watch(
   () => route.query.tab,
@@ -434,14 +706,40 @@ const formatFileSize = (bytes) => {
   return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`
 }
 
+const isImageFile = (name) => {
+  const ext = name.toLowerCase().split('.').pop()
+  return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(ext)
+}
+
+const isVideoFile = (name) => {
+  const ext = name.toLowerCase().split('.').pop()
+  return ['mp4', 'avi', 'mov', 'mkv', 'webm', '3gp'].includes(ext)
+}
+
+const previewAgentFile = async (file) => {
+  agentFilePreviewName.value = file.name
+  agentFilePreviewType.value = isImageFile(file.name) ? 'image' : 'video'
+  agentFilePreviewUrl.value = `/api/devices/${device.value.id}/agent/fs/download?path=${encodeURIComponent(agentFsPath.value + '/' + file.name)}&token=${auth.token}`
+  agentFilePreviewVisible.value = true
+}
+
 const formatFileDate = (date) => {
   if (!date) return '-'
-  const d = typeof date === 'string' ? new Date(date) : date
-  if (Number.isNaN(d.getTime())) return '-'
+  const d = typeof date === 'string' ? new Date(date) : (date instanceof Date ? date : new Date(date))
+  if (!d || Number.isNaN(d.getTime())) return '-'
   return d.toLocaleString()
 }
 
 const onMainTabChange = (name) => {
+  // 同步到 URL：便于刷新后保持标签页，同时支持从「设备管理」页用 ?tab=files 直达
+  try {
+    const q = { ...(route.query || {}) }
+    if (name && name !== 'info') q.tab = name
+    else delete q.tab
+    router.replace({ query: q }).catch(() => {})
+  } catch {
+    /* noop */
+  }
   if (name === 'files') {
     loadFileHub()
   }
@@ -524,6 +822,22 @@ const deleteMediaRow = async (row) => {
   }
 }
 
+const renameMediaRow = async (row) => {
+  try {
+    const { value } = await ElMessageBox.prompt('请输入新文件名', '重命名', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      inputValue: row.file_name,
+      inputValidator: (v) => v && v.trim() ? true : '文件名不能为空'
+    })
+    await deviceApi.renameDeviceMedia(row.id, value.trim())
+    ElMessage.success('重命名成功')
+    await loadFileHub()
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error(e.message || '重命名失败')
+  }
+}
+
 const archiveScreenshotToServer = async () => {
   archiveShotLoading.value = true
   const n = ElNotification({
@@ -543,6 +857,42 @@ const archiveScreenshotToServer = async () => {
   } finally {
     n.close()
     archiveShotLoading.value = false
+  }
+}
+
+const toggleRecording = async () => {
+  if (isRecording.value) {
+    stopRecording()
+  } else {
+    await startRecording()
+  }
+}
+
+const startRecording = async () => {
+  try {
+    await http.post(`/devices/${route.params.id}/audio-recording/start`)
+    isRecording.value = true
+    recordingDuration.value = 0
+    sessionStorage.setItem(`recording_${route.params.id}`, Date.now())
+    recordingTimer = setInterval(() => {
+      recordingDuration.value = Math.floor((Date.now() - parseInt(sessionStorage.getItem(`recording_${route.params.id}`))) / 1000)
+    }, 1000)
+    ElMessage.success('录音已开始')
+  } catch (e) {
+    ElMessage.error('启动录音失败：' + (e.response?.data?.error || e.message))
+  }
+}
+
+const stopRecording = async () => {
+  try {
+    await http.post(`/devices/${route.params.id}/audio-recording/stop`)
+    clearInterval(recordingTimer)
+    isRecording.value = false
+    sessionStorage.removeItem(`recording_${route.params.id}`)
+    ElMessage.success('录音已停止，正在上传...')
+    setTimeout(() => loadFileHub(), 2000)
+  } catch (e) {
+    ElMessage.error('停止录音失败：' + (e.response?.data?.error || e.message))
   }
 }
 
@@ -751,14 +1101,9 @@ const screenshot = async () => {
     duration: 0
   })
   try {
-    const blob = await deviceApi.captureScreenshot(route.params.id)
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `screenshot_${route.params.id}_${Date.now()}.png`
-    a.click()
-    URL.revokeObjectURL(url)
-    ElMessage.success('截图已下载')
+    const res = await deviceApi.captureScreenshot(route.params.id)
+    ElMessage.success('截图已保存到服务器')
+    loadFileHub()
   } catch (e) {
     ElMessage.error(e.message || '截图失败')
   } finally {
@@ -795,12 +1140,8 @@ const deleteDevice = async () => {
   router.push('/devices')
 }
 
-const profileStomp = createDeviceProfileStomp(
-  (j) => {
-    if (Number(j.device_id) === Number(route.params.id)) load()
-  },
-  () => localStorage.getItem('token')
-)
+const eventListeners = useEventListenerStore()
+let profileListenerId = null
 
 onMounted(async () => {
   await load()
@@ -809,10 +1150,24 @@ onMounted(async () => {
   if (route.query.tab === 'files') {
     loadFileHub()
   }
-  profileStomp.connect()
+  const recordingStart = sessionStorage.getItem(`recording_${route.params.id}`)
+  if (recordingStart) {
+    isRecording.value = true
+    const elapsed = Math.floor((Date.now() - parseInt(recordingStart)) / 1000)
+    recordingDuration.value = elapsed
+    recordingTimer = setInterval(() => {
+      recordingDuration.value = Math.floor((Date.now() - parseInt(sessionStorage.getItem(`recording_${route.params.id}`))) / 1000)
+    }, 1000)
+  }
+  profileListenerId = eventListeners.attachProfileListener({
+    sourceLabel: '设备详情',
+    deviceScopeId: route.params.id,
+    onEvent: () => load()
+  })
 })
 onUnmounted(() => {
-  profileStomp.disconnect()
+  if (profileListenerId) eventListeners.revoke(profileListenerId)
+  if (isRecording.value) stopRecording()
 })
 </script>
 

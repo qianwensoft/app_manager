@@ -15,8 +15,10 @@ import (
 )
 
 var stompDestDeviceRecording = regexp.MustCompile(`^/topic/device/(\d+)/recording$`)
+var stompDestDeviceEvents = regexp.MustCompile(`^/topic/device/(\d+)/events$`)
 
 const stompDestDevices = "/topic/devices"
+const stompDestEvents = "/topic/events"
 
 // StompWS STOMP 1.2 over WebSocket（需先经 StompWSAuth；浏览器用 query token=JWT）。订阅录屏进度：/topic/device/{id}/recording
 func StompWS(c *gin.Context) {
@@ -75,11 +77,14 @@ func StompWS(c *gin.Context) {
 				continue
 			}
 			switch dest {
-			case stompDestDevices:
+			case stompDestDevices, stompDestEvents:
 				unsubs[subID] = stomp.DefaultHub.Subscribe(dest, subID, send)
 				log.Printf("STOMP SUBSCRIBE user=%d dest=%s sub=%s", c.GetUint("user_id"), dest, subID)
 			default:
 				m := stompDestDeviceRecording.FindStringSubmatch(dest)
+				if m == nil {
+					m = stompDestDeviceEvents.FindStringSubmatch(dest)
+				}
 				if m == nil {
 					send(stomp.EncodeFrame("ERROR", map[string]string{"message": "invalid destination"}, ""))
 					continue

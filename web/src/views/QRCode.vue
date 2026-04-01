@@ -8,6 +8,13 @@
       <p><strong>设备Token：</strong>{{ deviceToken }}</p>
       <el-button type="primary" @click="regenerate" style="margin-top:10px">重新生成</el-button>
     </div>
+    <el-divider />
+    <div style="text-align:center">
+      <h3>下载 Agent 应用</h3>
+      <canvas ref="downloadQrCanvas" style="padding:20px;background:#fff;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.1);margin-top:20px"></canvas>
+      <p style="margin-top:10px;color:#666">扫码下载最新版 Agent APK</p>
+      <el-button type="success" @click="downloadLatest" style="margin-top:10px">直接下载</el-button>
+    </div>
   </div>
 </template>
 

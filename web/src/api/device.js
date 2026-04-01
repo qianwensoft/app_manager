@@ -103,6 +103,12 @@ export const clearApp = (id, pkg) => http.post(`/devices/${id}/adb/app/clear`, {
 export const grantPermission = (id, pkg, permission) => http.post(`/devices/${id}/adb/app/grant`, { package: pkg, permission })
 export const listFiles = (id, path) => http.get(`/devices/${id}/adb/files`, { params: { path } })
 
+/** Agent 文件系统：列目录（仅 Agent 在线可用） */
+export const listAgentFs = (id, path, opts = {}) =>
+  http.get(`/devices/${id}/agent/fs/list`, {
+    params: { path, include_hidden: opts.includeHidden ? '1' : '0' }
+  })
+
 /** Agent 在线时测 WS 延迟 + HTTP 上下行吞吐；耗时较长 */
 export const runSpeedTest = (id) =>
   http.post(`/devices/${id}/speed-test`, null, { timeout: 130000 })
@@ -118,6 +124,7 @@ export const uploadDeviceMedia = (deviceId, file, category) => {
 }
 
 export const deleteDeviceMedia = (id) => http.delete(`/device-media/${id}`)
+export const renameDeviceMedia = (id, fileName) => http.patch(`/device-media/${id}`, { file_name: fileName })
 export const deleteRecording = (id) => http.delete(`/recordings/${id}`)
 export const renameRecording = (id, file_name) => http.patch(`/recordings/${id}`, { file_name })
 

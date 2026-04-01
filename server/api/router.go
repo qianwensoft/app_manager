@@ -69,10 +69,13 @@ func SetupRouter() *gin.Engine {
 		d.POST("/:id/agent/refresh-info", RefreshAgentDeviceInfoFromAgent)
 		d.POST("/:id/speed-test", auth.RequireRole("admin", "operator"), DeviceSpeedTest)
 		d.GET("/:id/file-hub", ListDeviceFileHub)
-		d.POST("/:id/media/upload", auth.RequireRole("admin", "operator"), UploadDeviceMedia)
+		d.POST("/:id/audio-recording/start", auth.RequireRole("admin", "operator"), StartAudioRecording)
+		d.POST("/:id/audio-recording/stop", auth.RequireRole("admin", "operator"), StopAudioRecording)
 		d.POST("/:id/screen-shares", CreateScreenShare)
 		d.GET("/:id/screen-shares", ListScreenShares)
 		d.DELETE("/:id/screen-shares/:sid", RevokeScreenShare)
+		d.GET("/:id/agent/fs/list", auth.RequireRole("admin", "operator"), AgentFsList)
+		d.GET("/:id/agent/fs/download", auth.RequireRole("admin", "operator"), AgentFsDownload)
 
 		// ADB 操作
 		op := d.Group("/:id/adb", auth.RequireRole("admin", "operator"))
@@ -116,6 +119,22 @@ func SetupRouter() *gin.Engine {
 	// 审计日志
 	r.GET("/api/audit", auth.AuthMiddleware(), auth.RequireRole("admin"), ListAuditLogs)
 
+	// 系统设置
+	settings := r.Group("/api/settings", auth.AuthMiddleware(), auth.RequireRole("admin"))
+	{
+		settings.GET("/heartbeat", GetHeartbeatSettings)
+		settings.PUT("/heartbeat", UpdateHeartbeatSettings)
+	}
+
+	// Agent 更新管理
+	agentUpdate := r.Group("/api/agent-updates", auth.AuthMiddleware())
+	{
+		agentUpdate.POST("", auth.RequireRole("admin"), UploadAgentAPK)
+		agentUpdate.GET("", ListAgentUpdates)
+		agentUpdate.GET("/latest", GetLatestAgentUpdate)
+		agentUpdate.GET("/:id/download", DownloadAgentAPK)
+	}
+
 	// 录屏管理
 	rec := r.Group("/api/recordings", auth.AuthMiddleware())
 	{
@@ -131,14 +150,43 @@ func SetupRouter() *gin.Engine {
 	{
 		dm.GET("/:id/download", DownloadDeviceMedia)
 		dm.GET("/:id/stream", StreamDeviceMedia)
+		dm.PATCH("/:id", auth.RequireRole("admin", "operator"), RenameDeviceMedia)
 		dm.DELETE("/:id", auth.RequireRole("admin", "operator"), DeleteDeviceMedia)
 	}
 
-	// 设备事件
+	// Agent上传接口（支持Agent token认证）
+	r.POST("/api/devices/:id/media/upload", UploadDeviceMedia)
+
+	// 设备事件（含 PDA 扫码等 Agent 上报）
 	e := r.Group("/api/events", auth.AuthMiddleware())
 	{
 		e.GET("", ListDeviceEvents)
 		e.GET("/types", GetEventTypes)
+	}
+
+	// 自定义事件：分组、Intent 定义、批量下发监听
+	ce := r.Group("/api/custom-events", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"))
+	{
+		ce.GET("/listen-state", ListCustomEventListenState)
+		ce.GET("/listen-state/aggregates", ListenStateAggregates)
+		ce.POST("/listen/start", BatchStartCustomEventListen)
+		ce.POST("/listen/stop", BatchStopCustomEventListen)
+	}
+	ceg := r.Group("/api/custom-event-groups", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"))
+	{
+		ceg.GET("", ListCustomEventGroups)
+		ceg.POST("", CreateCustomEventGroup)
+		ceg.PUT("/:id", UpdateCustomEventGroup)
+		ceg.DELETE("/:id", DeleteCustomEventGroup)
+	}
+	ced := r.Group("/api/custom-event-definitions", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"))
+	{
+		ced.GET("", ListCustomEventDefinitions)
+		ced.POST("/import-pda-presets", ImportPdaScanPresets)
+		ced.GET("/:id", GetCustomEventDefinition)
+		ced.POST("", CreateCustomEventDefinition)
+		ced.PUT("/:id", UpdateCustomEventDefinition)
+		ced.DELETE("/:id", DeleteCustomEventDefinition)
 	}
 
 	// WebSocket
@@ -147,6 +195,7 @@ func SetupRouter() *gin.Engine {
 	r.GET("/ws/shell/:deviceId", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"), ShellWS)
 	r.GET("/ws/logcat/:deviceId", auth.AuthMiddleware(), LogcatWS)
 	r.GET("/ws/agent/:deviceId", AgentWS)
+	r.GET("/ws/agent-fs/:deviceId", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"), AgentFsWS)
 
 	// 对外开放 API
 	open := r.Group("/api/open/v1", auth.APIKeyMiddleware())
@@ -157,6 +206,7 @@ func SetupRouter() *gin.Engine {
 		open.POST("/apps/upload", auth.RequireOpenScope(auth.OpenAppsUpload), UploadApp)
 		open.POST("/apps/:id/install", auth.RequireOpenScope(auth.OpenAppsInstall), InstallApp)
 		open.GET("/tasks/:id", auth.RequireOpenScope(auth.OpenTasksGet), GetTask)
+		open.GET("/events", auth.RequireOpenScope(auth.OpenEventsList), ListDeviceEvents)
 	}
 
 	return r

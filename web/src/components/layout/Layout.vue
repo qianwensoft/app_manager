@@ -21,6 +21,12 @@
         <el-menu-item index="/logcat">
           <el-icon><Document /></el-icon><span>Logcat</span>
         </el-menu-item>
+        <el-menu-item index="/events">
+          <el-icon><Bell /></el-icon><span>自定义事件</span>
+        </el-menu-item>
+        <el-menu-item index="/event-definitions">
+          <el-icon><Setting /></el-icon><span>事件定义</span>
+        </el-menu-item>
         <el-menu-item index="/apps">
           <el-icon><Box /></el-icon><span>APK 管理</span>
         </el-menu-item>
@@ -32,6 +38,9 @@
         </el-menu-item>
         <el-menu-item index="/audit">
           <el-icon><Notebook /></el-icon><span>审计日志</span>
+        </el-menu-item>
+        <el-menu-item index="/settings">
+          <el-icon><Tools /></el-icon><span>系统管理</span>
         </el-menu-item>
       </el-menu>
     </el-aside>
@@ -51,7 +60,7 @@
 import { computed } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useRoute, useRouter } from 'vue-router'
-import { Monitor, Phone, VideoCamera, Document, Box, List, Key, Notebook, Connection, Cpu } from '@element-plus/icons-vue'
+import { Monitor, Phone, VideoCamera, Document, Box, List, Key, Notebook, Connection, Cpu, Bell, Setting, Tools } from '@element-plus/icons-vue'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -64,6 +73,7 @@ const menuActive = computed(() => {
   const p = route.path
   if (p === '/' || p === '') return '/'
   if (p.startsWith('/devices')) return '/devices'
+  if (p.startsWith('/event-definitions')) return '/event-definitions'
   return p
 })
 

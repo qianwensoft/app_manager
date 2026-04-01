@@ -2,12 +2,11 @@ import { Client } from '@stomp/stompjs'
 import { WS_BASE } from '@/utils/ws'
 
 /**
- * 订阅 /topic/devices，在设备别名、分组等变更时回调（需已登录 JWT）。
- * @param {(payload: { type: string, device_id: number }) => void} onEvent
+ * 订阅 /topic/events，接收 Agent 上报并经服务端转发的自定义事件（JSON）。
+ * @param {(payload: object) => void} onEvent
  * @param {() => string | null | undefined} getToken
- * @returns {{ connect: () => void, disconnect: () => void }}
  */
-export function createDeviceProfileStomp(onEvent, getToken) {
+export function createCustomEventsStomp(onEvent, getToken) {
   let client = null
   function tearDown() {
     try {
@@ -28,17 +27,17 @@ export function createDeviceProfileStomp(onEvent, getToken) {
         heartbeatIncoming: 0,
         heartbeatOutgoing: 0,
         onConnect: () => {
-          client.subscribe('/topic/devices', (message) => {
+          client.subscribe('/topic/events', (message) => {
             try {
               const j = JSON.parse(message.body)
-              if (j.type === 'device_profile_updated') onEvent(j)
+              if (j.type === 'device_custom_event') onEvent(j)
             } catch (e) {
-              console.warn('device profile STOMP parse', e)
+              console.warn('custom events STOMP parse', e)
             }
           })
         },
         onStompError: (frame) => {
-          console.warn('STOMP devices topic error', frame.headers?.message, frame.body)
+          console.warn('STOMP events topic error', frame.headers?.message, frame.body)
         },
         onWebSocketError: (e) => console.warn('STOMP WebSocket error', e)
       })

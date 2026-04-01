@@ -28,9 +28,13 @@ class LogcatManager(
             logcatProcess = Runtime.getRuntime().exec(cmd)
 
             readJob = CoroutineScope(Dispatchers.IO).launch {
-                val reader = BufferedReader(InputStreamReader(logcatProcess!!.inputStream))
-                reader.forEachLine { line ->
-                    sendOutput(line)
+                try {
+                    val reader = BufferedReader(InputStreamReader(logcatProcess!!.inputStream))
+                    reader.forEachLine { line ->
+                        sendOutput(line)
+                    }
+                } catch (e: Exception) {
+                    Log.d(TAG, "Logcat read stopped: ${e.message}")
                 }
             }
 

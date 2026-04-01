@@ -17,6 +17,7 @@
       <div style="display:flex;gap:12px;margin-bottom:16px;align-items:center">
         <el-button type="primary" @click="scan" :loading="scanning">扫描设备</el-button>
         <el-button @click="showAddDialog = true">手动添加</el-button>
+        <el-button :loading="refreshing" @click="refresh" :icon="RefreshIcon">刷新</el-button>
         <div style="flex:1"></div>
         <el-radio-group v-model="viewMode" size="small">
           <el-radio-button value="table">列表</el-radio-button>
@@ -39,9 +40,9 @@
           </template>
         </el-table-column>
         <el-table-column prop="model" label="型号" />
-        <el-table-column label="IP" width="140">
+        <el-table-column label="网络" width="200">
           <template #default="{ row }">
-            {{ row.ip || row.ip_address || '-' }}
+            <NetworkCell :device="row" />
           </template>
         </el-table-column>
         <el-table-column label="状态" width="100">
@@ -76,7 +77,7 @@
             <div><b>别名:</b> {{ d.server_alias || d.agent_alias || '-' }}</div>
             <div><b>分组:</b> {{ d.group_name || '未分组' }}</div>
             <div><b>型号:</b> {{ d.model }}</div>
-            <div><b>IP:</b> {{ d.ip || d.ip_address || '-' }}</div>
+            <div><b>网络:</b> <NetworkCell :device="d" inline /></div>
           </div>
           <template #footer>
             <div style="display:flex;flex-wrap:wrap;gap:8px">
@@ -112,7 +113,7 @@
       <el-form-item label="名称">
         <el-input v-model="editForm.name" />
       </el-form-item>
-      <el-form-item label="服务端别名">
+      <el-form-item label="设备别名">
         <el-input v-model="editForm.server_alias" placeholder="可选" />
       </el-form-item>
       <el-form-item label="分组">
@@ -131,8 +132,10 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import { Refresh as RefreshIcon } from '@element-plus/icons-vue'
 import * as deviceApi from '@/api/device'
-import { createDeviceProfileStomp } from '@/utils/deviceProfileStomp'
+import { useEventListenerStore } from '@/stores/eventListeners'
+import NetworkCell from '@/components/NetworkCell.vue'
 
 const DEVICES_VIEW_MODE_KEY = 'app-manager-devices-view-mode'
 
@@ -148,6 +151,7 @@ function readStoredViewMode() {
 
 const devices = ref([])
 const scanning = ref(false)
+const refreshing = ref(false)
 const showAddDialog = ref(false)
 const showEditDialog = ref(false)
 const addForm = ref({ ip: '', port: '5555' })
@@ -178,6 +182,16 @@ const filteredDevices = computed(() => {
 const load = async () => {
   const res = await deviceApi.getDevices()
   devices.value = res.data
+}
+
+const refresh = async () => {
+  refreshing.value = true
+  try {
+    await load()
+    ElMessage.success('已刷新')
+  } finally {
+    refreshing.value = false
+  }
 }
 
 const scan = async () => {
@@ -222,16 +236,18 @@ const handleGroupSelect = (index) => {
   selectedGroup.value = index
 }
 
-const profileStomp = createDeviceProfileStomp(
-  () => {
-    load()
-  },
-  () => localStorage.getItem('token')
-)
+const eventListeners = useEventListenerStore()
+let profileListenerId = null
 
 onMounted(() => {
   load()
-  profileStomp.connect()
+  profileListenerId = eventListeners.attachProfileListener({
+    sourceLabel: '设备管理',
+    deviceScopeId: null,
+    onEvent: () => load()
+  })
 })
-onUnmounted(() => profileStomp.disconnect())
+onUnmounted(() => {
+  if (profileListenerId) eventListeners.revoke(profileListenerId)
+})
 </script>

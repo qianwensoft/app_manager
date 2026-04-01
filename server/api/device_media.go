@@ -1,6 +1,7 @@
 package api
 
 import (
+	"app-manager/agent"
 	"app-manager/config"
 	"app-manager/database"
 	"app-manager/models"
@@ -50,9 +51,23 @@ func ListDeviceFileHub(c *gin.Context) {
 }
 
 func UploadDeviceMedia(c *gin.Context) {
-	dev := getDeviceByID(c)
-	if dev == nil {
+	param := c.Param("id")
+	var dev models.Device
+	if err := agent.DeviceScope(param).First(&dev).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "设备不存在"})
 		return
+	}
+	// 支持Agent token或用户token认证
+	authHeader := c.GetHeader("Authorization")
+	token := strings.TrimPrefix(authHeader, "Bearer ")
+	isAgent := (token == dev.AgentToken)
+	if !isAgent {
+		// 用户token认证：需要admin或operator角色
+		role, exists := c.Get("role")
+		if !exists || (role != "admin" && role != "operator") {
+			c.JSON(http.StatusForbidden, gin.H{"error": "权限不足"})
+			return
+		}
 	}
 	if err := c.Request.ParseMultipartForm(maxAudioUploadBytes); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "multipart 无效或过大"})
@@ -243,4 +258,28 @@ func DeleteDeviceMedia(c *gin.Context) {
 	_ = os.Remove(m.FilePath)
 	database.DB.Delete(m)
 	c.JSON(http.StatusOK, gin.H{"message": "删除成功"})
+}
+
+func RenameDeviceMedia(c *gin.Context) {
+	m, ok := loadDeviceMedia(c)
+	if !ok {
+		return
+	}
+	var req struct {
+		FileName string `json:"file_name" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	m.FileName = strings.TrimSpace(req.FileName)
+	if m.FileName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "文件名不能为空"})
+		return
+	}
+	if err := database.DB.Save(m).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "重命名成功"})
 }

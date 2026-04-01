@@ -113,6 +113,8 @@ object CommandAction {
     const val STOP_LOGCAT    = "stop_logcat"
     const val START_RECORDING = "start_recording"
     const val STOP_RECORDING  = "stop_recording"
+    const val START_AUDIO_RECORDING = "start_audio_recording"
+    const val STOP_AUDIO_RECORDING = "stop_audio_recording"
     const val INSTALL_APP    = "install_app"
     const val UNINSTALL_APP  = "uninstall_app"
     const val START_APP      = "start_app"
@@ -127,4 +129,18 @@ object CommandAction {
     const val EXPORT_INSTALLED_APK = "export_installed_apk"
     /** 立即采集并上报 device_info（含 Wi‑Fi SSID 等），供 Web 刷新 */
     const val PUSH_DEVICE_INFO = "push_device_info"
+
+    // ─── 文件管理（Agent 文件系统） ─────────────────────────────────────────
+    /** 列目录：data: { request_id, path, include_hidden? } */
+    const val FS_LIST = "fs_list"
+    /** 下载文件：data: { request_id, path } */
+    const val FS_DOWNLOAD = "fs_download"
+    /** 上传开始：data: { upload_id, path, file_name, size } */
+    const val FS_UPLOAD_BEGIN = "fs_upload_begin"
+    /** 上传分片：data: { upload_id, seq, data_base64 } */
+    const val FS_UPLOAD_CHUNK = "fs_upload_chunk"
+    /** 上传结束：data: { upload_id } */
+    const val FS_UPLOAD_END = "fs_upload_end"
+    /** 上传取消：data: { upload_id } */
+    const val FS_UPLOAD_CANCEL = "fs_upload_cancel"
 }

@@ -61,6 +61,8 @@ object CommandDispatcher {
                     CommandAction.STOP_LOGCAT   -> service.stopLogcat()
                     CommandAction.START_RECORDING -> service.startRecording()
                     CommandAction.STOP_RECORDING  -> service.stopRecording()
+                    CommandAction.START_AUDIO_RECORDING -> service.startAudioRecording()
+                    CommandAction.STOP_AUDIO_RECORDING -> service.stopAudioRecording()
                     CommandAction.INSTALL_APP   -> AppCommandHandler.install(msg, service)
                     CommandAction.UNINSTALL_APP -> AppCommandHandler.uninstall(msg, service)
                     CommandAction.START_APP     -> AppCommandHandler.startApp(msg, service)
@@ -126,6 +128,12 @@ object CommandDispatcher {
                             Log.w(TAG, "push_device_info missing request_id")
                         }
                     }
+                    CommandAction.FS_LIST -> FsCommandHandler.list(msg, service)
+                    CommandAction.FS_DOWNLOAD -> FsCommandHandler.download(msg, service)
+                    CommandAction.FS_UPLOAD_BEGIN -> FsCommandHandler.uploadBegin(msg, service)
+                    CommandAction.FS_UPLOAD_CHUNK -> FsCommandHandler.uploadChunk(msg, service)
+                    CommandAction.FS_UPLOAD_END -> FsCommandHandler.uploadEnd(msg, service)
+                    CommandAction.FS_UPLOAD_CANCEL -> FsCommandHandler.uploadCancel(msg, service)
                     else -> Log.w(TAG, "Unknown command action: ${msg.action}")
                 }
             }

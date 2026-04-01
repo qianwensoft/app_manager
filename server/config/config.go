@@ -7,12 +7,13 @@ import (
 )
 
 type Config struct {
-	Server   ServerConfig   `yaml:"server"`
-	Database DatabaseConfig `yaml:"database"`
-	Storage  StorageConfig  `yaml:"storage"`
-	ADB      ADBConfig      `yaml:"adb"`
-	FFmpeg   FFmpegConfig   `yaml:"ffmpeg"`
-	JWT      JWTConfig      `yaml:"jwt"`
+	Server    ServerConfig    `yaml:"server"`
+	Database  DatabaseConfig  `yaml:"database"`
+	Storage   StorageConfig   `yaml:"storage"`
+	ADB       ADBConfig       `yaml:"adb"`
+	FFmpeg    FFmpegConfig    `yaml:"ffmpeg"`
+	JWT       JWTConfig       `yaml:"jwt"`
+	Heartbeat HeartbeatConfig `yaml:"heartbeat"`
 }
 
 type ServerConfig struct {
@@ -44,6 +45,11 @@ type FFmpegConfig struct {
 type JWTConfig struct {
 	Secret     string `yaml:"secret"`
 	ExpireHour int    `yaml:"expire_hour"`
+}
+
+type HeartbeatConfig struct {
+	Interval int `yaml:"interval"` // 心跳间隔（秒）
+	Timeout  int `yaml:"timeout"`  // 超时时间（秒）
 }
 
 var C *Config

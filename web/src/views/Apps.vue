@@ -85,6 +85,7 @@ const installDialog = ref(false)
 const installAction = ref('install')
 const selectedDevices = ref([])
 const currentApp = ref(null)
+const installAndLaunch = ref(true)
 const uploadDescription = ref('')
 
 const descDialog = ref(false)
