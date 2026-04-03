@@ -1,6 +1,16 @@
 <template>
   <div class="settings-page">
     <el-card class="mb-4">
+      <template #header><h3>注册设置</h3></template>
+      <el-form label-width="140px" style="max-width: 500px">
+        <el-form-item label="允许用户注册">
+          <el-switch v-model="allowRegister" @change="saveRegisterSetting" />
+          <span style="margin-left: 10px; color: #909399; font-size: 12px">关闭后 /api/auth/register 接口返回 403</span>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
+    <el-card class="mb-4">
       <template #header><h3>心跳设置</h3></template>
       <el-form :model="heartbeat" label-width="120px" style="max-width: 500px">
         <el-form-item label="心跳间隔">
@@ -71,17 +81,25 @@ import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getHeartbeatSettings, updateHeartbeatSettings } from '@/api/settings'
 import { uploadAgentAPK, listAgentUpdates, downloadAgentAPK } from '@/api/agentUpdate'
+import { getRegisterSetting, updateRegisterSetting } from '@/api/user'
 
 const heartbeat = ref({ interval: 30, timeout: 90 })
+const allowRegister = ref(false)
 const updates = ref([])
 const uploadDialogVisible = ref(false)
 const uploadForm = ref({ version: '', changelog: '', file: null })
 
 onMounted(async () => {
-  const res = await getHeartbeatSettings()
-  heartbeat.value = res.data
+  const [hbRes, regRes] = await Promise.all([getHeartbeatSettings(), getRegisterSetting()])
+  heartbeat.value = hbRes.data
+  allowRegister.value = regRes.allow_register
   loadUpdates()
 })
+
+const saveRegisterSetting = async () => {
+  await updateRegisterSetting(allowRegister.value)
+  ElMessage.success('保存成功')
+}
 
 const saveHeartbeat = async () => {
   await updateHeartbeatSettings(heartbeat.value)

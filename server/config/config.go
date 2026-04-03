@@ -18,9 +18,10 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Port int    `yaml:"port"`
-	Host string `yaml:"host"`
-	Mode string `yaml:"mode"`
+	Port          int    `yaml:"port"`
+	Host          string `yaml:"host"`
+	Mode          string `yaml:"mode"`
+	AllowRegister bool   `yaml:"allow_register"`
 }
 
 type DatabaseConfig struct {
@@ -84,4 +85,12 @@ func Load(path string) error {
 		C.FFmpeg.Path = v
 	}
 	return nil
+}
+
+func Write(path string, cfg *Config) error {
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, data, 0644)
 }

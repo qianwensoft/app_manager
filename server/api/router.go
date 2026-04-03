@@ -28,6 +28,9 @@ func SetupRouter() *gin.Engine {
 		c.File("./web/dist/index.html")
 	})
 
+	// 安装状态检查（正常模式）
+	r.GET("/api/setup/status", GetSetupStatus)
+
 	// Agent 上传录屏（凭 X-Device-Token，无需登录）
 	r.POST("/api/agent/recordings/upload", AgentRecordingUpload)
 	// Agent 测速 HTTP（凭 X-Device-Token）
@@ -38,6 +41,10 @@ func SetupRouter() *gin.Engine {
 
 	// 免登录：分享页校验链接
 	r.GET("/api/screen-share/claims", ScreenShareClaims)
+
+	// 免登录：文件上传链接
+	r.GET("/api/upload/:token", GetUploadLinkInfo)
+	r.POST("/api/upload/:token", UploadFileByLink)
 
 	// 认证
 	a := r.Group("/api/auth")
@@ -124,6 +131,17 @@ func SetupRouter() *gin.Engine {
 	{
 		settings.GET("/heartbeat", GetHeartbeatSettings)
 		settings.PUT("/heartbeat", UpdateHeartbeatSettings)
+		settings.GET("/register", GetRegisterSetting)
+		settings.PUT("/register", UpdateRegisterSetting)
+	}
+
+	// 用户管理（仅 admin）
+	users := r.Group("/api/users", auth.AuthMiddleware(), auth.RequireRole("admin"))
+	{
+		users.GET("", ListUsers)
+		users.POST("", CreateUser)
+		users.PUT("/:id", UpdateUser)
+		users.DELETE("/:id", DeleteUser)
 	}
 
 	// Agent 更新管理
@@ -187,6 +205,15 @@ func SetupRouter() *gin.Engine {
 		ced.POST("", CreateCustomEventDefinition)
 		ced.PUT("/:id", UpdateCustomEventDefinition)
 		ced.DELETE("/:id", DeleteCustomEventDefinition)
+	}
+
+	// 上传链接管理
+	ul := r.Group("/api/upload-links", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"))
+	{
+		ul.POST("", CreateUploadLink)
+		ul.GET("", ListUploadLinks)
+		ul.DELETE("/:id", DeleteUploadLink)
+		ul.GET("/:id/files", ListUploadedFiles)
 	}
 
 	// WebSocket

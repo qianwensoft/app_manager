@@ -53,6 +53,8 @@ func Init(dbCfg config.DatabaseConfig) error {
 		&models.CustomEventDefinition{},
 		&models.DeviceCustomListenState{},
 		&models.AgentUpdate{},
+		&models.UploadLink{},
+		&models.UploadedFile{},
 	); err != nil {
 		return err
 	}

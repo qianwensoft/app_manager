@@ -86,7 +86,11 @@ func UploadApp(c *gin.Context) {
 
 func ListApps(c *gin.Context) {
 	var apps []models.App
-	database.DB.Find(&apps)
+	q := database.DB
+	if c.GetString("role") != "admin" {
+		q = q.Where("uploaded_by = ?", c.GetUint("user_id"))
+	}
+	q.Find(&apps)
 	c.JSON(http.StatusOK, gin.H{"data": apps})
 }
 

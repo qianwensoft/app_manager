@@ -29,3 +29,19 @@ func UpdateHeartbeatSettings(c *gin.Context) {
 	config.C.Heartbeat.Timeout = req.Timeout
 	c.JSON(http.StatusOK, gin.H{"message": "更新成功"})
 }
+
+func GetRegisterSetting(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"allow_register": config.C.Server.AllowRegister})
+}
+
+func UpdateRegisterSetting(c *gin.Context) {
+	var req struct {
+		AllowRegister bool `json:"allow_register"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	config.C.Server.AllowRegister = req.AllowRegister
+	c.JSON(http.StatusOK, gin.H{"message": "更新成功"})
+}

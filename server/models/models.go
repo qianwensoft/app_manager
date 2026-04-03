@@ -13,6 +13,7 @@ type User struct {
 
 type Device struct {
 	ID             uint      `gorm:"primaryKey" json:"id"`
+	UserID         *uint     `gorm:"index" json:"user_id"`
 	Serial         string    `gorm:"uniqueIndex;size:100" json:"serial"`
 	Name           string    `gorm:"size:100" json:"name"`
 	Model          string    `gorm:"size:100" json:"model"`
@@ -136,6 +137,26 @@ type Recording struct {
 }
 
 // DeviceMedia 设备文件管理：用户上传或截图存档（非 Agent 自动录屏，录屏见 Recording）
+// UploadLink 文件上传链接（扫码上传，无需登录）
+type UploadLink struct {
+	ID        uint       `gorm:"primaryKey" json:"id"`
+	Token     string     `gorm:"uniqueIndex;size:64" json:"token"`
+	Label     string     `gorm:"size:100" json:"label"`
+	ExpiresAt *time.Time `json:"expires_at"`
+	CreatedBy uint       `json:"created_by"`
+	CreatedAt time.Time  `json:"created_at"`
+}
+
+// UploadedFile 通过 UploadLink 上传的文件记录
+type UploadedFile struct {
+	ID         uint      `gorm:"primaryKey" json:"id"`
+	LinkID     uint      `gorm:"index" json:"link_id"`
+	FileName   string    `gorm:"size:255" json:"file_name"`
+	FilePath   string    `gorm:"size:500" json:"-"`
+	FileSize   int64     `json:"file_size"`
+	UploadedAt time.Time `json:"uploaded_at"`
+}
+
 type DeviceMedia struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
 	DeviceID    uint      `gorm:"index" json:"device_id"`

@@ -2,6 +2,7 @@ package api
 
 import (
 	"app-manager/auth"
+	"app-manager/config"
 	"app-manager/database"
 	"app-manager/models"
 	"log"
@@ -14,6 +15,10 @@ import (
 )
 
 func Register(c *gin.Context) {
+	if !config.C.Server.AllowRegister {
+		c.JSON(http.StatusForbidden, gin.H{"error": "registration is disabled"})
+		return
+	}
 	var req struct {
 		Username string `json:"username" binding:"required"`
 		Password string `json:"password" binding:"required"`

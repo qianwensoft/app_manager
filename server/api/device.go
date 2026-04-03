@@ -39,7 +39,12 @@ func serialUsableWithAdb(serial string) bool {
 
 func ListDevices(c *gin.Context) {
 	var devices []models.Device
-	database.DB.Find(&devices)
+	q := database.DB
+	if c.GetString("role") != "admin" {
+		uid := c.GetUint("user_id")
+		q = q.Where("user_id = ?", uid)
+	}
+	q.Find(&devices)
 	c.JSON(http.StatusOK, gin.H{"data": devices})
 }
 
@@ -52,8 +57,10 @@ func CreateDevice(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	uid := c.GetUint("user_id")
 	now := time.Now()
 	device := models.Device{
+		UserID:     &uid,
 		Serial:     req.Serial,
 		Name:       req.Name,
 		LastSeenAt: &now,

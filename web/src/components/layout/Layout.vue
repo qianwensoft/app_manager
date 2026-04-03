@@ -36,18 +36,31 @@
         <el-menu-item index="/apikeys">
           <el-icon><Key /></el-icon><span>授权令牌</span>
         </el-menu-item>
-        <el-menu-item index="/audit">
-          <el-icon><Notebook /></el-icon><span>审计日志</span>
-        </el-menu-item>
-        <el-menu-item index="/settings">
-          <el-icon><Tools /></el-icon><span>系统管理</span>
-        </el-menu-item>
+        <!-- admin 专属 -->
+        <template v-if="auth.isAdmin">
+          <el-menu-item index="/users">
+            <el-icon><UserFilled /></el-icon><span>用户管理</span>
+          </el-menu-item>
+          <el-menu-item index="/audit">
+            <el-icon><Notebook /></el-icon><span>审计日志</span>
+          </el-menu-item>
+          <el-menu-item index="/settings">
+            <el-icon><Tools /></el-icon><span>系统管理</span>
+          </el-menu-item>
+        </template>
       </el-menu>
     </el-aside>
     <el-container class="layout-right">
       <el-header height="56px">
         <span class="route-title">{{ pageTitle }}</span>
-        <el-button type="danger" size="small" @click="logout">退出</el-button>
+        <div class="header-right">
+          <span class="username">
+            <el-icon><User /></el-icon>
+            {{ auth.user?.username }}
+            <el-tag size="small" :type="roleTagType" style="margin-left: 6px">{{ roleLabel }}</el-tag>
+          </span>
+          <el-button type="danger" size="small" @click="logout">退出</el-button>
+        </div>
       </el-header>
       <el-main class="layout-main">
         <router-view />
@@ -57,10 +70,10 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useRoute, useRouter } from 'vue-router'
-import { Monitor, Phone, VideoCamera, Document, Box, List, Key, Notebook, Connection, Cpu, Bell, Setting, Tools } from '@element-plus/icons-vue'
+import { Monitor, Phone, VideoCamera, Document, Box, List, Key, Notebook, Connection, Cpu, Bell, Setting, Tools, UserFilled, User } from '@element-plus/icons-vue'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -68,7 +81,6 @@ const router = useRouter()
 
 const pageTitle = computed(() => route.meta?.title || route.name || '')
 
-/** 设备详情等子路径仍高亮「设备管理」 */
 const menuActive = computed(() => {
   const p = route.path
   if (p === '/' || p === '') return '/'
@@ -77,10 +89,17 @@ const menuActive = computed(() => {
   return p
 })
 
+const roleLabel = computed(() => ({ admin: '管理员', operator: '操作员', viewer: '只读' }[auth.user?.role] || ''))
+const roleTagType = computed(() => ({ admin: 'danger', operator: 'warning', viewer: '' }[auth.user?.role] || ''))
+
 const logout = () => {
   auth.logout()
   router.push('/login')
 }
+
+onMounted(() => {
+  if (auth.token && !auth.user) auth.fetchMe()
+})
 </script>
 
 <style scoped>
@@ -100,6 +119,8 @@ const logout = () => {
 .el-aside { background: #1d2935; overflow-x: hidden; }
 .el-header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #eee; flex-shrink: 0; }
 .route-title { font-size: 16px; font-weight: bold; }
+.header-right { display: flex; align-items: center; gap: 12px; }
+.username { display: flex; align-items: center; gap: 4px; color: #606266; font-size: 14px; }
 .layout-main {
   flex: 1;
   min-height: 0;
