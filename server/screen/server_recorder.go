@@ -197,6 +197,26 @@ func finalizeRecordingSession(sess *recordingSession, devID uint) {
 		Duration:  durationSec,
 		CreatedBy: 0,
 	}
+
+	// 异步生成 HLS（-c copy 直接从 MP4 切片，速度很快）
+	hlsDir := filepath.Join(outDir, fmt.Sprintf("hls_%d_%d", devID, time.Now().UnixMilli()))
+	if err := os.MkdirAll(hlsDir, 0755); err == nil {
+		hlsCmd := exec.Command(ffmpegPath,
+			"-y", "-hide_banner", "-loglevel", "error",
+			"-i", savePath,
+			"-c", "copy",
+			"-hls_time", "4",
+			"-hls_playlist_type", "vod",
+			"-hls_segment_filename", filepath.Join(hlsDir, "seg_%03d.ts"),
+			filepath.Join(hlsDir, "index.m3u8"),
+		)
+		if hlsOut, hlsErr := hlsCmd.CombinedOutput(); hlsErr != nil {
+			log.Printf("HLS generation failed: %v %s", hlsErr, string(hlsOut))
+			os.RemoveAll(hlsDir)
+		} else {
+			rec.HlsDir = hlsDir
+		}
+	}
 	if err := database.DB.Create(&rec).Error; err != nil {
 		_ = os.Remove(savePath)
 		PublishRecordingProgress(devID, "failed", map[string]interface{}{"error": err.Error()})
@@ -230,7 +250,8 @@ func AbortServerRecording(routeKey string) {
 	log.Printf("server recording aborted routeKey=%s", routeKey)
 }
 
-// resolveFFmpegExecutable 使用 config.ffmpeg.path（空则 PATH 查找 "ffmpeg"）；绝对路径或带路径分隔符时按文件路径 Stat。
+// ResolveFFmpeg 供外部包调用。
+func ResolveFFmpeg() (string, error) { return resolveFFmpegExecutable() }
 func resolveFFmpegExecutable() (string, error) {
 	p := strings.TrimSpace(config.C.FFmpeg.Path)
 	if p == "" {

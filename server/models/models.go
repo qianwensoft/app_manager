@@ -130,10 +130,21 @@ type Recording struct {
 	DeviceID  uint      `json:"device_id"`
 	FileName  string    `gorm:"size:255" json:"file_name"`
 	FilePath  string    `gorm:"size:500" json:"file_path"`
+	HlsDir    string    `gorm:"size:500" json:"hls_dir"`   // HLS 目录（含 index.m3u8），空字符串表示尚未生成
 	FileSize  int64     `json:"file_size"`
 	Duration  int       `json:"duration"`
 	CreatedBy uint      `json:"created_by"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+// RecordingShareLink 录屏分享链接（凭 token 无需登录即可播放/下载）
+type RecordingShareLink struct {
+	ID          uint       `gorm:"primaryKey" json:"id"`
+	RecordingID uint       `gorm:"index" json:"recording_id"`
+	Token       string     `gorm:"uniqueIndex;size:64" json:"token"`
+	ExpiresAt   *time.Time `json:"expires_at"`
+	CreatedBy   uint       `json:"created_by"`
+	CreatedAt   time.Time  `json:"created_at"`
 }
 
 // DeviceMedia 设备文件管理：用户上传或截图存档（非 Agent 自动录屏，录屏见 Recording）

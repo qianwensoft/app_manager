@@ -47,6 +47,7 @@ func Init(dbCfg config.DatabaseConfig) error {
 		&models.InstallTask{},
 		&models.AuditLog{},
 		&models.Recording{},
+		&models.RecordingShareLink{},
 		&models.DeviceMedia{},
 		&models.DeviceEvent{},
 		&models.CustomEventGroup{},

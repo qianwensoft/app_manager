@@ -159,9 +159,16 @@ func SetupRouter() *gin.Engine {
 		rec.GET("", ListRecordings)
 		rec.GET("/:id/stream", StreamRecording)
 		rec.GET("/:id/download", DownloadRecording)
+		rec.GET("/:id/hls/:file", StreamRecordingHls)
+		rec.POST("/:id/shares", auth.RequireRole("admin", "operator"), CreateRecordingShare)
+		rec.GET("/:id/shares", auth.RequireRole("admin", "operator"), ListRecordingShares)
+		rec.DELETE("/:id/shares/:sid", auth.RequireRole("admin", "operator"), RevokeRecordingShare)
 		rec.PATCH("/:id", auth.RequireRole("admin", "operator"), RenameRecording)
 		rec.DELETE("/:id", auth.RequireRole("admin", "operator"), DeleteRecording)
 	}
+	// 录屏分享（无鉴权，凭 ?share=token）
+	r.GET("/api/recordings/share/hls/:file", StreamRecordingHls)
+	r.GET("/api/recordings/share/stream", StreamRecording)
 
 	// 设备媒体（截图存档、上传音频等）
 	dm := r.Group("/api/device-media", auth.AuthMiddleware())

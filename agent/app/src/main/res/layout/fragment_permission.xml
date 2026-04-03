@@ -1,5 +1,45 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.recyclerview.widget.RecyclerView xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/recyclerView"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent" />
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="运行时权限"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:paddingBottom="8dp" />
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/recyclerView"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="特殊权限"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:paddingTop="16dp"
+        android:paddingBottom="8dp" />
+
+    <include
+        android:id="@+id/cardAccessibility"
+        layout="@layout/item_special_permission" />
+
+    <include
+        android:id="@+id/cardOverlay"
+        layout="@layout/item_special_permission"
+        android:layout_marginTop="8dp" />
+
+    <include
+        android:id="@+id/cardAutostart"
+        layout="@layout/item_special_permission"
+        android:layout_marginTop="8dp" />
+
+</LinearLayout>

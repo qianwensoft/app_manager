@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -139,6 +140,26 @@ func AgentRecordingUpload(c *gin.Context) {
 		FileSize:  fi.Size(),
 		CreatedBy: 0,
 	}
+	// 尝试从 MP4 生成 HLS
+	if ffmpegPath, err := screen.ResolveFFmpeg(); err == nil {
+		hlsDir := filepath.Join(dir, fmt.Sprintf("hls_%d_%d", device.ID, time.Now().UnixMilli()))
+		if os.MkdirAll(hlsDir, 0755) == nil {
+			hlsCmd := exec.Command(ffmpegPath,
+				"-y", "-hide_banner", "-loglevel", "error",
+				"-i", savePath,
+				"-c", "copy",
+				"-hls_time", "4",
+				"-hls_playlist_type", "vod",
+				"-hls_segment_filename", filepath.Join(hlsDir, "seg_%03d.ts"),
+				filepath.Join(hlsDir, "index.m3u8"),
+			)
+			if hlsErr := hlsCmd.Run(); hlsErr == nil {
+				rec.HlsDir = hlsDir
+			} else {
+				os.RemoveAll(hlsDir)
+			}
+		}
+	}
 	if err := database.DB.Create(&rec).Error; err != nil {
 		_ = os.Remove(savePath)
 		screen.PublishRecordingProgress(device.ID, "failed", map[string]interface{}{"error": err.Error()})
@@ -257,11 +278,10 @@ func DownloadRecording(c *gin.Context) {
 }
 
 // StreamRecording 在线播放：支持 Range（拖动进度），Content-Disposition: inline。
+// 支持 JWT 鉴权或 ?share=<token>。
 func StreamRecording(c *gin.Context) {
-	id, _ := strconv.Atoi(c.Param("id"))
-	var recording models.Recording
-	if err := database.DB.First(&recording, id).Error; err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "录屏文件不存在"})
+	recording, ok := resolveRecordingWithAuth(c)
+	if !ok {
 		return
 	}
 	f, err := os.Open(recording.FilePath)
@@ -300,6 +320,113 @@ func DeleteRecording(c *gin.Context) {
 		return
 	}
 	os.Remove(recording.FilePath)
+	if recording.HlsDir != "" {
+		os.RemoveAll(recording.HlsDir)
+	}
 	database.DB.Delete(&recording)
 	c.JSON(http.StatusOK, gin.H{"message": "删除成功"})
+}
+
+// StreamRecordingHls 提供 HLS 播放文件（index.m3u8 和 seg_*.ts）。
+// 支持 JWT 鉴权或 ?share=<token>。
+func StreamRecordingHls(c *gin.Context) {
+	rec, ok := resolveRecordingWithAuth(c)
+	if !ok {
+		return
+	}
+	if rec.HlsDir == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "该录屏暂无 HLS 流，请使用 MP4 播放"})
+		return
+	}
+	filename := c.Param("file")
+	// 防路径穿越
+	if strings.Contains(filename, "..") || strings.ContainsRune(filename, '/') {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "非法路径"})
+		return
+	}
+	filePath := filepath.Join(rec.HlsDir, filename)
+	if _, err := os.Stat(filePath); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "文件不存在"})
+		return
+	}
+	switch filepath.Ext(filename) {
+	case ".m3u8":
+		c.Header("Content-Type", "application/vnd.apple.mpegurl")
+	case ".ts":
+		c.Header("Content-Type", "video/MP2T")
+	}
+	c.Header("Cache-Control", "no-cache")
+	c.File(filePath)
+}
+
+// resolveRecordingWithAuth 从路径 :id 或 share token 读取录屏记录。
+func resolveRecordingWithAuth(c *gin.Context) (*models.Recording, bool) {
+	// 分享 token 优先
+	if token := c.Query("share"); token != "" {
+		var link models.RecordingShareLink
+		if err := database.DB.Where("token = ?", token).First(&link).Error; err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "无效分享链接"})
+			return nil, false
+		}
+		if link.ExpiresAt != nil && link.ExpiresAt.Before(time.Now()) {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "分享链接已过期"})
+			return nil, false
+		}
+		var rec models.Recording
+		if err := database.DB.First(&rec, link.RecordingID).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "录屏不存在"})
+			return nil, false
+		}
+		return &rec, true
+	}
+	// JWT 鉴权：已通过路由中间件，直接读取
+	id, _ := strconv.Atoi(c.Param("id"))
+	var rec models.Recording
+	if err := database.DB.First(&rec, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "录屏文件不存在"})
+		return nil, false
+	}
+	return &rec, true
+}
+
+// CreateRecordingShare 生成录屏分享链接。
+func CreateRecordingShare(c *gin.Context) {
+	id, _ := strconv.Atoi(c.Param("id"))
+	var rec models.Recording
+	if err := database.DB.First(&rec, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "录屏不存在"})
+		return
+	}
+	var req struct {
+		ExpiresIn int `json:"expires_in"` // 分钟，0=永不过期
+	}
+	c.ShouldBindJSON(&req)
+
+	var expiresAt *time.Time
+	if req.ExpiresIn > 0 {
+		t := time.Now().Add(time.Duration(req.ExpiresIn) * time.Minute)
+		expiresAt = &t
+	}
+	link := models.RecordingShareLink{
+		RecordingID: rec.ID,
+		Token:       generateKey(),
+		ExpiresAt:   expiresAt,
+		CreatedBy:   c.GetUint("user_id"),
+	}
+	database.DB.Create(&link)
+	c.JSON(http.StatusOK, gin.H{"data": link})
+}
+
+// ListRecordingShares 列出某录屏的所有分享链接。
+func ListRecordingShares(c *gin.Context) {
+	id := c.Param("id")
+	var links []models.RecordingShareLink
+	database.DB.Where("recording_id = ?", id).Order("created_at desc").Find(&links)
+	c.JSON(http.StatusOK, gin.H{"data": links})
+}
+
+// RevokeRecordingShare 删除分享链接。
+func RevokeRecordingShare(c *gin.Context) {
+	database.DB.Delete(&models.RecordingShareLink{}, c.Param("sid"))
+	c.JSON(http.StatusOK, gin.H{"message": "ok"})
 }
