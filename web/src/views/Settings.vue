@@ -31,16 +31,19 @@
       <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center">
           <h3>Agent 更新管理</h3>
-          <el-button type="primary" @click="uploadDialogVisible = true">上传新版本</el-button>
+          <el-button type="primary" @click="openUploadDialog">上传新版本</el-button>
         </div>
       </template>
       <el-table :data="updates" border>
-        <el-table-column prop="version" label="版本" width="120" />
-        <el-table-column prop="changelog" label="更新说明" />
-        <el-table-column prop="upload_at" label="上传时间" width="180">
+        <el-table-column prop="version" label="版本号" width="110" />
+        <el-table-column prop="version_code" label="版本码" width="90" />
+        <el-table-column prop="package_name" label="包名" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="file_name" label="文件名" min-width="160" show-overflow-tooltip />
+        <el-table-column prop="changelog" label="更新说明" min-width="160" show-overflow-tooltip />
+        <el-table-column prop="upload_at" label="上传时间" width="170">
           <template #default="{ row }">{{ new Date(row.upload_at).toLocaleString() }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="120">
+        <el-table-column label="操作" width="120" fixed="right">
           <template #default="{ row }">
             <el-button size="small" @click="downloadAPK(row.id)">下载</el-button>
           </template>
@@ -48,29 +51,46 @@
       </el-table>
     </el-card>
 
-    <el-dialog v-model="uploadDialogVisible" title="上传 Agent APK" width="500px">
+    <!-- 上传对话框 -->
+    <el-dialog v-model="uploadDialogVisible" title="上传 Agent APK" width="520px" :close-on-click-modal="false">
       <el-form :model="uploadForm" label-width="100px">
-        <el-form-item label="版本号">
-          <el-input v-model="uploadForm.version" placeholder="例如: 1.0.0" />
-        </el-form-item>
-        <el-form-item label="更新说明">
-          <el-input v-model="uploadForm.changelog" type="textarea" :rows="3" />
-        </el-form-item>
-        <el-form-item label="APK 文件">
+        <el-form-item label="APK 文件" required>
           <el-upload
             ref="uploadRef"
             :auto-upload="false"
             :limit="1"
             accept=".apk"
             :on-change="handleFileChange"
+            :on-remove="handleFileRemove"
           >
-            <el-button>选择文件</el-button>
+            <el-button>选择 APK 文件</el-button>
           </el-upload>
+          <div v-if="uploadForm.fileName" class="file-tip">
+            已选择：{{ uploadForm.fileName }}
+          </div>
+        </el-form-item>
+        <el-form-item label="版本号">
+          <el-input
+            v-model="uploadForm.version"
+            placeholder="留空则自动从 APK 解析"
+            clearable
+          />
+          <div class="form-tip">上传后服务器将自动解析包名与版本，版本号可不填</div>
+        </el-form-item>
+        <el-form-item label="更新说明">
+          <el-input v-model="uploadForm.changelog" type="textarea" :rows="3" placeholder="本次更新内容..." />
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="uploadDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="submitUpload">上传</el-button>
+        <el-button
+          type="primary"
+          :loading="uploading"
+          :disabled="!uploadForm.file"
+          @click="submitUpload"
+        >
+          {{ uploading ? '上传中...' : '上传' }}
+        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -87,7 +107,9 @@ const heartbeat = ref({ interval: 30, timeout: 90 })
 const allowRegister = ref(false)
 const updates = ref([])
 const uploadDialogVisible = ref(false)
-const uploadForm = ref({ version: '', changelog: '', file: null })
+const uploading = ref(false)
+const uploadRef = ref(null)
+const uploadForm = ref({ version: '', changelog: '', file: null, fileName: '' })
 
 onMounted(async () => {
   const [hbRes, regRes] = await Promise.all([getHeartbeatSettings(), getRegisterSetting()])
@@ -108,23 +130,45 @@ const saveHeartbeat = async () => {
 
 const loadUpdates = async () => {
   const res = await listAgentUpdates()
-  updates.value = res.data
+  updates.value = res.data || []
+}
+
+const openUploadDialog = () => {
+  uploadForm.value = { version: '', changelog: '', file: null, fileName: '' }
+  uploadDialogVisible.value = true
 }
 
 const handleFileChange = (file) => {
   uploadForm.value.file = file.raw
+  uploadForm.value.fileName = file.name
+}
+
+const handleFileRemove = () => {
+  uploadForm.value.file = null
+  uploadForm.value.fileName = ''
 }
 
 const submitUpload = async () => {
-  const fd = new FormData()
-  fd.append('file', uploadForm.value.file)
-  fd.append('version', uploadForm.value.version)
-  fd.append('changelog', uploadForm.value.changelog)
-  await uploadAgentAPK(fd)
-  ElMessage.success('上传成功')
-  uploadDialogVisible.value = false
-  uploadForm.value = { version: '', changelog: '', file: null }
-  loadUpdates()
+  if (!uploadForm.value.file) {
+    ElMessage.warning('请选择 APK 文件')
+    return
+  }
+  uploading.value = true
+  try {
+    const fd = new FormData()
+    fd.append('file', uploadForm.value.file)
+    fd.append('version', uploadForm.value.version)
+    fd.append('changelog', uploadForm.value.changelog)
+    await uploadAgentAPK(fd)
+    ElMessage.success('上传成功，包名和版本已自动解析')
+    uploadDialogVisible.value = false
+    uploadForm.value = { version: '', changelog: '', file: null, fileName: '' }
+    loadUpdates()
+  } catch (e) {
+    ElMessage.error('上传失败: ' + (e?.response?.data?.error || e.message || '未知错误'))
+  } finally {
+    uploading.value = false
+  }
 }
 
 const downloadAPK = (id) => {
@@ -136,4 +180,14 @@ const downloadAPK = (id) => {
 .settings-page { padding: 20px; }
 .mb-4 { margin-bottom: 16px; }
 .ml-2 { margin-left: 8px; }
+.file-tip {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #409eff;
+}
+.form-tip {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #909399;
+}
 </style>
