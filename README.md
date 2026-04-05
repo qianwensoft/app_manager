@@ -28,6 +28,7 @@
 | **远程操控** | **Android 远程桌面式** 画面查看、触控、截图；ADB 常用能力（有串号时） |
 | **终端与日志** | Web **Shell**、**Logcat** 流式查看（需 Agent 在线及权限） |
 | **应用分发** | APK 上传、远程安装/卸载、进度追踪；支持 Intent 方式安装；可从设备拉取已装应用 APK |
+| **USB 设备扫描（Bridge）** | 本地运行 `app-manager-bridge`，浏览器自动发现 USB 连接的 Android 设备并一键注册到服务器 |
 | **摄像头直播** | 屏幕查看页实时查看设备**前置/后置摄像头**画面（WebRTC），支持浮窗与侧边两种布局，悬停显示分辨率/帧率/码率 |
 | **录屏与录音** | 服务端录屏合成 MP4（需 ffmpeg）、**设备端录音** 并自动上传归档、在线播放 |
 | **截图存档** | ADB 截图或 Agent 截图保存到服务器、在线查看、支持重命名 |
@@ -179,6 +180,27 @@ scripts/         辅助脚本（如 APK 同步）
 docs/            文档与界面截图（README 引用）
 Makefile         构建 server / web / agent 与 release 打包
 ```
+
+---
+
+## App Manager Bridge（本地 USB 扫描）
+
+`bridge/` 是一个轻量本地代理程序，运行在管理员电脑上，通过 WebSocket 向浏览器推送本机 USB 连接的 Android 设备列表，并支持一键注册到 app-manager 服务器。
+
+### 使用方式
+
+```bash
+# 编译
+cd bridge && go build -o app-manager-bridge .
+
+# 运行（需本机已安装 adb 并在 PATH 中）
+./app-manager-bridge
+# 监听 ws://127.0.0.1:17175
+```
+
+浏览器打开 app-manager 控制台 → 设备列表页 → 点击「USB 扫描」，即可自动发现并注册 USB 设备。
+
+> Bridge 仅监听本地回环地址 `127.0.0.1`，不对外暴露。
 
 ---
 
