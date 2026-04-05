@@ -2,6 +2,7 @@
   <div class="screen-page-root">
     <div class="screen-page-main-col">
       <div v-show="!isNativeFullscreen" class="screen-page-toolbar">
+        <!-- 第一行：设备选择 + 操作按钮 + 全屏 -->
         <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
           <el-select
             v-if="!shareMode"
@@ -15,13 +16,26 @@
           <span v-else style="font-size:14px;color:#303133">
             共享查看：<strong>{{ shareClaims?.device_label || '设备' }}</strong>
           </span>
-          <el-checkbox
+          <el-tooltip
             v-if="!shareMode && auth.token && deviceId"
-            v-model="screenDropInstallAndLaunch"
-            style="margin-left:4px"
+            :content="screenDropInstallAndLaunch ? '拖入 APK：安装后启动（点击关闭）' : '拖入 APK：仅安装不启动（点击开启自动启动）'"
+            placement="bottom"
           >
-            拖入 APK 安装后启动
-          </el-checkbox>
+            <button
+              class="cfg-icon-btn"
+              :class="{ active: screenDropInstallAndLaunch }"
+              @click="screenDropInstallAndLaunch = !screenDropInstallAndLaunch"
+              title=""
+              style="width:auto;padding:0 8px;gap:4px;font-size:12px;color:inherit"
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+              APK 安装
+            </button>
+          </el-tooltip>
           <el-button
             v-if="!shareMode && auth.token && deviceId"
             type="success"
@@ -38,26 +52,76 @@
           >
             断开连接
           </el-button>
-        <el-tag :type="statusType">{{ statusText }}</el-tag>
-          <el-tag v-if="status === 'connected'" type="success">端到端: {{ latency || '—' }}ms</el-tag>
-          <el-tag v-if="status === 'connected'" type="info">到服务器: {{ latencyServer || '—' }}ms</el-tag>
           <el-button type="primary" plain @click="toggleNativeFullscreen">
             <el-icon class="screen-btn-icon"><FullScreen /></el-icon>
             全屏画面
           </el-button>
-      </div>
+        </div>
+
+        <!-- 第二行：虚拟按键 -->
         <div
-          v-if="!shareMode && screenDevice && deviceId"
-          style="font-size:12px;color:#606266;margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;align-items:center"
+          v-if="deviceId"
+          style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px"
         >
-          <span style="font-weight:500">Agent 端状态</span>
-          <el-tag size="small" :type="screenDevice.agent_connected ? 'success' : 'info'">
-            {{ screenDevice.agent_connected ? 'Agent 在线' : 'Agent 离线' }}
-          </el-tag>
-          <el-tag size="small" :type="screenDevice.allow_remote_screen ? 'success' : 'warning'">
-            {{ screenDevice.allow_remote_screen ? '端上已允许远程屏幕' : '端上未允许远程屏幕' }}
-          </el-tag>
-          <el-tag size="small" :type="streamStatusTagType">{{ streamStatusText }}</el-tag>
+          <span style="font-size:12px;color:#909399;margin-right:2px">虚拟按键</span>
+          <el-button-group>
+            <el-button size="small" title="返回 (KEYCODE_BACK)" @click="sendKeyEvent(4)">
+              ← 返回
+            </el-button>
+            <el-button size="small" title="Home (KEYCODE_HOME)" @click="sendKeyEvent(3)">
+              ○ Home
+            </el-button>
+            <el-button size="small" title="最近任务 (KEYCODE_APP_SWITCH)" @click="sendKeyEvent(187)">
+              □ 任务
+            </el-button>
+          </el-button-group>
+          <el-button-group>
+            <el-button size="small" title="音量+ (KEYCODE_VOLUME_UP)" @click="sendKeyEvent(24)">
+              VOL+
+            </el-button>
+            <el-button size="small" title="音量- (KEYCODE_VOLUME_DOWN)" @click="sendKeyEvent(25)">
+              VOL-
+            </el-button>
+            <el-button size="small" title="静音 (KEYCODE_VOLUME_MUTE)" @click="sendKeyEvent(164)">
+              静音
+            </el-button>
+          </el-button-group>
+          <el-button-group>
+            <el-button size="small" title="电源键 (KEYCODE_POWER)" @click="sendKeyEvent(26)">
+              电源
+            </el-button>
+            <el-button size="small" title="亮屏 (KEYCODE_WAKEUP)" @click="sendKeyEvent(224)">
+              亮屏
+            </el-button>
+            <el-button size="small" title="锁屏 (KEYCODE_SLEEP)" @click="sendKeyEvent(223)">
+              锁屏
+            </el-button>
+          </el-button-group>
+          <el-button-group>
+            <el-button size="small" title="截图 (KEYCODE_SYSRQ)" @click="sendKeyEvent(120)">
+              截屏键
+            </el-button>
+            <el-button size="small" title="菜单 (KEYCODE_MENU)" @click="sendKeyEvent(82)">
+              菜单
+            </el-button>
+          </el-button-group>
+        </div>
+
+        <!-- 第三行：连接状态 + Agent 状态 -->
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:8px">
+          <el-tag :type="statusType" size="small">{{ statusText }}</el-tag>
+          <el-tag v-if="status === 'connected'" type="success" size="small">端到端: {{ latency || '—' }}ms</el-tag>
+          <el-tag v-if="status === 'connected'" type="info" size="small">到服务器: {{ latencyServer || '—' }}ms</el-tag>
+          <template v-if="!shareMode && screenDevice && deviceId">
+            <el-divider direction="vertical" />
+            <el-tag size="small" :type="screenDevice.agent_connected ? 'success' : 'info'">
+              {{ screenDevice.agent_connected ? 'Agent 在线' : 'Agent 离线' }}
+            </el-tag>
+            <el-tag size="small" :type="screenDevice.allow_remote_screen ? 'success' : 'warning'">
+              {{ screenDevice.allow_remote_screen ? '端上已允许远程屏幕' : '端上未允许远程屏幕' }}
+            </el-tag>
+            <el-tag size="small" :type="streamStatusTagType">{{ streamStatusText }}</el-tag>
+          </template>
         </div>
       </div>
 
@@ -111,121 +175,306 @@
             >
           上传中...
       </div>
-    </div>
+
+            <!-- 摄像头侧边模式：紧贴实际画面左侧 -->
+            <div
+              v-if="cameraWindows.length > 0 && cameraDisplayMode === 'sidebar'"
+              class="camera-sidebar"
+              :style="cameraSidebarStyle"
+            >
+              <div
+                v-for="cam in cameraWindows"
+                :key="cam.id"
+                class="camera-sidebar-window"
+                :class="{ 'camera-sidebar-window--connecting': cam.state === 'connecting' }"
+              >
+                <div class="camera-overlay-header">
+                  <span class="camera-overlay-label">{{ cam.id === 'back' ? '后置' : '前置' }}</span>
+                  <el-tooltip
+                    :content="cameraStats[cam.id] ? `${cameraStats[cam.id].width}×${cameraStats[cam.id].height}  ${cameraStats[cam.id].fps}fps  ${cameraStats[cam.id].kbps}kbps` : '暂无统计'"
+                    placement="top"
+                    :disabled="cam.state !== 'connected'"
+                  >
+                    <el-tag size="small" :type="cam.state === 'connected' ? 'success' : 'info'" style="scale:0.8;cursor:default">
+                      {{ cam.state === 'connected' ? '直播' : cam.state === 'connecting' ? '连接中' : '断开' }}
+                    </el-tag>
+                  </el-tooltip>
+                  <button class="camera-overlay-close" @click="stopCameraStream(cam.id)" title="关闭">✕</button>
+                </div>
+                <video
+                  :ref="el => { if (el) cameraVideoRefs[cam.id] = el }"
+                  class="camera-sidebar-video"
+                  autoplay
+                  playsinline
+                  muted
+                />
+              </div>
+            </div>
+
+            <!-- 摄像头浮窗模式 -->
+            <div v-if="cameraWindows.length > 0 && cameraDisplayMode === 'overlay'" class="camera-overlay-container">
+              <div
+                v-for="cam in cameraWindows"
+                :key="cam.id"
+                class="camera-overlay-window"
+                :class="{ 'camera-overlay-window--connecting': cam.state === 'connecting' }"
+              >
+                <div class="camera-overlay-header">
+                  <span class="camera-overlay-label">{{ cam.id === 'back' ? '后置' : '前置' }}</span>
+                  <el-tooltip
+                    :content="cameraStats[cam.id] ? `${cameraStats[cam.id].width}×${cameraStats[cam.id].height}  ${cameraStats[cam.id].fps}fps  ${cameraStats[cam.id].kbps}kbps` : '暂无统计'"
+                    placement="top"
+                    :disabled="cam.state !== 'connected'"
+                  >
+                    <el-tag size="small" :type="cam.state === 'connected' ? 'success' : 'info'" style="scale:0.8;cursor:default">
+                      {{ cam.state === 'connected' ? '直播' : cam.state === 'connecting' ? '连接中' : '断开' }}
+                    </el-tag>
+                  </el-tooltip>
+                  <button class="camera-overlay-close" @click="stopCameraStream(cam.id)" title="关闭">✕</button>
+                </div>
+                <video
+                  :ref="el => { if (el) cameraVideoRefs[cam.id] = el }"
+                  class="camera-overlay-video"
+                  autoplay
+                  playsinline
+                  muted
+                />
+              </div>
+            </div>
+          </div>
 
           <aside v-if="!shareMode" class="screen-quick-rail" aria-label="快速操作">
             <div class="screen-quick-panel" :class="{ 'screen-quick-panel--open': quickPanelOpen }">
               <div class="screen-quick-panel__scroll">
-      <el-card shadow="never">
-        <template #header>
-          <div style="font-weight:600">操作</div>
-        </template>
-        <div style="display:flex;flex-direction:column;gap:12px">
-          <el-checkbox v-model="recordAudio">录制音频</el-checkbox>
-          <el-button :type="recording ? 'danger' : 'primary'" @click="toggleRecording" style="width:100%">
-            {{ recording ? '停止录屏' : '开始录屏' }}
-          </el-button>
-                    <el-button :loading="screenshotLoading" :disabled="!deviceId" @click="saveAdbScreenshot" style="width:100%">
-                      截图
-                    </el-button>
-          <el-tag v-if="recording" type="danger" effect="dark" style="width:100%;justify-content:center">
-            录制中 {{ recordingTime }}s
-          </el-tag>
-                    <div v-if="recordingProgressHint" style="font-size:12px;color:#606266;line-height:1.5;margin-top:8px">
-                      {{ recordingProgressHint }}
-                    </div>
-                    <el-alert
-                      v-if="recordingDownload"
-                      type="success"
-                      :closable="true"
-                      show-icon
-                      style="margin-top:12px"
-                      @close="dismissRecordingDownload"
-                    >
-                      <template #title>录屏已保存到服务器</template>
-                      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
-                        <el-button size="small" type="primary" @click="openRecordingPlayer(recordingDownload.id)">
-                          在线播放
-                        </el-button>
-                        <el-link type="primary" :underline="false" @click="downloadRecording(recordingDownload.id)">
-                          {{ recordingDownload.file_name || ('下载 #' + recordingDownload.id) }}
-                        </el-link>
-                        <el-button size="small" @click="promptRenameRecording(recordingDownload.id, recordingDownload.file_name)">
-                          重命名
-                        </el-button>
+
+                <!-- 操作卡片：录屏 + 截图 -->
+                <div style="flex-shrink:0;padding:8px 12px;border-bottom:1px solid #e4e7ed;display:flex;flex-direction:column;gap:6px;background:#fff">
+                  <!-- 录屏行 -->
+                  <div style="display:flex;align-items:center;gap:6px">
+                    <!-- 录制音频 toggle -->
+                    <el-tooltip :content="recordAudio ? '录制音频（点击关闭）' : '不录制音频（点击开启）'" placement="top">
+                      <button class="cfg-icon-btn" :class="{ active: recordAudio }" @click="recordAudio = !recordAudio" title="">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <path d="M12 2a3 3 0 0 1 3 3v7a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"/>
+                          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                          <line x1="12" y1="19" x2="12" y2="23"/>
+                          <line x1="8" y1="23" x2="16" y2="23"/>
+                        </svg>
+                      </button>
+                    </el-tooltip>
+                    <!-- 开始/停止录屏 -->
+                    <el-tooltip :content="recording ? `停止录屏（${recordingTime}s）` : '开始录屏'" placement="top">
+                      <button
+                        class="cfg-icon-btn"
+                        :class="{ active: recording, 'cfg-icon-btn--danger': recording }"
+                        @click="toggleRecording"
+                        title=""
+                      >
+                        <svg v-if="!recording" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <circle cx="12" cy="12" r="10"/>
+                          <circle cx="12" cy="12" r="4" fill="currentColor"/>
+                        </svg>
+                        <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                          <rect x="6" y="6" width="12" height="12" rx="2"/>
+                        </svg>
+                      </button>
+                    </el-tooltip>
+                    <!-- 录制中状态 -->
+                    <span v-if="recording" style="font-size:12px;color:#f56c6c;font-weight:600">● {{ recordingTime }}s</span>
+                    <span v-if="recordingProgressHint && !recording" style="font-size:11px;color:#909399;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ recordingProgressHint }}</span>
+                    <!-- 截图 -->
+                    <el-tooltip content="截图" placement="top">
+                      <button class="cfg-icon-btn" :class="{ 'cfg-icon-btn--loading': screenshotLoading }" :disabled="!deviceId" @click="saveAdbScreenshot" title="">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                          <circle cx="12" cy="13" r="4"/>
+                        </svg>
+                      </button>
+                    </el-tooltip>
+                  </div>
+                  <!-- 摄像头行 -->
+                  <div style="display:flex;align-items:center;gap:6px">
+                    <span style="font-size:11px;color:#909399">摄像头</span>
+                    <!-- 后置摄像头 -->
+                    <el-tooltip :content="isCameraActive('back') ? '关闭后置摄像头' : '开启后置摄像头'" placement="top">
+                      <button class="cfg-icon-btn" :class="{ active: isCameraActive('back') }" @click="toggleCameraStream('back')" title="">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                          <circle cx="12" cy="13" r="4"/>
+                        </svg>
+                      </button>
+                    </el-tooltip>
+                    <span style="font-size:11px;color:#606266">后</span>
+                    <!-- 前置摄像头 -->
+                    <el-tooltip :content="isCameraActive('front') ? '关闭前置摄像头' : '开启前置摄像头'" placement="top">
+                      <button class="cfg-icon-btn" :class="{ active: isCameraActive('front') }" @click="toggleCameraStream('front')" title="">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                          <circle cx="12" cy="13" r="3"/>
+                          <circle cx="12" cy="13" r="1" fill="currentColor"/>
+                        </svg>
+                      </button>
+                    </el-tooltip>
+                    <span style="font-size:11px;color:#606266">前</span>
+                  </div>
+                  <!-- 录屏完成提示 -->
+                  <el-alert
+                    v-if="recordingDownload"
+                    type="success"
+                    :closable="true"
+                    show-icon
+                    style="padding:4px 8px"
+                    @close="dismissRecordingDownload"
+                  >
+                    <template #title>
+                      <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+                        <span style="font-size:12px">录屏已保存</span>
+                        <el-button size="small" type="primary" @click="openRecordingPlayer(recordingDownload.id)">播放</el-button>
+                        <el-button size="small" @click="downloadRecording(recordingDownload.id)">下载</el-button>
+                        <el-button size="small" @click="promptRenameRecording(recordingDownload.id, recordingDownload.file_name)">重命名</el-button>
                       </div>
-                    </el-alert>
-        </div>
-      </el-card>
+                    </template>
+                  </el-alert>
+                </div>
 
-      <el-card shadow="never">
-        <template #header>
-          <div style="font-weight:600">配置</div>
-        </template>
-        <div style="display:flex;flex-direction:column;gap:12px">
-          <div>
-            <div style="font-size:13px;color:#606266;margin-bottom:8px">点击效果</div>
-            <el-checkbox v-model="showClickEffect">Web端点击效果</el-checkbox>
-            <el-checkbox v-model="showRemoteClickEffect" @change="toggleRemoteEffect">Android端点击效果</el-checkbox>
-          </div>
-          <el-divider style="margin:0" />
-          <div>
-            <div style="font-size:13px;color:#606266;margin-bottom:8px">交互执行</div>
-            <el-checkbox v-model="executeTouch">执行触摸操作</el-checkbox>
-                      <el-checkbox v-model="wheelScrollRemote" :disabled="!executeTouch">
-                        鼠标在画面上时，滚轮/触控板映射为滑屏（竖向与横向）
-                      </el-checkbox>
-          </div>
-        </div>
-      </el-card>
+                <!-- 文件区：截图 & 录屏 Tabs，flex-grow 占满中间空间 -->
+                <el-card shadow="never" class="screen-quick-files-card">
+                  <template #header>
+                    <div style="display:flex;justify-content:space-between;align-items:center">
+                      <span style="font-weight:600">文件</span>
+                      <el-button size="small" @click="loadRecordings" circle>
+                        <el-icon><Refresh /></el-icon>
+                      </el-button>
+                    </div>
+                  </template>
+                  <el-tabs v-model="fileTab" style="--el-tabs-header-height:32px">
+                    <!-- 截图 Tab -->
+                    <el-tab-pane label="截图" name="screenshots">
+                      <div class="screen-quick-files-list">
+                        <div v-if="screenshots.length === 0" style="text-align:center;color:#909399;padding:20px 0">暂无截图</div>
+                        <div v-for="shot in screenshots" :key="shot.id" style="padding:8px 0;border-bottom:1px solid #eee">
+                          <div style="font-size:13px;margin-bottom:4px;word-break:break-all">{{ shot.file_name }}</div>
+                          <div style="font-size:12px;color:#909399;margin-bottom:6px">
+                            {{ formatSize(shot.file_size) }} · {{ formatDate(shot.created_at) }}
+                          </div>
+                          <div style="display:flex;flex-wrap:wrap;gap:6px">
+                            <el-button size="small" type="primary" plain @click="viewScreenshot(shot.id)">查看</el-button>
+                            <el-button size="small" @click="downloadScreenshot(shot.id, shot.file_name)">下载</el-button>
+                            <el-button size="small" type="danger" @click="deleteScreenshot(shot.id)">删除</el-button>
+                          </div>
+                        </div>
+                      </div>
+                    </el-tab-pane>
+                    <!-- 录屏 Tab -->
+                    <el-tab-pane label="录屏" name="recordings">
+                      <div class="screen-quick-files-list">
+                        <div v-if="recordings.length === 0" style="text-align:center;color:#909399;padding:20px 0">暂无录屏</div>
+                        <div v-for="rec in recordings" :key="rec.id" style="padding:8px 0;border-bottom:1px solid #eee">
+                          <div style="font-size:13px;margin-bottom:4px;word-break:break-all">{{ rec.file_name }}</div>
+                          <div style="font-size:12px;color:#909399;margin-bottom:6px">
+                            {{ formatSize(rec.file_size) }} · {{ formatDate(rec.created_at) }}
+                          </div>
+                          <div style="display:flex;flex-wrap:wrap;gap:6px">
+                            <el-button size="small" type="primary" plain @click="openRecordingPlayer(rec.id)">播放</el-button>
+                            <el-button size="small" @click="downloadRecording(rec.id)">下载</el-button>
+                            <el-button size="small" @click="promptRenameRecording(rec.id, rec.file_name)">重命名</el-button>
+                            <el-button size="small" type="danger" @click="deleteRecording(rec.id)">删除</el-button>
+                          </div>
+                        </div>
+                      </div>
+                    </el-tab-pane>
+                  </el-tabs>
+                </el-card>
 
-                <el-card shadow="never">
-        <template #header>
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <span style="font-weight:600">截图列表</span>
-            <el-button size="small" @click="loadRecordings" :icon="'Refresh'" circle />
-          </div>
-        </template>
-        <div class="screen-quick-recordings">
-          <div v-if="screenshots.length === 0" style="text-align:center;color:#909399;padding:20px">暂无截图</div>
-          <div v-for="shot in screenshots" :key="shot.id" style="padding:8px;border-bottom:1px solid #eee">
-            <div style="font-size:13px;margin-bottom:4px">{{ shot.file_name }}</div>
-            <div style="font-size:12px;color:#909399;margin-bottom:8px">
-              {{ formatSize(shot.file_size) }} · {{ formatDate(shot.created_at) }}
-            </div>
-            <div style="display:flex;flex-wrap:wrap;gap:8px">
-              <el-button size="small" type="primary" plain @click="viewScreenshot(shot.id)">查看</el-button>
-              <el-button size="small" @click="downloadScreenshot(shot.id, shot.file_name)">下载</el-button>
-              <el-button size="small" type="danger" @click="deleteScreenshot(shot.id)">删除</el-button>
-            </div>
-          </div>
-        </div>
-      </el-card>
+                <!-- 配置卡片：固定在底部，图标行紧凑布局 -->
+                <div style="flex-shrink:0;padding:8px 12px;border-top:1px solid #e4e7ed;display:flex;align-items:center;gap:4px;background:#f5f7fa">
+                  <span style="font-size:11px;color:#909399;margin-right:4px">配置</span>
 
-                <el-card shadow="never">
-        <template #header>
-          <div style="display:flex;justify-content:space-between;align-items:center">
-            <span style="font-weight:600">录屏文件</span>
-            <el-button size="small" @click="loadRecordings" :icon="'Refresh'" circle />
-          </div>
-        </template>
-                  <div class="screen-quick-recordings">
-          <div v-if="recordings.length === 0" style="text-align:center;color:#909399;padding:20px">暂无录屏</div>
-          <div v-for="rec in recordings" :key="rec.id" style="padding:8px;border-bottom:1px solid #eee">
-            <div style="font-size:13px;margin-bottom:4px">{{ rec.file_name }}</div>
-            <div style="font-size:12px;color:#909399;margin-bottom:8px">
-              {{ formatSize(rec.file_size) }} · {{ formatDate(rec.created_at) }}
-            </div>
-                      <div style="display:flex;flex-wrap:wrap;gap:8px">
-                        <el-button size="small" type="primary" plain @click="openRecordingPlayer(rec.id)">播放</el-button>
-              <el-button size="small" @click="downloadRecording(rec.id)">下载</el-button>
-              <el-button size="small" @click="promptRenameRecording(rec.id, rec.file_name)">重命名</el-button>
-              <el-button size="small" type="danger" @click="deleteRecording(rec.id)">删除</el-button>
-            </div>
-          </div>
-        </div>
-      </el-card>
-    </div>
+                  <!-- Web端点击效果 -->
+                  <el-tooltip content="Web端点击效果" placement="top">
+                    <button class="cfg-icon-btn" :class="{ active: showClickEffect }" @click="showClickEffect = !showClickEffect" title="">
+                      <!-- 鼠标点击涟漪图标 -->
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"/>
+                        <circle cx="12" cy="12" r="7" stroke-dasharray="3 2" opacity="0.5"/>
+                      </svg>
+                    </button>
+                  </el-tooltip>
+
+                  <!-- Android端点击效果 -->
+                  <el-tooltip content="Android端点击效果" placement="top">
+                    <button class="cfg-icon-btn" :class="{ active: showRemoteClickEffect }" @click="showRemoteClickEffect = !showRemoteClickEffect; toggleRemoteEffect()" title="">
+                      <!-- 手机+点击图标 -->
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="7" y="2" width="10" height="18" rx="2"/>
+                        <circle cx="16" cy="16" r="3" fill="currentColor" opacity="0.4"/>
+                        <line x1="16" y1="13" x2="16" y2="11"/>
+                        <line x1="19" y1="16" x2="21" y2="16"/>
+                        <line x1="13" y1="16" x2="11" y2="16"/>
+                      </svg>
+                    </button>
+                  </el-tooltip>
+
+                  <div style="width:1px;height:16px;background:#dcdfe6;margin:0 4px"/>
+
+                  <!-- 执行触摸操作 -->
+                  <el-tooltip content="执行触摸操作" placement="top">
+                    <button class="cfg-icon-btn" :class="{ active: executeTouch }" @click="executeTouch = !executeTouch" title="">
+                      <!-- 手指触控图标 -->
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M9 11V6a2 2 0 0 1 4 0v5"/>
+                        <path d="M13 11V9a2 2 0 0 1 4 0v5a6 6 0 0 1-6 6H9a6 6 0 0 1-6-6v-1a2 2 0 0 1 4 0"/>
+                      </svg>
+                    </button>
+                  </el-tooltip>
+
+                  <!-- 滚轮映射滑屏 -->
+                  <el-tooltip :content="executeTouch ? '滚轮/触控板映射为滑屏' : '需先开启触摸操作'" placement="top">
+                    <button class="cfg-icon-btn" :class="{ active: wheelScrollRemote && executeTouch, disabled: !executeTouch }" @click="executeTouch && (wheelScrollRemote = !wheelScrollRemote)" title="">
+                      <!-- 滚轮图标 -->
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="8" y="2" width="8" height="14" rx="4"/>
+                        <line x1="12" y1="6" x2="12" y2="10"/>
+                        <path d="M5 20l7 2 7-2"/>
+                      </svg>
+                    </button>
+                  </el-tooltip>
+
+                  <div style="width:1px;height:16px;background:#dcdfe6;margin:0 4px"/>
+
+                  <!-- 摄像头显示模式：浮窗 / 侧边 -->
+                  <el-tooltip :content="cameraDisplayMode === 'overlay' ? '摄像头：浮窗模式（点击切换为侧边）' : '摄像头：侧边模式（点击切换为浮窗）'" placement="top">
+                    <button class="cfg-icon-btn" :class="{ active: cameraDisplayMode === 'sidebar' }" @click="toggleCameraDisplayMode" title="">
+                      <svg v-if="cameraDisplayMode === 'overlay'" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="2" y="3" width="20" height="14" rx="2"/>
+                        <rect x="13" y="10" width="7" height="5" rx="1" fill="currentColor" opacity="0.4"/>
+                      </svg>
+                      <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="2" y="3" width="20" height="14" rx="2"/>
+                        <line x1="15" y1="3" x2="15" y2="17"/>
+                      </svg>
+                    </button>
+                  </el-tooltip>
+
+                  <!-- 查看模式：内弹窗 / 新标签页 -->
+                  <el-tooltip :content="mediaViewMode === 'dialog' ? '查看模式：内弹窗（点击切换为新标签页）' : '查看模式：新标签页（点击切换为内弹窗）'" placement="top">
+                    <button class="cfg-icon-btn" :class="{ active: mediaViewMode === 'dialog' }" @click="toggleMediaViewMode" title="">
+                      <!-- 内弹窗图标（窗口层叠） -->
+                      <svg v-if="mediaViewMode === 'dialog'" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="5" width="14" height="11" rx="1"/>
+                        <path d="M7 19h14V9" stroke-dasharray="2 2" opacity="0.5"/>
+                      </svg>
+                      <!-- 新标签页图标（外链箭头） -->
+                      <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                        <polyline points="15 3 21 3 21 9"/>
+                        <line x1="10" y1="14" x2="21" y2="3"/>
+                      </svg>
+                    </button>
+                  </el-tooltip>
+                </div>
+
+              </div>
             </div>
             <button
               type="button"
@@ -300,6 +549,27 @@
         preload="metadata"
         class="recording-playback-video"
       />
+    </el-dialog>
+
+    <!-- 截图预览 Dialog -->
+    <el-dialog
+      v-model="screenshotPreviewVisible"
+      title="截图预览"
+      width="min(960px, 96vw)"
+      destroy-on-close
+      align-center
+    >
+      <div style="text-align:center;background:#000;border-radius:4px;overflow:hidden">
+        <img
+          :src="screenshotPreviewUrl"
+          style="max-width:100%;max-height:78vh;object-fit:contain;display:block;margin:0 auto"
+          alt="截图预览"
+        />
+      </div>
+      <template #footer>
+        <el-button @click="screenshotPreviewVisible = false">关闭</el-button>
+        <el-button type="primary" @click="openScreenshotInTab">在新标签页打开</el-button>
+      </template>
     </el-dialog>
   </div>
 </template>
@@ -443,7 +713,7 @@
 
 .screen-quick-panel__scroll {
   height: 100%;
-  overflow-y: auto;
+  overflow: hidden;
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -451,9 +721,107 @@
   box-sizing: border-box;
 }
 
-.screen-quick-recordings {
-  max-height: min(40vh, 320px);
+.screen-quick-files-card {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.screen-quick-files-card :deep(.el-card__body) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0 12px 12px;
+}
+
+.screen-quick-files-card :deep(.el-tabs) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.screen-quick-files-card :deep(.el-tabs__content) {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.screen-quick-files-card :deep(.el-tab-pane) {
+  height: 100%;
+  overflow: hidden;
+}
+
+.screen-quick-files-list {
+  height: 100%;
   overflow-y: auto;
+}
+
+/* 配置区图标按钮 */
+.cfg-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  background: #fff;
+  color: #c0c4cc;
+  cursor: pointer;
+  transition: all 0.15s;
+  padding: 0;
+  flex-shrink: 0;
+}
+.cfg-icon-btn:hover:not(.disabled):not(:disabled) {
+  border-color: #409eff;
+  color: #409eff;
+  background: #ecf5ff;
+}
+.cfg-icon-btn.active {
+  border-color: #409eff;
+  color: #409eff;
+  background: #ecf5ff;
+}
+.cfg-icon-btn.cfg-icon-btn--danger {
+  border-color: #f56c6c;
+  color: #f56c6c;
+  background: #fef0f0;
+}
+.cfg-icon-btn.cfg-icon-btn--danger:hover {
+  border-color: #f56c6c;
+  color: #f56c6c;
+  background: #fde2e2;
+}
+.cfg-icon-btn.cfg-icon-btn--loading {
+  opacity: 0.6;
+  cursor: wait;
+}
+.cfg-icon-btn.disabled,
+.cfg-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.cfg-icon-btn:hover:not(.disabled) {
+  border-color: #409eff;
+  color: #409eff;
+  background: #ecf5ff;
+}
+
+.cfg-icon-btn.active {
+  border-color: #409eff;
+  color: #409eff;
+  background: #ecf5ff;
+}
+
+.cfg-icon-btn.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .screen-quick-tab {
@@ -580,6 +948,95 @@
     opacity: 0;
   }
 }
+/* 摄像头浮窗 */
+.camera-overlay-container {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 20;
+  pointer-events: none;
+}
+.camera-overlay-window {
+  width: 160px;
+  background: #000;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  pointer-events: all;
+  border: 1px solid rgba(255,255,255,0.15);
+}
+.camera-overlay-window--connecting {
+  opacity: 0.7;
+}
+.camera-overlay-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: rgba(0,0,0,0.6);
+}
+.camera-overlay-label {
+  font-size: 11px;
+  color: #fff;
+  flex: 1;
+}
+.camera-overlay-close {
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.7);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 2px;
+  line-height: 1;
+}
+.camera-overlay-close:hover { color: #fff; }
+.camera-overlay-video {
+  width: 100%;
+  aspect-ratio: 9/16;
+  object-fit: cover;
+  display: block;
+  background: #111;
+}
+
+/* 摄像头侧边模式：绝对定位，紧贴实际画面左侧 */
+.camera-sidebar {
+  position: absolute;
+  display: flex;
+  flex-direction: row;
+  gap: 4px;
+  padding: 0;
+  background: transparent;
+  z-index: 5;
+  box-sizing: border-box;
+  overflow: visible;
+}
+.camera-sidebar-window {
+  background: #000;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.15);
+  height: 100%;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.camera-sidebar-window--connecting {
+  opacity: 0.7;
+}
+.camera-sidebar-video {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  background: #111;
+}
+
 </style>
 
 <script setup>
@@ -588,7 +1045,7 @@ import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useEventListenerStore } from '@/stores/eventListeners'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
-import { FullScreen, Close } from '@element-plus/icons-vue'
+import { FullScreen, Close, Refresh } from '@element-plus/icons-vue'
 import { Client } from '@stomp/stompjs'
 import * as deviceApi from '@/api/device'
 import { WS_BASE } from '@/utils/ws'
@@ -618,6 +1075,7 @@ const fullscreenTargetEl = ref(null)
 const isNativeFullscreen = ref(false)
 /** 右侧快速操作面板默认收起 */
 const quickPanelOpen = ref(false)
+const fileTab = ref('screenshots') // 文件区 tab：screenshots | recordings
 /** 屏幕页拖入 APK 安装任务：是否在安装成功后尝试启动应用 */
 const screenDropInstallAndLaunch = ref(true)
 const uploading = ref(false)
@@ -634,6 +1092,204 @@ const screenshots = ref([])
 const recordingPlayerVisible = ref(false)
 const recordingPlayerId = ref(null)
 const recordingPlayerRef = ref(null)
+const screenshotPreviewVisible = ref(false)
+const screenshotPreviewUrl = ref('')
+const mediaViewMode = ref(localStorage.getItem('screen-media-view-mode') === 'tab' ? 'tab' : 'dialog')
+const cameraDisplayMode = ref(localStorage.getItem('screen-camera-display-mode') === 'sidebar' ? 'sidebar' : 'overlay')
+
+// 侧边栏紧贴实际画面左侧：响应式样式，由 updateCameraSidebarStyle 驱动
+const cameraSidebarStyle = ref({})
+function updateCameraSidebarStyle() {
+  const pic = getVideoPictureRect()
+  if (!pic || !videoWrap.value) { cameraSidebarStyle.value = { display: 'none' }; return }
+  const wrapRect = videoWrap.value.getBoundingClientRect()
+  const top = pic.picTop - wrapRect.top
+  const picLeft = pic.picLeft - wrapRect.left
+
+  // 每个摄像头按 9:16 比例计算宽度，多个并排
+  const camCount = cameraWindows.value.length || 1
+  const camW = Math.round(pic.picH * 9 / 16)
+  const totalW = camW * camCount + (camCount - 1) * 4 // 4px gap
+
+  // 优先放在画面左侧，空间不足时从画面左边缘内缩
+  const idealLeft = picLeft - totalW
+  const left = Math.max(0, idealLeft)
+
+  cameraSidebarStyle.value = {
+    top: top + 'px',
+    left: left + 'px',
+    height: pic.picH + 'px',
+    width: totalW + 'px',
+  }
+}
+// ── 摄像头 WebRTC ──────────────────────────────────────────────────────────────
+const cameraWindows = ref([])   // [{ id: 'back'|'front', state: 'connecting'|'connected'|'disconnected' }]
+const cameraVideoRefs = {}      // { 'back': HTMLVideoElement, 'front': HTMLVideoElement }
+const cameraPCs = {}            // { 'back': RTCPeerConnection, 'front': RTCPeerConnection }
+const cameraWSs = {}            // { 'back': WebSocket, 'front': WebSocket }
+const cameraStats = ref({})     // { 'back': { width, height, fps, kbps }, ... }
+const cameraStatsTimers = {}    // { 'back': intervalId }
+
+async function pollCameraStats(camId) {
+  const pc = cameraPCs[camId]
+  if (!pc) return
+  try {
+    const stats = await pc.getStats()
+    let width = 0, height = 0, fps = 0, kbps = 0
+    let prevBytes = cameraStats.value[camId]?._bytes ?? 0
+    let prevTs = cameraStats.value[camId]?._ts ?? 0
+    stats.forEach(r => {
+      if (r.type === 'inbound-rtp' && r.kind === 'video') {
+        fps = Math.round(r.framesPerSecond ?? 0)
+        width = r.frameWidth ?? 0
+        height = r.frameHeight ?? 0
+        const now = r.timestamp
+        const dt = (now - prevTs) / 1000
+        if (dt > 0 && prevTs > 0) {
+          kbps = Math.round((r.bytesReceived - prevBytes) * 8 / dt / 1000)
+        }
+        prevBytes = r.bytesReceived
+        prevTs = now
+      }
+    })
+    cameraStats.value[camId] = { width, height, fps, kbps, _bytes: prevBytes, _ts: prevTs }
+  } catch (_) {}
+}
+
+function startCameraStatsPolling(camId) {
+  stopCameraStatsPolling(camId)
+  cameraStatsTimers[camId] = setInterval(() => pollCameraStats(camId), 1500)
+}
+
+function stopCameraStatsPolling(camId) {
+  if (cameraStatsTimers[camId]) {
+    clearInterval(cameraStatsTimers[camId])
+    delete cameraStatsTimers[camId]
+  }
+  const s = { ...cameraStats.value }
+  delete s[camId]
+  cameraStats.value = s
+}
+
+watch(cameraWindows, () => updateCameraSidebarStyle(), { deep: true })
+watch(cameraDisplayMode, () => updateCameraSidebarStyle())
+
+const isCameraActive = (camId) => cameraWindows.value.some(c => c.id === camId)
+
+const toggleCameraStream = (camId) => {
+  if (isCameraActive(camId)) {
+    stopCameraStream(camId)
+  } else {
+    startCameraStream(camId)
+  }
+}
+
+const startCameraStream = (camId) => {
+  if (!deviceId.value) return
+  if (!cameraWindows.value.find(c => c.id === camId)) {
+    cameraWindows.value.push({ id: camId, state: 'connecting' })
+  }
+
+  const token = auth.token || ''
+  const wsUrl = `${WS_BASE}/ws/camera/${deviceId.value}?camera=${camId}&token=${token}`
+  const ws = new WebSocket(wsUrl)
+  cameraWSs[camId] = ws
+
+  const pc = new RTCPeerConnection({})
+  cameraPCs[camId] = pc
+
+  // Server sends track to browser — bind to video element
+  pc.ontrack = (event) => {
+    const win = cameraWindows.value.find(c => c.id === camId)
+    if (win) win.state = 'connected'
+    nextTick(() => {
+      const videoEl = cameraVideoRefs[camId]
+      if (videoEl) {
+        videoEl.srcObject = event.streams[0] || new MediaStream([event.track])
+      }
+    })
+    startCameraStatsPolling(camId)
+  }
+
+  // Send ICE candidates to server
+  pc.onicecandidate = (event) => {
+    if (event.candidate && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'webrtc_ice_candidate',
+        camera: camId,
+        candidate: {
+          candidate: event.candidate.candidate,
+          sdpMid: event.candidate.sdpMid,
+          sdpMLineIndex: event.candidate.sdpMLineIndex
+        }
+      }))
+    }
+  }
+
+  pc.onconnectionstatechange = () => {
+    const win = cameraWindows.value.find(c => c.id === camId)
+    if (!win) return
+    if (pc.connectionState === 'connected') win.state = 'connected'
+    else if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+      win.state = 'disconnected'
+    }
+  }
+
+  // Server is the offerer — browser receives offer and sends answer
+  ws.onmessage = async (e) => {
+    const msg = JSON.parse(e.data)
+    if (msg.type === 'webrtc_offer') {
+      // Server sends offer when publisher track is ready
+      await pc.setRemoteDescription({ type: 'offer', sdp: msg.sdp })
+      const answer = await pc.createAnswer()
+      await pc.setLocalDescription(answer)
+      ws.send(JSON.stringify({ type: 'webrtc_answer', camera: camId, sdp: answer.sdp }))
+    } else if (msg.type === 'webrtc_ice_candidate' && msg.candidate) {
+      try { await pc.addIceCandidate(msg.candidate) } catch (_) {}
+    } else if (msg.type === 'error') {
+      ElMessage.error('摄像头连接失败：' + msg.message)
+      stopCameraStream(camId)
+    }
+  }
+
+  ws.onerror = () => {
+    const win = cameraWindows.value.find(c => c.id === camId)
+    if (win) win.state = 'disconnected'
+  }
+
+  ws.onclose = () => {
+    const win = cameraWindows.value.find(c => c.id === camId)
+    if (win && win.state !== 'disconnected') win.state = 'disconnected'
+  }
+}
+
+const stopCameraStream = (camId) => {
+  stopCameraStatsPolling(camId)
+  // Close WebSocket
+  const ws = cameraWSs[camId]
+  if (ws) {
+    ws.close()
+    delete cameraWSs[camId]
+  }
+  // Close PeerConnection
+  const pc = cameraPCs[camId]
+  if (pc) {
+    pc.close()
+    delete cameraPCs[camId]
+  }
+  // Clear video
+  const videoEl = cameraVideoRefs[camId]
+  if (videoEl) {
+    videoEl.srcObject = null
+    delete cameraVideoRefs[camId]
+  }
+  // Remove window
+  cameraWindows.value = cameraWindows.value.filter(c => c.id !== camId)
+}
+
+const stopAllCameraStreams = () => {
+  Object.keys(cameraWSs).forEach(stopCameraStream)
+}
 const executeTouch = ref(true)
 /** 滚轮/触控板在画面上合成为一次 swipe，模拟列表/页面滑动 */
 const wheelScrollRemote = ref(true)
@@ -1172,6 +1828,7 @@ function onScreenImgLoad() {
   const el = screenImg.value
   if (!el || el.naturalWidth <= 0 || el.naturalHeight <= 0) return
   deviceResolution.value = { width: el.naturalWidth, height: el.naturalHeight }
+  updateCameraSidebarStyle()
 }
 
 /** 视口坐标 clientX/clientY */
@@ -1401,6 +2058,12 @@ async function flushWheelAccum() {
 
 async function handlePointerDown(e) {
   if (!screenImg.value || !e.isPrimary) return
+  // 只响应实际画面区域内的点击，黑边区域不触发
+  const pic = getVideoPictureRect()
+  if (pic) {
+    const { x: cx, y: cy } = pointerClientXY(e)
+    if (cx < pic.picLeft || cx > pic.picLeft + pic.picW || cy < pic.picTop || cy > pic.picTop + pic.picH) return
+  }
   try {
     screenImg.value.setPointerCapture(e.pointerId)
   } catch (_) { /* 部分环境可能不支持 */ }
@@ -1645,9 +2308,13 @@ watch(
   { immediate: true }
 )
 
+let sidebarResizeObserver = null
+
 onMounted(async () => {
   document.addEventListener('fullscreenchange', syncNativeFullscreenState)
   document.addEventListener('webkitfullscreenchange', syncNativeFullscreenState)
+  sidebarResizeObserver = new ResizeObserver(() => updateCameraSidebarStyle())
+  if (videoWrap.value) sidebarResizeObserver.observe(videoWrap.value)
   if (shareMode.value) {
     return
   }
@@ -1659,6 +2326,16 @@ onMounted(async () => {
     loadRecordings()
   }
 })
+
+// 发送虚拟按键
+const sendKeyEvent = async (keycode) => {
+  if (!deviceId.value) return
+  try {
+    await deviceApi.keyEvent(deviceId.value, keycode)
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.error || e?.message || '按键发送失败')
+  }
+}
 
 const saveAdbScreenshot = async () => {
   if (!deviceId.value) return
@@ -1757,6 +2434,10 @@ const recordingStreamUrl = (id) => {
 }
 
 const openRecordingPlayer = async (id) => {
+  if (mediaViewMode.value === 'tab') {
+    window.open(`/api/recordings/${id}/stream?token=${auth.token}`, '_blank')
+    return
+  }
   recordingPlayerId.value = id
   recordingPlayerVisible.value = true
   await nextTick()
@@ -1791,7 +2472,25 @@ const deleteRecording = async (id) => {
 }
 
 const viewScreenshot = (id) => {
-  window.open(`/api/device-media/${id}/stream?token=${auth.token}`, '_blank')
+  if (mediaViewMode.value === 'tab') {
+    window.open(`/api/device-media/${id}/stream?token=${auth.token}`, '_blank')
+    return
+  }
+  screenshotPreviewUrl.value = `/api/device-media/${id}/stream?token=${auth.token}`
+  screenshotPreviewVisible.value = true
+}
+
+const openScreenshotInTab = () => {
+  window.open(screenshotPreviewUrl.value, '_blank')
+}
+
+const toggleMediaViewMode = () => {
+  mediaViewMode.value = mediaViewMode.value === 'dialog' ? 'tab' : 'dialog'
+  localStorage.setItem('screen-media-view-mode', mediaViewMode.value)
+}
+const toggleCameraDisplayMode = () => {
+  cameraDisplayMode.value = cameraDisplayMode.value === 'overlay' ? 'sidebar' : 'overlay'
+  localStorage.setItem('screen-camera-display-mode', cameraDisplayMode.value)
 }
 
 const downloadScreenshot = (id, fileName) => {
@@ -1822,10 +2521,12 @@ const formatDate = (date) => {
 onUnmounted(() => {
   document.removeEventListener('fullscreenchange', syncNativeFullscreenState)
   document.removeEventListener('webkitfullscreenchange', syncNativeFullscreenState)
+  sidebarResizeObserver?.disconnect()
   if (profileListenerId) {
     eventListeners.revoke(profileListenerId)
     profileListenerId = null
   }
   closeAll()
+  stopAllCameraStreams()
 })
 </script>
