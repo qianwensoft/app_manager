@@ -9,15 +9,18 @@ import (
 	"app-manager/models"
 	"app-manager/screen"
 	"app-manager/shell"
+	wrtc "app-manager/webrtc"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
@@ -229,21 +232,65 @@ func ShellWS(c *gin.Context) {
 
 func LogcatWS(c *gin.Context) {
 	param := c.Param("deviceId")
-	routeKey, err := agent.AgentConnectionKey(param)
-	if err != nil {
-		log.Printf("LogcatWS: reject param=%q: %v", param, err)
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	filter := c.Query("filter")
+
+	// 查询设备，判断是否可以走 ADB
+	var dev models.Device
+	if err := agent.DeviceScope(param).First(&dev).Error; err != nil {
+		log.Printf("LogcatWS: device not found param=%q: %v", param, err)
+		c.JSON(http.StatusNotFound, gin.H{"error": "设备不存在"})
 		return
 	}
-	filter := c.Query("filter")
+
+	adbSerial := strings.TrimSpace(dev.Serial)
+	useADB := serialUsableWithAdb(adbSerial)
+	if useADB {
+		s, _, err := ensureADBConnected(adbSerial)
+		if err != nil {
+			log.Printf("LogcatWS: ADB not reachable serial=%s: %v, falling back to agent", adbSerial, err)
+			useADB = false
+		} else {
+			adbSerial = s
+		}
+	}
+
+	var routeKey string
+	if !useADB {
+		var err error
+		routeKey, err = agent.AgentConnectionKey(param)
+		if err != nil {
+			log.Printf("LogcatWS: reject param=%q: %v", param, err)
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		if !agent.AgentHub.IsConnected(routeKey) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Agent 未在线；若设备已通过 USB/网络 ADB 连接，请确保设备 serial 已录入且 adb devices 为 device 状态"})
+			return
+		}
+	}
+
 	conn, err := rawWsUpgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		return
 	}
+
+	// ADB 模式：直接用 adb logcat 流式输出（连接保持到 session 结束）
+	if useADB {
+		log.Printf("Browser logcat (ADB) param=%s serial=%s filter=%q", param, adbSerial, filter)
+		_, err := logcat.NewSession(adbSerial, conn, getADB().ExePath(), filter)
+		if err != nil {
+			log.Printf("LogcatWS: ADB session error serial=%s: %v", adbSerial, err)
+			_ = conn.WriteMessage(websocket.TextMessage, []byte("[error] 无法启动 ADB logcat: "+err.Error()))
+			_ = conn.Close()
+		}
+		return
+	}
+
+	// Agent 模式
 	log.Printf("Browser connected to logcat param=%s routeKey=%s", param, routeKey)
 	logcat.LogcatHub.Register(routeKey, conn)
 
-	// Tell agent to start logcat
+	// 通知 Agent 开始 logcat
 	agent.AgentHub.Send(routeKey, map[string]interface{}{
 		"type":   "command",
 		"action": "start_logcat",
@@ -260,7 +307,7 @@ func LogcatWS(c *gin.Context) {
 		conn.Close()
 	}()
 
-	// Keep connection alive
+	// 保持连接存活
 	for {
 		if _, _, err := conn.ReadMessage(); err != nil {
 			break
@@ -286,6 +333,7 @@ func init() {
 		screen.ResetCaptureRoute(deviceID)
 		screen.ScreenHub.CloseAllForDevice(deviceID)
 		DeactivateDeviceCustomListenStateForAgentKey(deviceID)
+		wrtc.CameraHub.RemoveAllPublishers(deviceID)
 	}
 	// Handle uplink messages from agents
 	agent.SetMessageHandler(func(deviceID string, msg map[string]interface{}) {
@@ -511,6 +559,42 @@ func init() {
 				}
 				agent.DeliverInstallTaskResult(cid, out, errStr)
 			}
+		case "webrtc_offer":
+			// Agent 发来摄像头 WebRTC offer
+			camera, _ := msg["camera"].(string)
+			sdp, _ := msg["sdp"].(string)
+			if camera != "" && sdp != "" {
+				sendFn := func(m interface{}) {
+					_ = agent.AgentHub.Send(deviceID, m)
+				}
+				if err := wrtc.CameraHub.HandleAgentOffer(deviceID, wrtc.CameraType(camera), sdp, sendFn); err != nil {
+					log.Printf("WebRTC agent offer error device=%s camera=%s: %v", deviceID, camera, err)
+				}
+			}
+		case "webrtc_ice_candidate":
+			// Agent 发来 ICE candidate
+			camera, _ := msg["camera"].(string)
+			if camera != "" {
+				if cand, ok := msg["candidate"].(map[string]interface{}); ok {
+					raw, _ := json.Marshal(cand)
+					_ = wrtc.CameraHub.HandleAgentICE(deviceID, wrtc.CameraType(camera), raw)
+				}
+			}
+		case "webrtc_stop_camera":
+			// Agent 主动停止摄像头推流
+			camera, _ := msg["camera"].(string)
+			if camera != "" {
+				wrtc.CameraHub.RemovePublisher(deviceID, wrtc.CameraType(camera))
+				log.Printf("WebRTC: agent stopped camera device=%s camera=%s", deviceID, camera)
+			}
+		case "camera_error":
+			// Agent 摄像头启动失败，转发错误给所有等待的 viewer
+			camera, _ := msg["camera"].(string)
+			message, _ := msg["message"].(string)
+			if camera != "" {
+				wrtc.CameraHub.BroadcastError(deviceID, wrtc.CameraType(camera), message)
+				log.Printf("WebRTC: camera error device=%s camera=%s: %s", deviceID, camera, message)
+			}
 		default:
 			raw, _ := json.Marshal(msg)
 			log.Printf("Agent msg [%s]: %s", deviceID, string(raw))
@@ -604,5 +688,104 @@ func parseInstalledAppsEntries(v interface{}) []agent.InstalledAppEntry {
 		})
 	}
 	return out
+}
+
+// cameraWsWriteMu guards concurrent writes to a single websocket.Conn.
+var cameraWsWriteMu sync.Map // viewerID → *sync.Mutex
+
+func cameraWsWrite(viewerID string, conn *websocket.Conn, msg interface{}) {
+	raw, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+	mu, _ := cameraWsWriteMu.LoadOrStore(viewerID, &sync.Mutex{})
+	mu.(*sync.Mutex).Lock()
+	defer mu.(*sync.Mutex).Unlock()
+	_ = conn.SetWriteDeadline(time.Now().Add(15 * time.Second))
+	_ = conn.WriteMessage(websocket.TextMessage, raw)
+}
+
+// CameraWS handles browser ↔ server WebRTC signaling for camera streams.
+// URL: /ws/camera/:deviceId?camera=back|front
+func CameraWS(c *gin.Context) {
+	param := c.Param("deviceId")
+	routeKey, err := agent.AgentConnectionKey(param)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	camera := wrtc.CameraType(c.DefaultQuery("camera", "back"))
+	if camera != wrtc.CameraBack && camera != wrtc.CameraFront {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "camera must be back or front"})
+		return
+	}
+
+	conn, err := rawWsUpgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		return
+	}
+
+	viewerID := uuid.New().String()
+	log.Printf("CameraWS: viewer=%s device=%s camera=%s connected", viewerID, routeKey, camera)
+
+	sendFn := func(msg interface{}) {
+		cameraWsWrite(viewerID, conn, msg)
+	}
+
+	// Register viewer first — so error messages from agent can be delivered
+	wrtc.CameraHub.RegisterViewer(routeKey, camera, viewerID, sendFn)
+
+	// Tell agent to start camera if not already streaming
+	_ = agent.AgentHub.Send(routeKey, map[string]interface{}{
+		"type":   "command",
+		"action": "start_camera",
+		"camera": string(camera),
+	})
+
+	defer func() {
+		remaining := wrtc.CameraHub.RemoveViewer(routeKey, viewerID, camera)
+		cameraWsWriteMu.Delete(viewerID)
+		_ = conn.Close()
+		log.Printf("CameraWS: viewer=%s device=%s camera=%s disconnected, remaining=%d", viewerID, routeKey, camera, remaining)
+		// 最后一个 viewer 断开时通知 agent 停止摄像头
+		if remaining == 0 {
+			_ = agent.AgentHub.Send(routeKey, map[string]interface{}{
+				"type":   "command",
+				"action": "stop_camera",
+				"camera": string(camera),
+			})
+			log.Printf("CameraWS: sent stop_camera to agent device=%s camera=%s", routeKey, camera)
+		}
+	}()
+
+	for {
+		_, data, err := conn.ReadMessage()
+		if err != nil {
+			break
+		}
+		var msg map[string]interface{}
+		if err := json.Unmarshal(data, &msg); err != nil {
+			continue
+		}
+		msgType, _ := msg["type"].(string)
+		switch msgType {
+		case "webrtc_answer":
+			// Browser sends answer to server's offer
+			sdp, _ := msg["sdp"].(string)
+			if sdp != "" {
+				if err := wrtc.CameraHub.HandleViewerAnswer(routeKey, camera, viewerID, sdp); err != nil {
+					log.Printf("CameraWS HandleViewerAnswer error viewer=%s: %v", viewerID, err)
+				}
+			}
+		case "webrtc_ice_candidate":
+			if cand, ok := msg["candidate"].(map[string]interface{}); ok {
+				raw, _ := json.Marshal(cand)
+				_ = wrtc.CameraHub.HandleViewerICE(routeKey, viewerID, camera, raw)
+			}
+		case "ping":
+			sendFn(map[string]interface{}{"type": "pong"})
+		}
+	}
 }
 

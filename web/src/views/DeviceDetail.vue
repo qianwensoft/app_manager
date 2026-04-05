@@ -383,6 +383,256 @@
         </el-table>
       </el-tab-pane>
 
+      <el-tab-pane label="ADB 管理" name="adb">
+        <el-space direction="vertical" alignment="stretch" :size="16" style="width:100%;max-width:860px">
+
+          <!-- USB ADB 状态 -->
+          <el-card shadow="never">
+            <template #header>
+              <span style="font-weight:600">USB ADB</span>
+            </template>
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+              <span style="color:#606266;white-space:nowrap">Serial：</span>
+              <code v-if="usbSerial" style="font-family:monospace;background:#f4f4f5;padding:2px 8px;border-radius:4px">{{ usbSerial }}</code>
+              <el-text v-else type="info" size="small">暂无 USB Serial（纯 Agent 或无线设备）</el-text>
+              <el-tag
+                v-if="adbStatus.usb"
+                :type="usbStateType(adbStatus.usb.state)"
+                size="small"
+              >{{ usbStateLabel(adbStatus.usb.state) }}</el-tag>
+              <el-button size="small" :loading="adbStatusLoading" @click="refreshAdbStatus">检测状态</el-button>
+            </div>
+          </el-card>
+
+          <!-- 无线 ADB -->
+          <el-card shadow="never">
+            <template #header>
+              <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                <span style="font-weight:600">无线 ADB</span>
+                <!-- 已连接：在 header 直接展示地址 + 断开按钮 -->
+                <template v-if="adbStatus.wireless?.state === 'device'">
+                  <el-tag type="success" size="small">
+                    <el-icon style="vertical-align:-2px;margin-right:2px"><CircleCheckFilled /></el-icon>
+                    已连接
+                  </el-tag>
+                  <code style="font-family:monospace;background:#f0f9eb;color:#67c23a;padding:2px 10px;border-radius:4px;border:1px solid #b3e19d;font-size:13px">
+                    {{ device.wireless_adb_serial || adbStatus.wireless?.serial }}
+                  </code>
+                  <el-button
+                    type="danger"
+                    plain
+                    size="small"
+                    :loading="adbDisconnecting"
+                    @click="doAdbDisconnect"
+                  >断开</el-button>
+                </template>
+                <!-- 未连接：显示状态 tag + 检测按钮 -->
+                <template v-else>
+                  <el-tag v-if="adbStatus.wireless" :type="wirelessStateType(adbStatus.wireless.state)" size="small">
+                    {{ wirelessStateLabel(adbStatus.wireless.state) }}
+                  </el-tag>
+                  <el-button size="small" :loading="adbStatusLoading" @click="refreshAdbStatus">检测状态</el-button>
+                </template>
+              </div>
+            </template>
+
+            <!-- ── 已连接：隐藏配对和连接表单 ── -->
+            <template v-if="adbStatus.wireless?.state === 'device'">
+              <div style="display:flex;align-items:center;gap:8px;color:#67c23a;font-size:13px;padding:4px 0">
+                <el-icon><CircleCheckFilled /></el-icon>
+                <span>无线 ADB 连接正常，配对与连接操作已隐藏。如需重新配置请点击「断开」后重新操作。</span>
+              </div>
+            </template>
+
+            <!-- ── 未连接（配对 + 连接）── -->
+            <template v-else>
+              <!-- 上次记录的 serial 但当前已断开 -->
+              <el-alert
+                v-if="device.wireless_adb_serial && adbStatus.wireless && adbStatus.wireless.state !== 'not_configured'"
+                type="warning"
+                :closable="false"
+                show-icon
+                style="margin-bottom:12px"
+                :title="`无线 ADB 连接已断开（${device.wireless_adb_serial}）`"
+                description="可重新在下方输入端口点「连接」，或点「断开」清除记录。"
+              >
+                <template #default>
+                  <el-button
+                    size="small"
+                    type="danger"
+                    plain
+                    :loading="adbDisconnecting"
+                    style="margin-top:6px"
+                    @click="doAdbDisconnect"
+                  >断开并清除记录</el-button>
+                </template>
+              </el-alert>
+
+              <!-- 配对方式选择 -->
+              <el-divider content-position="left" style="margin-top:0">第一步：配对（Android 11+）</el-divider>
+              <el-radio-group v-model="pairMethod" style="margin-bottom:14px">
+                <el-radio-button value="code">配对码</el-radio-button>
+                <el-radio-button value="qrcode">二维码</el-radio-button>
+              </el-radio-group>
+
+              <!-- 配对码 -->
+              <template v-if="pairMethod === 'code'">
+                <el-alert
+                  type="info"
+                  :closable="false"
+                  show-icon
+                  style="margin-bottom:12px"
+                  description="在手机「开发者选项 → 无线调试」开启「使用配对码配对设备」，获取配对端口和 6 位配对码。"
+                />
+                <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+                  <div>
+                    <div style="font-size:12px;color:#606266;margin-bottom:4px">配对端口</div>
+                    <el-input-number v-model="wirelessPairPort" :min="1" :max="65535" :controls="false" style="width:110px" placeholder="端口" />
+                  </div>
+                  <div>
+                    <div style="font-size:12px;color:#606266;margin-bottom:4px">6 位配对码</div>
+                    <el-input v-model="wirelessPairCode" placeholder="例：123456" style="width:130px" maxlength="6" />
+                  </div>
+                  <el-button
+                    :loading="pairing"
+                    :disabled="!wirelessPairPort || wirelessPairCode.length < 4"
+                    @click="doPair"
+                  >{{ pairing ? '配对中...' : '配对' }}</el-button>
+                </div>
+              </template>
+
+              <!-- 二维码 -->
+              <template v-else>
+                <el-alert
+                  type="info"
+                  :closable="false"
+                  show-icon
+                  style="margin-bottom:12px"
+                  description="用手机 Agent 应用扫描下方二维码，手机将自动打开「无线调试」设置页面。启用调试后，将页面上显示的端口号填入下方「连接」步骤中。"
+                />
+                <div style="display:flex;align-items:flex-start;gap:24px;flex-wrap:wrap">
+                  <canvas ref="pairQrCanvas" style="border-radius:8px;border:1px solid #e4e7ed" />
+                  <div style="font-size:13px;color:#606266;line-height:1.8;max-width:320px">
+                    <p style="margin:0 0 8px;font-weight:500">操作步骤：</p>
+                    <ol style="margin:0;padding-left:18px">
+                      <li>打开手机上的 Agent 应用</li>
+                      <li>点击右上角扫码按钮，扫描左侧二维码</li>
+                      <li>手机自动跳转到「无线调试」设置页面</li>
+                      <li>手机上启用无线调试，记录显示的 IP 地址和端口号</li>
+                      <li>将端口号填入下方「连接端口」后点「连接」</li>
+                    </ol>
+                  </div>
+                </div>
+              </template>
+
+              <el-alert
+                v-if="pairResult"
+                :type="pairSuccess ? 'success' : 'error'"
+                :title="pairResult"
+                :closable="true"
+                show-icon
+                style="margin-top:10px"
+                @close="pairResult = ''"
+              />
+
+              <!-- 连接 -->
+              <el-divider content-position="left">第二步：连接</el-divider>
+              <el-alert
+                type="info"
+                :closable="false"
+                show-icon
+                style="margin-bottom:12px"
+                description="填写「无线调试」页面显示的主端口（非配对端口）。跳过配对直接连接时默认填 5555。"
+              />
+              <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+                <div>
+                  <div style="font-size:12px;color:#606266;margin-bottom:4px">连接端口</div>
+                  <el-input-number v-model="wirelessConnectPort" :min="1" :max="65535" :controls="false" style="width:110px" />
+                </div>
+                <el-button
+                  type="primary"
+                  :loading="connecting"
+                  @click="doConnect"
+                >{{ connecting ? '连接中...' : '连接' }}</el-button>
+              </div>
+              <el-alert
+                v-if="connectResult"
+                :type="connectSuccess ? 'success' : 'error'"
+                :title="connectResult"
+                :closable="true"
+                show-icon
+                style="margin-top:10px"
+                @close="connectResult = ''"
+              />
+            </template>
+          </el-card>
+
+          <!-- ADB 工具 -->
+          <el-card shadow="never">
+            <template #header><span style="font-weight:600">ADB 工具</span></template>
+
+            <!-- 授权 READ_LOGS -->
+            <el-divider content-position="left" style="margin-top:0">授权日志权限</el-divider>
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px">
+              <el-button :loading="grantingReadLogs" @click="doGrantReadLogs">
+                授权 Agent READ_LOGS
+              </el-button>
+              <el-text type="info" size="small">
+                允许 Agent 读取系统全量日志（需已建立 ADB 连接）
+              </el-text>
+            </div>
+            <el-alert
+              v-if="grantReadLogsResult"
+              :type="grantReadLogsSuccess ? 'success' : 'error'"
+              :title="grantReadLogsResult"
+              :closable="true"
+              show-icon
+              style="margin-top:4px;margin-bottom:8px"
+              @close="grantReadLogsResult = ''"
+            />
+
+            <!-- Shell Runner -->
+            <el-divider content-position="left">ADB Shell</el-divider>
+            <div style="display:flex;gap:8px;margin-bottom:8px">
+              <el-input
+                v-model="shellCommand"
+                placeholder="输入命令，例如：ls /sdcard"
+                clearable
+                style="flex:1"
+                @keyup.enter="runShellCommand"
+              />
+              <el-button
+                type="primary"
+                :loading="shellRunning"
+                :disabled="!shellCommand.trim()"
+                @click="runShellCommand"
+              >执行</el-button>
+              <el-button @click="shellOutput = null; shellCommand = ''">清空</el-button>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+              <span style="font-size:12px;color:#909399;align-self:center">快捷：</span>
+              <el-button size="small" text type="primary" @click="shellCommand = 'getprop ro.product.model'">型号</el-button>
+              <el-button size="small" text type="primary" @click="shellCommand = 'pm list packages -3'">第三方应用</el-button>
+              <el-button size="small" text type="primary" @click="shellCommand = 'df -h /data'">存储空间</el-button>
+              <el-button size="small" text type="primary" @click="shellCommand = 'dumpsys battery'">电池信息</el-button>
+              <el-button size="small" text type="primary" @click="shellCommand = 'wm size'">屏幕分辨率</el-button>
+              <el-button size="small" text type="primary" @click="shellCommand = 'ip addr show wlan0'">WLAN 地址</el-button>
+              <el-button size="small" text type="primary" @click="shellCommand = 'settings list global | grep adb'">ADB 设置</el-button>
+            </div>
+            <el-input
+              v-if="shellOutput !== null"
+              v-model="shellOutput"
+              type="textarea"
+              :rows="10"
+              readonly
+              style="font-family:monospace;font-size:12px"
+              placeholder="命令输出将显示在这里"
+            />
+          </el-card>
+
+        </el-space>
+      </el-tab-pane>
+
       <el-tab-pane label="设备管理" name="manage">
         <el-form :model="editForm" label-width="100px" style="max-width:500px">
           <el-form-item label="设备别名">
@@ -433,15 +683,17 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
+import { CircleCheckFilled } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import * as deviceApi from '@/api/device'
 import * as appApi from '@/api/app'
 import { useEventListenerStore } from '@/stores/eventListeners'
 import { WS_BASE } from '@/utils/ws'
 import http from '@/api/http'
+import QRCode from 'qrcode'
 
 const route = useRoute()
 const router = useRouter()
@@ -462,6 +714,28 @@ const apkInstallAndLaunch = ref(true)
 const appsRefreshing = ref(false)
 const pullApkPkg = ref('')
 
+// ─── ADB 管理 ─────────────────────────────────────────────────────────────────
+const adbStatus = ref({ usb: null, wireless: null })
+const adbStatusLoading = ref(false)
+const adbDisconnecting = ref(false)
+const pairMethod = ref('code') // 'code' | 'qrcode'
+const pairQrCanvas = ref(null)
+const wirelessPairPort = ref(null)
+const wirelessPairCode = ref('')
+const pairing = ref(false)
+const pairResult = ref('')
+const pairSuccess = ref(false)
+const wirelessConnectPort = ref(5555)
+const connecting = ref(false)
+const connectResult = ref('')
+const connectSuccess = ref(false)
+const grantingReadLogs = ref(false)
+const grantReadLogsResult = ref('')
+const grantReadLogsSuccess = ref(false)
+const shellCommand = ref('')
+const shellOutput = ref(null)
+const shellRunning = ref(false)
+
 const agentFilePreviewVisible = ref(false)
 const agentFilePreviewType = ref('')
 const agentFilePreviewUrl = ref('')
@@ -474,7 +748,9 @@ const activeMainTab = ref(
       ? 'apps'
       : route.query.tab === 'manage'
         ? 'manage'
-        : 'info'
+        : route.query.tab === 'adb'
+          ? 'adb'
+          : 'info'
 )
 const fileHub = ref({ recordings: [], media: [] })
 const fileHubLoading = ref(false)
@@ -668,6 +944,10 @@ watch(
     if (t === 'manage') {
       activeMainTab.value = 'manage'
     }
+    if (t === 'adb') {
+      activeMainTab.value = 'adb'
+      refreshAdbStatus()
+    }
   }
 )
 
@@ -689,6 +969,144 @@ const filteredApps = computed(() => {
     return pkg.includes(q) || label.includes(q)
   })
 })
+
+// ─── ADB 状态辅助 ──────────────────────────────────────────────────────────────
+const usbSerial = computed(() => {
+  const s = device.value?.serial || ''
+  if (!s || s.startsWith('agent-') || s.includes(':')) return ''
+  return s
+})
+const usbStateType = (state) => {
+  if (state === 'device') return 'success'
+  if (state === 'unauthorized') return 'warning'
+  if (state === 'offline' || state === 'no_device') return 'danger'
+  return 'info'
+}
+const usbStateLabel = (state) => {
+  const map = { device: '已连接', offline: '离线', unauthorized: '未授权', no_device: '未找到', not_configured: '未配置' }
+  return map[state] || state
+}
+const wirelessStateType = (state) => {
+  if (state === 'device') return 'success'
+  if (state === 'offline' || state === 'no_device') return 'danger'
+  if (state === 'not_configured') return 'info'
+  return 'warning'
+}
+const wirelessStateLabel = (state) => {
+  const map = { device: '已连接', offline: '未连接', no_device: '未找到', not_configured: '未配置' }
+  return map[state] || state
+}
+
+// ─── ADB 管理操作 ──────────────────────────────────────────────────────────────
+const refreshAdbStatus = async () => {
+  adbStatusLoading.value = true
+  try {
+    const res = await deviceApi.getAdbStatus(route.params.id)
+    adbStatus.value = res || {}
+    // 检测到已连接时同步刷新设备数据，确保 wireless_adb_serial 最新
+    if (adbStatus.value.wireless?.state === 'device') {
+      await load()
+    }
+  } catch (e) {
+    ElMessage.error(e.message || '检测失败')
+  } finally {
+    adbStatusLoading.value = false
+  }
+}
+
+const renderPairQrCode = async () => {
+  await nextTick()
+  if (!pairQrCanvas.value) return
+  const payload = JSON.stringify({
+    type: 'wireless_adb_guide',
+    deviceId: Number(route.params.id),
+    serverUrl: location.origin
+  })
+  await QRCode.toCanvas(pairQrCanvas.value, payload, { width: 200, margin: 2 })
+}
+
+// 切换到二维码方式时自动渲染
+watch(pairMethod, (v) => {
+  if (v === 'qrcode') nextTick(renderPairQrCode)
+})
+
+const doAdbDisconnect = async () => {
+  try {
+    await ElMessageBox.confirm('确认断开无线 ADB 连接？这将清除已记录的无线 Serial。', '提示', { type: 'warning' })
+  } catch { return }
+  adbDisconnecting.value = true
+  try {
+    await deviceApi.adbWirelessDisconnect(route.params.id)
+    ElMessage.success('已断开')
+    await load()
+    await refreshAdbStatus()
+  } catch (e) {
+    ElMessage.error(e.response?.data?.error || e.message || '断开失败')
+  } finally {
+    adbDisconnecting.value = false
+  }
+}
+
+const doPair = async () => {
+  pairResult.value = ''
+  pairing.value = true
+  try {
+    await deviceApi.adbPairByAgentIP(route.params.id, wirelessPairPort.value, wirelessPairCode.value)
+    pairResult.value = '配对成功，请在第二步中点击「连接」完成建立'
+    pairSuccess.value = true
+  } catch (e) {
+    pairResult.value = e.response?.data?.error || e.message || '配对失败'
+    pairSuccess.value = false
+  } finally {
+    pairing.value = false
+  }
+}
+
+const doConnect = async () => {
+  connectResult.value = ''
+  connecting.value = true
+  try {
+    const res = await deviceApi.adbConnectByAgentIP(route.params.id, wirelessConnectPort.value)
+    connectResult.value = res.message || '连接成功'
+    connectSuccess.value = true
+    await load()
+    await refreshAdbStatus()
+  } catch (e) {
+    connectResult.value = e.response?.data?.error || e.message || '连接失败'
+    connectSuccess.value = false
+  } finally {
+    connecting.value = false
+  }
+}
+
+const doGrantReadLogs = async () => {
+  grantReadLogsResult.value = ''
+  grantingReadLogs.value = true
+  try {
+    const res = await deviceApi.grantAgentReadLogs(route.params.id)
+    grantReadLogsResult.value = res?.message || '授权成功'
+    grantReadLogsSuccess.value = true
+  } catch (e) {
+    grantReadLogsResult.value = e.response?.data?.error || e.message || '授权失败'
+    grantReadLogsSuccess.value = false
+  } finally {
+    grantingReadLogs.value = false
+  }
+}
+
+const runShellCommand = async () => {
+  if (!shellCommand.value.trim()) return
+  shellRunning.value = true
+  shellOutput.value = '执行中...'
+  try {
+    const res = await deviceApi.adbShellRun(route.params.id, shellCommand.value.trim())
+    shellOutput.value = res.output ?? ''
+  } catch (e) {
+    shellOutput.value = '错误：' + (e.response?.data?.error || e.message || '执行失败')
+  } finally {
+    shellRunning.value = false
+  }
+}
 
 const streamTok = () => localStorage.getItem('token') || ''
 
@@ -745,6 +1163,10 @@ const onMainTabChange = (name) => {
   }
   if (name === 'apps') {
     loadApps()
+  }
+  if (name === 'adb') {
+    refreshAdbStatus()
+    if (pairMethod.value === 'qrcode') nextTick(renderPairQrCode)
   }
 }
 

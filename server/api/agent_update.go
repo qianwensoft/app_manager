@@ -99,3 +99,18 @@ func DownloadAgentAPK(c *gin.Context) {
 	}
 	c.FileAttachment(update.FilePath, name)
 }
+
+func DeleteAgentUpdate(c *gin.Context) {
+	id := c.Param("id")
+	var update models.AgentUpdate
+	if err := database.DB.First(&update, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "未找到更新"})
+		return
+	}
+	_ = os.Remove(update.FilePath)
+	if err := database.DB.Delete(&update).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}

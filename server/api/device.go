@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"mime"
 	"net/http"
 	"net/url"
@@ -35,6 +36,34 @@ func randomAgentRequestID() string {
 // serialUsableWithAdb 为 false 时表示扫码占位设备（serial 形如 agent-xxx），不能执行 adb -s。
 func serialUsableWithAdb(serial string) bool {
 	return serial != "" && !strings.HasPrefix(serial, "agent-")
+}
+
+// ensureADBConnected 确保 serial 对应的 adb 连接活跃。
+// 对于无线 ADB（serial 为 ip:port 格式），先执行 adb connect 再检查状态。
+// 返回可用的 serial（可能与入参相同）以及是否需要事后 disconnect。
+func ensureADBConnected(serial string) (activeSerial string, needDisconnect bool, err error) {
+	cli := getADB()
+
+	// USB serial：不含 ":"，直接检查状态
+	if !strings.Contains(serial, ":") {
+		st, e := cli.GetState(serial)
+		if e != nil || st != "device" {
+			return "", false, fmt.Errorf("设备 %s 不在线（state=%s）", serial, st)
+		}
+		return serial, false, nil
+	}
+
+	// 无线 ADB（ip:port）：先 connect，不管当前是否在线
+	parts := strings.SplitN(serial, ":", 2)
+	port, convErr := strconv.Atoi(parts[1])
+	if convErr != nil {
+		return "", false, fmt.Errorf("serial 格式错误: %s", serial)
+	}
+	out, connErr := cli.ConnectTCP(parts[0], port)
+	if connErr != nil || (!strings.Contains(out, "connected") && !strings.Contains(out, "already connected")) {
+		return "", false, fmt.Errorf("adb connect %s 失败: %s", serial, out)
+	}
+	return serial, true, nil
 }
 
 func ListDevices(c *gin.Context) {
@@ -174,6 +203,21 @@ func ConnectDevice(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
+	// 连接成功（含 "already connected"）时更新对应设备状态
+	outLow := strings.ToLower(out)
+	if strings.Contains(outLow, "connected") && !strings.Contains(outLow, "failed") && !strings.Contains(outLow, "cannot") && !strings.Contains(outLow, "error") {
+		serial := fmt.Sprintf("%s:%d", req.IP, req.Port)
+		now := time.Now()
+		database.DB.Model(&models.Device{}).
+			Where("serial = ? OR wireless_adb_serial = ?", serial, serial).
+			Updates(map[string]interface{}{
+				"status":              "online",
+				"last_seen_at":        now,
+				"wireless_adb_serial": serial,
+			})
+	}
+
 	c.JSON(http.StatusOK, gin.H{"message": out})
 }
 
@@ -771,6 +815,309 @@ func GetDeviceGroups(c *gin.Context) {
 	var groups []string
 	database.DB.Model(&models.Device{}).Distinct("group_name").Where("group_name != ''").Pluck("group_name", &groups)
 	c.JSON(http.StatusOK, gin.H{"data": groups})
+}
+
+// AdbConnectByAgentIP 用设备 Agent 心跳上报的 IP + 指定端口，让服务器发起 adb connect。
+// 若请求体包含 ip 字段则优先使用（配对后直接用配对结果的 IP 连接）。
+// 连接成功后将 serial 更新到设备记录，并返回 serial 供前端后续操作。
+func AdbConnectByAgentIP(c *gin.Context) {
+	var req struct {
+		Port int    `json:"port"`
+		IP   string `json:"ip"` // 可选：覆盖 DB 中的 device.IP（如配对后直接传）
+	}
+	_ = c.ShouldBindJSON(&req)
+	if req.Port == 0 {
+		req.Port = 5555
+	}
+
+	device := getDeviceByID(c)
+	if device == nil {
+		return
+	}
+
+	ip := strings.TrimSpace(req.IP)
+	if ip == "" {
+		ip = strings.TrimSpace(device.IP)
+	}
+	if ip == "" {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "设备尚未上报 IP 地址，请确认 Agent 已在线并完成心跳"})
+		return
+	}
+
+	out, err := getADB().ConnectTCP(ip, req.Port)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error(), "output": out})
+		return
+	}
+
+	// adb connect 失败时 exit=0 但输出含 "failed"/"cannot"
+	outLow := strings.ToLower(out)
+	if strings.Contains(outLow, "failed") || strings.Contains(outLow, "cannot") || strings.Contains(outLow, "error") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": out, "ip": ip, "port": req.Port})
+		return
+	}
+
+	// 连接成功：serial = ip:port
+	// 始终更新 wireless_adb_serial（记录最新无线端口）
+	// 仅在无 USB serial 时覆盖主 serial 字段
+	serial := fmt.Sprintf("%s:%d", ip, req.Port)
+	now := time.Now()
+	dbUpdates := map[string]interface{}{
+		"wireless_adb_serial": serial,
+		"status":              "online",
+		"last_seen_at":        now,
+	}
+	if !serialUsableWithAdb(device.Serial) || strings.Contains(device.Serial, ":") {
+		dbUpdates["serial"] = serial
+	}
+	_ = database.DB.Model(&models.Device{}).Where("id = ?", device.ID).Updates(dbUpdates).Error
+
+	logAudit(c, "ADB 无线连接", fmt.Sprintf("设备 %d adb connect %s → %s", device.ID, serial, out), &device.ID)
+	c.JSON(http.StatusOK, gin.H{"message": out, "ip": ip, "port": req.Port, "serial": serial})
+}
+
+// AdbPairByAgentIP 用 Agent 上报的 IP + 配对端口 + 配对码，让服务器发起 adb pair。
+// 适用于 Android 11+ 无线调试「使用配对码配对设备」。
+// 配对成功后还需调用 AdbConnectByAgentIP（connect 端口与 pair 端口不同）完成连接。
+func AdbPairByAgentIP(c *gin.Context) {
+	var req struct {
+		Port int    `json:"port" binding:"required"`
+		Code string `json:"code" binding:"required"`
+		IP   string `json:"ip"` // 可选：QR 码直接携带 IP 时使用，覆盖 DB 中的 device.IP
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少参数：port（配对端口）和 code（6位配对码）均为必填"})
+		return
+	}
+
+	device := getDeviceByID(c)
+	if device == nil {
+		return
+	}
+	ip := strings.TrimSpace(req.IP)
+	if ip == "" {
+		ip = strings.TrimSpace(device.IP)
+	}
+	if ip == "" {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "设备尚未上报 IP 地址，请确认 Agent 已在线并完成心跳"})
+		return
+	}
+
+	out, err := getADB().PairTCP(ip, req.Port, req.Code)
+	clean := cleanPairOutput(out)
+	log.Printf("AdbPairByAgentIP: adb pair %s:%d code=%s → err=%v output=%q", ip, req.Port, req.Code, err, clean)
+	if err != nil {
+		outLow := strings.ToLower(clean)
+		var reason string
+		switch {
+		case strings.Contains(outLow, "protocol fault"), strings.Contains(outLow, "connection refused"), strings.Contains(outLow, "no route"):
+			reason = fmt.Sprintf("无法连接到 %s:%d，请确认设备已开启无线调试，且配对端口填写正确", ip, req.Port)
+		case strings.Contains(outLow, "failed to pair"), strings.Contains(outLow, "bad code"), strings.Contains(outLow, "incorrect"):
+			reason = "配对码不正确，请重新查看手机上显示的6位配对码"
+		default:
+			reason = "配对失败: " + clean
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": reason, "output": clean})
+		return
+	}
+	// exit=0 即成功
+	logAudit(c, "ADB 无线配对", fmt.Sprintf("设备 %d adb pair %s:%d → %s", device.ID, ip, req.Port, clean), &device.ID)
+	c.JSON(http.StatusOK, gin.H{"message": clean, "ip": ip, "port": req.Port})
+}
+
+// GrantAgentReadLogs 通过 ADB 为 Agent 包授予 android.permission.READ_LOGS 权限。
+// 该权限是 signature/privileged 级别，普通安装无法自行申请，只能通过 adb pm grant 授权。
+// 授权后 Agent 才能通过 logcat 命令读取其他 App 的日志。
+//
+// 连接策略（按优先级）：
+//  1. 设备已有真实 ADB serial 且 adb get-state == device → 直接用
+//  2. 仅 Agent 连接 → 用 Agent 心跳上报的 IP 自动执行 adb connect <ip>:5555，
+//     授权完成后自动 disconnect（临时连接，不影响设备记录）。
+func GrantAgentReadLogs(c *gin.Context) {
+	const (
+		agentPkg   = "com.appmanager.agent"
+		permission = "android.permission.READ_LOGS"
+	)
+
+	device := getDeviceByID(c)
+	if device == nil {
+		return
+	}
+
+	adbCli := getADB()
+	dbSerial := strings.TrimSpace(device.Serial)
+	var serial string
+	var needDisconnect bool
+
+	// ── 策略1：DB serial 可用（USB 或 已配对的无线 ip:port）────────────────
+	if serialUsableWithAdb(dbSerial) {
+		s, nd, err := ensureADBConnected(dbSerial)
+		if err == nil {
+			serial = s
+			needDisconnect = nd
+			goto doGrant
+		}
+		log.Printf("GrantAgentReadLogs: serial %s not usable: %v", dbSerial, err)
+	}
+
+	// ── 策略2：用 Agent 上报 IP + 5555 临时连接 ─────────────────────────────
+	{
+		ip := strings.TrimSpace(device.IP)
+		if ip == "" {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"error": "设备 ADB 未在线，且 Agent 未上报 IP；请先在「无线 ADB ▾→第二步」完成连接后再授权",
+			})
+			return
+		}
+		s, nd, err := ensureADBConnected(fmt.Sprintf("%s:5555", ip))
+		if err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"error":  fmt.Sprintf("adb connect %s:5555 失败，请先在「无线 ADB ▾→第二步」输入端口并点连接", ip),
+				"output": err.Error(),
+			})
+			return
+		}
+		serial = s
+		needDisconnect = nd
+	}
+
+doGrant:
+	out, err := adbCli.Shell(serial, "pm", "grant", agentPkg, permission)
+	if needDisconnect {
+		_ = adbCli.Disconnect(serial)
+	}
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "授权失败: " + err.Error(), "output": out})
+		return
+	}
+	logAudit(c, "授权 READ_LOGS", fmt.Sprintf("设备 %d adb pm grant %s %s (serial=%s)", device.ID, agentPkg, permission, serial), &device.ID)
+	c.JSON(http.StatusOK, gin.H{"message": "READ_LOGS 权限授权成功，重启 Agent 后生效", "output": out})
+}
+
+// GetAdbStatus 查询设备 USB 与无线 ADB 连接状态（轻量探测，不执行 reconnect）。
+func GetAdbStatus(c *gin.Context) {
+	device := getDeviceByID(c)
+	if device == nil {
+		return
+	}
+	type Entry struct {
+		Serial string `json:"serial"`
+		State  string `json:"state"` // device / offline / unauthorized / no_device / not_configured
+	}
+	usb := Entry{}
+	wireless := Entry{}
+	cli := getADB()
+
+	// USB serial：不含 ":" 且不是 agent- 前缀
+	if serialUsableWithAdb(device.Serial) && !strings.Contains(device.Serial, ":") {
+		usb.Serial = device.Serial
+		if st, err := cli.GetState(device.Serial); err != nil {
+			usb.State = "no_device"
+		} else {
+			usb.State = strings.TrimSpace(st)
+		}
+	} else {
+		usb.State = "not_configured"
+	}
+
+	// 无线 ADB：先 connect 确保 adb server 有连接记录，再 get-state
+	if device.WirelessAdbSerial != "" {
+		wireless.Serial = device.WirelessAdbSerial
+		// adb server 重启后连接记录会丢失，先 connect 恢复
+		parts := strings.SplitN(device.WirelessAdbSerial, ":", 2)
+		if len(parts) == 2 {
+			if port, convErr := strconv.Atoi(parts[1]); convErr == nil {
+				_, _ = cli.ConnectTCP(parts[0], port)
+			}
+		}
+		if st, err := cli.GetState(device.WirelessAdbSerial); err != nil {
+			wireless.State = "offline"
+		} else {
+			wireless.State = strings.TrimSpace(st)
+		}
+	} else {
+		wireless.State = "not_configured"
+	}
+
+	c.JSON(http.StatusOK, gin.H{"usb": usb, "wireless": wireless})
+}
+
+// AdbWirelessDisconnect 断开无线 ADB 并清除 DB 中的 wireless_adb_serial。
+func AdbWirelessDisconnect(c *gin.Context) {
+	device := getDeviceByID(c)
+	if device == nil {
+		return
+	}
+	serial := device.WirelessAdbSerial
+	if serial == "" && strings.Contains(device.Serial, ":") {
+		serial = device.Serial
+	}
+	if serial == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "设备未配置无线 ADB"})
+		return
+	}
+	_ = getADB().Disconnect(serial)
+	_ = database.DB.Model(&models.Device{}).Where("id = ?", device.ID).Update("wireless_adb_serial", "").Error
+	logAudit(c, "ADB 无线断开", fmt.Sprintf("设备 %d disconnect %s", device.ID, serial), &device.ID)
+	c.JSON(http.StatusOK, gin.H{"message": "已断开", "serial": serial})
+}
+
+// AdbShellRun 通过 ADB 在设备上执行单条 shell 命令（优先 USB，其次无线）。
+func AdbShellRun(c *gin.Context) {
+	var req struct {
+		Command string `json:"command" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	cmd := strings.TrimSpace(req.Command)
+	if cmd == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "命令不能为空"})
+		return
+	}
+	device := getDeviceByID(c)
+	if device == nil {
+		return
+	}
+	// 优先 USB serial，其次无线
+	adbSerial := ""
+	if serialUsableWithAdb(device.Serial) && !strings.Contains(device.Serial, ":") {
+		adbSerial = device.Serial
+	} else if device.WirelessAdbSerial != "" {
+		adbSerial = device.WirelessAdbSerial
+	} else if serialUsableWithAdb(device.Serial) {
+		adbSerial = device.Serial
+	}
+	if adbSerial == "" {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "设备无可用 ADB 连接（USB 或无线）"})
+		return
+	}
+	activeSerial, needDisc, err := ensureADBConnected(adbSerial)
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "ADB 连接失败: " + err.Error()})
+		return
+	}
+	if needDisc {
+		defer getADB().Disconnect(activeSerial)
+	}
+	// 将命令字符串拆分成参数（shell -c 模式以保留管道/重定向等语法）
+	out, _ := getADB().Shell(activeSerial, "sh", "-c", cmd)
+	logAudit(c, "ADB Shell", fmt.Sprintf("设备 %d: %s", device.ID, cmd), &device.ID)
+	c.JSON(http.StatusOK, gin.H{"output": out})
+}
+
+// cleanPairOutput 去掉 adb pair 输出里的 "Enter pairing code:" 提示行，保留实际结果。
+func cleanPairOutput(out string) string {
+	var lines []string
+	for _, line := range strings.Split(out, "\n") {
+		t := strings.TrimSpace(line)
+		if t == "" || strings.HasPrefix(strings.ToLower(t), "enter pairing code") {
+			continue
+		}
+		lines = append(lines, t)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func logAudit(c *gin.Context, action, command string, deviceID *uint) {

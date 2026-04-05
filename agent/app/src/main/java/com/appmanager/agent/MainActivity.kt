@@ -1,10 +1,12 @@
 package com.appmanager.agent
 
+import android.Manifest
 import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
@@ -18,6 +20,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.appmanager.agent.config.AgentConfig
 import com.appmanager.agent.service.AgentService
@@ -58,6 +61,15 @@ class MainActivity : AppCompatActivity() {
         if (result.contents != null) {
             try {
                 val json = JSONObject(result.contents)
+
+                // ── 无线 ADB 引导二维码 ──────────────────────────────────────
+                if (json.optString("type") == "wireless_adb_guide") {
+                    openWirelessDebugSettings()
+                    Toast.makeText(this, "请在「无线调试」中点击「使用配对码配对设备」，然后将端口和配对码填入管理平台", Toast.LENGTH_LONG).show()
+                    return@registerForActivityResult
+                }
+
+                // ── 原有：接入二维码（serverUrl + deviceToken）───────────────
                 val serverUrl = json.getString("serverUrl")
                 val deviceToken = json.getString("deviceToken")
 
@@ -79,6 +91,28 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 Toast.makeText(this, "二维码格式错误", Toast.LENGTH_SHORT).show()
             }
+        }
+    }
+
+    /** 跳转系统「无线调试」设置页（Android 11+）；旧版本降级到开发者选项 */
+    private fun openWirelessDebugSettings() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Android 11+ 尝试直接跳「无线调试」子页（部分厂商支持）
+            val wirelessAdbIntent = Intent("com.android.settings.WIRELESS_DEBUGGING_SETTINGS").apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            try {
+                startActivity(wirelessAdbIntent)
+                return
+            } catch (_: Exception) { }
+        }
+        // 降级：开发者选项主页
+        try {
+            startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            })
+        } catch (_: Exception) {
+            Toast.makeText(this, "请手动进入「开发者选项 → 无线调试」", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -111,6 +145,9 @@ class MainActivity : AppCompatActivity() {
 
         // Request battery optimization exemption
         requestBatteryOptimizationExemption()
+
+        // 首次启动时申请所有运行时权限
+        requestAllRuntimePermissions()
 
         // Auto-start service if configured
         if (config.serverUrl.isNotEmpty() && config.deviceToken.isNotEmpty()) {
@@ -244,6 +281,34 @@ class MainActivity : AppCompatActivity() {
                 }
                 startActivity(intent)
             }
+        }
+    }
+
+    private fun requestAllRuntimePermissions() {
+        val perms = buildList {
+            add(Manifest.permission.RECORD_AUDIO)
+            add(Manifest.permission.CAMERA)
+            add(Manifest.permission.ACCESS_FINE_LOCATION)
+            add(Manifest.permission.READ_CONTACTS)
+            add(Manifest.permission.READ_PHONE_STATE)
+            add(Manifest.permission.READ_SMS)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                add(Manifest.permission.READ_MEDIA_IMAGES)
+                add(Manifest.permission.READ_MEDIA_AUDIO)
+                add(Manifest.permission.READ_MEDIA_VIDEO)
+                add(Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+                add(Manifest.permission.READ_EXTERNAL_STORAGE)
+                if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+                    add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                }
+            }
+        }
+        val denied = perms.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (denied.isNotEmpty()) {
+            ActivityCompat.requestPermissions(this, denied.toTypedArray(), 300)
         }
     }
 }

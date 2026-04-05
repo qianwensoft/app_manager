@@ -9,6 +9,9 @@
   "dependencies": {
     "@stomp/stompjs": "^7.3.0",
     "@xterm/addon-fit": "^0.10.0",
+    "@yume-chan/adb": "^2.5.1",
+    "@yume-chan/adb-credential-web": "^2.1.0",
+    "@yume-chan/adb-daemon-webusb": "^2.3.2",
     "axios": "^1.6.5",
     "element-plus": "^2.5.4",
     "pinia": "^2.1.7",

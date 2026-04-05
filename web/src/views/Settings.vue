@@ -43,9 +43,14 @@
         <el-table-column prop="upload_at" label="上传时间" width="170">
           <template #default="{ row }">{{ new Date(row.upload_at).toLocaleString() }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="120" fixed="right">
+        <el-table-column label="操作" width="160" fixed="right">
           <template #default="{ row }">
             <el-button size="small" @click="downloadAPK(row.id)">下载</el-button>
+            <el-popconfirm title="确认删除该版本？" @confirm="deleteAPK(row.id)">
+              <template #reference>
+                <el-button size="small" type="danger">删除</el-button>
+              </template>
+            </el-popconfirm>
           </template>
         </el-table-column>
       </el-table>
@@ -100,7 +105,7 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getHeartbeatSettings, updateHeartbeatSettings } from '@/api/settings'
-import { uploadAgentAPK, listAgentUpdates, downloadAgentAPK } from '@/api/agentUpdate'
+import { uploadAgentAPK, listAgentUpdates, downloadAgentAPK, deleteAgentUpdate } from '@/api/agentUpdate'
 import { getRegisterSetting, updateRegisterSetting } from '@/api/user'
 
 const heartbeat = ref({ interval: 30, timeout: 90 })
@@ -173,6 +178,16 @@ const submitUpload = async () => {
 
 const downloadAPK = (id) => {
   window.open(downloadAgentAPK(id))
+}
+
+const deleteAPK = async (id) => {
+  try {
+    await deleteAgentUpdate(id)
+    ElMessage.success('删除成功')
+    loadUpdates()
+  } catch {
+    ElMessage.error('删除失败')
+  }
 }
 </script>
 

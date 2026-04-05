@@ -17,6 +17,7 @@
       <div style="display:flex;gap:12px;margin-bottom:16px;align-items:center">
         <el-button type="primary" @click="scan" :loading="scanning">扫描设备</el-button>
         <el-button @click="showAddDialog = true">手动添加</el-button>
+        <AdbBridgeScan @registered="refresh" />
         <el-button :loading="refreshing" @click="refresh" :icon="RefreshIcon">刷新</el-button>
         <div style="flex:1"></div>
         <el-radio-group v-model="viewMode" size="small">
@@ -136,6 +137,7 @@ import { Refresh as RefreshIcon } from '@element-plus/icons-vue'
 import * as deviceApi from '@/api/device'
 import { useEventListenerStore } from '@/stores/eventListeners'
 import NetworkCell from '@/components/NetworkCell.vue'
+import AdbBridgeScan from '@/components/AdbBridgeScan.vue'
 
 const DEVICES_VIEW_MODE_KEY = 'app-manager-devices-view-mode'
 

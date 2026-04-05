@@ -92,6 +92,7 @@ class AgentService : LifecycleService() {
     private lateinit var heartbeatManager: HeartbeatManager
     private lateinit var deviceInfoCollector: DeviceInfoCollector
     private var screenCaptureManager: ScreenCaptureManager? = null
+    private var cameraStreamManager: CameraStreamManager? = null
     private var shellManager: ShellManager? = null
     private var logcatManager: LogcatManager? = null
     private var deviceToken: String = ""
@@ -197,6 +198,7 @@ class AgentService : LifecycleService() {
         if (::heartbeatManager.isInitialized) heartbeatManager.stop()
         if (::deviceInfoCollector.isInitialized) deviceInfoCollector.stop()
         screenCaptureManager?.stop()
+        cameraStreamManager?.stopAll()
         shellManager?.stop()
         logcatManager?.stop()
         CustomEventBroadcastHelper.stop(this)
@@ -257,6 +259,26 @@ class AgentService : LifecycleService() {
     fun stopScreenCapture() {
         screenCaptureManager?.stop()
         screenCaptureManager = null
+    }
+
+    fun startCamera(cameraId: String) {
+        if (cameraStreamManager == null) {
+            cameraStreamManager = CameraStreamManager(this, webSocket)
+        }
+        cameraStreamManager?.startCamera(cameraId)
+    }
+
+    fun stopCamera(cameraId: String) {
+        cameraStreamManager?.stopCamera(cameraId)
+    }
+
+    fun handleCameraWebRTCAnswer(cameraId: String, sdp: String) {
+        cameraStreamManager?.handleAnswer(cameraId, sdp)
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    fun handleCameraWebRTCIce(cameraId: String, candidate: Map<String, Any>) {
+        cameraStreamManager?.handleRemoteIce(cameraId, candidate)
     }
 
     fun handleWebRTCSignal(data: Map<String, Any>) {

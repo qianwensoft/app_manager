@@ -1,9 +1,7 @@
 import { useAuthStore } from '@/stores/auth'
 
-/** 开发默认与页面同源（走 Vite /ws 代理）；代理异常时在 .env 设 VITE_WS_BASE=ws://本机IP:8080 直连 Go */
-export const WS_BASE =
-  import.meta.env.VITE_WS_BASE ||
-  `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`
+/** 始终走 Vite /ws 代理（与页面同源），生产环境与后端同源无需代理 */
+export const WS_BASE = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`
 
 export class WSClient {
   constructor(path, { onOpen, onMessage, onClose, onError, reconnect = true } = {}) {

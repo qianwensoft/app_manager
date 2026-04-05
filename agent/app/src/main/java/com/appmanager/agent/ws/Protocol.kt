@@ -9,7 +9,11 @@ data class Message(
     @SerializedName("commandId") val commandId: String? = null,
     val payload: Map<String, Any>? = null,
     val data: Any? = null,
-    val deviceId: String? = null
+    val deviceId: String? = null,
+    val camera: String? = null,
+    val sdp: String? = null,
+    val candidate: Map<String, Any>? = null,
+    val role: String? = null
 )
 
 // ─── 上行：Agent → Server ────────────────────────────────────────────────────
@@ -57,7 +61,9 @@ data class DeviceInfoData(
     val resolution: String = "",
     @SerializedName("allow_remote_screen") val allowRemoteScreen: Boolean = false,
     /** Agent APK 版本，供服务端设备档案展示 */
-    @SerializedName("agent_version") val agentVersion: String = ""
+    @SerializedName("agent_version") val agentVersion: String = "",
+    /** 手机硬件序列号（Build.SERIAL），服务端用于跨重装唯一识别设备 */
+    @SerializedName("android_serial") val androidSerial: String = ""
 )
 
 data class ScreenFrameMessage(
@@ -115,6 +121,8 @@ object CommandAction {
     const val STOP_RECORDING  = "stop_recording"
     const val START_AUDIO_RECORDING = "start_audio_recording"
     const val STOP_AUDIO_RECORDING = "stop_audio_recording"
+    const val START_CAMERA  = "start_camera"
+    const val STOP_CAMERA   = "stop_camera"
     const val INSTALL_APP    = "install_app"
     const val UNINSTALL_APP  = "uninstall_app"
     const val START_APP      = "start_app"

@@ -7,6 +7,9 @@ import (
 )
 
 func SetupRouter() *gin.Engine {
+	// 启动无线 ADB 保活（每 30 秒 reconnect，防止 adb server 重启后连接丢失）
+	StartAdbKeepalive()
+
 	r := gin.Default()
 
 	// CORS
@@ -45,6 +48,10 @@ func SetupRouter() *gin.Engine {
 	// 免登录：文件上传链接
 	r.GET("/api/upload/:token", GetUploadLinkInfo)
 	r.POST("/api/upload/:token", UploadFileByLink)
+
+	// 免登录：Agent APK 下载（扫码下载无需登录）
+	r.GET("/api/agent-updates/latest", GetLatestAgentUpdate)
+	r.GET("/api/agent-updates/:id/download", DownloadAgentAPK)
 
 	// 认证
 	a := r.Group("/api/auth")
@@ -101,6 +108,12 @@ func SetupRouter() *gin.Engine {
 		op.GET("/files", AdbListFiles)
 		op.POST("/recording/start", StartRecording)
 		op.POST("/recording/stop", StopRecording)
+		op.POST("/grant-read-logs", GrantAgentReadLogs)
+		op.POST("/connect-by-ip", AdbConnectByAgentIP)
+		op.POST("/pair-by-ip", AdbPairByAgentIP)
+		op.GET("/status", GetAdbStatus)
+		op.POST("/disconnect", AdbWirelessDisconnect)
+		op.POST("/shell", AdbShellRun)
 	}
 
 	// APK
@@ -144,13 +157,12 @@ func SetupRouter() *gin.Engine {
 		users.DELETE("/:id", DeleteUser)
 	}
 
-	// Agent 更新管理
+	// Agent 更新管理（需登录：上传、列表、删除）
 	agentUpdate := r.Group("/api/agent-updates", auth.AuthMiddleware())
 	{
 		agentUpdate.POST("", auth.RequireRole("admin"), UploadAgentAPK)
 		agentUpdate.GET("", ListAgentUpdates)
-		agentUpdate.GET("/latest", GetLatestAgentUpdate)
-		agentUpdate.GET("/:id/download", DownloadAgentAPK)
+		agentUpdate.DELETE("/:id", auth.RequireRole("admin"), DeleteAgentUpdate)
 	}
 
 	// 录屏管理
@@ -230,6 +242,7 @@ func SetupRouter() *gin.Engine {
 	r.GET("/ws/logcat/:deviceId", auth.AuthMiddleware(), LogcatWS)
 	r.GET("/ws/agent/:deviceId", AgentWS)
 	r.GET("/ws/agent-fs/:deviceId", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"), AgentFsWS)
+	r.GET("/ws/camera/:deviceId", auth.AuthMiddleware(), CameraWS)
 
 	// 对外开放 API
 	open := r.Group("/api/open/v1", auth.APIKeyMiddleware())

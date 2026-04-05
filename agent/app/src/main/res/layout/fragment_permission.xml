@@ -1,45 +1,82 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:padding="16dp">
+    android:layout_height="match_parent">
 
-    <TextView
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="运行时权限"
-        android:textSize="16sp"
-        android:textStyle="bold"
-        android:paddingBottom="8dp" />
+        android:orientation="vertical"
+        android:padding="16dp">
 
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/recyclerView"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1" />
+        <!-- 一键申请全部 -->
+        <Button
+            android:id="@+id/btnRequestAll"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="一键申请所有权限"
+            android:layout_marginBottom="16dp"
+            style="@style/Widget.MaterialComponents.Button" />
 
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="特殊权限"
-        android:textSize="16sp"
-        android:textStyle="bold"
-        android:paddingTop="16dp"
-        android:paddingBottom="8dp" />
+        <!-- ── 运行时权限 ── -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="运行时权限"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:paddingBottom="8dp" />
 
-    <include
-        android:id="@+id/cardAccessibility"
-        layout="@layout/item_special_permission" />
+        <LinearLayout
+            android:id="@+id/layoutRuntimePerms"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
 
-    <include
-        android:id="@+id/cardOverlay"
-        layout="@layout/item_special_permission"
-        android:layout_marginTop="8dp" />
+        <!-- ── 特殊权限 ── -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="特殊权限"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:paddingTop="16dp"
+            android:paddingBottom="8dp" />
 
-    <include
-        android:id="@+id/cardAutostart"
-        layout="@layout/item_special_permission"
-        android:layout_marginTop="8dp" />
+        <include
+            android:id="@+id/cardAccessibility"
+            layout="@layout/item_special_permission" />
 
-</LinearLayout>
+        <include
+            android:id="@+id/cardOverlay"
+            layout="@layout/item_special_permission"
+            android:layout_marginTop="8dp" />
+
+        <include
+            android:id="@+id/cardInstallUnknown"
+            layout="@layout/item_special_permission"
+            android:layout_marginTop="8dp" />
+
+        <include
+            android:id="@+id/cardManageStorage"
+            layout="@layout/item_special_permission"
+            android:layout_marginTop="8dp" />
+
+        <include
+            android:id="@+id/cardAutostart"
+            layout="@layout/item_special_permission"
+            android:layout_marginTop="8dp" />
+
+        <include
+            android:id="@+id/cardWirelessAdb"
+            layout="@layout/item_special_permission"
+            android:layout_marginTop="8dp" />
+
+        <include
+            android:id="@+id/cardReadLogs"
+            layout="@layout/item_special_permission"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="16dp" />
+
+    </LinearLayout>
+</ScrollView>

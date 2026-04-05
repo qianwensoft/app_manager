@@ -48,6 +48,10 @@ type Device struct {
 	AllowRemoteScreen bool `gorm:"default:false" json:"allow_remote_screen"`
 	// Agent 上报的已安装应用（第三方），JSON 数组，供 Web 在无 ADB 时展示
 	AgentInstalledAppsJSON string `gorm:"column:agent_installed_apps_json;type:text" json:"-"`
+	// Agent 上报的手机硬件序列号（Build.SERIAL），用于跨重装识别同一台设备
+	AndroidSerial string `gorm:"column:android_serial;size:64;index" json:"android_serial"`
+	// 无线 ADB 连接地址（ip:port），独立于 USB serial，每次 connect-by-ip 成功后更新
+	WirelessAdbSerial string `gorm:"column:wireless_adb_serial;size:64" json:"wireless_adb_serial"`
 	// 指针：MySQL 在 NO_ZERO_DATE 下禁止 '0000-00-00'，未上线/未心跳时为 NULL
 	LastSeenAt     *time.Time `json:"last_seen_at"`
 	CreatedAt      time.Time  `json:"created_at"`

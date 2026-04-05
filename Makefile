@@ -5,6 +5,7 @@ ROOT       := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 WEB        := $(ROOT)/web
 SERVER     := $(ROOT)/server
 AGENT      := $(ROOT)/agent
+BRIDGE     := $(ROOT)/bridge
 BIN_DIR    := $(ROOT)/bin
 DIST_DIR   := $(ROOT)/dist
 RELEASE_DIR := $(DIST_DIR)/release
@@ -24,7 +25,8 @@ SERVER_BIN := $(BIN_DIR)/app-manager
 .PHONY: help all clean \
 	deps-web web web-build \
 	server server-only server-linux-amd64 server-linux-arm64 server-darwin-amd64 server-darwin-arm64 server-windows-amd64 \
-	agent agent-debug agent-release install-agent \
+	agent agent-debug agent-release agent-release-build install-agent bump-agent-version \
+	bridge bridge-linux-amd64 bridge-linux-arm64 bridge-darwin-amd64 bridge-darwin-arm64 bridge-windows-amd64 bridge-all \
 	release release-linux release-darwin release-windows release-all release-zip release-tar \
 	check test fmt
 
@@ -36,8 +38,12 @@ help:
 	@echo "  make server           先 web 再编译 Go 服务（需 web/dist 已存在）"
 	@echo "  make server-only      仅编译 Go（不检查 web）"
 	@echo "  make agent / agent-debug  编译 Agent 调试 APK"
-	@echo "  make agent-release    编译 Agent release APK（已签名）"
-	@echo "  make install-agent    assembleDebug 并 adb installDebug"
+	@echo "  make agent-release    自动检测 agent 提交→升级版本→编译 release APK"
+	@echo "  make agent-release-build  仅编译 release APK（跳过版本升级）"
+	@echo "  make bump-agent-version   仅升级 agent 版本号（不构建）"
+	@echo "    AGENT_VERSION=x.y.z     直接指定版本名"
+	@echo "    AGENT_CODE=N            直接指定 versionCode"
+	@echo "    FORCE=1                 强制升级（无论是否有 agent 提交）"
 	@echo "  make release          生成 Linux 发布包（默认）"
 	@echo "  make release-linux    生成 Linux 发布包 + systemd 服务"
 	@echo "  make release-darwin   生成 macOS 发布包 + launchd 服务"
@@ -90,13 +96,51 @@ server-darwin-arm64: web $(BIN_DIR)
 server-windows-amd64: web $(BIN_DIR)
 	cd $(SERVER) && GOOS=windows GOARCH=amd64 $(GO) build -trimpath -ldflags "-s -w" -o $(BIN_DIR)/app-manager-windows-amd64.exe .
 
+# ─── 本地 ADB Bridge ────────────────────────────────────────────────────────
+
+bridge: $(BIN_DIR)
+	cd $(BRIDGE) && $(GO) build -trimpath -ldflags "-s -w" -o $(BIN_DIR)/adb-bridge .
+
+bridge-linux-amd64: $(BIN_DIR)
+	cd $(BRIDGE) && GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags "-s -w" -o $(BIN_DIR)/adb-bridge-linux-amd64 .
+
+bridge-linux-arm64: $(BIN_DIR)
+	cd $(BRIDGE) && GOOS=linux GOARCH=arm64 $(GO) build -trimpath -ldflags "-s -w" -o $(BIN_DIR)/adb-bridge-linux-arm64 .
+
+bridge-darwin-amd64: $(BIN_DIR)
+	cd $(BRIDGE) && GOOS=darwin GOARCH=amd64 $(GO) build -trimpath -ldflags "-s -w" -o $(BIN_DIR)/adb-bridge-darwin-amd64 .
+
+bridge-darwin-arm64: $(BIN_DIR)
+	cd $(BRIDGE) && GOOS=darwin GOARCH=arm64 $(GO) build -trimpath -ldflags "-s -w" -o $(BIN_DIR)/adb-bridge-darwin-arm64 .
+
+bridge-windows-amd64: $(BIN_DIR)
+	cd $(BRIDGE) && GOOS=windows GOARCH=amd64 $(GO) build -trimpath -ldflags "-s -w" -o $(BIN_DIR)/adb-bridge-windows-amd64.exe .
+
+bridge-all: bridge-linux-amd64 bridge-linux-arm64 bridge-darwin-amd64 bridge-darwin-arm64 bridge-windows-amd64
+
 # ─── Android Agent ─────────────────────────────────────────────────────────
 
 agent agent-debug:
 	cd $(AGENT) && $(GRADLEW) :app:assembleDebug --no-daemon
 
-agent-release:
+# 仅构建 release APK（不自动 bump 版本，供调试用）
+agent-release-build:
 	cd $(AGENT) && $(GRADLEW) :app:assembleRelease --no-daemon
+
+# 检查 git 提交，必要时升级 agent 版本号，再构建 release APK
+agent-release:
+	@$(ROOT)/scripts/bump-agent-version.sh; \
+	  STATUS=$$?; \
+	  if [ $$STATUS -ne 0 ] && [ $$STATUS -ne 2 ]; then exit $$STATUS; fi
+	cd $(AGENT) && $(GRADLEW) :app:assembleRelease --no-daemon
+
+# 独立目标：仅执行版本号检查与升级（不构建）
+# 支持参数：make bump-agent-version AGENT_VERSION=2.1.0 AGENT_CODE=42
+bump-agent-version:
+	@$(ROOT)/scripts/bump-agent-version.sh \
+	  $(if $(AGENT_VERSION),--version $(AGENT_VERSION)) \
+	  $(if $(AGENT_CODE),--code $(AGENT_CODE)) \
+	  $(if $(FORCE),--force)
 
 install-agent:
 	cd $(AGENT) && $(GRADLEW) :app:installDebug --no-daemon

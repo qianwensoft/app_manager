@@ -19,7 +19,8 @@ import (
 )
 
 type SetupStatusResponse struct {
-	Required bool `json:"required"`
+	Required      bool `json:"required"`
+	AllowRegister bool `json:"allow_register"`
 }
 
 type TestDbRequest struct {
@@ -43,12 +44,12 @@ type CompleteSetupRequest struct {
 func GetSetupStatus(c *gin.Context) {
 	// 检查标识文件
 	if _, err := os.Stat(".installed"); err == nil {
-		c.JSON(200, SetupStatusResponse{Required: false})
+		c.JSON(200, SetupStatusResponse{Required: false, AllowRegister: config.C.Server.AllowRegister})
 		return
 	}
 	// 检查配置文件
 	_, err := os.Stat("config.yaml")
-	c.JSON(200, SetupStatusResponse{Required: os.IsNotExist(err)})
+	c.JSON(200, SetupStatusResponse{Required: os.IsNotExist(err), AllowRegister: config.C.Server.AllowRegister})
 }
 
 func TestDbConnection(c *gin.Context) {

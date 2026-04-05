@@ -101,6 +101,7 @@ fun collectDeviceInfoData(context: Context): DeviceInfoData {
         groupName = config.groupName,
         resolution = resolution,
         allowRemoteScreen = config.allowRemoteScreen,
-        agentVersion = AppVersions.displayLabel(context)
+        agentVersion = AppVersions.displayLabel(context),
+        androidSerial = try { android.os.Build.SERIAL } catch (_: Exception) { "" }
     )
 }

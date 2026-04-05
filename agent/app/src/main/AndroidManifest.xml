@@ -32,6 +32,9 @@
     <!-- 硬件信息 -->
     <uses-permission android:name="android.permission.BATTERY_STATS" />
 
+    <!-- Logcat 读取（signature/privileged 权限，需通过 adb pm grant 授权） -->
+    <uses-permission android:name="android.permission.READ_LOGS" />
+
     <!-- 悬浮窗 -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 

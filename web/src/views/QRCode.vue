@@ -91,20 +91,33 @@ function regenerate() { generateQRCode() }
 
 // 下载 Agent
 const downloadQrCanvas = ref(null)
+const latestApkId = ref(null)
 async function renderDownloadQR() {
   try {
     const res = await http.get('/agent-updates/latest')
-    const id = res.data?.data?.id
+    const id = res.data?.id
     if (!id) return
+    latestApkId.value = id
     const url = `${window.location.origin}/api/agent-updates/${id}/download`
     await QRCode.toCanvas(downloadQrCanvas.value, url, { width: 200, margin: 2 })
-  } catch {}
+  } catch {
+    // 未上传 APK 时不显示二维码，属正常状态
+  }
 }
 function downloadLatest() {
+  if (latestApkId.value) {
+    window.open(`/api/agent-updates/${latestApkId.value}/download`)
+    return
+  }
   http.get('/agent-updates/latest').then(res => {
-    const id = res.data?.data?.id
-    if (id) window.open(`/api/agent-updates/${id}/download`)
-  })
+    const id = res.data?.id
+    if (id) {
+      latestApkId.value = id
+      window.open(`/api/agent-updates/${id}/download`)
+    } else {
+      ElMessage.warning('暂无可下载的 Agent APK，请先上传')
+    }
+  }).catch(() => ElMessage.error('获取 APK 信息失败'))
 }
 
 // 上传链接
@@ -157,7 +170,8 @@ function formatDate(d) {
   return new Date(d).toLocaleString()
 }
 
-onMounted(() => {
+onMounted(async () => {
+  await nextTick()
   generateQRCode()
   renderDownloadQR()
   loadLinks()

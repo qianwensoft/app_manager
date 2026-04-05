@@ -29,6 +29,8 @@ func SyncDeviceStatus(deviceID string, connected bool) {
 	if connected {
 		updates["status"] = "online"
 		updates["last_seen_at"] = time.Now()
+	} else {
+		updates["status"] = "offline"
 	}
 	result := DeviceScope(deviceID).Updates(updates)
 	if result.Error != nil {
@@ -37,7 +39,7 @@ func SyncDeviceStatus(deviceID string, connected bool) {
 	}
 	// 扫码 token 首次上线：库中尚无对应行时自动建一条（serial 占位，避免与 id 比较混用）
 	if connected && result.RowsAffected == 0 && !isNumericID(deviceID) {
-		if err := ensureAgentDevice(deviceID); err != nil {
+		if err := ensureAgentDevice(deviceID, ""); err != nil {
 			log.Printf("Failed to auto-register agent device [%s]: %v", deviceID, err)
 			return
 		}
@@ -48,13 +50,33 @@ func SyncDeviceStatus(deviceID string, connected bool) {
 }
 
 // ensureAgentDevice 保证存在 agent_token 对应的设备行（扫码 token 首次上报）。
-func ensureAgentDevice(deviceKey string) error {
+// 若提供了 androidSerial，先按 android_serial 查找同一台物理设备（重装 App 场景），
+// 找到则更新其 agent_token，避免产生重复设备记录。
+func ensureAgentDevice(deviceKey, androidSerial string) error {
 	if isNumericID(deviceKey) {
 		return nil
 	}
+
+	// 1. 先查 android_serial 是否已有记录（重装 App 场景）
+	if androidSerial != "" && androidSerial != "unknown" {
+		var existing models.Device
+		err := database.DB.Where("android_serial = ?", androidSerial).First(&existing).Error
+		if err == nil && existing.ID > 0 {
+			// 找到同一台物理设备，更新 agent_token（不更改 serial 等其他字段）
+			now := time.Now()
+			return database.DB.Model(&existing).Updates(map[string]interface{}{
+				"agent_token":    deviceKey,
+				"serial":         "agent-" + deviceKey,
+				"agent_connected": true,
+				"status":          "online",
+				"last_seen_at":    now,
+			}).Error
+		}
+	}
+
+	// 2. 没有找到同一台物理设备，按 agent_token 首次创建
 	var d models.Device
 	now := time.Now()
-	// MySQL NO_ZERO_DATE：不得写入 time.Time 零值，否则会报 '0000-00-00'
 	return database.DB.Where("agent_token = ?", deviceKey).FirstOrCreate(&d, models.Device{
 		Serial:     "agent-" + deviceKey,
 		Name:       "Agent 设备",
@@ -151,13 +173,21 @@ func HandleHeartbeat(deviceID string, info map[string]interface{}) {
 	if av, ok := strFromInfo(info["agent_version"]); ok && av != "" {
 		updates["agent_version"] = av
 	}
+	// 手机硬件序列号（Build.SERIAL），作为物理设备唯一标识，写入专用字段用于跨重装识别
+	androidSerial := ""
+	if as, ok := strFromInfo(info["android_serial"]); ok && as != "" && as != "unknown" {
+		androidSerial = as
+		updates["android_serial"] = as
+	}
+
 	result := DeviceScope(deviceID).Updates(updates)
 	if result.Error != nil {
 		log.Printf("HandleHeartbeat [%s]: %v", deviceID, result.Error)
 		return
 	}
 	if result.RowsAffected == 0 && !isNumericID(deviceID) {
-		if err := ensureAgentDevice(deviceID); err != nil {
+		// 传入 androidSerial，支持重装 App 后按物理设备合并记录
+		if err := ensureAgentDevice(deviceID, androidSerial); err != nil {
 			log.Printf("HandleHeartbeat ensureAgentDevice [%s]: %v", deviceID, err)
 			return
 		}
@@ -179,3 +209,4 @@ func HandleHeartbeat(deviceID string, info map[string]interface{}) {
 		PublishDeviceProfileUpdated(dbID)
 	}
 }
+

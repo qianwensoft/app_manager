@@ -77,6 +77,25 @@ func (c *Client) ConnectTCP(ip string, port int) (string, error) {
 	return c.Exec("connect", fmt.Sprintf("%s:%d", ip, port))
 }
 
+// PairTCP 使用 Android 11+ 无线调试配对码与设备配对。
+// adb pair HOST:PORT CODE  — 三参数直接传码，exit=0 表示成功，exit!=0 表示失败。
+// 失败时输出含 "Failed to pair"（码错）或 "protocol fault"（连不上）。
+func (c *Client) PairTCP(ip string, port int, code string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	addr := fmt.Sprintf("%s:%d", ip, port)
+	cmd := exec.CommandContext(ctx, c.adbPath, "pair", addr, code)
+
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+
+	err := cmd.Run()
+	result := strings.TrimSpace(out.String())
+	return result, err
+}
+
 func (c *Client) Disconnect(serial string) error {
 	_, err := c.Exec("disconnect", serial)
 	return err

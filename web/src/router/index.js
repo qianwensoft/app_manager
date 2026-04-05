@@ -4,7 +4,8 @@ import { getSetupStatus } from '@/api/setup'
 
 const routes = [
   { path: '/setup', name: 'Setup', meta: { requiresAuth: false }, component: () => import('@/views/Setup.vue') },
-  { path: '/login', component: () => import('@/views/Login.vue') },
+  { path: '/login', name: 'Login', meta: { requiresAuth: false }, component: () => import('@/views/Login.vue') },
+  { path: '/register', name: 'Register', meta: { requiresAuth: false }, component: () => import('@/views/Register.vue') },
   { path: '/upload/:token', name: 'UploadPage', meta: { requiresAuth: false }, component: () => import('@/views/UploadPage.vue') },
   {
     path: '/share/screen',
@@ -44,6 +45,16 @@ const routes = [
 const router = createRouter({ history: createWebHistory(), routes })
 
 router.beforeEach(async (to, _, next) => {
+  // requiresAuth 明确为 false 的路由（登录/注册/安装/分享）直接放行，但安装向导仍需检测
+  if (to.meta.requiresAuth === false && to.path !== '/setup') {
+    const auth = useAuthStore()
+    // 已登录时访问 /login 或 /register，跳转到首页
+    if ((to.path === '/login' || to.path === '/register') && auth.token) {
+      return next('/')
+    }
+    return next()
+  }
+
   // 检查安装状态
   if (to.path !== '/setup') {
     try {

