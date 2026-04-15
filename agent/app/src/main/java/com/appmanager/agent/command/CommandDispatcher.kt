@@ -3,6 +3,7 @@ package com.appmanager.agent.command
 import android.util.Log
 import com.appmanager.agent.DeviceProfileSync
 import com.appmanager.agent.service.AgentService
+import com.appmanager.agent.util.OutboundMessagePresenter
 import com.appmanager.agent.ws.CommandAction
 import com.appmanager.agent.ws.CommandResultMessage
 import com.appmanager.agent.ws.Message
@@ -175,6 +176,32 @@ object CommandDispatcher {
                     CommandAction.STOP_CUSTOM_EVENT_LISTEN -> {
                         com.appmanager.agent.util.CustomEventBroadcastHelper.stop(service)
                         Log.i(TAG, "Custom event listen stopped")
+                    }
+                    CommandAction.OPEN_URL -> IntentCommandHandler.openUrl(msg, service)
+                    CommandAction.BROADCAST_INTENT -> IntentCommandHandler.broadcastIntent(msg, service)
+                    CommandAction.SHOW_DEVICE_MESSAGE -> {
+                        val d = msg.data as? Map<*, *>
+                        if (d == null) {
+                            Log.w(TAG, "show_device_message missing data")
+                            sendResult(service, msg.commandId, false, "missing data")
+                        } else {
+                            val title = (d["title"] as? String)?.trim()?.takeIf { it.isNotEmpty() } ?: "通知"
+                            val body = listOfNotNull(
+                                d["body"] as? String,
+                                d["text"] as? String,
+                                d["message"] as? String
+                            ).map { it.trim() }.firstOrNull { it.isNotEmpty() } ?: ""
+                            if (body.isEmpty()) {
+                                sendResult(service, msg.commandId, false, "empty body")
+                            } else {
+                                val dur = when (val v = d["duration_ms"]) {
+                                    is Number -> v.toInt()
+                                    else -> 8000
+                                }
+                                OutboundMessagePresenter.show(service, title, body, dur)
+                                sendResult(service, msg.commandId, true, "")
+                            }
+                        }
                     }
                     else -> Log.w(TAG, "Unknown command action: ${msg.action}")
                 }

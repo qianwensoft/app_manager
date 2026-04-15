@@ -56,7 +56,8 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:launchMode="singleTop">
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.AppManagerMain">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -70,6 +71,31 @@
             android:name=".ui.DeviceInfoActivity"
             android:exported="false"
             android:label="设备信息" />
+
+        <activity
+            android:name=".ui.SettingsActivity"
+            android:exported="false"
+            android:label="@string/main_tile_settings"
+            android:theme="@style/Theme.AppManagerMain"
+            android:parentActivityName=".MainActivity" />
+
+        <activity
+            android:name=".ui.CatalogListActivity"
+            android:exported="false"
+            android:theme="@style/Theme.AppManagerMain"
+            android:parentActivityName=".MainActivity" />
+
+        <activity
+            android:name=".ui.DeviceListenStateActivity"
+            android:exported="false"
+            android:label="@string/main_tile_listen_state"
+            android:theme="@style/Theme.AppManagerMain"
+            android:parentActivityName=".MainActivity" />
+
+        <activity
+            android:name=".ui.InAppWebActivity"
+            android:exported="false"
+            android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
 
         <service
             android:name=".service.AgentService"
