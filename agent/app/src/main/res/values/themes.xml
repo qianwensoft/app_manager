@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 避免 Theme.AppManager.Main 被解析为缺少父主题 Theme.AppManager -->
+    <style name="Theme.AppManagerMain" parent="Theme.MaterialComponents.Light.NoActionBar">
+        <item name="colorPrimary">@color/agent_primary</item>
+        <item name="colorPrimaryVariant">@color/agent_primary_dark</item>
+        <item name="colorOnPrimary">@android:color/white</item>
+        <item name="colorSecondary">@color/agent_secondary</item>
+        <item name="android:statusBarColor">@color/agent_primary_dark</item>
+        <item name="android:navigationBarColor">@color/agent_surface</item>
+        <item name="android:windowBackground">@color/agent_background</item>
+    </style>
+</resources>
