@@ -3,4 +3,16 @@
     <color name="colorPrimary">#1976D2</color>
     <color name="colorPrimaryDark">#1565C0</color>
     <color name="colorAccent">#FF4081</color>
+    <!-- 首页与 Material 主题 -->
+    <color name="agent_primary">#1E40AF</color>
+    <color name="agent_primary_dark">#1E3A5F</color>
+    <color name="agent_secondary">#3B82F6</color>
+    <color name="agent_background">#F1F5F9</color>
+    <color name="agent_surface">#FFFFFF</color>
+    <color name="agent_text_secondary">#64748B</color>
+    <color name="agent_text_primary">#0F172A</color>
+    <color name="agent_divider">#E2E8F0</color>
+    <color name="agent_tile_icon_tint">#3B82F6</color>
+    <color name="agent_placeholder">#CBD5E1</color>
 </resources>
+

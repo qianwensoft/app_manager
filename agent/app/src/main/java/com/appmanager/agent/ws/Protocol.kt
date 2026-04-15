@@ -157,4 +157,13 @@ object CommandAction {
     const val START_CUSTOM_EVENT_LISTEN = "start_custom_event_listen"
     /** 停止自定义事件监听 */
     const val STOP_CUSTOM_EVENT_LISTEN = "stop_custom_event_listen"
+
+    /** 打开网页（ACTION_VIEW） */
+    const val OPEN_URL = "open_url"
+
+    /** 发送广播 Intent：data.action、data.extras、可选 data.package */
+    const val BROADCAST_INTENT = "broadcast_intent"
+
+    /** 出站连接器「消息」步骤：data.title、data.body（或 text/message）、data.duration_ms */
+    const val SHOW_DEVICE_MESSAGE = "show_device_message"
 }
