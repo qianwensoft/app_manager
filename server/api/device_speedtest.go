@@ -2,8 +2,6 @@ package api
 
 import (
 	"app-manager/agent"
-	"app-manager/database"
-	"app-manager/models"
 	"crypto/rand"
 	"encoding/hex"
 	"io"
@@ -28,9 +26,7 @@ func AgentSpeedTestDownload(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing X-Device-Token"})
 		return
 	}
-	var cnt int64
-	database.DB.Model(&models.Device{}).Where("agent_token = ? OR serial = ?", token, "agent-"+token).Count(&cnt)
-	if cnt == 0 {
+	if _, ok := agent.ResolveDeviceID(token); !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 		return
 	}
@@ -69,9 +65,7 @@ func AgentSpeedTestUpload(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing X-Device-Token"})
 		return
 	}
-	var upCnt int64
-	database.DB.Model(&models.Device{}).Where("agent_token = ? OR serial = ?", token, "agent-"+token).Count(&upCnt)
-	if upCnt == 0 {
+	if _, ok := agent.ResolveDeviceID(token); !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 		return
 	}
