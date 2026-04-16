@@ -6,6 +6,7 @@ import (
 	"app-manager/models"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -81,11 +82,9 @@ func persistListenStateAfterStart(defs []models.CustomEventDefinition, results [
 }
 
 func persistListenStateAfterStop(results []customEventListenResult) {
+	// 凡在 Web 端请求停止的设备，一律将库中快照标为未激活（Agent 离线时无法下发 WS，仍应反映用户意图）
 	now := time.Now()
 	for _, r := range results {
-		if !r.OK {
-			continue
-		}
 		database.DB.Model(&models.DeviceCustomListenState{}).
 			Where("device_id = ?", r.DeviceID).
 			Updates(map[string]interface{}{
@@ -266,4 +265,24 @@ func ListenStateAggregates(c *gin.Context) {
 			"by_device": byDeviceList,
 		},
 	})
+}
+
+// DeleteDeviceCustomListenState DELETE /api/custom-events/listen-state/device/:device_id
+// 尽力向 Agent 下发 stop_custom_event_listen，并删除该设备的监听快照行（Web 端「删除」）。
+func DeleteDeviceCustomListenState(c *gin.Context) {
+	idStr := strings.TrimSpace(c.Param("device_id"))
+	id64, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil || id64 == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid device_id"})
+		return
+	}
+	deviceID := uint(id64)
+	results := dispatchCustomEventListen([]uint{deviceID}, "stop_custom_event_listen", nil)
+	persistListenStateAfterStop(results)
+	if err := database.DB.Where("device_id = ?", deviceID).Delete(&models.DeviceCustomListenState{}).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	agentOK := len(results) > 0 && results[0].OK
+	c.JSON(http.StatusOK, gin.H{"ok": true, "agent_notified": agentOK})
 }

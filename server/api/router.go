@@ -2,6 +2,7 @@ package api
 
 import (
 	"app-manager/auth"
+	"app-manager/config"
 
 	"github.com/gin-gonic/gin"
 )
@@ -27,9 +28,6 @@ func SetupRouter() *gin.Engine {
 	// 静态文件
 	r.Static("/assets", "./web/dist/assets")
 	r.StaticFile("/", "./web/dist/index.html")
-	r.NoRoute(func(c *gin.Context) {
-		c.File("./web/dist/index.html")
-	})
 
 	// 安装状态检查（正常模式）
 	r.GET("/api/setup/status", GetSetupStatus)
@@ -39,8 +37,23 @@ func SetupRouter() *gin.Engine {
 	// Agent 测速 HTTP（凭 X-Device-Token）
 	r.GET("/api/agent/speed-test/download", AgentSpeedTestDownload)
 	r.POST("/api/agent/speed-test/upload", AgentSpeedTestUpload)
+	// Agent App 只读：自定义事件定义、出站连接器（凭 X-Device-Token）
+	r.GET("/api/agent/custom-event-definitions", AgentListCustomEventDefinitions)
+	r.GET("/api/agent/custom-events/listen-state", AgentGetCustomEventListenState)
+	r.POST("/api/agent/custom-events/listen/pause", AgentPauseCustomEventListen)
+	r.DELETE("/api/agent/custom-events/listen-state", AgentDeleteCustomEventListenState)
+	r.GET("/api/agent/outbound-connectors", AgentListOutboundConnectors)
+	r.POST("/api/agent/outbound-connectors/:id/pause", AgentOutboundConnectorPause)
+	r.POST("/api/agent/outbound-connectors/:id/enable", AgentOutboundConnectorEnable)
+	r.POST("/api/agent/outbound-connectors/:id/exclude", AgentOutboundConnectorExclude)
 	r.GET("/api/agent/install-apk", AgentInstallApkDownload)
 	r.POST("/api/agent/pulled-apk-upload", AgentPulledApkUpload)
+	r.GET("/api/agent/menu-manifest", AgentMenuManifest)
+
+	// 免登录：组态分享
+	r.GET("/api/scada/info/share/:token", GetScadaInfoByShareToken)
+	// 组态静态资源（上传目录映射）
+	r.Static("/api/scada/resource", config.C.Storage.Path)
 
 	// 免登录：分享页校验链接
 	r.GET("/api/screen-share/claims", ScreenShareClaims)
@@ -201,29 +214,67 @@ func SetupRouter() *gin.Engine {
 		e.GET("/types", GetEventTypes)
 	}
 
-	// 自定义事件：分组、Intent 定义、批量下发监听
-	ce := r.Group("/api/custom-events", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"))
+	// 自定义事件：分组、Intent 定义、批量下发监听（只读接口含 viewer，写操作仍为 admin/operator）
+	ce := r.Group("/api/custom-events", auth.AuthMiddleware())
 	{
-		ce.GET("/listen-state", ListCustomEventListenState)
-		ce.GET("/listen-state/aggregates", ListenStateAggregates)
-		ce.POST("/listen/start", BatchStartCustomEventListen)
-		ce.POST("/listen/stop", BatchStopCustomEventListen)
+		ce.GET("/listen-state", auth.RequireRole("admin", "operator", "viewer"), ListCustomEventListenState)
+		ce.GET("/listen-state/aggregates", auth.RequireRole("admin", "operator", "viewer"), ListenStateAggregates)
+		ce.DELETE("/listen-state/device/:device_id", auth.RequireRole("admin", "operator"), DeleteDeviceCustomListenState)
+		ce.POST("/listen/start", auth.RequireRole("admin", "operator"), BatchStartCustomEventListen)
+		ce.POST("/listen/stop", auth.RequireRole("admin", "operator"), BatchStopCustomEventListen)
 	}
-	ceg := r.Group("/api/custom-event-groups", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"))
+	ceg := r.Group("/api/custom-event-groups", auth.AuthMiddleware())
 	{
-		ceg.GET("", ListCustomEventGroups)
-		ceg.POST("", CreateCustomEventGroup)
-		ceg.PUT("/:id", UpdateCustomEventGroup)
-		ceg.DELETE("/:id", DeleteCustomEventGroup)
+		ceg.GET("", auth.RequireRole("admin", "operator", "viewer"), ListCustomEventGroups)
+		ceg.POST("", auth.RequireRole("admin", "operator"), CreateCustomEventGroup)
+		ceg.PUT("/:id", auth.RequireRole("admin", "operator"), UpdateCustomEventGroup)
+		ceg.DELETE("/:id", auth.RequireRole("admin", "operator"), DeleteCustomEventGroup)
 	}
-	ced := r.Group("/api/custom-event-definitions", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"))
+	ced := r.Group("/api/custom-event-definitions", auth.AuthMiddleware())
 	{
-		ced.GET("", ListCustomEventDefinitions)
-		ced.POST("/import-pda-presets", ImportPdaScanPresets)
-		ced.GET("/:id", GetCustomEventDefinition)
-		ced.POST("", CreateCustomEventDefinition)
-		ced.PUT("/:id", UpdateCustomEventDefinition)
-		ced.DELETE("/:id", DeleteCustomEventDefinition)
+		ced.GET("", auth.RequireRole("admin", "operator", "viewer"), ListCustomEventDefinitions)
+		ced.POST("/import-pda-presets", auth.RequireRole("admin", "operator"), ImportPdaScanPresets)
+		ced.GET("/:id", auth.RequireRole("admin", "operator", "viewer"), GetCustomEventDefinition)
+		ced.POST("", auth.RequireRole("admin", "operator"), CreateCustomEventDefinition)
+		ced.PUT("/:id", auth.RequireRole("admin", "operator"), UpdateCustomEventDefinition)
+		ced.DELETE("/:id", auth.RequireRole("admin", "operator"), DeleteCustomEventDefinition)
+	}
+
+	// 出站连接器：统一 /api/outbound + 鉴权；device-states 允许 viewer，其余需 operator
+	obBase := r.Group("/api/outbound", auth.AuthMiddleware())
+	{
+		obBase.GET("/connectors/:id/device-states", auth.RequireRole("admin", "operator", "viewer"), GetOutboundConnectorDeviceStates)
+		obBase.GET("/connectors", auth.RequireRole("admin", "operator", "viewer"), ListOutboundConnectors)
+		ob := obBase.Group("", auth.RequireRole("admin", "operator"))
+		{
+			ob.GET("/apps", ListOutboundApps)
+			ob.POST("/apps", CreateOutboundApp)
+			ob.GET("/apps/:id/token/status", GetOutboundAppTokenStatus)
+			ob.POST("/apps/:id/token/fetch", PostOutboundAppTokenFetch)
+			ob.POST("/apps/:id/token/refresh", PostOutboundAppTokenRefresh)
+			ob.GET("/apps/:id", GetOutboundApp)
+			ob.PUT("/apps/:id", UpdateOutboundApp)
+			ob.DELETE("/apps/:id", DeleteOutboundApp)
+
+			ob.GET("/endpoints", ListOutboundEndpoints)
+			ob.POST("/endpoints", CreateOutboundEndpoint)
+			ob.GET("/endpoints/:id", GetOutboundEndpoint)
+			ob.PUT("/endpoints/:id", UpdateOutboundEndpoint)
+			ob.DELETE("/endpoints/:id", DeleteOutboundEndpoint)
+
+			ob.POST("/connectors", CreateOutboundConnector)
+			ob.POST("/connectors/:id/devices/:device_id/pause", PostOutboundConnectorDevicePause)
+			ob.POST("/connectors/:id/devices/:device_id/enable", PostOutboundConnectorDeviceEnable)
+			ob.POST("/connectors/:id/devices/:device_id/exclude", PostOutboundConnectorDeviceExclude)
+			ob.GET("/connectors/:id/execution-trace", GetOutboundConnectorExecutionTrace)
+			ob.GET("/connectors/:id", GetOutboundConnector)
+			ob.PUT("/connectors/:id", UpdateOutboundConnector)
+			ob.DELETE("/connectors/:id", DeleteOutboundConnector)
+
+			ob.GET("/deliveries/:id", GetOutboundDelivery)
+			ob.POST("/deliveries/:id/retry", PostRetryOutboundDelivery)
+			ob.GET("/deliveries", ListOutboundDeliveries)
+		}
 	}
 
 	// 上传链接管理
@@ -235,8 +286,68 @@ func SetupRouter() *gin.Engine {
 		ul.GET("/:id/files", ListUploadedFiles)
 	}
 
+	// SCADA 组态 / 点位模拟 / 数据栈 / Agent 菜单
+	sca := r.Group("/api/scada", auth.AuthMiddleware(), auth.RequireRole("admin", "operator", "viewer"))
+	{
+		sca.GET("/groups", ListScadaGroups)
+		sca.POST("/groups", auth.RequireRole("admin", "operator"), CreateScadaGroup)
+		sca.PUT("/groups/:id", auth.RequireRole("admin", "operator"), UpdateScadaGroup)
+		sca.DELETE("/groups/:id", auth.RequireRole("admin", "operator"), DeleteScadaGroup)
+		sca.GET("/infos", ListScadaInfos)
+		sca.GET("/infos/:id", GetScadaInfo)
+		sca.GET("/infos/code/:code", GetScadaInfoByCode)
+		sca.POST("/infos", auth.RequireRole("admin", "operator"), CreateScadaInfo)
+		sca.PUT("/infos/:id", auth.RequireRole("admin", "operator"), UpdateScadaInfo)
+		sca.DELETE("/infos/:id", auth.RequireRole("admin", "operator"), DeleteScadaInfo)
+		sca.POST("/save-canvas", auth.RequireRole("admin", "operator"), SaveScadaCanvas)
+		sca.POST("/infos/:id/publish", auth.RequireRole("admin", "operator"), PublishScada)
+		sca.POST("/infos/:id/unpublish", auth.RequireRole("admin", "operator"), UnpublishScada)
+		sca.POST("/resource/upload/:category", auth.RequireRole("admin", "operator"), UploadScadaResource)
+		sca.GET("/customize/components", ListScadaCustomizeComponents)
+		sca.POST("/customize/component/create", auth.RequireRole("admin", "operator"), CreateScadaCustomizeComponent)
+		sca.DELETE("/customize/component/:id", auth.RequireRole("admin", "operator"), DeleteScadaCustomizeComponent)
+		sca.GET("/customize/file/:id", GetScadaCustomizeFile)
+	}
+	sim := r.Group("/api/scada/sim-points", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"))
+	{
+		sim.GET("", ListScadaSimPoints)
+		sim.POST("", CreateScadaSimPoint)
+		sim.PUT("/:id", UpdateScadaSimPoint)
+		sim.DELETE("/:id", DeleteScadaSimPoint)
+	}
+	dstack := r.Group("/api/data", auth.AuthMiddleware(), auth.RequireRole("admin", "operator", "viewer"))
+	{
+		dstack.GET("/sources", ListDataSources)
+		dstack.POST("/sources", auth.RequireRole("admin", "operator"), CreateDataSource)
+		dstack.PUT("/sources/:id", auth.RequireRole("admin", "operator"), UpdateDataSource)
+		dstack.DELETE("/sources/:id", auth.RequireRole("admin", "operator"), DeleteDataSource)
+		dstack.GET("/sources/:id/test", auth.RequireRole("admin", "operator"), TestDataSource)
+		dstack.GET("/datasets", ListDatasets)
+		dstack.POST("/datasets", auth.RequireRole("admin", "operator"), CreateDataset)
+		dstack.PUT("/datasets/:id", auth.RequireRole("admin", "operator"), UpdateDataset)
+		dstack.DELETE("/datasets/:id", auth.RequireRole("admin", "operator"), DeleteDataset)
+		dstack.POST("/datasets/:id/preview", auth.RequireRole("admin", "operator"), PreviewDataset)
+		dstack.GET("/interface-groups", ListDataInterfaceGroups)
+		dstack.POST("/interface-groups", auth.RequireRole("admin", "operator"), CreateDataInterfaceGroup)
+		dstack.PUT("/interface-groups/:id", auth.RequireRole("admin", "operator"), UpdateDataInterfaceGroup)
+		dstack.DELETE("/interface-groups/:id", auth.RequireRole("admin", "operator"), DeleteDataInterfaceGroup)
+		dstack.GET("/interfaces", ListDataInterfaces)
+		dstack.POST("/interfaces", auth.RequireRole("admin", "operator"), CreateDataInterface)
+		dstack.PUT("/interfaces/:id", auth.RequireRole("admin", "operator"), UpdateDataInterface)
+		dstack.DELETE("/interfaces/:id", auth.RequireRole("admin", "operator"), DeleteDataInterface)
+	}
+	amenu := r.Group("/api/agent-menus", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"))
+	{
+		amenu.GET("", ListAgentMenuItems)
+		amenu.POST("", CreateAgentMenuItem)
+		amenu.PUT("/:id", UpdateAgentMenuItem)
+		amenu.DELETE("/:id", DeleteAgentMenuItem)
+		amenu.POST("/deploy", DeployAgentMenus)
+	}
+
 	// WebSocket
 	r.GET("/ws/stomp", StompWSAuth, StompWS)
+	r.GET("/ws/stomp-scada", StompScadaShareAuth, StompScadaShareWS)
 	r.GET("/ws/screen/:deviceId", auth.ScreenWSAuth(), ScreenWS)
 	r.GET("/ws/shell/:deviceId", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"), ShellWS)
 	r.GET("/ws/logcat/:deviceId", auth.AuthMiddleware(), LogcatWS)
@@ -247,6 +358,8 @@ func SetupRouter() *gin.Engine {
 	// 对外开放 API
 	open := r.Group("/api/open/v1", auth.APIKeyMiddleware())
 	{
+		open.GET("/data/:slug", OpenDataInterfaceInvoke)
+		open.POST("/data/:slug", OpenDataInterfaceInvoke)
 		open.GET("/devices", auth.RequireOpenScope(auth.OpenDevicesList), ListDevices)
 		open.GET("/devices/:id/info", auth.RequireOpenScope(auth.OpenDeviceInfo), GetDeviceInfo)
 		open.GET("/devices/:id/apps", auth.RequireOpenScope(auth.OpenDeviceApps), GetDeviceApps)
@@ -255,6 +368,11 @@ func SetupRouter() *gin.Engine {
 		open.GET("/tasks/:id", auth.RequireOpenScope(auth.OpenTasksGet), GetTask)
 		open.GET("/events", auth.RequireOpenScope(auth.OpenEventsList), ListDeviceEvents)
 	}
+
+	// SPA 回退放最后，避免未匹配 API 被误判为前端路由
+	r.NoRoute(func(c *gin.Context) {
+		c.File("./web/dist/index.html")
+	})
 
 	return r
 }

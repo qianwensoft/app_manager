@@ -16,6 +16,7 @@ import (
 
 var stompDestDeviceRecording = regexp.MustCompile(`^/topic/device/(\d+)/recording$`)
 var stompDestDeviceEvents = regexp.MustCompile(`^/topic/device/(\d+)/events$`)
+var stompDestScadaPointData = regexp.MustCompile(`^/topic/scada/point-data/([^/]+)$`)
 
 const stompDestDevices = "/topic/devices"
 const stompDestEvents = "/topic/events"
@@ -81,6 +82,13 @@ func StompWS(c *gin.Context) {
 				unsubs[subID] = stomp.DefaultHub.Subscribe(dest, subID, send)
 				log.Printf("STOMP SUBSCRIBE user=%d dest=%s sub=%s", c.GetUint("user_id"), dest, subID)
 			default:
+				if mSc := stompDestScadaPointData.FindStringSubmatch(dest); mSc != nil {
+					if mSc[1] != "" {
+						unsubs[subID] = stomp.DefaultHub.Subscribe(dest, subID, send)
+						log.Printf("STOMP SUBSCRIBE user=%d dest=%s sub=%s", c.GetUint("user_id"), dest, subID)
+						continue
+					}
+				}
 				mEv := stompDestDeviceEvents.FindStringSubmatch(dest)
 				if mEv != nil {
 					if _, err := strconv.ParseUint(mEv[1], 10, 64); err != nil {

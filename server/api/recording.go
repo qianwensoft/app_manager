@@ -95,8 +95,8 @@ func AgentRecordingUpload(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing X-Device-Token"})
 		return
 	}
-	var device models.Device
-	if err := database.DB.Where("agent_token = ? OR serial = ?", token, "agent-"+token).First(&device).Error; err != nil {
+	device, ok := agent.LookupDeviceByConnectionKey(token)
+	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "device not found"})
 		return
 	}

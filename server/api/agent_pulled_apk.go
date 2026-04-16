@@ -2,8 +2,6 @@ package api
 
 import (
 	"app-manager/agent"
-	"app-manager/database"
-	"app-manager/models"
 	"io"
 	"net/http"
 	"os"
@@ -19,11 +17,7 @@ func deviceIDFromAgentToken(c *gin.Context) (uint, bool) {
 	if devTok == "" {
 		return 0, false
 	}
-	var dev models.Device
-	if err := database.DB.Where("agent_token = ? OR serial = ?", devTok, "agent-"+devTok).First(&dev).Error; err != nil {
-		return 0, false
-	}
-	return dev.ID, true
+	return agent.ResolveDeviceID(devTok)
 }
 
 // AgentPulledApkUpload Agent 将端上读取的 APK/zip 流上传到此接口（凭 X-Device-Token，无 JWT）。

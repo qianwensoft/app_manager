@@ -5,6 +5,7 @@ import (
 	"app-manager/auth"
 	"app-manager/database"
 	"app-manager/event"
+	appoutbound "app-manager/outbound"
 	"app-manager/logcat"
 	"app-manager/models"
 	"app-manager/screen"
@@ -389,6 +390,7 @@ func init() {
 							devPtr = &d
 						}
 						event.PublishDeviceCustomEventSTOMP(rec, devPtr)
+						appoutbound.NotifyDeviceEvent(rec, devPtr)
 					}
 				}
 			}
