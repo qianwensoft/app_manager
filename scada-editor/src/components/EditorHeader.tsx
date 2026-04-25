@@ -171,7 +171,11 @@ export default function EditorHeader({ scadaName, publishStatus, onPreview, onBa
 
       {/* Save */}
       <button
-        onClick={() => scadaId && saveCanvas.mutate({ id: scadaId, project })}
+        onClick={() => {
+          if (!scadaId) return
+          const previewImage = store.getSnapshot(480) ?? undefined
+          saveCanvas.mutate({ id: scadaId, project, previewImage })
+        }}
         disabled={saveCanvas.isPending}
         style={{
           display: 'inline-flex', alignItems: 'center', gap: 5,

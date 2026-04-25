@@ -202,11 +202,12 @@ func initSchema(db *gorm.DB) error {
 	// One-time migrations — each is idempotent internally.
 	// Run them concurrently where safe (all read-then-write, independent tables).
 	var wg sync.WaitGroup
-	wg.Add(4)
+	wg.Add(5)
 	go func() { defer wg.Done(); SeedDefaultCustomEvents(db) }()
 	go func() { defer wg.Done(); MigrateLegacyOutboundPhases(db) }()
 	go func() { defer wg.Done(); MigrateDeviceAndroidSerialUnique(db) }()
 	go func() { defer wg.Done(); MigrateDataStackCode(db) }()
+	go func() { defer wg.Done(); MigrateThirdPartyAuthorizerAppID(db) }()
 	wg.Wait()
 	log.Printf("[db] Post-migrate tasks done in %v", time.Since(start))
 

@@ -6,6 +6,7 @@ import (
 	"app-manager/datastack"
 	"app-manager/database"
 	"app-manager/mcp"
+	"os"
 
 	"github.com/gin-gonic/gin"
 )
@@ -31,7 +32,12 @@ func SetupRouter() *gin.Engine {
 	// 静态文件
 	r.Static("/assets", "./web/dist/assets")
 	r.StaticFile("/", "./web/dist/index.html")
-	r.Static("/scada-editor", "./web/dist/scada-editor")
+	// scada-editor: 优先 web/dist/scada-editor（make 构建后），fallback 到 scada-editor/dist（开发模式）
+	scadaEditorDir := "./web/dist/scada-editor"
+	if _, err := os.Stat(scadaEditorDir); os.IsNotExist(err) {
+		scadaEditorDir = "../scada-editor/dist"
+	}
+	r.Static("/scada-editor", scadaEditorDir)
 
 	// 安装状态检查（正常模式）
 	r.GET("/api/setup/status", GetSetupStatus)

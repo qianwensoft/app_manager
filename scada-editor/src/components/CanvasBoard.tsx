@@ -53,6 +53,12 @@ export default function CanvasBoard() {
 
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; id: string } | null>(null)
 
+  // 注册 canvas 元素到 store，供保存时截图
+  useEffect(() => {
+    store.registerCanvasEl(canvasRef.current)
+    return () => store.registerCanvasEl(null)
+  }, [])
+
   const draw = useCallback(() => {
     const el = canvasRef.current
     if (!el || !canvas) return

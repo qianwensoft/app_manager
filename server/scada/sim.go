@@ -27,6 +27,12 @@ var (
 	runtimes  = map[uint]*pointRuntime{} // by ScadaSimPoint.ID
 	lastPush  = map[string]map[string]float64{}
 	pushMu    sync.Mutex
+
+	// 点位缓存，避免每 tick 查库
+	cachedPoints    []models.ScadaSimPoint
+	cachedPointsMu  sync.RWMutex
+	lastPointsLoad  time.Time
+	pointsCacheTTL  = 5 * time.Second
 )
 
 // StartSimEngine 启动模拟点位调度（全局单例）
@@ -42,14 +48,34 @@ func loop() {
 	}
 }
 
+func loadPoints() []models.ScadaSimPoint {
+	cachedPointsMu.RLock()
+	if time.Since(lastPointsLoad) < pointsCacheTTL {
+		pts := cachedPoints
+		cachedPointsMu.RUnlock()
+		return pts
+	}
+	cachedPointsMu.RUnlock()
+
+	var points []models.ScadaSimPoint
+	if err := database.DB.Where("enabled = ?", true).Find(&points).Error; err != nil {
+		cachedPointsMu.RLock()
+		pts := cachedPoints
+		cachedPointsMu.RUnlock()
+		return pts
+	}
+	cachedPointsMu.Lock()
+	cachedPoints = points
+	lastPointsLoad = time.Now()
+	cachedPointsMu.Unlock()
+	return points
+}
+
 func tick() {
 	if database.DB == nil {
 		return
 	}
-	var points []models.ScadaSimPoint
-	if err := database.DB.Where("enabled = ?", true).Find(&points).Error; err != nil {
-		return
-	}
+	points := loadPoints()
 	now := time.Now().UnixMilli()
 	for _, p := range points {
 		if p.IntervalMs <= 0 {
@@ -166,5 +192,9 @@ func RemoveScadaFromCache(scadaCode string) {
 	pushMu.Unlock()
 }
 
-// ReloadPoints 配置变更时可调用（当前周期自动读库）
-func ReloadPoints(_ *gorm.DB) {}
+// ReloadPoints 配置变更时调用，立即失效点位缓存
+func ReloadPoints(_ *gorm.DB) {
+	cachedPointsMu.Lock()
+	lastPointsLoad = time.Time{}
+	cachedPointsMu.Unlock()
+}

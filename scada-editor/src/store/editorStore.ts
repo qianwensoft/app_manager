@@ -39,6 +39,11 @@ interface EditorStore {
   // clipboard (in-memory, not persisted)
   _clipboard: CanvasElement[]
 
+  // canvas element ref — registered by CanvasBoard, read by EditorHeader for snapshot
+  _canvasEl: HTMLCanvasElement | null
+  registerCanvasEl: (el: HTMLCanvasElement | null) => void
+  getSnapshot: (maxWidth?: number) => string | null
+
   // actions - project
   loadProject: (scadaId: number, project: CanvasProject) => void
   resetProject: () => void
@@ -112,6 +117,23 @@ export const useEditorStore = create<EditorStore>()(
     zoom: 1,
     panOffset: { x: 0, y: 0 },
     _clipboard: [],
+    _canvasEl: null,
+    registerCanvasEl: (el) => set(() => ({ _canvasEl: el })),
+    getSnapshot: (maxWidth = 480) => {
+      const el = get()._canvasEl
+      if (!el) return null
+      try {
+        if (maxWidth && el.width > maxWidth) {
+          const scale = maxWidth / el.width
+          const off = document.createElement('canvas')
+          off.width = maxWidth
+          off.height = Math.round(el.height * scale)
+          off.getContext('2d')!.drawImage(el, 0, 0, off.width, off.height)
+          return off.toDataURL('image/jpeg', 0.82)
+        }
+        return el.toDataURL('image/jpeg', 0.82)
+      } catch { return null }
+    },
 
     loadProject: (scadaId, project) =>
       set((s) => { s.scadaId = scadaId; s.project = project; s.isDirty = false }),
