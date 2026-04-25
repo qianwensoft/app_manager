@@ -79,7 +79,7 @@ func ListScadaInfos(c *gin.Context) {
 }
 
 func GetScadaInfo(c *gin.Context) {
-	id := c.Param("id")
+	id := c.Param("scada_id")
 	var row models.ScadaInfo
 	if err := database.DB.First(&row, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
@@ -121,7 +121,7 @@ func CreateScadaInfo(c *gin.Context) {
 }
 
 func UpdateScadaInfo(c *gin.Context) {
-	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	id, _ := strconv.ParseUint(c.Param("scada_id"), 10, 64)
 	var body models.ScadaInfo
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -158,7 +158,7 @@ func UpdateScadaInfo(c *gin.Context) {
 }
 
 func DeleteScadaInfo(c *gin.Context) {
-	id := c.Param("id")
+	id := c.Param("scada_id")
 	var row models.ScadaInfo
 	if err := database.DB.First(&row, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
@@ -196,8 +196,35 @@ func SaveScadaCanvas(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
+func SaveScadaCanvasByID(c *gin.Context) {
+	id, _ := strconv.ParseUint(c.Param("scada_id"), 10, 64)
+	var body struct {
+		CanvasData   string `json:"canvas_data"`
+		PreviewImage string `json:"preview_image"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	var row models.ScadaInfo
+	if err := database.DB.First(&row, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+	up := map[string]interface{}{"canvas_data": body.CanvasData, "content_version": row.ContentVersion + 1}
+	if strings.TrimSpace(body.PreviewImage) != "" {
+		up["preview_image"] = body.PreviewImage
+	}
+	if err := database.DB.Model(&row).Updates(up).Error; err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	database.DB.First(&row, id)
+	c.JSON(http.StatusOK, gin.H{"data": row})
+}
+
 func PublishScada(c *gin.Context) {
-	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	id, _ := strconv.ParseUint(c.Param("scada_id"), 10, 64)
 	var row models.ScadaInfo
 	if err := database.DB.First(&row, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
@@ -222,7 +249,7 @@ func PublishScada(c *gin.Context) {
 }
 
 func UnpublishScada(c *gin.Context) {
-	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	id, _ := strconv.ParseUint(c.Param("scada_id"), 10, 64)
 	if err := database.DB.Model(&models.ScadaInfo{}).Where("id = ?", id).Updates(map[string]interface{}{
 		"publish_status":  0,
 		"share_token":     "",

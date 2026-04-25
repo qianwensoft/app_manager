@@ -28,6 +28,7 @@
 
       <!-- 表格视图 -->
       <el-table v-if="viewMode === 'table'" :data="filteredDevices" border>
+        <el-table-column prop="id" label="ID" width="72" align="center" />
         <el-table-column prop="serial" label="Serial" width="200" />
         <el-table-column prop="name" label="名称" width="150" />
         <el-table-column label="别名" width="150">
@@ -74,6 +75,7 @@
             </div>
           </template>
           <div style="font-size:13px;line-height:1.8">
+            <div><b>ID:</b> {{ d.id }}</div>
             <div><b>Serial:</b> {{ d.serial }}</div>
             <div><b>别名:</b> {{ d.server_alias || d.agent_alias || '-' }}</div>
             <div><b>分组:</b> {{ d.group_name || '未分组' }}</div>

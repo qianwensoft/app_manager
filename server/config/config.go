@@ -15,6 +15,8 @@ type Config struct {
 	JWT       JWTConfig       `yaml:"jwt"`
 	Heartbeat HeartbeatConfig `yaml:"heartbeat"`
 	MQTT      MQTTConfig      `yaml:"mqtt"`
+	Claude    ClaudeConfig    `yaml:"claude"`
+	Channel   ChannelConfig   `yaml:"channel"`
 }
 
 type ServerConfig struct {
@@ -22,6 +24,8 @@ type ServerConfig struct {
 	Host          string `yaml:"host"`
 	Mode          string `yaml:"mode"`
 	AllowRegister bool   `yaml:"allow_register"`
+	// PublicBaseURL 对外访问根 URL（如 http://192.168.1.10:8080），用于 Agent 组态菜单预览链接；空则按 host:port 推导（0.0.0.0 时回退 127.0.0.1，仅本机可用）
+	PublicBaseURL string `yaml:"public_base_url"`
 }
 
 type DatabaseConfig struct {
@@ -63,9 +67,28 @@ type MQTTConfig struct {
 	QoS      byte   `yaml:"qos"`
 }
 
+type ClaudeConfig struct {
+	APIKey string `yaml:"api_key"`
+	Model  string `yaml:"model"` // default: claude-opus-4-5
+}
+
+type ChannelConfig struct {
+	Kafka             KafkaChannelConfig `yaml:"kafka"`
+	KafkaRestProxyURL string             `yaml:"kafka_rest_proxy_url"`
+}
+
+type KafkaChannelConfig struct {
+	Brokers []string `yaml:"brokers"`
+	GroupID string   `yaml:"group_id"`
+	Topics  []string `yaml:"topics"`
+	Enabled bool     `yaml:"enabled"`
+}
+
 var C *Config
+var ConfigPath string
 
 func Load(path string) error {
+	ConfigPath = path
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -83,6 +106,12 @@ func Load(path string) error {
 	}
 	if v := os.Getenv("FFMPEG_PATH"); v != "" {
 		C.FFmpeg.Path = v
+	}
+	if v := os.Getenv("CLAUDE_API_KEY"); v != "" {
+		C.Claude.APIKey = v
+	}
+	if C.Claude.Model == "" {
+		C.Claude.Model = "claude-opus-4-5"
 	}
 	return nil
 }

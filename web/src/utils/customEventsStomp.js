@@ -28,11 +28,18 @@ export function createCustomEventsStomp(onEvent, getToken) {
         heartbeatOutgoing: 0,
         onConnect: () => {
           client.subscribe('/topic/events', (message) => {
+            let j
             try {
-              const j = JSON.parse(message.body)
-              if (j.type === 'device_custom_event') onEvent(j)
+              j = JSON.parse(message.body)
             } catch (e) {
-              console.warn('custom events STOMP parse', e)
+              console.warn('[custom events STOMP] parse failed', e)
+              return
+            }
+            if (j?.type !== 'device_custom_event') return
+            try {
+              onEvent(j)
+            } catch (e) {
+              console.warn('[custom events STOMP] onEvent handler failed (subscription stays active)', e)
             }
           })
         },

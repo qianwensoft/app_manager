@@ -193,8 +193,9 @@
                                 app:tint="@color/agent_tile_icon_tint" />
 
                             <TextView
+                                android:id="@+id/tv_tile_scada_label"
                                 style="@style/AppManagerGridTileLabel"
-                                android:text="@string/main_tile_app_list" />
+                                android:text="@string/main_tile_scada" />
                         </LinearLayout>
                     </com.google.android.material.card.MaterialCardView>
 

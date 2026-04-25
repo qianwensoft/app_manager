@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
+	"mime/multipart"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -17,23 +20,36 @@ import (
 
 // TokenProvider 描述获取/刷新 access_token 的 HTTP 调用与 JSON 路径。
 type TokenProvider struct {
+	// Code 可选的预请求步骤：先调用此接口获取 code，响应 JSON 的一级字段以
+	// {{code_resp.<key>}} 形式注入到后续 Fetch/Refresh 的 URL/Headers/Body 中。
+	Code struct {
+		Enabled  bool              `json:"enabled"`
+		URL      string            `json:"url"`
+		Method   string            `json:"method"`
+		Headers  map[string]string `json:"headers"`
+		Body     json.RawMessage   `json:"body"`
+		BodyType string            `json:"body_type"` // "json" | "form" | "formdata"; default "json"
+	} `json:"code"`
 	Fetch struct {
-		URL     string            `json:"url"`
-		Method  string            `json:"method"`
-		Headers map[string]string `json:"headers"`
-		Body    json.RawMessage   `json:"body"`
+		URL      string            `json:"url"`
+		Method   string            `json:"method"`
+		Headers  map[string]string `json:"headers"`
+		Body     json.RawMessage   `json:"body"`
+		BodyType string            `json:"body_type"`
 	} `json:"fetch"`
 	Refresh struct {
-		URL     string            `json:"url"`
-		Method  string            `json:"method"`
-		Headers map[string]string `json:"headers"`
-		Body    json.RawMessage   `json:"body"`
+		URL      string            `json:"url"`
+		Method   string            `json:"method"`
+		Headers  map[string]string `json:"headers"`
+		Body     json.RawMessage   `json:"body"`
+		BodyType string            `json:"body_type"`
 	} `json:"refresh"`
 	Paths struct {
-		AccessToken  string `json:"access_token"`
-		ExpiresIn    string `json:"expires_in"`
-		ExpiresAt    string `json:"expires_at"`
-		RefreshToken string `json:"refresh_token"`
+		AccessToken   string          `json:"access_token"`
+		ExpiresIn     json.RawMessage `json:"expires_in"`
+		ExpiresInMode string          `json:"expires_in_mode"` // "path" | "fixed" | "expr"; default "path"
+		ExpiresAt     string          `json:"expires_at"`
+		RefreshToken  string          `json:"refresh_token"`
 	} `json:"paths"`
 	SkewSeconds int `json:"skew_seconds"` // 提前多少秒视为过期，默认 60
 
@@ -190,18 +206,108 @@ func expandTokenTemplate(s string, access, refresh string) string {
 	return s
 }
 
-func doTokenHTTP(client *http.Client, method, urlStr string, hdr map[string]string, body []byte, access, refresh string) ([]byte, int, error) {
+const maxTokenTraceBytes = 100 * 1024
+
+// TokenFetchResult 包含一次 fetch/refresh 操作的所有 HTTP 往返 trace（供管理端调试）。
+type TokenFetchResult struct {
+	CodeTrace  *TokenExchangeTrace `json:"code_exchange,omitempty"`  // Code 预请求（可选）
+	TokenTrace *TokenExchangeTrace `json:"token_exchange,omitempty"` // fetch 或 refresh
+	// CodeContext 是 code 步骤响应 JSON 的一级字段（key→value），供前端展示注入了哪些变量。
+	CodeContext map[string]string `json:"code_context,omitempty"`
+}
+
+// TokenExchangeTrace 与第三方 Token 接口的单次 HTTP 往返（管理端调试用）。
+type TokenExchangeTrace struct {
+	Phase    string `json:"phase"`
+	Request  struct {
+		Method        string            `json:"method"`
+		URL           string            `json:"url"`
+		Headers       map[string]string `json:"headers"`
+		Body          string            `json:"body"`
+		BodyTruncated bool              `json:"body_truncated,omitempty"`
+	} `json:"request"`
+	Response struct {
+		Status        int               `json:"status"`
+		Headers       map[string]string `json:"headers"`
+		Body          string            `json:"body"`
+		BodyTruncated bool              `json:"body_truncated,omitempty"`
+	} `json:"response"`
+}
+
+func traceBodyString(b []byte) (s string, truncated bool) {
+	if len(b) <= maxTokenTraceBytes {
+		return string(b), false
+	}
+	return string(b[:maxTokenTraceBytes]) + "\n...[truncated]", true
+}
+
+// encodeBody converts a JSON object body into the target content type.
+// Returns (encodedBody, contentType).
+// bodyType: "json" (default) | "form" (application/x-www-form-urlencoded) | "formdata" (multipart/form-data)
+func encodeBody(rawJSON []byte, bodyType string) ([]byte, string, error) {
+	bt := strings.TrimSpace(bodyType)
+	if bt == "" || bt == "json" {
+		ct := ""
+		if len(rawJSON) > 0 {
+			ct = "application/json; charset=utf-8"
+		}
+		return rawJSON, ct, nil
+	}
+	// Parse JSON object into flat string map
+	var m map[string]interface{}
+	if err := json.Unmarshal(rawJSON, &m); err != nil {
+		return rawJSON, "", fmt.Errorf("body is not a JSON object: %w", err)
+	}
+	if bt == "form" {
+		vals := url.Values{}
+		for k, v := range m {
+			vals.Set(k, stringFromJSON(v))
+		}
+		return []byte(vals.Encode()), "application/x-www-form-urlencoded", nil
+	}
+	if bt == "formdata" {
+		var buf bytes.Buffer
+		w := multipart.NewWriter(&buf)
+		for k, v := range m {
+			if err := w.WriteField(k, stringFromJSON(v)); err != nil {
+				return nil, "", err
+			}
+		}
+		w.Close()
+		return buf.Bytes(), w.FormDataContentType(), nil
+	}
+	return rawJSON, "application/json; charset=utf-8", nil
+}
+
+func doTokenHTTP(client *http.Client, method, urlStr string, hdr map[string]string, body []byte, contentType string, access, refresh string, recordTrace bool) ([]byte, int, *TokenExchangeTrace, error) {
 	method = strings.ToUpper(strings.TrimSpace(method))
 	if method == "" {
 		method = "POST"
 	}
 	urlStr = strings.TrimSpace(urlStr)
+
+	var trace *TokenExchangeTrace
+	if recordTrace {
+		trace = &TokenExchangeTrace{}
+		trace.Request.Method = method
+		trace.Request.URL = urlStr
+		trace.Request.Headers = make(map[string]string)
+		for k, v := range hdr {
+			k = strings.TrimSpace(k)
+			if k == "" {
+				continue
+			}
+			trace.Request.Headers[k] = expandTokenTemplate(v, access, refresh)
+		}
+		trace.Request.Body, trace.Request.BodyTruncated = traceBodyString(body)
+	}
+
 	if urlStr == "" {
-		return nil, 0, fmt.Errorf("token url empty")
+		return nil, 0, trace, fmt.Errorf("token url empty")
 	}
 	req, err := http.NewRequest(method, urlStr, bytes.NewReader(body))
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, trace, err
 	}
 	for k, v := range hdr {
 		k = strings.TrimSpace(k)
@@ -210,16 +316,29 @@ func doTokenHTTP(client *http.Client, method, urlStr string, hdr map[string]stri
 		}
 		req.Header.Set(k, expandTokenTemplate(v, access, refresh))
 	}
-	if len(body) > 0 && req.Header.Get("Content-Type") == "" {
+	if len(body) > 0 && req.Header.Get("Content-Type") == "" && contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	} else if len(body) > 0 && req.Header.Get("Content-Type") == "" {
 		req.Header.Set("Content-Type", "application/json; charset=utf-8")
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, trace, err
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(resp.Body)
-	return b, resp.StatusCode, nil
+	if trace != nil {
+		trace.Response.Status = resp.StatusCode
+		trace.Response.Headers = make(map[string]string)
+		for k, vals := range resp.Header {
+			if len(vals) == 0 {
+				continue
+			}
+			trace.Response.Headers[k] = strings.Join(vals, ", ")
+		}
+		trace.Response.Body, trace.Response.BodyTruncated = traceBodyString(b)
+	}
+	return b, resp.StatusCode, trace, nil
 }
 
 func applyPaths(root map[string]interface{}, p TokenProvider, cache *TokenCache) error {
@@ -248,9 +367,52 @@ func applyPaths(root map[string]interface{}, p TokenProvider, cache *TokenCache)
 		}
 	}
 	if cache.ExpiresAt.IsZero() {
-		if eip := strings.TrimSpace(p.Paths.ExpiresIn); eip != "" {
-			if ev, ok := jsonPathGet(root, eip); ok {
-				if sec, ok := numberFromJSON(ev); ok && sec > 0 {
+		mode := strings.TrimSpace(p.Paths.ExpiresInMode)
+		if mode == "" {
+			mode = "path"
+		}
+		switch mode {
+		case "fixed":
+			// ExpiresIn raw value is a number (seconds)
+			if len(p.Paths.ExpiresIn) > 0 {
+				var sec float64
+				if err := json.Unmarshal(p.Paths.ExpiresIn, &sec); err == nil && sec > 0 {
+					cache.ExpiresAt = time.Now().Add(time.Duration(sec) * time.Second)
+				} else {
+					// maybe stored as string "3600"
+					var s string
+					if err2 := json.Unmarshal(p.Paths.ExpiresIn, &s); err2 == nil {
+						if f, err3 := strconv.ParseFloat(strings.TrimSpace(s), 64); err3 == nil && f > 0 {
+							cache.ExpiresAt = time.Now().Add(time.Duration(f) * time.Second)
+						}
+					}
+				}
+			}
+		case "expr":
+			// Expression: "<jsonpath>/<divisor>" e.g. "data.expires_in/1000"
+			// Evaluates root[jsonpath] / divisor to get seconds.
+			if eip := expiresInPath(p.Paths.ExpiresIn); eip != "" {
+				sec := evalExpiresInExpr(root, eip)
+				log.Printf("[token] expr=%q sec=%.2f", eip, sec)
+				if sec > 0 {
+					cache.ExpiresAt = time.Now().Add(time.Duration(sec) * time.Second)
+					log.Printf("[token] expires_at=%s", cache.ExpiresAt.Format(time.RFC3339))
+				}
+			}
+		default: // "path"
+			if eip := expiresInPath(p.Paths.ExpiresIn); eip != "" {
+				if ev, ok := jsonPathGet(root, eip); ok {
+					if sec, ok := numberFromJSON(ev); ok && sec > 0 {
+						cache.ExpiresAt = time.Now().Add(time.Duration(sec) * time.Second)
+					}
+				}
+			} else if len(p.Paths.ExpiresIn) > 0 {
+				// ExpiresIn is not a JSON string path (e.g. it is a number because the
+				// user configured a fixed value and later switched the mode label without
+				// clearing the field). Treat it as a fixed number of seconds so that the
+				// expiry is still applied rather than silently dropped.
+				var sec float64
+				if err := json.Unmarshal(p.Paths.ExpiresIn, &sec); err == nil && sec > 0 {
 					cache.ExpiresAt = time.Now().Add(time.Duration(sec) * time.Second)
 				}
 			}
@@ -264,83 +426,231 @@ func applyPaths(root map[string]interface{}, p TokenProvider, cache *TokenCache)
 	return nil
 }
 
-// FetchAppToken 执行 fetch 配置并写入 app.TokenCacheJSON（同时 Save）。
-func FetchAppToken(db *gorm.DB, app *models.OutboundApp) error {
+// execCodeStep 执行可选的 Code 预请求步骤，返回响应 JSON 一级字段的 {{code_resp.<key>}} 变量表。
+// 若 Code 未启用或 URL 为空则返回空 map（不报错）。
+func execCodeStep(p TokenProvider, appVars map[string]string, cache TokenCache, client *http.Client, recordTrace bool) (map[string]string, map[string]string, *TokenExchangeTrace, error) {
+	codeVars := map[string]string{}
+	codeCtx := map[string]string{}
+	if !p.Code.Enabled || strings.TrimSpace(p.Code.URL) == "" {
+		return codeVars, codeCtx, nil, nil
+	}
+	cu := expandTemplate(strings.TrimSpace(p.Code.URL), appVars)
+	cbody := []byte(strings.TrimSpace(string(p.Code.Body)))
+	if len(cbody) == 0 || string(cbody) == "null" {
+		cbody = []byte("{}")
+	}
+	cbody = []byte(expandTemplate(string(cbody), appVars))
+	chdr := expandHeaderMapVars(p.Code.Headers, appVars)
+	method := p.Code.Method
+	if method == "" {
+		method = "POST"
+	}
+	cbody, cct, encErr := encodeBody(cbody, p.Code.BodyType)
+	if encErr != nil {
+		return codeVars, codeCtx, nil, fmt.Errorf("code step body encode: %w", encErr)
+	}
+	raw, status, trace, err := doTokenHTTP(client, method, cu, chdr, cbody, cct, cache.AccessToken, cache.RefreshToken, recordTrace)
+	if trace != nil {
+		trace.Phase = "code"
+	}
+	if err != nil {
+		return codeVars, codeCtx, trace, fmt.Errorf("code step: %w", err)
+	}
+	if status < 200 || status >= 300 {
+		return codeVars, codeCtx, trace, fmt.Errorf("code step http %d: %s", status, truncate(string(raw), 500))
+	}
+	var root map[string]interface{}
+	if err := json.Unmarshal(raw, &root); err == nil {
+		for k, v := range root {
+			sv := stringFromJSON(v)
+			codeVars["{{code_resp."+k+"}}"] = sv
+			codeCtx[k] = sv
+		}
+	}
+	return codeVars, codeCtx, trace, nil
+}
+
+// mergeVars merges extra into base (extra wins on conflict), returns new map.
+func mergeVars(base, extra map[string]string) map[string]string {
+	out := make(map[string]string, len(base)+len(extra))
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range extra {
+		out[k] = v
+	}
+	return out
+}
+
+// ExecCodeStepWithTrace 单独执行 Code 预请求步骤，返回 trace 和 code_context（供管理 API 调试）。
+func ExecCodeStepWithTrace(app *models.OutboundApp) (*TokenFetchResult, error) {
 	p, err := parseTokenProvider(app.TokenProviderJSON)
 	if err != nil {
-		return fmt.Errorf("token_provider: %w", err)
+		return nil, fmt.Errorf("token_provider: %w", err)
+	}
+	if !p.Code.Enabled || strings.TrimSpace(p.Code.URL) == "" {
+		return nil, fmt.Errorf("code step not enabled or url empty")
+	}
+	client := &http.Client{Timeout: 30 * time.Second}
+	cache, _ := parseTokenCache(app.TokenCacheJSON)
+	appVars := buildAppParamVars(app)
+	_, codeCtx, codeTrace, err := execCodeStep(p, appVars, cache, client, true)
+	result := &TokenFetchResult{CodeTrace: codeTrace}
+	if len(codeCtx) > 0 {
+		result.CodeContext = codeCtx
+	}
+	return result, err
+}
+
+func fetchAppToken(db *gorm.DB, app *models.OutboundApp, recordTrace bool) (*TokenFetchResult, error) {
+	p, err := parseTokenProvider(app.TokenProviderJSON)
+	if err != nil {
+		return nil, fmt.Errorf("token_provider: %w", err)
 	}
 	u := strings.TrimSpace(p.Fetch.URL)
 	if u == "" {
-		return fmt.Errorf("token_provider.fetch.url required")
+		return nil, fmt.Errorf("token_provider.fetch.url required")
 	}
+	client := &http.Client{Timeout: 30 * time.Second}
+	cache, _ := parseTokenCache(app.TokenCacheJSON)
+	appVars := buildAppParamVars(app)
+
+	// Code pre-step
+	codeVars, codeCtx, codeTrace, err := execCodeStep(p, appVars, cache, client, recordTrace)
+	if err != nil {
+		return &TokenFetchResult{CodeTrace: codeTrace}, err
+	}
+	allVars := mergeVars(appVars, codeVars)
+
 	method := p.Fetch.Method
 	body := []byte(strings.TrimSpace(string(p.Fetch.Body)))
 	if len(body) == 0 || string(body) == "null" {
 		body = []byte("{}")
 	}
-	client := &http.Client{Timeout: 30 * time.Second}
-	cache, _ := parseTokenCache(app.TokenCacheJSON)
-	raw, code, err := doTokenHTTP(client, method, u, p.Fetch.Headers, body, cache.AccessToken, cache.RefreshToken)
+	u = expandTemplate(u, allVars)
+	body = []byte(expandTemplate(string(body), allVars))
+	hdr := expandHeaderMapVars(p.Fetch.Headers, allVars)
+	body, fct, encErr := encodeBody(body, p.Fetch.BodyType)
+	if encErr != nil {
+		return &TokenFetchResult{CodeTrace: codeTrace}, fmt.Errorf("fetch body encode: %w", encErr)
+	}
+	raw, code, tokenTrace, err := doTokenHTTP(client, method, u, hdr, body, fct, cache.AccessToken, cache.RefreshToken, recordTrace)
+	if tokenTrace != nil {
+		tokenTrace.Phase = "fetch"
+	}
+	result := &TokenFetchResult{CodeTrace: codeTrace, TokenTrace: tokenTrace}
+	if len(codeCtx) > 0 {
+		result.CodeContext = codeCtx
+	}
 	if err != nil {
-		return err
+		return result, err
 	}
 	if code < 200 || code >= 300 {
-		return fmt.Errorf("token fetch http %d: %s", code, truncate(string(raw), 500))
+		return result, fmt.Errorf("token fetch http %d: %s", code, truncate(string(raw), 500))
 	}
 	var root map[string]interface{}
 	if err := json.Unmarshal(raw, &root); err != nil {
-		return fmt.Errorf("token response json: %w", err)
+		return result, fmt.Errorf("token response json: %w", err)
 	}
 	if err := applyPaths(root, p, &cache); err != nil {
-		return err
+		return result, err
 	}
 	s, err := marshalTokenCache(cache)
 	if err != nil {
-		return err
+		return result, err
 	}
 	app.TokenCacheJSON = s
-	return db.Model(app).Updates(map[string]interface{}{"token_cache_json": s}).Error
+	if err := db.Model(app).Updates(map[string]interface{}{"token_cache_json": s}).Error; err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
-// RefreshAppToken 若有 refresh 配置则调用，否则退回 FetchAppToken。
-func RefreshAppToken(db *gorm.DB, app *models.OutboundApp) error {
+// FetchAppToken 执行 fetch 配置并写入 app.TokenCacheJSON（同时 Save）。
+func FetchAppToken(db *gorm.DB, app *models.OutboundApp) error {
+	_, err := fetchAppToken(db, app, false)
+	return err
+}
+
+// FetchAppTokenWithTrace 同 FetchAppToken，并返回与第三方接口的 HTTP 往返详情（供管理 API 展示）。
+func FetchAppTokenWithTrace(db *gorm.DB, app *models.OutboundApp) (*TokenFetchResult, error) {
+	return fetchAppToken(db, app, true)
+}
+
+func refreshAppToken(db *gorm.DB, app *models.OutboundApp, recordTrace bool) (*TokenFetchResult, error) {
 	p, err := parseTokenProvider(app.TokenProviderJSON)
 	if err != nil {
-		return fmt.Errorf("token_provider: %w", err)
+		return nil, fmt.Errorf("token_provider: %w", err)
 	}
 	cache, _ := parseTokenCache(app.TokenCacheJSON)
 	ru := strings.TrimSpace(p.Refresh.URL)
 	if ru == "" || strings.TrimSpace(cache.RefreshToken) == "" {
-		return FetchAppToken(db, app)
+		return fetchAppToken(db, app, recordTrace)
 	}
+	client := &http.Client{Timeout: 30 * time.Second}
+	appVars := buildAppParamVars(app)
+
+	// Code pre-step (also runs before refresh when configured)
+	codeVars, codeCtx, codeTrace, err := execCodeStep(p, appVars, cache, client, recordTrace)
+	if err != nil {
+		return &TokenFetchResult{CodeTrace: codeTrace}, err
+	}
+	allVars := mergeVars(appVars, codeVars)
+
 	method := p.Refresh.Method
 	body := []byte(strings.TrimSpace(string(p.Refresh.Body)))
 	if len(body) == 0 || string(body) == "null" {
 		body = []byte("{}")
 	}
 	bodyStr := expandTokenTemplate(string(body), cache.AccessToken, cache.RefreshToken)
-	client := &http.Client{Timeout: 30 * time.Second}
-	raw, code, err := doTokenHTTP(client, method, ru, p.Refresh.Headers, []byte(bodyStr), cache.AccessToken, cache.RefreshToken)
+	ru = expandTemplate(ru, allVars)
+	bodyStr = expandTemplate(bodyStr, allVars)
+	hdr := expandHeaderMapVars(p.Refresh.Headers, allVars)
+	rbody, rct, encErr := encodeBody([]byte(bodyStr), p.Refresh.BodyType)
+	if encErr != nil {
+		return &TokenFetchResult{CodeTrace: codeTrace}, fmt.Errorf("refresh body encode: %w", encErr)
+	}
+	raw, code, tokenTrace, err := doTokenHTTP(client, method, ru, hdr, rbody, rct, cache.AccessToken, cache.RefreshToken, recordTrace)
+	if tokenTrace != nil {
+		tokenTrace.Phase = "refresh"
+	}
+	result := &TokenFetchResult{CodeTrace: codeTrace, TokenTrace: tokenTrace}
+	if len(codeCtx) > 0 {
+		result.CodeContext = codeCtx
+	}
 	if err != nil {
-		return err
+		return result, err
 	}
 	if code < 200 || code >= 300 {
-		return fmt.Errorf("token refresh http %d: %s", code, truncate(string(raw), 500))
+		return result, fmt.Errorf("token refresh http %d: %s", code, truncate(string(raw), 500))
 	}
 	var root map[string]interface{}
 	if err := json.Unmarshal(raw, &root); err != nil {
-		return fmt.Errorf("token response json: %w", err)
+		return result, fmt.Errorf("token response json: %w", err)
 	}
 	if err := applyPaths(root, p, &cache); err != nil {
-		return err
+		return result, err
 	}
 	s, err := marshalTokenCache(cache)
 	if err != nil {
-		return err
+		return result, err
 	}
 	app.TokenCacheJSON = s
-	return db.Model(app).Updates(map[string]interface{}{"token_cache_json": s}).Error
+	if err := db.Model(app).Updates(map[string]interface{}{"token_cache_json": s}).Error; err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+// RefreshAppToken 若有 refresh 配置则调用，否则退回 FetchAppToken。
+func RefreshAppToken(db *gorm.DB, app *models.OutboundApp) error {
+	_, err := refreshAppToken(db, app, false)
+	return err
+}
+
+// RefreshAppTokenWithTrace 同 RefreshAppToken，并返回 HTTP 往返详情。
+func RefreshAppTokenWithTrace(db *gorm.DB, app *models.OutboundApp) (*TokenFetchResult, error) {
+	return refreshAppToken(db, app, true)
 }
 
 func truncate(s string, n int) string {
@@ -411,9 +721,144 @@ func TokenStatusForAPI(app *models.OutboundApp) (map[string]interface{}, error) 
 	}, nil
 }
 
+// expiresInPath 从 json.RawMessage 中提取 expires_in 路径字符串。
+// 兼容两种配置写法：字符串 "expires_in" 或数字（此时直接当秒数路径忽略，返回空）。
+func expiresInPath(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	// 尝试解析为字符串（正常配置：JSON path 如 "expires_in"）
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return strings.TrimSpace(s)
+	}
+	// 数字：用户误把秒数直接填进了 path 字段，忽略
+	return ""
+}
+
+// evalExpiresInExpr 解析并计算 expr 模式表达式，返回秒数。
+// 支持格式：
+//   - "data.expires_in/1000"  — 路径值除以除数（如毫秒转秒）
+//   - "data.expires_in*0.001" — 路径值乘以因子
+//   - "data.expires_in+3600"  — 路径值加偏移
+//   - "data.expires_in-60"    — 路径值减偏移
+//   - "data.expires_in"       — 纯路径，等同 path 模式
+func evalExpiresInExpr(root map[string]interface{}, expr string) float64 {
+	// 从右向左找运算符（路径段用点分隔，运算符在最后）
+	op := byte(0)
+	opIdx := -1
+	for i := len(expr) - 1; i > 0; i-- {
+		c := expr[i]
+		if c == '/' || c == '*' || c == '+' || c == '-' {
+			op = c
+			opIdx = i
+			break
+		}
+	}
+
+	jsonPath := strings.TrimSpace(expr)
+	operand := 0.0
+	if opIdx > 0 {
+		jsonPath = strings.TrimSpace(expr[:opIdx])
+		if f, err := strconv.ParseFloat(strings.TrimSpace(expr[opIdx+1:]), 64); err == nil {
+			operand = f
+		}
+	}
+
+	v, ok := jsonPathGet(root, jsonPath)
+	if !ok {
+		return 0
+	}
+	val, ok := numberFromJSON(v)
+	if !ok {
+		return 0
+	}
+
+	switch op {
+	case '/':
+		if operand == 0 {
+			return 0
+		}
+		return val / operand
+	case '*':
+		return val * operand
+	case '+':
+		return val + operand
+	case '-':
+		return val - operand
+	default:
+		return val
+	}
+}
+
 func rfcOrEmpty(t time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
 	return t.UTC().Format(time.RFC3339Nano)
+}
+
+// buildAppParamVars 从 app.AppParamsJSON 构建 {{app.<key>}} → value 的替换表。
+func buildAppParamVars(app *models.OutboundApp) map[string]string {
+	vars := map[string]string{}
+	MergeAppParamsIntoVars(vars, app)
+	return vars
+}
+
+// expandHeaderMapVars 对 headers map 的值做 {{app.*}} 占位符替换，返回新 map（不修改原始）。
+func expandHeaderMapVars(hdr map[string]string, vars map[string]string) map[string]string {
+	if len(vars) == 0 {
+		return hdr
+	}
+	out := make(map[string]string, len(hdr))
+	for k, v := range hdr {
+		out[k] = expandTemplate(v, vars)
+	}
+	return out
+}
+
+// sensitiveAppParamValues 已迁移至 masking.go collectSensitiveParamValues，此处保留转发以兼容内部调用。
+func sensitiveAppParamValues(appParamsJSON string) []string {
+	// 构造临时 app 对象仅用于提取参数
+	return collectSensitiveParamValues(&models.OutboundApp{AppParamsJSON: appParamsJSON})
+}
+
+// MaskTrace 将 TokenExchangeTrace 中 request body/headers 里的敏感参数值替换为 "****"，
+// 同时默认脱敏 response 中的 access_token / refresh_token 值，返回脱敏后的副本（不修改原始 trace）。
+func MaskTrace(tr *TokenExchangeTrace, app *models.OutboundApp) *TokenExchangeTrace {
+	if tr == nil || app == nil {
+		return tr
+	}
+	masker := NewSensitiveMasker(app)
+	masker.AddTokenValues(tr.Response.Body)
+	return masker.MaskTrace(tr)
+}
+
+// MaskFetchResult 对 TokenFetchResult 中所有 trace 做脱敏，返回副本。
+func MaskFetchResult(r *TokenFetchResult, app *models.OutboundApp) *TokenFetchResult {
+	if r == nil || app == nil {
+		return r
+	}
+	masker := NewSensitiveMasker(app)
+	// Add token values from token trace response for masking
+	if r.TokenTrace != nil {
+		masker.AddTokenValues(r.TokenTrace.Response.Body)
+	}
+	cp := &TokenFetchResult{
+		CodeTrace:  masker.MaskTrace(r.CodeTrace),
+		TokenTrace: masker.MaskTrace(r.TokenTrace),
+		CodeContext: r.CodeContext,
+	}
+	return cp
+}
+
+// tokenValuesFromBody 从 JSON body 中提取 access_token / refresh_token 的实际值（向后兼容保留）。
+func tokenValuesFromBody(body string) []string {
+	return tokenValuesFromJSON(body)
+}
+
+// maskSecrets 将 s 中出现的每个 secret 替换为 "****"（向后兼容保留）。
+func maskSecrets(s string, secrets []string) string {
+	m := &SensitiveMasker{secrets: secrets}
+	return m.MaskString(s)
 }

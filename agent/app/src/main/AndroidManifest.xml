@@ -65,7 +65,18 @@
             <intent-filter>
                 <action android:name="com.appmanager.agent.ACTION_REQUEST_SCREEN" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="com.appmanager.agent.ACTION_OPEN_SCADA_MENU" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
+
+        <activity
+            android:name=".ui.ScadaWebViewActivity"
+            android:exported="false"
+            android:label="@string/scada_webview_title"
+            android:theme="@style/Theme.AppManagerMain"
+            android:parentActivityName=".MainActivity" />
 
         <activity
             android:name=".ui.DeviceInfoActivity"

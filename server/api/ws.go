@@ -4,6 +4,7 @@ import (
 	"app-manager/agent"
 	"app-manager/auth"
 	"app-manager/database"
+	"app-manager/datastack"
 	"app-manager/event"
 	appoutbound "app-manager/outbound"
 	"app-manager/logcat"
@@ -391,6 +392,7 @@ func init() {
 						}
 						event.PublishDeviceCustomEventSTOMP(rec, devPtr)
 						appoutbound.NotifyDeviceEvent(rec, devPtr)
+						go datastack.DispatchEventToEventBoundDatasets(database.DB, rec.EventType, rec.EventData)
 					}
 				}
 			}

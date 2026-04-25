@@ -3,7 +3,12 @@
     <el-tabs v-model="activeMainTab" @tab-change="onMainTabChange">
       <el-tab-pane label="设备信息" name="info">
         <el-descriptions :column="2" border>
-          <el-descriptions-item label="Serial">{{ device.serial }}</el-descriptions-item>
+          <el-descriptions-item label="设备 ID">{{ device.id }}</el-descriptions-item>
+          <el-descriptions-item label="Serial">{{ device.serial || '—' }}</el-descriptions-item>
+          <el-descriptions-item label="硬件串号" :span="2">
+            {{ device.android_serial || '—' }}
+            <el-text v-if="!device.android_serial" type="info" size="small" style="margin-left:8px">由 Agent 上报后显示</el-text>
+          </el-descriptions-item>
           <el-descriptions-item label="型号">{{ device.model }}</el-descriptions-item>
           <el-descriptions-item label="品牌">{{ device.brand }}</el-descriptions-item>
           <el-descriptions-item label="Android">{{ device.os_version }}</el-descriptions-item>
@@ -60,6 +65,41 @@
           style="margin:12px 0;max-width:720px"
           title="当前设备无 Agent Token（多为 ADB 扫描入库）。请先扫码配置手机，再把同一 Token 填到「设备管理」保存，否则无法打开远程屏幕。"
         />
+
+        <el-card
+          v-if="!device.agent_connected"
+          shadow="never"
+          class="agent-reconnect-card"
+        >
+          <template #header>
+            <span class="agent-reconnect-card-title">Agent 离线 · 扫码继续接入</span>
+          </template>
+          <template v-if="device.agent_token">
+            <p class="agent-reconnect-desc">
+              手机重装 Agent、清除数据或换机后，用 Agent 应用扫描下方二维码，将自动填入<strong>本设备已绑定的 Token</strong>与当前页面对应的 WebSocket 地址；连接成功后仍为同一台设备（服务端按硬件串号等与现有记录合并）。
+            </p>
+            <div class="agent-reconnect-qr-row">
+              <canvas ref="reconnectQrCanvas" class="agent-reconnect-canvas" />
+              <div class="agent-reconnect-meta">
+                <p><span class="lbl">WebSocket 基址</span><code class="mono">{{ WS_BASE }}</code></p>
+                <p><span class="lbl">Token</span><code class="mono tok">{{ device.agent_token }}</code></p>
+                <el-space wrap>
+                  <el-button type="primary" size="small" plain @click="copyAgentReconnectJson">复制接入 JSON</el-button>
+                  <el-button size="small" @click="renderReconnectQr">刷新二维码</el-button>
+                </el-space>
+              </div>
+            </div>
+          </template>
+          <template v-else>
+            <el-alert type="info" :closable="false" show-icon title="尚未绑定 Agent Token">
+              <p class="agent-reconnect-desc" style="margin: 0">
+                请先到
+                <router-link to="/qrcode">全局扫码接入</router-link>
+                生成 Token，再在本页「设备管理」中粘贴保存；保存后即可在此处生成重装扫码。
+              </p>
+            </el-alert>
+          </template>
+        </el-card>
 
         <el-divider content-position="left">快捷操作</el-divider>
         <el-checkbox v-model="apkInstallAndLaunch" style="margin-bottom:10px;display:block">
@@ -132,6 +172,118 @@
         </el-space>
         <div v-if="device.agent_connected" style="font-size:12px;color:#909399;margin-top:8px;max-width:720px">
           「刷新 Agent 网络与状态」会向手机拉取当前网络类型、Wi‑Fi 名称（SSID）、信号、链路速率等并写入本页；需 Agent 在线。
+        </div>
+      </el-tab-pane>
+
+      <el-tab-pane label="事件与出站" name="events">
+        <div style="max-width: 960px">
+          <el-card shadow="never" class="events-out-card">
+            <template #header>
+              <span>自定义事件监听</span>
+              <el-button
+                v-if="canMutate"
+                text
+                type="primary"
+                size="small"
+                style="float: right; margin-top: -2px"
+                :loading="deviceListenLoading"
+                @click="loadDeviceListenState"
+              >
+                刷新
+              </el-button>
+            </template>
+            <el-alert
+              type="info"
+              :closable="false"
+              show-icon
+              style="margin-bottom: 12px"
+              title="说明"
+              description="与「自定义事件中心」一致：启用会按当前已选规则向本机 Agent 下发监听；停用会下发停止并标记未激活；删除会移除本机监听快照。需 Agent 在线时下发才能立即生效。"
+            />
+            <el-table :data="deviceListenTableData" border size="small" v-loading="deviceListenLoading" empty-text="暂无监听记录">
+              <el-table-column label="状态" width="100" align="center">
+                <template #default="{ row }">
+                  <el-tag v-if="row.active" type="success" size="small">激活</el-tag>
+                  <el-tag v-else type="info" size="small">未激活</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="上报键 / 事件" min-width="220">
+                <template #default="{ row }">
+                  <el-tag v-for="k in row.event_keys || []" :key="k" size="small" style="margin: 2px 4px 2px 0">
+                    {{ k }}
+                  </el-tag>
+                  <span v-if="!(row.event_keys || []).length">—</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="updated_at" label="更新时间" width="178" />
+              <el-table-column v-if="canMutate" label="操作" width="220" align="center" fixed="right">
+                <template #default="{ row }">
+                  <el-button link type="primary" size="small" :disabled="row.active" @click="startDeviceCustomListen">启用</el-button>
+                  <el-button link type="warning" size="small" :disabled="!row.active" @click="stopDeviceCustomListen">停用</el-button>
+                  <el-button link type="danger" size="small" @click="deleteDeviceCustomListen">删除</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            <div v-if="canMutate && !deviceListenSnapshot && !deviceListenLoading" style="margin-top: 12px">
+              <el-button type="primary" @click="startDeviceCustomListen">启用监听</el-button>
+            </div>
+          </el-card>
+
+          <el-card shadow="never" class="events-out-card" style="margin-top: 16px">
+            <template #header>
+              <span>连接器（本机）</span>
+              <el-button
+                v-if="canMutate"
+                text
+                type="primary"
+                size="small"
+                style="float: right; margin-top: -2px"
+                :loading="outboundLoading"
+                @click="loadOutboundConnectorsForDevice"
+              >
+                刷新
+              </el-button>
+            </template>
+            <el-alert
+              type="info"
+              :closable="false"
+              show-icon
+              style="margin-bottom: 12px"
+              title="说明"
+              description="仅列出对本机生效的连接器（未限制设备或已勾选本机）。启用：清除暂停/排除；停用：本机暂停出站；删除：排除本机直至再次启用。与「出站」页一致。"
+            />
+            <el-table :data="outboundConnectorRows" border size="small" v-loading="outboundLoading" empty-text="无适用连接器">
+              <el-table-column prop="id" label="ID" width="72" align="center" />
+              <el-table-column prop="name" label="名称" min-width="140" show-overflow-tooltip />
+              <el-table-column label="本机状态" width="100" align="center">
+                <template #default="{ row }">
+                  <el-tag v-if="row._state === 'active'" type="success" size="small">正常</el-tag>
+                  <el-tag v-else-if="row._state === 'paused'" type="warning" size="small">已暂停</el-tag>
+                  <el-tag v-else type="info" size="small">已排除</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="全局启用" width="88" align="center">
+                <template #default="{ row }">
+                  <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '是' : '否' }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column v-if="canMutate" label="操作" width="200" align="center" fixed="right">
+                <template #default="{ row }">
+                  <el-button link type="primary" size="small" :disabled="row._state === 'active'" @click="outboundDeviceEnable(row)">启用</el-button>
+                  <el-button
+                    link
+                    type="warning"
+                    size="small"
+                    :disabled="row._state === 'paused' || row._state === 'excluded'"
+                    @click="outboundDevicePause(row)"
+                  >
+                    停用
+                  </el-button>
+                  <el-button link type="danger" size="small" :disabled="row._state === 'excluded'" @click="outboundDeviceExclude(row)">删除</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+          </el-card>
         </div>
       </el-tab-pane>
 
@@ -688,11 +840,14 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { CircleCheckFilled } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
+import { copyText } from '@/utils/clipboard'
 import * as deviceApi from '@/api/device'
 import * as appApi from '@/api/app'
 import { useEventListenerStore } from '@/stores/eventListeners'
 import { WS_BASE } from '@/utils/ws'
 import http from '@/api/http'
+import * as eventsApi from '@/api/events'
+import * as ob from '@/api/outbound'
 import QRCode from 'qrcode'
 
 const route = useRoute()
@@ -732,6 +887,7 @@ const connectSuccess = ref(false)
 const grantingReadLogs = ref(false)
 const grantReadLogsResult = ref('')
 const grantReadLogsSuccess = ref(false)
+const reconnectQrCanvas = ref(null)
 const shellCommand = ref('')
 const shellOutput = ref(null)
 const shellRunning = ref(false)
@@ -750,7 +906,9 @@ const activeMainTab = ref(
         ? 'manage'
         : route.query.tab === 'adb'
           ? 'adb'
-          : 'info'
+          : route.query.tab === 'events'
+            ? 'events'
+            : 'info'
 )
 const fileHub = ref({ recordings: [], media: [] })
 const fileHubLoading = ref(false)
@@ -948,6 +1106,10 @@ watch(
       activeMainTab.value = 'adb'
       refreshAdbStatus()
     }
+    if (t === 'events') {
+      activeMainTab.value = 'events'
+      loadDeviceEventsOutbound()
+    }
   }
 )
 
@@ -955,6 +1117,16 @@ const canMutate = computed(() => {
   const r = auth.user?.role
   if (!r) return true
   return r === 'admin' || r === 'operator'
+})
+
+const deviceListenSnapshot = ref(null)
+const deviceListenLoading = ref(false)
+const outboundConnectorRows = ref([])
+const outboundLoading = ref(false)
+
+const deviceListenTableData = computed(() => {
+  if (!deviceListenSnapshot.value) return []
+  return [deviceListenSnapshot.value]
 })
 
 const screenshots = computed(() => (fileHub.value.media || []).filter((m) => m.category === 'screenshot'))
@@ -1148,6 +1320,140 @@ const formatFileDate = (date) => {
   return d.toLocaleString()
 }
 
+function connectorAppliesToDevice(c, deviceId) {
+  const ids = c.device_ids || []
+  if (!ids.length) return true
+  return ids.map(Number).includes(Number(deviceId))
+}
+
+async function loadDeviceListenState() {
+  if (!device.value?.id) return
+  deviceListenLoading.value = true
+  try {
+    const r = await eventsApi.getCustomListenState({
+      device_id: String(device.value.id),
+      include_inactive: '1'
+    })
+    const arr = r.data || []
+    deviceListenSnapshot.value = arr[0] || null
+  } catch {
+    deviceListenSnapshot.value = null
+  } finally {
+    deviceListenLoading.value = false
+  }
+}
+
+async function loadOutboundConnectorsForDevice() {
+  if (!device.value?.id) return
+  const did = Number(device.value.id)
+  outboundLoading.value = true
+  try {
+    const r = await ob.listOutboundConnectors()
+    const all = r.data || []
+    const applicable = all.filter((c) => connectorAppliesToDevice(c, did))
+    const rows = []
+    for (const c of applicable) {
+      let stLabel = 'active'
+      try {
+        const st = await ob.getOutboundConnectorDeviceStates(c.id)
+        const found = (st.data || []).find((x) => x.device_id === did)
+        if (found) stLabel = found.status
+      } catch {
+        /* ignore */
+      }
+      rows.push({ ...c, _state: stLabel })
+    }
+    outboundConnectorRows.value = rows
+  } catch {
+    outboundConnectorRows.value = []
+  } finally {
+    outboundLoading.value = false
+  }
+}
+
+async function loadDeviceEventsOutbound() {
+  if (!device.value?.id) return
+  await Promise.all([loadDeviceListenState(), loadOutboundConnectorsForDevice()])
+}
+
+async function startDeviceCustomListen() {
+  const id = Number(device.value.id)
+  if (!id) return
+  try {
+    await eventsApi.batchStartCustomEventListen([id])
+    ElMessage.success('已下发启用监听')
+    await loadDeviceListenState()
+  } catch {
+    /* axios 拦截器已提示 */
+  }
+}
+
+async function stopDeviceCustomListen() {
+  const id = Number(device.value.id)
+  if (!id) return
+  try {
+    await eventsApi.batchStopCustomEventListen([id])
+    ElMessage.success('已停用监听')
+    await loadDeviceListenState()
+  } catch {
+    /* */
+  }
+}
+
+async function deleteDeviceCustomListen() {
+  const id = Number(device.value.id)
+  if (!id) return
+  try {
+    await ElMessageBox.confirm('将删除本机监听快照并尽力下发停止。确定？', '删除监听记录', { type: 'warning' })
+    await eventsApi.deleteCustomEventListenState(id)
+    ElMessage.success('已删除')
+    await loadDeviceListenState()
+  } catch (e) {
+    if (e !== 'cancel') {
+      /* */
+    }
+  }
+}
+
+async function outboundDeviceEnable(row) {
+  const cid = row.id
+  const did = Number(device.value.id)
+  try {
+    await ob.postOutboundConnectorDeviceEnable(cid, did)
+    ElMessage.success('已启用')
+    await loadOutboundConnectorsForDevice()
+  } catch {
+    /* */
+  }
+}
+
+async function outboundDevicePause(row) {
+  const cid = row.id
+  const did = Number(device.value.id)
+  try {
+    await ob.postOutboundConnectorDevicePause(cid, did)
+    ElMessage.success('已停用')
+    await loadOutboundConnectorsForDevice()
+  } catch {
+    /* */
+  }
+}
+
+async function outboundDeviceExclude(row) {
+  const cid = row.id
+  const did = Number(device.value.id)
+  try {
+    await ElMessageBox.confirm('将从本连接器出站中排除本设备，确定？', '排除', { type: 'warning' })
+    await ob.postOutboundConnectorDeviceExclude(cid, did)
+    ElMessage.success('已排除')
+    await loadOutboundConnectorsForDevice()
+  } catch (e) {
+    if (e !== 'cancel') {
+      /* */
+    }
+  }
+}
+
 const onMainTabChange = (name) => {
   // 同步到 URL：便于刷新后保持标签页，同时支持从「设备管理」页用 ?tab=files 直达
   try {
@@ -1167,6 +1473,9 @@ const onMainTabChange = (name) => {
   if (name === 'adb') {
     refreshAdbStatus()
     if (pairMethod.value === 'qrcode') nextTick(renderPairQrCode)
+  }
+  if (name === 'events') {
+    loadDeviceEventsOutbound()
   }
 }
 
@@ -1341,6 +1650,42 @@ const onAudioUpload = async (opt) => {
   }
 }
 
+const reconnectQrPayload = computed(() => {
+  if (!device.value?.agent_token || device.value.agent_connected) return ''
+  return JSON.stringify({
+    serverUrl: WS_BASE,
+    deviceToken: String(device.value.agent_token).trim()
+  })
+})
+
+async function renderReconnectQr() {
+  await nextTick()
+  const canvas = reconnectQrCanvas.value
+  const payload = reconnectQrPayload.value
+  if (!canvas || !payload) return
+  try {
+    await QRCode.toCanvas(canvas, payload, { width: 248, margin: 2 })
+  } catch (e) {
+    console.error('reconnect QR', e)
+  }
+}
+
+function copyAgentReconnectJson() {
+  const s = reconnectQrPayload.value
+  if (!s) {
+    ElMessage.warning('无可用接入数据')
+    return
+  }
+  copyText(s).then(
+    () => ElMessage.success('已复制'),
+    () => ElMessage.error('复制失败')
+  )
+}
+
+watch(reconnectQrPayload, () => {
+  renderReconnectQr()
+})
+
 const load = async () => {
   const res = await deviceApi.getDevice(route.params.id)
   device.value = res.data
@@ -1350,6 +1695,7 @@ const load = async () => {
     group_name: res.data.group_name || '',
     agent_token: res.data.agent_token || ''
   }
+  await renderReconnectQr()
 }
 
 const formatWifiSsid = (raw) => {
@@ -1572,6 +1918,9 @@ onMounted(async () => {
   if (route.query.tab === 'files') {
     loadFileHub()
   }
+  if (route.query.tab === 'events') {
+    loadDeviceEventsOutbound()
+  }
   const recordingStart = sessionStorage.getItem(`recording_${route.params.id}`)
   if (recordingStart) {
     isRecording.value = true
@@ -1594,12 +1943,70 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.events-out-card :deep(.el-card__header) {
+  overflow: hidden;
+}
 .file-hub-video {
   width: 100%;
   max-height: 72vh;
   background: #000;
   border-radius: 4px;
   vertical-align: middle;
+}
+
+.agent-reconnect-card {
+  margin: 12px 0;
+  max-width: 720px;
+}
+.agent-reconnect-card-title {
+  font-weight: 600;
+}
+.agent-reconnect-desc {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: #606266;
+  line-height: 1.55;
+}
+.agent-reconnect-qr-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 16px;
+}
+.agent-reconnect-canvas {
+  flex-shrink: 0;
+  padding: 12px;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.08);
+}
+.agent-reconnect-meta {
+  flex: 1;
+  min-width: 200px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.agent-reconnect-meta p {
+  margin: 0 0 8px;
+}
+.agent-reconnect-meta .lbl {
+  display: inline-block;
+  min-width: 7.5em;
+  margin-right: 6px;
+  color: #909399;
+  font-size: 12px;
+}
+.agent-reconnect-meta .mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  background: #f4f4f5;
+  padding: 2px 6px;
+  border-radius: 4px;
+  word-break: break-all;
+}
+.agent-reconnect-meta .mono.tok {
+  display: inline-block;
+  max-width: 100%;
 }
 
 </style>

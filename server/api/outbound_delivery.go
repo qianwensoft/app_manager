@@ -13,6 +13,22 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// loadConnectorStepForDelivery 解析步骤配置：优先 step_id；HTTP 且 step 行缺失时用 phase_id+endpoint_id 回退（修复历史数据 step_id 不一致导致调试下游上下文不完整）。
+func loadConnectorStepForDelivery(d *models.OutboundDelivery) (st models.OutboundConnectorStep, ok bool) {
+	if d.StepID > 0 {
+		if err := database.DB.Where("id = ?", d.StepID).First(&st).Error; err == nil {
+			return st, true
+		}
+	}
+	if strings.EqualFold(strings.TrimSpace(d.StepType), "http") && d.PhaseID > 0 && d.EndpointID > 0 {
+		if err := database.DB.Where("phase_id = ? AND endpoint_id = ? AND step_type = ?", d.PhaseID, d.EndpointID, "http").
+			Order("sort_order ASC, id ASC").First(&st).Error; err == nil {
+			return st, true
+		}
+	}
+	return models.OutboundConnectorStep{}, false
+}
+
 func deliveryToJSON(d models.OutboundDelivery) gin.H {
 	var detail interface{}
 	raw := strings.TrimSpace(d.DetailJSON)
@@ -70,6 +86,49 @@ func GetOutboundDelivery(c *gin.Context) {
 	for k, v := range vars {
 		varsOut[k] = v
 	}
+	var phRow models.OutboundConnectorPhase
+	if d.PhaseID > 0 {
+		_ = database.DB.Where("id = ?", d.PhaseID).First(&phRow).Error
+		outbound.MergeParamsJSONObjectIntoVars(varsOut, phRow.ParamsJSON)
+	}
+	stRow, hasStepRow := loadConnectorStepForDelivery(&d)
+	if hasStepRow {
+		outbound.MergeStepEventDataToContext(varsOut, stRow, rec)
+		outbound.MergeStepTemplateParamsFromConfigJSON(varsOut, stRow.ConfigJSON)
+	}
+
+	varsDownstream := outbound.ShallowCloneStringMap(varsOut)
+	if strings.EqualFold(strings.TrimSpace(d.StepType), "http") && strings.EqualFold(strings.TrimSpace(d.Status), "success") {
+		if bodyStr, statusCode, ok := outbound.HTTPDetailResponseBodyAndStatus(d.DetailJSON, d.HTTPStatus); ok {
+			if statusCode < 200 || statusCode >= 300 {
+				if d.HTTPStatus >= 200 && d.HTTPStatus < 300 {
+					statusCode = d.HTTPStatus
+				}
+			}
+			if statusCode >= 200 && statusCode < 300 {
+				stepIDForKeys := d.StepID
+				if hasStepRow && stRow.ID > 0 {
+					stepIDForKeys = stRow.ID
+				}
+				outbound.MergeHTTPResponseContext(varsDownstream, stepIDForKeys, statusCode, []byte(bodyStr))
+				if hasStepRow {
+					outbound.MergeHTTPResponseBodyToContext(varsDownstream, stRow, []byte(bodyStr))
+				}
+			}
+		}
+	}
+
+	// 脱敏：将 sensitive=true 的应用参数在 trace context 中替换为 ****
+	if d.EndpointID > 0 {
+		var ep2 models.OutboundEndpoint
+		if err := database.DB.First(&ep2, d.EndpointID).Error; err == nil && ep2.AppID > 0 {
+			var app models.OutboundApp
+			if err := database.DB.First(&app, ep2.AppID).Error; err == nil {
+				outbound.MaskSensitiveAppParamsInVars(varsOut, &app)
+				outbound.MaskSensitiveAppParamsInVars(varsDownstream, &app)
+			}
+		}
+	}
 
 	current := gin.H{
 		"phase_id":    d.PhaseID,
@@ -110,15 +169,24 @@ func GetOutboundDelivery(c *gin.Context) {
 		}
 	}
 
+	deliveryH := deliveryToJSON(d)
+	if ru, ok := deliveryH["request_url"].(string); ok && strings.TrimSpace(ru) != "" {
+		deliveryH["request_url"] = outbound.ExpandTemplate(ru, varsOut)
+	}
+	if det, ok := deliveryH["detail"]; ok && det != nil {
+		deliveryH["detail"] = outbound.ExpandJSONStringLeaves(det, varsOut)
+	}
+
 	payload := gin.H{
-		"delivery":           deliveryToJSON(d),
-		"connector":          connH,
-		"current_step":       current,
-		"highlight":          gin.H{"phase_id": d.PhaseID, "step_id": d.StepID},
-		"endpoint":           epH,
-		"device_event":       rec,
-		"device":             dev,
-		"execution_template": varsOut,
+		"delivery":                      deliveryH,
+		"connector":                     connH,
+		"current_step":                  current,
+		"highlight":                     gin.H{"phase_id": d.PhaseID, "step_id": d.StepID},
+		"endpoint":                      epH,
+		"device_event":                  rec,
+		"device":                        dev,
+		"execution_template":            varsOut,
+		"execution_template_downstream": varsDownstream,
 	}
 	if defPtr != nil {
 		payload["definition"] = *defPtr

@@ -3,6 +3,8 @@ server:
   port: 8080
   host: 0.0.0.0
   mode: debug
+  # 局域网给 Agent 打开组态预览时填写，如 http://192.168.1.10:8080
+  public_base_url: ""
 
 database:
   type: mysql

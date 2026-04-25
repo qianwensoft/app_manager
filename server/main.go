@@ -2,14 +2,21 @@ package main
 
 import (
 	"app-manager/api"
+	"app-manager/channel"
 	"app-manager/config"
+	"app-manager/datastack"
 	"app-manager/database"
+	"app-manager/event"
 	"app-manager/mqtt"
+	"app-manager/outbound"
+	"app-manager/scada"
 	"app-manager/task"
+	"context"
 	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -43,21 +50,48 @@ func main() {
 	os.MkdirAll(config.C.Storage.Path, 0755)
 	os.MkdirAll("./data", 0755)
 
-	// 初始化数据库
+	// 初始化数据库（MySQL 连不上时后台重试，不阻塞启动）
 	if err := database.Init(config.C.Database); err != nil {
 		log.Fatalf("Failed to init database: %v", err)
 	}
-	database.SeedAdmin(database.DB)
+	// 等 DB 就绪后再启动依赖 DB 的子系统（非阻塞：已就绪则立即执行）
+	go func() {
+		<-database.Ready
+		event.RegisterOutboundDeliveryTracePub(database.DB)
+		database.SeedAdmin(database.DB)
+		datastack.StartBufferPollers(database.DB)
+		outbound.InitTriggerManager(database.DB)
+		scada.StartSimEngine()
+		go func() {
+			ticker := time.NewTicker(30 * time.Minute)
+			defer ticker.Stop()
+			for range ticker.C {
+				api.ThirdPartyTokenRefreshAll()
+			}
+		}()
+	}()
 
 	// 启动任务队列
 	task.Init(5)
 	defer task.Q.Stop()
 
-	// 初始化 MQTT
-	if err := mqtt.Init(); err != nil {
-		log.Printf("MQTT init failed: %v", err)
-	}
+	// 初始化 MQTT（非阻塞 — broker 不可达最多等 10s，放后台）
+	go func() {
+		if err := mqtt.Init(); err != nil {
+			log.Printf("MQTT init failed: %v", err)
+		}
+	}()
 	defer mqtt.Close()
+
+	// 启动 Channel Kafka 消费者
+	kafkaCfg := channel.KafkaConfig{
+		Enabled:      config.C.Channel.Kafka.Enabled,
+		GroupID:      config.C.Channel.Kafka.GroupID,
+		Topics:       config.C.Channel.Kafka.Topics,
+		RestProxyURL: config.C.Channel.KafkaRestProxyURL,
+	}
+	kafkaConsumer := channel.NewKafkaConsumer(channel.Hub, kafkaCfg)
+	kafkaConsumer.Start(context.Background())
 
 	// 设置 Gin 模式
 	// gin.SetMode(config.C.Server.Mode)

@@ -10,6 +10,7 @@
         <p style="margin: 0">多台 PDA 同时下发开启监听；外部系统可轮询 GET /api/open/v1/events（open:events:list）。</p>
       </template>
     </el-alert>
+    <el-alert v-if="!auth.isOperator" type="warning" :closable="false" show-icon style="margin-bottom: 16px" title="只读账号" description="可查看设备、下发范围与监听状态；批量开启/停止监听需管理员或操作员。" />
 
     <el-card style="margin-bottom: 16px">
       <template #header>
@@ -64,10 +65,15 @@
           <div class="hint">分组与定义可同时选，结果合并去重；皆空则使用全部已启用定义。</div>
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" :loading="batchLoading" :disabled="!selectedIds.length" @click="startListen">
+          <el-button
+            type="primary"
+            :loading="batchLoading"
+            :disabled="!selectedIds.length || !auth.isOperator"
+            @click="startListen"
+          >
             批量开启监听
           </el-button>
-          <el-button :loading="batchLoading" :disabled="!selectedIds.length" @click="stopListen">
+          <el-button :loading="batchLoading" :disabled="!selectedIds.length || !auth.isOperator" @click="stopListen">
             批量停止监听
           </el-button>
           <el-button @click="loadDevices">刷新设备</el-button>
@@ -83,7 +89,8 @@
         </div>
       </template>
       <p class="listen-hint">
-        成功下发「开启监听」且 Agent 仍在线时会记为<strong>激活</strong>；停止下发或 Agent 断线会记为未激活。可按事件看多设备、按设备看多事件，或在明细中组合筛选。
+        成功下发「开启监听」且 Agent 仍在线时会记为<strong>激活</strong>。明细中已激活行可<strong>暂停</strong>（下发停止并标记未激活）；未激活行显示<strong>启动</strong>，将按快照中的定义范围重新下发开启监听。亦可<strong>删除</strong>快照行；Agent
+        离线时暂停/停止仍会更新后台状态，设备下次上线后需重新下发开启监听。
       </p>
       <el-tabs v-model="listenViewTab">
         <el-tab-pane label="按事件（多设备）" name="byEvent">
@@ -93,15 +100,15 @@
             <el-table-column label="设备列表">
               <template #default="{ row }">
                 <div class="dev-tags">
-                  <el-tag
-                    v-for="d in row.devices"
-                    :key="d.id"
-                    size="small"
-                    :type="d.agent_connected ? 'success' : 'info'"
-                    style="margin: 2px 4px 2px 0"
-                  >
-                    {{ deviceBriefLine(d) }}
-                  </el-tag>
+                  <div v-for="d in row.devices" :key="d.id" class="dev-tag-row">
+                    <el-tag size="small" :type="d.agent_connected ? 'success' : 'info'" style="margin: 2px 6px 2px 0">
+                      {{ deviceBriefLine(d) }}
+                    </el-tag>
+                    <template v-if="auth.isOperator">
+                      <el-button link type="primary" size="small" @click="pauseListenForDevice(d.id)">暂停</el-button>
+                      <el-button link type="danger" size="small" @click="deleteListenForDevice(d.id)">删除</el-button>
+                    </template>
+                  </div>
                 </div>
               </template>
             </el-table-column>
@@ -124,6 +131,12 @@
               </template>
             </el-table-column>
             <el-table-column prop="updated_at" label="更新时间" width="180" />
+            <el-table-column v-if="auth.isOperator" label="操作" width="120" align="center" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" size="small" @click="pauseListenForDevice(row.device?.id)">暂停</el-button>
+                <el-button link type="danger" size="small" @click="deleteListenForDevice(row.device?.id)">删除</el-button>
+              </template>
+            </el-table-column>
           </el-table>
         </el-tab-pane>
         <el-tab-pane label="明细（单设备·单事件筛选）" name="detail">
@@ -177,6 +190,21 @@
               </template>
             </el-table-column>
             <el-table-column prop="updated_at" label="更新时间" width="178" />
+            <el-table-column v-if="auth.isOperator" label="操作" width="120" align="center" fixed="right">
+              <template #default="{ row }">
+                <el-button
+                  v-if="row.active"
+                  link
+                  type="primary"
+                  size="small"
+                  @click="pauseListenForDevice(row.device_id)"
+                >
+                  暂停
+                </el-button>
+                <el-button v-else link type="success" size="small" @click="startListenForRow(row)">启动</el-button>
+                <el-button link type="danger" size="small" @click="deleteListenForDevice(row.device_id)">删除</el-button>
+              </template>
+            </el-table-column>
           </el-table>
         </el-tab-pane>
       </el-tabs>
@@ -219,7 +247,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import * as deviceApi from '@/api/device'
@@ -325,6 +353,49 @@ async function loadListenViews() {
 
 function onIncludeInactiveChange() {
   loadListenViews()
+}
+
+async function pauseListenForDevice(deviceId) {
+  if (!deviceId) return
+  try {
+    await eventsApi.batchStopCustomEventListen([deviceId])
+    ElMessage.success('已暂停监听（已标记未激活）')
+    await loadListenViews()
+  } catch {
+    /* axios 已提示 */
+  }
+}
+
+/** 明细行未激活时：按库中快照的 definition_ids 重新下发开启（无则等同全部已启用定义） */
+async function startListenForRow(row) {
+  const deviceId = row?.device_id
+  if (!deviceId) return
+  const raw = row.definition_ids
+  const definitionIds =
+    Array.isArray(raw) && raw.length ? raw.map((x) => Number(x)).filter((n) => !Number.isNaN(n) && n > 0) : undefined
+  try {
+    await eventsApi.batchStartCustomEventListen([deviceId], {
+      definitionIds: definitionIds?.length ? definitionIds : undefined
+    })
+    ElMessage.success('已下发开启监听')
+    await loadListenViews()
+  } catch {
+    /* axios 已提示 */
+  }
+}
+
+async function deleteListenForDevice(deviceId) {
+  if (!deviceId) return
+  try {
+    await ElMessageBox.confirm('将删除该设备的监听快照，并尽力下发停止监听。确定？', '删除监听记录', { type: 'warning' })
+    await eventsApi.deleteCustomEventListenState(deviceId)
+    ElMessage.success('已删除')
+    await loadListenViews()
+  } catch (e) {
+    if (e !== 'cancel') {
+      /* 其它错误由 http 拦截器提示 */
+    }
+  }
 }
 
 let stomp = null
@@ -546,5 +617,12 @@ onUnmounted(() => {
 }
 .dev-tags {
   line-height: 1.6;
+}
+.dev-tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 4px;
+  margin-bottom: 4px;
 }
 </style>

@@ -7,6 +7,7 @@ const routes = [
   { path: '/login', name: 'Login', meta: { requiresAuth: false }, component: () => import('@/views/Login.vue') },
   { path: '/register', name: 'Register', meta: { requiresAuth: false }, component: () => import('@/views/Register.vue') },
   { path: '/upload/:token', name: 'UploadPage', meta: { requiresAuth: false }, component: () => import('@/views/UploadPage.vue') },
+  { path: '/oauth/authorize', name: 'OAuthAuthorize', meta: { requiresAuth: true, title: 'OAuth 授权' }, component: () => import('@/views/OAuthAuthorizePage.vue') },
   {
     path: '/share/screen',
     name: 'ScreenShare',
@@ -32,12 +33,56 @@ const routes = [
         meta: { title: '事件定义' },
         component: () => import('@/views/CustomEventConfig.vue')
       },
+      {
+        path: 'outbound/apps',
+        name: 'OutboundApps',
+        meta: { title: '外部应用' },
+        component: () => import('@/views/OutboundApps.vue')
+      },
+      {
+        path: 'outbound/apps/:appId/endpoints/debug',
+        name: 'OutboundEndpointDebug',
+        meta: { title: '接口调试' },
+        component: () => import('@/views/OutboundEndpointDebug.vue')
+      },
+      {
+        path: 'outbound/apps/:appId/webhooks/:webhookId/debug',
+        name: 'OutboundWebhookDebug',
+        meta: { title: 'Webhook 调试' },
+        component: () => import('@/views/OutboundWebhookDebug.vue')
+      },
+      {
+        path: 'outbound/apps/:appId/webhooks/:webhookId/logs',
+        name: 'OutboundWebhookLogs',
+        meta: { title: 'Webhook 历史记录' },
+        component: () => import('@/views/OutboundWebhookLogs.vue')
+      },
+      {
+        path: 'outbound/apps/:id',
+        name: 'OutboundAppDetail',
+        meta: { title: '外部应用详情' },
+        component: () => import('@/views/OutboundAppDetail.vue')
+      },
+      {
+        path: 'outbound/connectors/:id',
+        name: 'OutboundConnectorEdit',
+        meta: { title: '连接器编辑' },
+        component: () => import('@/views/OutboundConnectorEdit.vue')
+      },
+      {
+        path: 'outbound',
+        name: 'OutboundIntegrations',
+        meta: { title: '连接器' },
+        component: () => import('@/views/OutboundIntegrations.vue')
+      },
       { path: 'apps', name: 'Apps', meta: { title: 'APK 管理' }, component: () => import('@/views/Apps.vue') },
       { path: 'tasks', name: 'Tasks', meta: { title: '任务队列' }, component: () => import('@/views/Tasks.vue') },
-      { path: 'apikeys', name: 'ApiKeys', meta: { title: '授权令牌' }, component: () => import('@/views/ApiKeys.vue') },
+      { path: 'apikeys', name: 'ApiKeys', meta: { title: '授权管理' }, component: () => import('@/views/ApiKeys.vue') },
       { path: 'users', name: 'Users', meta: { title: '用户管理' }, component: () => import('@/views/Users.vue') },
       { path: 'audit', name: 'AuditLog', meta: { title: '审计日志' }, component: () => import('@/views/AuditLog.vue') },
       { path: 'settings', name: 'Settings', meta: { title: '系统管理' }, component: () => import('@/views/Settings.vue') },
+      { path: 'data', name: 'DataStack', meta: { title: '数据源与接口' }, component: () => import('@/views/data/DataStack.vue') },
+      { path: 'agent-menus', name: 'AgentMenus', meta: { title: 'Agent 菜单下发' }, component: () => import('@/views/agent-menus/AgentMenus.vue') }
     ]
   }
 ]

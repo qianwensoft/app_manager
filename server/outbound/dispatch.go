@@ -90,6 +90,8 @@ func runConnectorDeliveries(db *gorm.DB, connector models.OutboundConnector, eps
 	}
 
 	vars := TemplateVars(rec, dev, def)
+	SeedContextFromWebhookSchema(vars, connector)
+	FlattenJSONEventDataIntoContext(vars, rec.EventData, "context", maxContextFlattenKeys)
 	switch mode {
 	case "parallel":
 		var wg sync.WaitGroup
@@ -100,19 +102,19 @@ func runConnectorDeliveries(db *gorm.DB, connector models.OutboundConnector, eps
 			go func(ep models.OutboundEndpoint, app *models.OutboundApp) {
 				defer wg.Done()
 				meta := StepExecutionMeta{StepType: "http"}
-				ExecuteHTTPWebhook(db, connector, ep, app, rec, dev, def, vars, meta, false)
+				ExecuteHTTPWebhook(db, connector, ep, app, rec, dev, def, vars, meta, false, models.OutboundConnectorStep{}, nil)
 			}(ep, app)
 		}
 		wg.Wait()
 	case "sequential":
 		for i := range eps {
 			meta := StepExecutionMeta{StepType: "http"}
-			ExecuteHTTPWebhook(db, connector, eps[i], eps[i].App, rec, dev, def, vars, meta, true)
+			ExecuteHTTPWebhook(db, connector, eps[i], eps[i].App, rec, dev, def, vars, meta, true, models.OutboundConnectorStep{}, nil)
 		}
 	case "failover":
 		for i := range eps {
 			meta := StepExecutionMeta{StepType: "http"}
-			d := ExecuteHTTPWebhook(db, connector, eps[i], eps[i].App, rec, dev, def, vars, meta, true)
+			d := ExecuteHTTPWebhook(db, connector, eps[i], eps[i].App, rec, dev, def, vars, meta, true, models.OutboundConnectorStep{}, nil)
 			if d.Status == "success" {
 				return
 			}

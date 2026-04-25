@@ -106,7 +106,14 @@ func (h *Hub) readPump(c *Connection) {
 			continue
 		}
 		if h.onMessage != nil {
-			h.onMessage(c.DeviceID, msg)
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("agent uplink handler panic device=%s: %v", c.DeviceID, r)
+					}
+				}()
+				h.onMessage(c.DeviceID, msg)
+			}()
 		}
 	}
 }

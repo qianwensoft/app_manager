@@ -1,0 +1,102 @@
+/* SCADA Editor Design Tokens — Industrial Dark Theme */
+
+:root {
+  /* ── Background layers ── */
+  --bg-base:       #020617;   /* canvas / page base */
+  --bg-app:        #0f0f1e;   /* app shell */
+  --bg-panel:      #12122a;   /* header / sidebar panels */
+  --bg-surface:    #1a1a2e;   /* cards, wells */
+  --bg-elevated:   #1e1e3a;   /* dropdowns, popovers */
+  --bg-overlay:    #252545;   /* hover / selected states */
+  --bg-muted:      #2a2a4a;   /* grid lines, dividers */
+
+  /* ── Brand / Accent ── */
+  --accent:        #4a9eff;   /* primary interactive */
+  --accent-dim:    #2d6abf;   /* pressed / active */
+  --accent-glow:   rgba(74, 158, 255, 0.15);
+  --accent-muted:  rgba(74, 158, 255, 0.08);
+
+  /* ── Semantic colors ── */
+  --success:       #22c55e;
+  --success-muted: rgba(34, 197, 94, 0.12);
+  --warning:       #f59e0b;
+  --warning-muted: rgba(245, 158, 11, 0.12);
+  --danger:        #ef4444;
+  --danger-muted:  rgba(239, 68, 68, 0.12);
+  --info:          #06b6d4;
+  --info-muted:    rgba(6, 182, 212, 0.12);
+
+  /* ── Text ── */
+  --text-primary:  #f1f5f9;   /* headings / labels */
+  --text-secondary:#94a3b8;   /* secondary info */
+  --text-muted:    #64748b;   /* placeholders / disabled */
+  --text-inverse:  #020617;   /* text on light bg */
+
+  /* ── Border ── */
+  --border:        rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --border-accent: rgba(74, 158, 255, 0.40);
+
+  /* ── Radius ── */
+  --radius-sm:  3px;
+  --radius-md:  6px;
+  --radius-lg:  10px;
+  --radius-xl:  14px;
+  --radius-full:9999px;
+
+  /* ── Spacing scale ── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
+  /* ── Typography ── */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'Fira Code', 'JetBrains Mono', 'Cascadia Code', monospace;
+
+  --text-xs:   11px;
+  --text-sm:   12px;
+  --text-base: 13px;
+  --text-md:   14px;
+  --text-lg:   16px;
+  --text-xl:   18px;
+  --text-2xl:  22px;
+
+  --leading-tight:  1.25;
+  --leading-normal: 1.5;
+  --leading-relaxed:1.75;
+
+  /* ── Shadow / Glow ── */
+  --shadow-sm:  0 1px 3px rgba(0,0,0,0.4);
+  --shadow-md:  0 4px 12px rgba(0,0,0,0.5);
+  --shadow-lg:  0 8px 32px rgba(0,0,0,0.6);
+  --shadow-accent: 0 0 0 1px var(--border-accent), 0 4px 16px rgba(74,158,255,0.15);
+  --shadow-inset: inset 0 1px 0 rgba(255,255,255,0.05);
+
+  /* ── Motion ── */
+  --duration-fast:   100ms;
+  --duration-base:   200ms;
+  --duration-slow:   300ms;
+  --ease-out:  cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in:   cubic-bezier(0.4, 0, 1, 1);
+  --ease-inout:cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ── Z-index ── */
+  --z-base:    0;
+  --z-raised:  10;
+  --z-dropdown:100;
+  --z-sticky:  200;
+  --z-modal:   300;
+  --z-toast:   400;
+  --z-tooltip: 500;
+
+  /* ── Layout ── */
+  --header-h:     44px;
+  --tabs-h:       32px;
+  --sidebar-l-w:  200px;
+  --toolbar-w:    44px;
+  --panel-r-w:    228px;
+  --layer-w:      172px;
+}

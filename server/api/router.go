@@ -3,6 +3,9 @@ package api
 import (
 	"app-manager/auth"
 	"app-manager/config"
+	"app-manager/datastack"
+	"app-manager/database"
+	"app-manager/mcp"
 
 	"github.com/gin-gonic/gin"
 )
@@ -28,6 +31,7 @@ func SetupRouter() *gin.Engine {
 	// 静态文件
 	r.Static("/assets", "./web/dist/assets")
 	r.StaticFile("/", "./web/dist/index.html")
+	r.Static("/scada-editor", "./web/dist/scada-editor")
 
 	// 安装状态检查（正常模式）
 	r.GET("/api/setup/status", GetSetupStatus)
@@ -250,15 +254,24 @@ func SetupRouter() *gin.Engine {
 			ob.GET("/apps", ListOutboundApps)
 			ob.POST("/apps", CreateOutboundApp)
 			ob.GET("/apps/:id/token/status", GetOutboundAppTokenStatus)
+			ob.POST("/apps/:id/token/code", PostOutboundAppTokenCode)
 			ob.POST("/apps/:id/token/fetch", PostOutboundAppTokenFetch)
 			ob.POST("/apps/:id/token/refresh", PostOutboundAppTokenRefresh)
+			ob.PUT("/apps/:id/params", PutOutboundAppParams)
 			ob.GET("/apps/:id", GetOutboundApp)
 			ob.PUT("/apps/:id", UpdateOutboundApp)
 			ob.DELETE("/apps/:id", DeleteOutboundApp)
+			ob.POST("/apps/:id/clone", CloneOutboundApp)
 
 			ob.GET("/endpoints", ListOutboundEndpoints)
 			ob.POST("/endpoints", CreateOutboundEndpoint)
+			ob.GET("/template-demo", GetOutboundTemplateDemo)
+			ob.POST("/template-expand", PostOutboundTemplateExpand)
+			ob.GET("/template-vars", GetOutboundTemplateVars)
+			ob.POST("/phase-preview", PostOutboundPhasePreview)
+			ob.POST("/endpoints/debug", PostOutboundEndpointDebug)
 			ob.GET("/endpoints/:id", GetOutboundEndpoint)
+			ob.GET("/endpoints/:id/param-schema", GetEndpointParamSchema)
 			ob.PUT("/endpoints/:id", UpdateOutboundEndpoint)
 			ob.DELETE("/endpoints/:id", DeleteOutboundEndpoint)
 
@@ -267,9 +280,23 @@ func SetupRouter() *gin.Engine {
 			ob.POST("/connectors/:id/devices/:device_id/enable", PostOutboundConnectorDeviceEnable)
 			ob.POST("/connectors/:id/devices/:device_id/exclude", PostOutboundConnectorDeviceExclude)
 			ob.GET("/connectors/:id/execution-trace", GetOutboundConnectorExecutionTrace)
+			ob.GET("/connectors/:id/trigger/status", GetOutboundConnectorTriggerStatus)
 			ob.GET("/connectors/:id", GetOutboundConnector)
 			ob.PUT("/connectors/:id", UpdateOutboundConnector)
 			ob.DELETE("/connectors/:id", DeleteOutboundConnector)
+
+			ob.GET("/webhooks", ListOutboundWebhooks)
+			ob.POST("/webhooks", CreateOutboundWebhook)
+			ob.GET("/webhooks/:id", GetOutboundWebhook)
+			ob.GET("/webhooks/:id/config", GetOutboundWebhookConfig)
+			ob.PUT("/webhooks/:id", UpdateOutboundWebhook)
+			ob.DELETE("/webhooks/:id", DeleteOutboundWebhook)
+			ob.GET("/webhooks/:id/logs", ListOutboundWebhookLogs)
+			ob.DELETE("/webhooks/:id/logs", DeleteOutboundWebhookLogs)
+			ob.GET("/webhooks/:id/event-types", ListOutboundWebhookEventTypes)
+			ob.POST("/webhooks/:id/event-types", CreateOutboundWebhookEventType)
+			ob.PUT("/webhooks/:id/event-types/:etid", UpdateOutboundWebhookEventType)
+			ob.DELETE("/webhooks/:id/event-types/:etid", DeleteOutboundWebhookEventType)
 
 			ob.GET("/deliveries/:id", GetOutboundDelivery)
 			ob.POST("/deliveries/:id/retry", PostRetryOutboundDelivery)
@@ -294,23 +321,30 @@ func SetupRouter() *gin.Engine {
 		sca.PUT("/groups/:id", auth.RequireRole("admin", "operator"), UpdateScadaGroup)
 		sca.DELETE("/groups/:id", auth.RequireRole("admin", "operator"), DeleteScadaGroup)
 		sca.GET("/infos", ListScadaInfos)
-		sca.GET("/infos/:id", GetScadaInfo)
+		sca.GET("/infos/:scada_id", GetScadaInfo)
 		sca.GET("/infos/code/:code", GetScadaInfoByCode)
 		sca.POST("/infos", auth.RequireRole("admin", "operator"), CreateScadaInfo)
-		sca.PUT("/infos/:id", auth.RequireRole("admin", "operator"), UpdateScadaInfo)
-		sca.DELETE("/infos/:id", auth.RequireRole("admin", "operator"), DeleteScadaInfo)
+		sca.PUT("/infos/:scada_id", auth.RequireRole("admin", "operator"), UpdateScadaInfo)
+		sca.DELETE("/infos/:scada_id", auth.RequireRole("admin", "operator"), DeleteScadaInfo)
 		sca.POST("/save-canvas", auth.RequireRole("admin", "operator"), SaveScadaCanvas)
-		sca.POST("/infos/:id/publish", auth.RequireRole("admin", "operator"), PublishScada)
-		sca.POST("/infos/:id/unpublish", auth.RequireRole("admin", "operator"), UnpublishScada)
+			sca.POST("/infos/:scada_id/save-canvas", auth.RequireRole("admin", "operator"), SaveScadaCanvasByID)
+		sca.POST("/infos/:scada_id/publish", auth.RequireRole("admin", "operator"), PublishScada)
+		sca.POST("/infos/:scada_id/unpublish", auth.RequireRole("admin", "operator"), UnpublishScada)
 		sca.POST("/resource/upload/:category", auth.RequireRole("admin", "operator"), UploadScadaResource)
 		sca.GET("/customize/components", ListScadaCustomizeComponents)
 		sca.POST("/customize/component/create", auth.RequireRole("admin", "operator"), CreateScadaCustomizeComponent)
 		sca.DELETE("/customize/component/:id", auth.RequireRole("admin", "operator"), DeleteScadaCustomizeComponent)
 		sca.GET("/customize/file/:id", GetScadaCustomizeFile)
+		// access policies
+		sca.GET("/infos/:scada_id/access-policies", auth.RequireRole("admin", "operator"), ListScadaAccessPolicies)
+		sca.POST("/infos/:scada_id/access-policies", auth.RequireRole("admin", "operator"), CreateScadaAccessPolicy)
+		sca.PUT("/access-policies/:id", auth.RequireRole("admin", "operator"), UpdateScadaAccessPolicy)
+		sca.DELETE("/access-policies/:id", auth.RequireRole("admin", "operator"), DeleteScadaAccessPolicy)
 	}
 	sim := r.Group("/api/scada/sim-points", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"))
 	{
 		sim.GET("", ListScadaSimPoints)
+			sim.GET("/snapshot/:scada_code", GetScadaSimSnapshot)
 		sim.POST("", CreateScadaSimPoint)
 		sim.PUT("/:id", UpdateScadaSimPoint)
 		sim.DELETE("/:id", DeleteScadaSimPoint)
@@ -322,11 +356,29 @@ func SetupRouter() *gin.Engine {
 		dstack.PUT("/sources/:id", auth.RequireRole("admin", "operator"), UpdateDataSource)
 		dstack.DELETE("/sources/:id", auth.RequireRole("admin", "operator"), DeleteDataSource)
 		dstack.GET("/sources/:id/test", auth.RequireRole("admin", "operator"), TestDataSource)
+		dstack.GET("/sources/:id/pool-stats", auth.RequireRole("admin", "operator"), GetDataSourcePoolStats)
+		dstack.GET("/sources/:id/tables", ListDataSourceTables)
+		dstack.GET("/sources/:id/tables/:table/columns", ListDataSourceTableColumns)
+		dstack.GET("/sources/:id/select-all-sql", DataSourceSelectAllSQL)
+		dstack.POST("/sources/:id/exec-ddl", auth.RequireRole("admin", "operator"), ExecDataSourceDDL)
 		dstack.GET("/datasets", ListDatasets)
 		dstack.POST("/datasets", auth.RequireRole("admin", "operator"), CreateDataset)
 		dstack.PUT("/datasets/:id", auth.RequireRole("admin", "operator"), UpdateDataset)
 		dstack.DELETE("/datasets/:id", auth.RequireRole("admin", "operator"), DeleteDataset)
 		dstack.POST("/datasets/:id/preview", auth.RequireRole("admin", "operator"), PreviewDataset)
+		dstack.POST("/datasets/:id/debug", auth.RequireRole("admin", "operator"), DebugDataset)
+		dstack.GET("/datasets/:id/mock-params", auth.RequireRole("admin", "operator"), MockParamsDataset)
+		dstack.GET("/datasets/:id/event-rows", auth.RequireRole("admin", "operator"), GetDatasetEventRows)
+		dstack.GET("/datasets/:id/structures", ListDataStructures)
+		dstack.POST("/datasets/:id/structures", auth.RequireRole("admin", "operator"), CreateDataStructure)
+		dstack.PUT("/datasets/:id/structures/:sid", auth.RequireRole("admin", "operator"), UpdateDataStructure)
+		dstack.DELETE("/datasets/:id/structures/:sid", auth.RequireRole("admin", "operator"), DeleteDataStructure)
+		dstack.POST("/interfaces/:id/debug", auth.RequireRole("admin", "operator"), DebugDataInterface)
+		dstack.GET("/interfaces/:id/mock-params", auth.RequireRole("admin", "operator"), MockParamsInterface)
+		dstack.GET("/interfaces/:id/param-schema", auth.RequireRole("admin", "operator"), GetInterfaceParamSchema)
+		dstack.POST("/datasets/:id/generate-static-crud-interfaces", auth.RequireRole("admin", "operator"), GenerateStaticCrudInterfaces)
+		dstack.POST("/datasets/:id/generate-crud-interfaces", auth.RequireRole("admin", "operator"), GenerateCrudInterfaces)
+		dstack.POST("/datasets/:id/apply-ddl", auth.RequireRole("admin", "operator"), ApplyDatasetDDL)
 		dstack.GET("/interface-groups", ListDataInterfaceGroups)
 		dstack.POST("/interface-groups", auth.RequireRole("admin", "operator"), CreateDataInterfaceGroup)
 		dstack.PUT("/interface-groups/:id", auth.RequireRole("admin", "operator"), UpdateDataInterfaceGroup)
@@ -335,6 +387,7 @@ func SetupRouter() *gin.Engine {
 		dstack.POST("/interfaces", auth.RequireRole("admin", "operator"), CreateDataInterface)
 		dstack.PUT("/interfaces/:id", auth.RequireRole("admin", "operator"), UpdateDataInterface)
 		dstack.DELETE("/interfaces/:id", auth.RequireRole("admin", "operator"), DeleteDataInterface)
+		dstack.POST("/interfaces/batch-delete", auth.RequireRole("admin", "operator"), BatchDeleteDataInterfaces)
 	}
 	amenu := r.Group("/api/agent-menus", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"))
 	{
@@ -343,6 +396,66 @@ func SetupRouter() *gin.Engine {
 		amenu.PUT("/:id", UpdateAgentMenuItem)
 		amenu.DELETE("/:id", DeleteAgentMenuItem)
 		amenu.POST("/deploy", DeployAgentMenus)
+	}
+
+	// 组织架构
+	org := r.Group("/api/org", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"))
+	{
+		org.GET("/departments", ListDepartments)
+		org.POST("/departments", auth.RequireRole("admin"), CreateDepartment)
+		org.PUT("/departments/:id", auth.RequireRole("admin"), UpdateDepartment)
+		org.DELETE("/departments/:id", auth.RequireRole("admin"), DeleteDepartment)
+		org.GET("/positions", ListPositions)
+		org.POST("/positions", auth.RequireRole("admin"), CreatePosition)
+		org.PUT("/positions/:id", auth.RequireRole("admin"), UpdatePosition)
+		org.DELETE("/positions/:id", auth.RequireRole("admin"), DeletePosition)
+		org.GET("/users/:user_id/departments", ListUserDepartments)
+		org.POST("/users/:user_id/departments", auth.RequireRole("admin"), AssignUserDepartment)
+		org.DELETE("/users/:user_id/departments/:dept_id", auth.RequireRole("admin"), RemoveUserDepartment)
+		org.GET("/device-groups", ListDeviceGroupsTree)
+		org.POST("/device-groups", auth.RequireRole("admin"), CreateDeviceGroup)
+		org.PUT("/device-groups/:id", auth.RequireRole("admin"), UpdateDeviceGroup)
+		org.DELETE("/device-groups/:id", auth.RequireRole("admin"), DeleteDeviceGroup)
+		org.GET("/device-groups/:id/members", ListDeviceGroupMembers)
+		org.POST("/device-groups/:id/members", auth.RequireRole("admin"), AddDeviceGroupMember)
+		org.DELETE("/device-groups/:id/members/:device_id", auth.RequireRole("admin"), RemoveDeviceGroupMember)
+	}
+
+	// OAuth 2.0 — token endpoint (无需登录，Client Credentials)
+	r.POST("/api/oauth/token", PostOAuthToken)
+	// OAuth 2.0 — authorization code flow
+	r.GET("/api/oauth/authorize", OAuthAuthorizeInfo)
+	r.POST("/api/oauth/authorize", auth.AuthMiddleware(), OAuthAuthorizeConsent)
+	// OAuth 2.0 — client management (admin only)
+	oauthAdmin := r.Group("/api/oauth", auth.AuthMiddleware(), auth.RequireRole("admin"))
+	{
+		oauthAdmin.GET("/clients", ListOAuthClients)
+		oauthAdmin.POST("/clients", CreateOAuthClient)
+		oauthAdmin.GET("/clients/:id", GetOAuthClient)
+		oauthAdmin.PUT("/clients/:id", UpdateOAuthClient)
+		oauthAdmin.DELETE("/clients/:id", DeleteOAuthClient)
+		oauthAdmin.POST("/clients/:id/revoke-tokens", RevokeOAuthClientTokens)
+		oauthAdmin.POST("/introspect", OAuthIntrospect)
+	}
+
+	// Third-party OAuth providers (admin only)
+	tp := r.Group("/api/thirdparty", auth.AuthMiddleware(), auth.RequireRole("admin"))
+	{
+		tp.GET("", ListThirdPartyProviders)
+		tp.POST("", CreateThirdPartyProvider)
+		tp.GET("/:id", GetThirdPartyProvider)
+		tp.PUT("/:id", UpdateThirdPartyProvider)
+		tp.DELETE("/:id", DeleteThirdPartyProvider)
+		tp.GET("/:id/token", GetThirdPartyTokenStatus)
+		// FreePass
+		tp.GET("/:id/authorize", FreePassAuthorizeURL)
+		tp.GET("/:id/freepass/callback", FreePassCallback)
+		tp.POST("/:id/freepass/refresh", FreePassRefresh)
+		// WeChat Open Platform
+		tp.POST("/:id/wechat/preauthcode", WechatPreAuthCode)
+		tp.GET("/:id/wechat/callback", WechatCallback)
+		tp.POST("/:id/wechat/refresh", WechatRefresh)
+		tp.POST("/:id/wechat/ticket", WechatTicket)
 	}
 
 	// WebSocket
@@ -354,12 +467,22 @@ func SetupRouter() *gin.Engine {
 	r.GET("/ws/agent/:deviceId", AgentWS)
 	r.GET("/ws/agent-fs/:deviceId", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"), AgentFsWS)
 	r.GET("/ws/camera/:deviceId", auth.AuthMiddleware(), CameraWS)
+	r.GET("/ws/channel", ChannelWS)
+
+	// 缓冲入站 Webhook（免 API Key，凭 X-Webhook-Secret）
+	r.POST("/api/open/v1/ingress/buffer/:dataset_code", datastack.OpenBufferWebhook(database.DB))
+	// event_bound Webhook 推送入站（免 API Key，凭 webhook 自身鉴权）
+	r.POST("/api/open/v1/ingress/webhook/:webhook_id", datastack.OpenWebhookPush(database.DB))
+	// 出站连接器 Webhook 触发器入站（免 API Key，凭 token 自身鉴权）
+	r.POST("/api/open/v1/trigger/:token", InboundWebhookTrigger)
+	// 出站 Webhook 接收端点（按 ID 路由，自带鉴权/解密）
+	r.Any("/api/open/v1/outbound/webhooks/receive/:app_code/:token", ReceiveOutboundWebhook)
 
 	// 对外开放 API
 	open := r.Group("/api/open/v1", auth.APIKeyMiddleware())
 	{
-		open.GET("/data/:slug", OpenDataInterfaceInvoke)
-		open.POST("/data/:slug", OpenDataInterfaceInvoke)
+		open.GET("/data/:code", OpenDataInterfaceInvoke)
+		open.POST("/data/:code", OpenDataInterfaceInvoke)
 		open.GET("/devices", auth.RequireOpenScope(auth.OpenDevicesList), ListDevices)
 		open.GET("/devices/:id/info", auth.RequireOpenScope(auth.OpenDeviceInfo), GetDeviceInfo)
 		open.GET("/devices/:id/apps", auth.RequireOpenScope(auth.OpenDeviceApps), GetDeviceApps)
@@ -369,8 +492,19 @@ func SetupRouter() *gin.Engine {
 		open.GET("/events", auth.RequireOpenScope(auth.OpenEventsList), ListDeviceEvents)
 	}
 
+	// MCP — Model Context Protocol (X-API-Key auth)
+	mcpGroup := r.Group("/mcp/v1", auth.APIKeyMiddleware())
+	{
+		mcpGroup.POST("/", mcp.Handle)
+	}
+
 	// SPA 回退放最后，避免未匹配 API 被误判为前端路由
 	r.NoRoute(func(c *gin.Context) {
+		path := c.Request.URL.Path
+		if len(path) >= 14 && path[:14] == "/scada-editor/" {
+			c.File("./web/dist/scada-editor/index.html")
+			return
+		}
 		c.File("./web/dist/index.html")
 	})
 

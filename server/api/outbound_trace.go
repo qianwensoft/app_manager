@@ -3,6 +3,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -12,52 +13,15 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// traceLastRun 兼容 Raw 聚合：MySQL 常为 time.Time，SQLite 常为 string / []byte。
-type traceLastRun struct {
-	T     time.Time
-	Valid bool
-}
-
-func (t *traceLastRun) Scan(src interface{}) error {
-	*t = traceLastRun{}
-	if src == nil {
-		return nil
-	}
-	switch v := src.(type) {
-	case time.Time:
-		if v.IsZero() {
-			return nil
-		}
-		t.T = v
-		t.Valid = true
-		return nil
-	case []byte:
-		return t.scanString(string(v))
-	case string:
-		return t.scanString(v)
-	default:
-		return fmt.Errorf("traceLastRun: unsupported %T", src)
-	}
-}
-
-func (t *traceLastRun) scanString(s string) error {
-	if tm, ok := parseOutboundLastRun(s); ok {
-		t.T = tm
-		t.Valid = true
-	}
-	return nil
-}
-
-// traceStatRow 聚合 outbound_deliveries（SQLite / MySQL 通用 SUM CASE）。
-type traceStatRow struct {
-	PhaseID    uint         `gorm:"column:phase_id"`
-	StepID     uint         `gorm:"column:step_id"`
-	StepType   string       `gorm:"column:step_type"`
-	EndpointID uint         `gorm:"column:endpoint_id"`
-	Total      int64        `gorm:"column:total"`
-	Success    int64        `gorm:"column:success"`
-	Failed     int64        `gorm:"column:failed"`
-	LastRun    traceLastRun `gorm:"column:last_run"`
+// traceAggRow 仅用于内存组装（不经 GORM Scan），避免 GORM 将嵌套/自定义类型误判为关联模型。
+type traceAggRow struct {
+	PhaseID    uint
+	StepID     uint
+	StepType   string
+	EndpointID uint
+	Total      int64
+	Success    int64
+	Failed     int64
 }
 
 type traceNodeStatOut struct {
@@ -87,7 +51,15 @@ func GetOutboundConnectorExecutionTrace(c *gin.Context) {
 		return
 	}
 
-	var rows []traceStatRow
+	var rawRows []map[string]interface{}
+	deviceWhere := ""
+	args := []interface{}{id}
+	if ds := strings.TrimSpace(c.Query("device_id")); ds != "" {
+		if du, err := strconv.ParseUint(ds, 10, 32); err == nil && du > 0 {
+			deviceWhere = " AND device_event_id IN (SELECT id FROM device_events WHERE device_id = ?)"
+			args = append(args, uint(du))
+		}
+	}
 	raw := `
 SELECT 
   COALESCE(phase_id, 0) AS phase_id,
@@ -99,18 +71,19 @@ SELECT
   SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed,
   MAX(created_at) AS last_run
 FROM outbound_deliveries
-WHERE connector_id = ?
-GROUP BY phase_id, step_id, step_type, endpoint_id
-ORDER BY phase_id, step_id
+WHERE connector_id = ?` + deviceWhere + `
+GROUP BY COALESCE(phase_id, 0), COALESCE(step_id, 0), COALESCE(step_type, ''), COALESCE(endpoint_id, 0)
+ORDER BY COALESCE(phase_id, 0), COALESCE(step_id, 0)
 `
-	if err := database.DB.Raw(raw, id).Scan(&rows).Error; err != nil {
+	if err := database.DB.Raw(raw, args...).Scan(&rawRows).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	labelByStep := buildStepLabelMap(h)
-	out := make([]traceNodeStatOut, 0, len(rows))
-	for _, r := range rows {
+	out := make([]traceNodeStatOut, 0, len(rawRows))
+	for _, m := range rawRows {
+		r := traceAggRowFromMap(m)
 		lb := labelForTraceRow(r, labelByStep)
 		tr := traceNodeStatOut{
 			PhaseID:    r.PhaseID,
@@ -122,8 +95,7 @@ ORDER BY phase_id, step_id
 			Success:    r.Success,
 			Failed:     r.Failed,
 		}
-		if r.LastRun.Valid {
-			tm := r.LastRun.T
+		if tm, ok := lastRunFromTraceMap(m); ok {
 			tr.LastRun = &tm
 		}
 		out = append(out, tr)
@@ -135,15 +107,97 @@ ORDER BY phase_id, step_id
 	})
 }
 
+// gormRawMapValue GORM 将 Raw().Scan 到 map 的单元格存为 *interface{}（可能多层），需解引用后再做类型断言。
+func gormRawMapValue(v interface{}) interface{} {
+	for v != nil {
+		p, ok := v.(*interface{})
+		if !ok || p == nil {
+			break
+		}
+		v = *p
+	}
+	return v
+}
+
+func traceAggRowFromMap(m map[string]interface{}) traceAggRow {
+	return traceAggRow{
+		PhaseID:    uintFromIface(gormRawMapValue(m["phase_id"])),
+		StepID:     uintFromIface(gormRawMapValue(m["step_id"])),
+		StepType:   strings.TrimSpace(fmt.Sprint(gormRawMapValue(m["step_type"]))),
+		EndpointID: uintFromIface(gormRawMapValue(m["endpoint_id"])),
+		Total:      int64FromIface(gormRawMapValue(m["total"])),
+		Success:    int64FromIface(gormRawMapValue(m["success"])),
+		Failed:     int64FromIface(gormRawMapValue(m["failed"])),
+	}
+}
+
+func int64FromIface(v interface{}) int64 {
+	switch t := v.(type) {
+	case int64:
+		return t
+	case int:
+		return int64(t)
+	case uint:
+		return int64(t)
+	case uint64:
+		return int64(t)
+	case float64:
+		return int64(t)
+	case []byte:
+		var n int64
+		_, _ = fmt.Sscan(string(t), &n)
+		return n
+	default:
+		var n int64
+		_, _ = fmt.Sscan(strings.TrimSpace(fmt.Sprint(v)), &n)
+		return n
+	}
+}
+
+func lastRunFromTraceMap(m map[string]interface{}) (time.Time, bool) {
+	v, ok := m["last_run"]
+	if !ok {
+		return time.Time{}, false
+	}
+	v = gormRawMapValue(v)
+	if v == nil {
+		return time.Time{}, false
+	}
+	switch t := v.(type) {
+	case time.Time:
+		if t.IsZero() {
+			return time.Time{}, false
+		}
+		return t, true
+	case []byte:
+		return parseOutboundLastRun(string(t))
+	case string:
+		return parseOutboundLastRun(t)
+	default:
+		return parseOutboundLastRun(strings.TrimSpace(fmt.Sprint(v)))
+	}
+}
+
 // parseOutboundLastRun 兼容 SQLite / MySQL 驱动对聚合时间戳的不同返回格式。
 func parseOutboundLastRun(s string) (time.Time, bool) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return time.Time{}, false
 	}
+	// SQLite / GORM 常见： "2006-01-02 15:04:05.999999+08:00"（空格），与 RFC3339 的 T 不兼容
+	if len(s) >= 19 && s[4] == '-' && s[7] == '-' && s[10] == ' ' && s[13] == ':' {
+		s = s[:10] + "T" + s[11:]
+		if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+			return t, true
+		}
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			return t, true
+		}
+	}
 	layouts := []string{
 		time.RFC3339Nano,
 		time.RFC3339,
+		"2006-01-02 15:04:05.999999999 -07:00 MST", // SQLite / 驱动常见：带时区缩写
 		"2006-01-02 15:04:05.999999999",
 		"2006-01-02 15:04:05.000",
 		"2006-01-02 15:04:05",
@@ -234,6 +288,24 @@ func buildStepLabelMap(h gin.H) map[uint]string {
 				m[sid] = "广播 Intent"
 			case "message":
 				m[sid] = "消息提醒"
+			case "app_script":
+				cfg, _ := st["config"].(map[string]interface{})
+				var appID uint
+				if cfg != nil {
+					appID = uintFromIface(cfg["app_id"])
+				}
+				hook := ""
+				if cfg != nil {
+					hook = strings.TrimSpace(fmt.Sprint(cfg["hook"]))
+				}
+				if hook == "" {
+					hook = "before_request"
+				}
+				if appID > 0 {
+					m[sid] = fmt.Sprintf("应用脚本 · #%d · %s", appID, hook)
+				} else {
+					m[sid] = "应用脚本"
+				}
 			default:
 				m[sid] = typ
 			}
@@ -242,7 +314,7 @@ func buildStepLabelMap(h gin.H) map[uint]string {
 	return m
 }
 
-func labelForTraceRow(r traceStatRow, byStep map[uint]string) string {
+func labelForTraceRow(r traceAggRow, byStep map[uint]string) string {
 	if r.StepID > 0 {
 		if lb, ok := byStep[r.StepID]; ok && lb != "" {
 			return lb
@@ -260,6 +332,8 @@ func labelForTraceRow(r traceStatRow, byStep map[uint]string) string {
 		return "广播 Intent"
 	case "message":
 		return "消息提醒"
+	case "app_script":
+		return "应用脚本"
 	default:
 		if r.StepType != "" {
 			return r.StepType

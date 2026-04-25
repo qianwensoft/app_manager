@@ -8,8 +8,9 @@
       title="自定义事件定义"
       description="按业务分组管理：每条定义包含上报键（event_type）、若干广播动作（Intent action）、按顺序尝试的数据标签（Intent extra 键）。保存后可在「自定义事件」页按定义或分组批量下发到多台 Agent。"
     />
+    <el-alert v-if="!canManage" type="warning" :closable="false" show-icon style="margin-bottom: 16px" title="当前为只读账号" description="可查看分组与定义；新建、编辑、删除与导入需管理员或操作员。" />
     <div class="toolbar">
-      <el-button type="success" :loading="importing" @click="openImportDialog">
+      <el-button type="success" :loading="importing" :disabled="!canManage" @click="openImportDialog">
         一键导入常用 PDA 扫码
       </el-button>
       <span class="toolbar-hint">覆盖 Honeywell、Zebra DataWedge、新大陆、商米等常见 Intent；已存在的上报键会自动跳过</span>
@@ -21,7 +22,7 @@
           <template #header>
             <div class="hdr">
               <span>分组</span>
-              <el-button type="primary" size="small" @click="openGroupDialog()">新建</el-button>
+              <el-button type="primary" size="small" :disabled="!canManage" @click="openGroupDialog()">新建</el-button>
             </div>
           </template>
           <el-table :data="groups" border size="small" highlight-current-row @current-change="onGroupRow">
@@ -29,8 +30,8 @@
             <el-table-column prop="sort_order" label="排序" width="70" />
             <el-table-column label="操作" width="120">
               <template #default="{ row }">
-                <el-button link type="primary" size="small" @click.stop="openGroupDialog(row)">编辑</el-button>
-                <el-button link type="danger" size="small" @click.stop="removeGroup(row)">删</el-button>
+                <el-button link type="primary" size="small" :disabled="!canManage" @click.stop="openGroupDialog(row)">编辑</el-button>
+                <el-button link type="danger" size="small" :disabled="!canManage" @click.stop="removeGroup(row)">删</el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -41,7 +42,7 @@
           <template #header>
             <div class="hdr">
               <span>事件定义{{ currentGroup ? ` — ${currentGroup.name}` : '（全部分组）' }}</span>
-              <el-button type="primary" size="small" :disabled="!groups.length" @click="openDefDialog()">新建定义</el-button>
+              <el-button type="primary" size="small" :disabled="!groups.length || !canManage" @click="openDefDialog()">新建定义</el-button>
             </div>
           </template>
           <el-table :data="definitions" border size="small" max-height="440">
@@ -60,8 +61,8 @@
             </el-table-column>
             <el-table-column label="操作" width="120">
               <template #default="{ row }">
-                <el-button link type="primary" size="small" @click="openDefDialog(row)">编辑</el-button>
-                <el-button link type="danger" size="small" @click="removeDef(row)">删</el-button>
+                <el-button link type="primary" size="small" :disabled="!canManage" @click="openDefDialog(row)">编辑</el-button>
+                <el-button link type="danger" size="small" :disabled="!canManage" @click="removeDef(row)">删</el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -167,9 +168,13 @@
 </template>
 
 <script setup>
-import { ref, reactive, watch, onMounted } from 'vue'
+import { ref, reactive, watch, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useAuthStore } from '@/stores/auth'
 import * as api from '@/api/customEventConfig'
+
+const auth = useAuthStore()
+const canManage = computed(() => auth.isOperator)
 
 const groups = ref([])
 const definitions = ref([])

@@ -16,6 +16,7 @@ import (
 type authCfg struct {
 	HeaderName  string `json:"header_name"`
 	HeaderValue string `json:"header_value"`
+	CookieValue string `json:"cookie_value"`
 }
 
 func joinBasePath(base, path string) string {
@@ -28,6 +29,35 @@ func joinBasePath(base, path string) string {
 		return base
 	}
 	return base + "/" + path
+}
+
+func mergeParsedHeaders(base, overlay http.Header) http.Header {
+	out := http.Header{}
+	for k, vals := range base {
+		cp := make([]string, len(vals))
+		copy(cp, vals)
+		out[k] = cp
+	}
+	for k, vals := range overlay {
+		cp := make([]string, len(vals))
+		copy(cp, vals)
+		out[k] = cp
+	}
+	return out
+}
+
+func headerFlatStringMap(h http.Header) map[string]string {
+	if h == nil {
+		return map[string]string{}
+	}
+	m := make(map[string]string)
+	for k, vals := range h {
+		if len(vals) == 0 {
+			continue
+		}
+		m[k] = strings.Join(vals, ", ")
+	}
+	return m
 }
 
 func parseHeaderMapJSON(raw string, vars map[string]string) (http.Header, error) {
@@ -45,7 +75,8 @@ func parseHeaderMapJSON(raw string, vars map[string]string) (http.Header, error)
 		if k == "" {
 			continue
 		}
-		h.Set(k, expandTemplate(v, vars))
+		// 直接写入 map 保留配置的原始大小写，不经 http.Header.Set 的规范化
+		h[k] = []string{expandTemplate(v, vars)}
 	}
 	return h, nil
 }
@@ -63,7 +94,23 @@ func applyAppAuth(db *gorm.DB, req *http.Request, app *models.OutboundApp, vars 
 		if ac.HeaderName == "" {
 			return nil
 		}
-		req.Header.Set(ac.HeaderName, expandTemplate(ac.HeaderValue, vars))
+		req.Header[ac.HeaderName] = []string{expandTemplate(ac.HeaderValue, vars)}
+		return nil
+	case "static_cookie":
+		var ac authCfg
+		if err := json.Unmarshal([]byte(app.AuthConfigJSON), &ac); err != nil {
+			return fmt.Errorf("auth_config_json: %w", err)
+		}
+		cv := expandTemplate(strings.TrimSpace(ac.CookieValue), vars)
+		if cv == "" {
+			return nil
+		}
+		// 追加到已有 Cookie header，避免覆盖
+		if existing := req.Header.Get("Cookie"); existing != "" {
+			req.Header.Set("Cookie", existing+"; "+cv)
+		} else {
+			req.Header.Set("Cookie", cv)
+		}
 		return nil
 	case "dynamic_bearer":
 		if db != nil {
@@ -84,7 +131,7 @@ func applyAppAuth(db *gorm.DB, req *http.Request, app *models.OutboundApp, vars 
 		}
 		tpl := expandTemplate(p.AuthHeaderTemplate, vars)
 		tpl = expandTokenTemplate(tpl, cache.AccessToken, cache.RefreshToken)
-		req.Header.Set(p.AuthHeaderName, tpl)
+		req.Header[p.AuthHeaderName] = []string{tpl}
 		return nil
 	default:
 		return fmt.Errorf("unsupported auth_type %q", app.AuthType)
@@ -107,11 +154,29 @@ func defaultJSONBody(rec models.DeviceEvent) string {
 	return string(b)
 }
 
+// HTTPExecOpts 控制 ExecuteHTTPWebhook 的持久化；nil 表示默认写入 outbound_deliveries。
+type HTTPExecOpts struct {
+	SkipPersistDelivery bool
+}
+
+func persistOutboundDelivery(db *gorm.DB, d *models.OutboundDelivery, opts *HTTPExecOpts) {
+	if db == nil {
+		return
+	}
+	if opts != nil && opts.SkipPersistDelivery {
+		return
+	}
+	_ = db.Create(d).Error
+}
+
 // ExecuteHTTPWebhook 执行一次 HTTP 出站并写入 outbound_deliveries。
 // vars 为模板变量表（可与 RunPhasedConnector 共用）；nil 时内部使用 TemplateVars。
 // mergeHTTPResponseIntoVars 为 true 且 HTTP 2xx 时，将响应体/状态码写入 vars（{{http.last.*}} 等），供后续步骤使用；并行多步勿开启，避免并发写 map。
+// connectorStep 为阶段步骤表行（含 ConfigJSON）；旧版无阶段出站可传零值。
+// execOpts 为 nil 时写入投递表；SkipPersistDelivery 为 true 时不写入（阶段预览真实请求等）。
 func ExecuteHTTPWebhook(db *gorm.DB, connector models.OutboundConnector, endpoint models.OutboundEndpoint, app *models.OutboundApp,
 	rec models.DeviceEvent, dev *models.Device, def *models.CustomEventDefinition, vars map[string]string, meta StepExecutionMeta, mergeHTTPResponseIntoVars bool,
+	connectorStep models.OutboundConnectorStep, execOpts *HTTPExecOpts,
 ) models.OutboundDelivery {
 	st := strings.TrimSpace(meta.StepType)
 	if st == "" {
@@ -131,19 +196,26 @@ func ExecuteHTTPWebhook(db *gorm.DB, connector models.OutboundConnector, endpoin
 	if app == nil || strings.TrimSpace(app.BaseURL) == "" {
 		d.Error = "应用或 Base URL 为空"
 		d.DetailJSON = HTTPSetupDetail("app", d.Error)
-		_ = db.Create(&d).Error
+		persistOutboundDelivery(db, &d, execOpts)
 		return d
 	}
 
 	if vars == nil {
 		vars = TemplateVars(rec, dev, def)
 	}
-	urlStr := joinBasePath(app.BaseURL, endpoint.Path)
+	MergeAppParamsIntoVars(vars, app)
+	workVars := vars
+	if !mergeHTTPResponseIntoVars {
+		workVars = ShallowCloneStringMap(vars)
+	}
+
+	rawURL := joinBasePath(app.BaseURL, endpoint.Path)
+	urlStr := expandTemplate(rawURL, workVars)
 	d.RequestURL = urlStr
 	if urlStr == "" {
 		d.Error = "拼接请求 URL 失败"
 		d.DetailJSON = HTTPSetupDetail("url", d.Error)
-		_ = db.Create(&d).Error
+		persistOutboundDelivery(db, &d, execOpts)
 		return d
 	}
 
@@ -167,20 +239,33 @@ func ExecuteHTTPWebhook(db *gorm.DB, connector models.OutboundConnector, endpoin
 		retryMax = connector.DefaultRetryMax
 	}
 
-	bodyStr := strings.TrimSpace(endpoint.BodyTemplate)
-	if bodyStr == "" {
-		bodyStr = defaultJSONBody(rec)
-	} else {
-		bodyStr = expandTemplate(bodyStr, vars)
+	bodyTpl := strings.TrimSpace(endpoint.BodyTemplate)
+	if bodyTpl == "" {
+		bodyTpl = defaultJSONBody(rec)
 	}
+	if err := RunAppExtensionScript(AppScriptHookBeforeRequest, app, workVars, &ScriptEnv{BodyTemplate: &bodyTpl}); err != nil {
+		d.Error = "extension_script before_request: " + err.Error()
+		d.DetailJSON = HTTPSetupDetail("extension_script", d.Error)
+		persistOutboundDelivery(db, &d, execOpts)
+		return d
+	}
+	bodyStr := expandTemplate(bodyTpl, workVars)
 
-	hdr, err := parseHeaderMapJSON(endpoint.HeadersJSON, vars)
+	commonHdr, err := parseHeaderMapJSON(app.CommonHeadersJSON, workVars)
+	if err != nil {
+		d.Error = "common_headers_json: " + err.Error()
+		d.DetailJSON = HTTPSetupDetail("common_headers_json", d.Error)
+		persistOutboundDelivery(db, &d, execOpts)
+		return d
+	}
+	epHdr, err := parseHeaderMapJSON(endpoint.HeadersJSON, workVars)
 	if err != nil {
 		d.Error = "headers_json: " + err.Error()
 		d.DetailJSON = HTTPSetupDetail("headers_json", d.Error)
-		_ = db.Create(&d).Error
+		persistOutboundDelivery(db, &d, execOpts)
 		return d
 	}
+	hdr := mergeParsedHeaders(commonHdr, epHdr)
 
 	client := &http.Client{Timeout: time.Duration(timeout) * time.Millisecond}
 
@@ -203,11 +288,11 @@ func ExecuteHTTPWebhook(db *gorm.DB, connector models.OutboundConnector, endpoin
 		}
 		req.Header.Set("X-Idempotency-Key", idem)
 		for k, vals := range hdr {
-			for _, v := range vals {
-				req.Header.Add(k, v)
-			}
+			cp := make([]string, len(vals))
+			copy(cp, vals)
+			req.Header[k] = cp
 		}
-		if err := applyAppAuth(db, req, app, vars); err != nil {
+		if err := applyAppAuth(db, req, app, workVars); err != nil {
 			lastErr = err.Error()
 			lastDetail = marshalHTTPAttemptDetail(method, urlStr, req.Header, bodyStr, 0, nil, lastErr)
 			break
@@ -244,10 +329,14 @@ func ExecuteHTTPWebhook(db *gorm.DB, connector models.OutboundConnector, endpoin
 			d.Error = ""
 			d.DurationMS = time.Since(startAll).Milliseconds()
 			d.DetailJSON = lastDetail
-			if mergeHTTPResponseIntoVars {
-				MergeHTTPResponseContext(vars, meta.StepID, resp.StatusCode, bodyBytes)
+			if err := mergeHTTPResponseIntoVarsAndRunAfterResponse(workVars, app, connectorStep, meta.StepID, resp.StatusCode, bodyBytes, nil, false, mergeHTTPResponseIntoVars); err != nil {
+				d.Status = "failed"
+				d.Error = "extension_script after_response: " + err.Error()
+				d.DurationMS = time.Since(startAll).Milliseconds()
+				persistOutboundDelivery(db, &d, execOpts)
+				return d
 			}
-			_ = db.Create(&d).Error
+			persistOutboundDelivery(db, &d, execOpts)
 			return d
 		}
 		if attempt < retryMax && resp.StatusCode >= 500 {
@@ -262,7 +351,7 @@ func ExecuteHTTPWebhook(db *gorm.DB, connector models.OutboundConnector, endpoin
 	d.Error = truncateErr(lastErr, 2000)
 	d.DurationMS = time.Since(startAll).Milliseconds()
 	d.DetailJSON = lastDetail
-	_ = db.Create(&d).Error
+	persistOutboundDelivery(db, &d, execOpts)
 	return d
 }
 

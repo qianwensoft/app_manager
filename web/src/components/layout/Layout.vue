@@ -27,6 +27,21 @@
         <el-menu-item index="/event-definitions">
           <el-icon><Setting /></el-icon><span>事件定义</span>
         </el-menu-item>
+        <el-menu-item index="/outbound/apps">
+          <el-icon><Link /></el-icon><span>外部应用</span>
+        </el-menu-item>
+        <el-menu-item index="/data">
+          <el-icon><Histogram /></el-icon><span>数据源与接口</span>
+        </el-menu-item>
+        <el-menu-item index="/outbound">
+          <el-icon><Share /></el-icon><span>连接器</span>
+        </el-menu-item>
+        <div class="menu-item-external menu-item-flat" @click="openScadaEditor">
+          <el-icon><Histogram /></el-icon><span>组态编辑器 ↗</span>
+        </div>
+        <el-menu-item index="/agent-menus">
+          <el-icon><Menu /></el-icon><span>Agent 菜单</span>
+        </el-menu-item>
         <el-menu-item index="/apps">
           <el-icon><Box /></el-icon><span>APK 管理</span>
         </el-menu-item>
@@ -34,7 +49,7 @@
           <el-icon><List /></el-icon><span>任务队列</span>
         </el-menu-item>
         <el-menu-item index="/apikeys">
-          <el-icon><Key /></el-icon><span>授权令牌</span>
+          <el-icon><Key /></el-icon><span>授权管理</span>
         </el-menu-item>
         <!-- admin 专属 -->
         <template v-if="auth.isAdmin">
@@ -54,6 +69,7 @@
       <el-header height="56px">
         <span class="route-title">{{ pageTitle }}</span>
         <div class="header-right">
+          <QuickSearch />
           <span class="username">
             <el-icon><User /></el-icon>
             {{ auth.user?.username }}
@@ -62,7 +78,7 @@
           <el-button type="danger" size="small" @click="logout">退出</el-button>
         </div>
       </el-header>
-      <el-main class="layout-main">
+      <el-main class="layout-main" :class="{ 'layout-main--bleed': route.meta.fullBleed }">
         <router-view />
       </el-main>
     </el-container>
@@ -73,11 +89,19 @@
 import { computed, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useRoute, useRouter } from 'vue-router'
-import { Monitor, Phone, VideoCamera, Document, Box, List, Key, Notebook, Connection, Cpu, Bell, Setting, Tools, UserFilled, User } from '@element-plus/icons-vue'
+import { Monitor, Phone, VideoCamera, Document, Box, List, Key, Notebook, Connection, Cpu, Bell, Setting, Share, Link, Tools, UserFilled, User, Histogram, Menu } from '@element-plus/icons-vue'
+import QuickSearch from './QuickSearch.vue'
 
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
+
+const openScadaEditor = () => {
+  const token = localStorage.getItem('token')
+  const base = `${window.location.origin}/scada-editor/`
+  const url = `${base}${token ? `?_token=${encodeURIComponent(token)}` : ''}`
+  window.open(url, '_blank')
+}
 
 const pageTitle = computed(() => route.meta?.title || route.name || '')
 
@@ -86,6 +110,10 @@ const menuActive = computed(() => {
   if (p === '/' || p === '') return '/'
   if (p.startsWith('/devices')) return '/devices'
   if (p.startsWith('/event-definitions')) return '/event-definitions'
+  if (p.startsWith('/outbound/apps')) return '/outbound/apps'
+  if (p.startsWith('/outbound')) return '/outbound'
+  if (p.startsWith('/data')) return '/data'
+  if (p.startsWith('/agent-menus')) return '/agent-menus'
   return p
 })
 
@@ -103,6 +131,25 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.menu-item-external {
+  height: 56px;
+  line-height: 56px;
+  padding: 0 20px 0 20px;
+  font-size: 14px;
+  color: #aaa;
+  cursor: pointer;
+  transition: background-color 0.2s, color 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.menu-item-external:hover {
+  background-color: #263445;
+  color: #fff;
+}
+.menu-item-flat {
+  padding-left: 20px;
+}
 .layout {
   height: 100vh;
   max-height: 100vh;
@@ -127,5 +174,15 @@ onMounted(() => {
   overflow: auto;
   padding: 16px;
   background: #f5f7fa;
+}
+.layout-main--bleed {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.layout-main--bleed > * {
+  flex: 1;
+  min-height: 0;
 }
 </style>

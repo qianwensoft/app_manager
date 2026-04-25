@@ -2,6 +2,7 @@ package outbound
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -10,25 +11,9 @@ import (
 
 const maxHTTPDetailBody = 65536
 
+// sanitizeHeadersForLog 对 HTTP Header 做脱敏，委托给统一 SanitizeHTTPHeaders。
 func sanitizeHeadersForLog(h http.Header) map[string]string {
-	if h == nil {
-		return map[string]string{}
-	}
-	out := make(map[string]string)
-	for k, vals := range h {
-		lk := strings.ToLower(strings.TrimSpace(k))
-		switch lk {
-		case "authorization", "proxy-authorization", "cookie", "set-cookie":
-			out[k] = "[redacted]"
-		default:
-			if strings.Contains(lk, "api-key") || strings.Contains(lk, "apikey") {
-				out[k] = "[redacted]"
-			} else {
-				out[k] = strings.Join(vals, "; ")
-			}
-		}
-	}
-	return out
+	return SanitizeHTTPHeaders(h)
 }
 
 func truncateUTF8(s string, maxBytes int) string {
@@ -117,4 +102,74 @@ func marshalHTTPAttemptDetail(method, urlStr string, reqHeaders http.Header, bod
 	}
 	b, _ := json.Marshal(m)
 	return string(b)
+}
+
+// HTTPDetailResponseBodyAndStatus 从 outbound_deliveries.detail_json 解析 HTTP 响应的 status 与 body 文本。
+// fallbackHTTPStatus：当 JSON 内未带 status 或解析为 0 时，若该值在 200–299 则用作状态码（与 outbound_deliveries.http_status 列对齐）。
+func HTTPDetailResponseBodyAndStatus(detailJSON string, fallbackHTTPStatus int) (body string, httpStatus int, ok bool) {
+	detailJSON = strings.TrimSpace(detailJSON)
+	detailJSON = strings.TrimPrefix(detailJSON, "\ufeff")
+	if detailJSON == "" || detailJSON == "{}" {
+		return "", 0, false
+	}
+	var root map[string]interface{}
+	if err := json.Unmarshal([]byte(detailJSON), &root); err != nil || root == nil {
+		return "", 0, false
+	}
+	kind := strings.TrimSpace(fmt.Sprint(root["kind"]))
+	isHTTP := strings.EqualFold(kind, "http")
+	respRaw, hasResp := root["response"]
+	if !isHTTP && hasResp {
+		if _, okm := respRaw.(map[string]interface{}); okm {
+			isHTTP = true
+		}
+	}
+	if !isHTTP {
+		return "", 0, false
+	}
+	if !hasResp || respRaw == nil {
+		return "", 0, false
+	}
+	resp, _ := respRaw.(map[string]interface{})
+	if resp == nil {
+		return "", 0, false
+	}
+	httpStatus = httpDetailStatusInt(resp["status"])
+	if httpStatus == 0 && fallbackHTTPStatus >= 200 && fallbackHTTPStatus < 300 {
+		httpStatus = fallbackHTTPStatus
+	}
+	switch t := resp["body"].(type) {
+	case string:
+		body = t
+	case nil:
+		body = ""
+	case map[string]interface{}, []interface{}:
+		b, err := json.Marshal(t)
+		if err != nil {
+			body = fmt.Sprint(t)
+		} else {
+			body = string(b)
+		}
+	default:
+		body = fmt.Sprint(t)
+	}
+	return body, httpStatus, true
+}
+
+func httpDetailStatusInt(v interface{}) int {
+	switch t := v.(type) {
+	case float64:
+		return int(t)
+	case int:
+		return t
+	case int64:
+		return int(t)
+	case json.Number:
+		n, _ := t.Int64()
+		return int(n)
+	default:
+		var n int
+		_, _ = fmt.Sscan(strings.TrimSpace(fmt.Sprint(v)), &n)
+		return n
+	}
 }

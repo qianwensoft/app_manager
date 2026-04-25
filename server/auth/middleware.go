@@ -55,6 +55,15 @@ func APIKeyMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		key := c.GetHeader("X-API-Key")
 		if key == "" {
+			// Also accept OAuth Bearer tokens (opaque, stored as ApiKey records)
+			if bearer := c.GetHeader("Authorization"); bearer != "" {
+				trimmed := strings.TrimPrefix(bearer, "Bearer ")
+				if strings.HasPrefix(trimmed, "oa_") {
+					key = trimmed
+				}
+			}
+		}
+		if key == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing api key"})
 			c.Abort()
 			return
