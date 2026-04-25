@@ -72,6 +72,7 @@ export default function ChartWidget({ el, zoom }: Props) {
         top: el.y * zoom,
         width: el.width * zoom,
         height: el.height * zoom,
+        zIndex: el.zIndex,
         pointerEvents: 'none',
       }}
     >

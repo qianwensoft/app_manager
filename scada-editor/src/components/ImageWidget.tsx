@@ -23,6 +23,7 @@ export default function ImageWidget({ el, zoom }: Props) {
     top: el.y * zoom,
     width: el.width * zoom,
     height: el.height * zoom,
+    zIndex: el.zIndex,
     opacity: el.opacity ?? 1,
     transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
     pointerEvents: 'none',

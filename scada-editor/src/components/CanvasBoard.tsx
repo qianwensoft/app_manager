@@ -368,14 +368,11 @@ export default function CanvasBoard() {
           onMouseUp={handleMouseUp}
           onContextMenu={handleContextMenu}
         />
-        {overlayElements.map((el) => (
-          <div key={el.id} style={{ position: 'absolute', inset: 0, zIndex: el.zIndex, pointerEvents: 'none' }}>
-            {el.type.startsWith('echarts-')
-              ? <ChartWidget el={el} zoom={zoom} />
-              : <ImageWidget el={el} zoom={zoom} />
-            }
-          </div>
-        ))}
+        {overlayElements.map((el) =>
+          el.type.startsWith('echarts-')
+            ? <ChartWidget key={el.id} el={el} zoom={zoom} />
+            : <ImageWidget key={el.id} el={el} zoom={zoom} />
+        )}
       </div>
 
       {/* ── Right-click context menu ── */}
