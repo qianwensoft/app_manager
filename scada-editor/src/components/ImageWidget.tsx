@@ -5,6 +5,14 @@ interface Props {
   zoom: number
 }
 
+// 兼容旧数据：/images/... → {BASE}images/...
+const BASE = import.meta.env.BASE_URL
+function resolveUrl(url?: string) {
+  if (!url) return url
+  if (url.startsWith('/images/')) return `${BASE}images/${url.slice(8)}`
+  return url
+}
+
 export default function ImageWidget({ el, zoom }: Props) {
   const isBorderBox = el.type === 'image-border-box'
   const bc = el.borderImageConfig
@@ -32,7 +40,7 @@ export default function ImageWidget({ el, zoom }: Props) {
           ...baseStyle,
           borderStyle: 'solid',
           borderWidth: scaleWidth(bc.width),
-          borderImageSource: `url(${el.imageUrl})`,
+          borderImageSource: `url(${resolveUrl(el.imageUrl)})`,
           borderImageSlice: bc.slice,
           borderImageRepeat: bc.repeat,
           borderImageOutset: bc.outset ?? '0',
@@ -44,7 +52,7 @@ export default function ImageWidget({ el, zoom }: Props) {
 
   return (
     <img
-      src={el.imageUrl}
+      src={resolveUrl(el.imageUrl)}
       draggable={false}
       style={{
         ...baseStyle,

@@ -342,6 +342,8 @@ export default function CanvasBoard() {
     el.type === 'image-bg' || el.type === 'image-widget' ||
     el.type === 'image-decoration' || el.type === 'image-border-box'
   ))
+  // 合并 overlay 元素并按 zIndex 排序，保证层级正确
+  const overlayElements = [...chartElements, ...imageElements].sort((a, b) => a.zIndex - b.zIndex)
 
   return (
     <div
@@ -366,11 +368,13 @@ export default function CanvasBoard() {
           onMouseUp={handleMouseUp}
           onContextMenu={handleContextMenu}
         />
-        {chartElements.map((el) => (
-          <ChartWidget key={el.id} el={el} zoom={zoom} />
-        ))}
-        {imageElements.map((el) => (
-          <ImageWidget key={el.id} el={el} zoom={zoom} />
+        {overlayElements.map((el) => (
+          <div key={el.id} style={{ position: 'absolute', inset: 0, zIndex: el.zIndex, pointerEvents: 'none' }}>
+            {el.type.startsWith('echarts-')
+              ? <ChartWidget el={el} zoom={zoom} />
+              : <ImageWidget el={el} zoom={zoom} />
+            }
+          </div>
         ))}
       </div>
 
