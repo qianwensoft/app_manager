@@ -2,6 +2,8 @@ import { useRef, useState } from 'react'
 import { useEditorStore } from '@/store/editorStore'
 import { pushHistory } from '@/hooks/useHistory'
 import { scadaApi } from '@/api/scada'
+import { getChartSchema, type StyleFieldDef } from '@/schema/chartSchema'
+import type { CanvasElement } from '@/types'
 
 /* ── Shared input ── */
 const Inp = ({ val, onChange, type = 'text', placeholder = '' }: {
@@ -192,6 +194,97 @@ function ImageResourceSection({ imageUrl, onUpdate }: { imageUrl?: string; onUpd
   )
 }
 
+// ── Chart Config Section ──────────────────────────────────────────────────────
+
+function ChartConfigSection({ el, onUpdate }: {
+  el: CanvasElement
+  onUpdate: (key: string, value: unknown) => void
+}) {
+  const schema = getChartSchema(el.type)
+  if (!schema) return null
+
+  const cfg = (el.properties?.chartConfig ?? {}) as Record<string, unknown>
+
+  const setField = (field: StyleFieldDef, value: unknown) => {
+    onUpdate('properties', {
+      ...el.properties,
+      chartConfig: { ...cfg, [field.key]: value },
+    })
+  }
+
+  // group fields by field.group
+  const groups: Record<string, StyleFieldDef[]> = {}
+  for (const f of schema.styleFields) {
+    const g = f.group ?? '其他'
+    if (!groups[g]) groups[g] = []
+    groups[g].push(f)
+  }
+
+  return (
+    <>
+      {Object.entries(groups).map(([groupName, fields]) => (
+        <Section key={groupName} title={groupName} defaultOpen={groupName === '标题' ? false : true}>
+          {fields.map((f) => {
+            const val = cfg[f.key] !== undefined ? cfg[f.key] : f.default
+            if (f.type === 'color') {
+              return (
+                <Row key={f.key} label={f.label}>
+                  <ColorPicker
+                    val={typeof val === 'string' && val !== 'transparent' ? val : '#000000'}
+                    onChange={(v) => setField(f, v)}
+                  />
+                </Row>
+              )
+            }
+            if (f.type === 'boolean') {
+              return (
+                <Row key={f.key} label={f.label}>
+                  <Toggle
+                    checked={!!val}
+                    onChange={(v) => setField(f, v)}
+                    label={val ? '开' : '关'}
+                  />
+                </Row>
+              )
+            }
+            if (f.type === 'select' && f.options) {
+              return (
+                <Row key={f.key} label={f.label}>
+                  <select
+                    value={String(val)}
+                    onChange={(e) => setField(f, e.target.value)}
+                    style={{
+                      width: '100%', height: 26,
+                      background: 'var(--bg-base)', border: '1px solid var(--border)',
+                      color: 'var(--text-primary)', borderRadius: 'var(--radius-sm)',
+                      fontSize: 11, padding: '0 4px', outline: 'none',
+                    }}
+                  >
+                    {f.options.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </Row>
+              )
+            }
+            // text / number
+            return (
+              <Row key={f.key} label={f.label}>
+                <Inp
+                  val={f.type === 'number' ? Number(val) : String(val ?? '')}
+                  type={f.type === 'number' ? 'number' : 'text'}
+                  onChange={(v) => setField(f, f.type === 'number' ? Number(v) : v)}
+                  placeholder={f.hint ?? ''}
+                />
+              </Row>
+            )
+          })}
+        </Section>
+      ))}
+    </>
+  )
+}
+
 export default function PropertiesPanel() {
   const store = useEditorStore()
   const canvas = store.activeCanvas()
@@ -345,6 +438,11 @@ export default function PropertiesPanel() {
             <Row label="填充"><ColorPicker val={selectedEl.fill || '#000000'} onChange={(v) => update('fill', v)} /></Row>
             <Row label="描边"><ColorPicker val={selectedEl.stroke || '#000000'} onChange={(v) => update('stroke', v)} /></Row>
           </Section>
+
+          {/* 图表配置 — 仅 echarts-* 元素显示 */}
+          {selectedEl.type.startsWith('echarts-') && (
+            <ChartConfigSection el={selectedEl} onUpdate={update} />
+          )}
 
           {(selectedEl.type === 'text' || selectedEl.type === 'button') && (
             <Section title="文本">

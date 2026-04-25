@@ -2,6 +2,7 @@ import { useRef, useEffect } from 'react'
 import * as echarts from 'echarts'
 import type { CanvasElement } from '@/types'
 import type { PointDataMap } from '@/hooks/useStompPointData'
+import { getStyleValue, type StyleFieldDef, chartSchema } from '@/schema/chartSchema'
 
 interface Props {
   el: CanvasElement
@@ -19,104 +20,321 @@ function applyTransform(raw: number, transform?: string): number {
   }
 }
 
-function buildOption(el: CanvasElement, pointData: PointDataMap): echarts.EChartsOption {
-  const base: echarts.EChartsOption = {
-    backgroundColor: 'transparent',
-    animation: false,
-    grid: { top: 30, right: 10, bottom: 30, left: 40 },
-    textStyle: { color: '#aaa', fontSize: 11 },
-  }
+/** 从 chartConfig 读取 styleField 值的快捷函数 */
+function sv<T>(cfg: Record<string, unknown>, key: string, def: T): T {
+  const schema = { key, default: def } as StyleFieldDef
+  return getStyleValue<T>(cfg, schema)
+}
 
+/** 解析逗号分隔的颜色字符串 */
+function parseColors(s: string): string[] {
+  return s.split(',').map((c) => c.trim()).filter(Boolean)
+}
+
+/** 解析仪表盘颜色段 "0.3:#27ae60,0.7:#e67e22,1:#c0392b" */
+function parseGaugeColors(s: string): [number, string][] {
+  return s.split(',').map((seg) => {
+    const [ratio, color] = seg.trim().split(':')
+    return [parseFloat(ratio), color?.trim() ?? '#ccc'] as [number, string]
+  }).filter(([r]) => !isNaN(r))
+}
+
+function buildOption(el: CanvasElement, pointData: PointDataMap): echarts.EChartsOption {
+  const cfg = (el.properties?.chartConfig ?? {}) as Record<string, unknown>
   const pb = el.pointBinding
   const seriesKeys = pb?.chartSeriesKeys ?? []
   const transform = pb?.transform
 
+  // 共用 title / bg
+  const titleText = sv(cfg, 'title', '')
+  const titleColor = sv(cfg, 'titleColor', '#cccccc')
+  const titleSize = sv(cfg, 'titleSize', 12)
+  const bgColor = sv(cfg, 'bgColor', 'transparent')
+
+  const titleOpt = titleText
+    ? { text: titleText, textStyle: { color: titleColor, fontSize: titleSize } }
+    : undefined
+
+  const base: echarts.EChartsOption = {
+    backgroundColor: bgColor,
+    animation: false,
+    textStyle: { color: '#aaa', fontSize: 11 },
+    ...(titleOpt ? { title: titleOpt } : {}),
+  }
+
   switch (el.type) {
+
     case 'echarts-bar': {
-      const data = seriesKeys[0]?.length
-        ? seriesKeys[0].map((k) => applyTransform(pointData[k] ?? 0, transform))
-        : [42, 68, 35, 80, 55]
+      const colors = parseColors(sv(cfg, 'seriesColors', '#4a9eff,#27ae60,#e67e22'))
+      const borderRadius = sv(cfg, 'barBorderRadius', 2)
+      const maxWidth = sv(cfg, 'barMaxWidth', 40)
+      const showLegend = sv(cfg, 'showLegend', false)
+      const xAxisColor = sv(cfg, 'xAxisColor', '#444')
+      const yAxisColor = sv(cfg, 'yAxisColor', '#444')
+      const splitLineColor = sv(cfg, 'splitLineColor', '#2a2a3e')
+      const grid = {
+        top: sv(cfg, 'gridTop', 30),
+        bottom: sv(cfg, 'gridBottom', 30),
+        left: sv(cfg, 'gridLeft', 40),
+        right: sv(cfg, 'gridRight', 10),
+      }
+
       const categories = pb?.chartCategoryKey
         ? (pointData[pb.chartCategoryKey] as unknown as string[] | undefined) ?? ['A', 'B', 'C', 'D', 'E']
         : ['A', 'B', 'C', 'D', 'E']
+
+      const series: echarts.SeriesOption[] = (seriesKeys.length > 0 ? seriesKeys : [[]]).map((keys, i) => ({
+        type: 'bar',
+        data: keys.length
+          ? keys.map((k) => applyTransform(pointData[k] ?? 0, transform))
+          : [42, 68, 35, 80, 55],
+        itemStyle: {
+          color: colors[i % colors.length],
+          borderRadius,
+        },
+        barMaxWidth: maxWidth,
+      }))
+
       return {
         ...base,
-        xAxis: { type: 'category', data: categories, axisLine: { lineStyle: { color: '#444' } } },
-        yAxis: { type: 'value', axisLine: { lineStyle: { color: '#444' } }, splitLine: { lineStyle: { color: '#2a2a3e' } } },
-        series: [{ type: 'bar', data, itemStyle: { color: '#4a9eff' } }],
+        grid,
+        legend: showLegend ? {} : undefined,
+        xAxis: { type: 'category', data: categories, axisLine: { lineStyle: { color: xAxisColor } } },
+        yAxis: { type: 'value', axisLine: { lineStyle: { color: yAxisColor } }, splitLine: { lineStyle: { color: splitLineColor } } },
+        series,
       }
     }
+
     case 'echarts-line': {
-      const data = seriesKeys[0]?.length
-        ? seriesKeys[0].map((k) => applyTransform(pointData[k] ?? 0, transform))
-        : [30, 55, 40, 70, 50, 80]
+      const colors = parseColors(sv(cfg, 'seriesColors', '#4a9eff,#27ae60'))
+      const smooth = sv(cfg, 'smooth', true)
+      const areaStyle = sv(cfg, 'areaStyle', true)
+      const lineWidth = sv(cfg, 'lineWidth', 2)
+      const showSymbol = sv(cfg, 'showSymbol', false)
+      const showLegend = sv(cfg, 'showLegend', false)
+      const xAxisColor = sv(cfg, 'xAxisColor', '#444')
+      const yAxisColor = sv(cfg, 'yAxisColor', '#444')
+      const splitLineColor = sv(cfg, 'splitLineColor', '#2a2a3e')
+      const grid = {
+        top: sv(cfg, 'gridTop', 30),
+        bottom: sv(cfg, 'gridBottom', 30),
+        left: sv(cfg, 'gridLeft', 40),
+        right: sv(cfg, 'gridRight', 10),
+      }
+
       const categories = pb?.chartCategoryKey
         ? (pointData[pb.chartCategoryKey] as unknown as string[] | undefined) ?? ['1', '2', '3', '4', '5', '6']
         : ['1', '2', '3', '4', '5', '6']
+
+      const series: echarts.SeriesOption[] = (seriesKeys.length > 0 ? seriesKeys : [[]]).map((keys, i) => {
+        const color = colors[i % colors.length]
+        return {
+          type: 'line',
+          data: keys.length
+            ? keys.map((k) => applyTransform(pointData[k] ?? 0, transform))
+            : [30, 55, 40, 70, 50, 80],
+          smooth,
+          showSymbol,
+          lineStyle: { width: lineWidth, color },
+          itemStyle: { color },
+          areaStyle: areaStyle ? { color: color + '22' } : undefined,
+        }
+      })
+
       return {
         ...base,
-        xAxis: { type: 'category', data: categories, axisLine: { lineStyle: { color: '#444' } } },
-        yAxis: { type: 'value', axisLine: { lineStyle: { color: '#444' } }, splitLine: { lineStyle: { color: '#2a2a3e' } } },
-        series: [{ type: 'line', data, smooth: true, itemStyle: { color: '#4a9eff' }, areaStyle: { color: '#4a9eff22' } }],
+        grid,
+        legend: showLegend ? {} : undefined,
+        xAxis: { type: 'category', data: categories, axisLine: { lineStyle: { color: xAxisColor } } },
+        yAxis: { type: 'value', axisLine: { lineStyle: { color: yAxisColor } }, splitLine: { lineStyle: { color: splitLineColor } } },
+        series,
       }
     }
+
     case 'echarts-pie': {
+      const colors = parseColors(sv(cfg, 'colors', '#4a9eff,#27ae60,#e67e22,#8e44ad,#e74c3c'))
+      const radius = sv(cfg, 'radius', '65%')
+      const innerRadius = sv(cfg, 'innerRadius', '0%')
+      const showLabel = sv(cfg, 'showLabel', true)
+      const labelColor = sv(cfg, 'labelColor', '#aaaaaa')
+      const roseType = sv(cfg, 'roseType', false)
+
       const keys = seriesKeys[0] ?? []
+      const nameArr = pb?.chartCategoryKey
+        ? (pointData[pb.chartCategoryKey] as unknown as string[] | undefined)
+        : undefined
+
       const pieData = keys.length
         ? keys.map((k, i) => ({
             value: applyTransform(pointData[k] ?? 0, transform),
-            name: k,
-            itemStyle: { color: ['#4a9eff', '#27ae60', '#e67e22', '#8e44ad', '#e74c3c'][i % 5] },
+            name: nameArr?.[i] ?? k,
+            itemStyle: { color: colors[i % colors.length] },
           }))
         : [
-            { value: 35, name: 'A', itemStyle: { color: '#4a9eff' } },
-            { value: 25, name: 'B', itemStyle: { color: '#27ae60' } },
-            { value: 20, name: 'C', itemStyle: { color: '#e67e22' } },
-            { value: 20, name: 'D', itemStyle: { color: '#8e44ad' } },
+            { value: 35, name: 'A', itemStyle: { color: colors[0] } },
+            { value: 25, name: 'B', itemStyle: { color: colors[1] } },
+            { value: 20, name: 'C', itemStyle: { color: colors[2] } },
+            { value: 20, name: 'D', itemStyle: { color: colors[3] } },
           ]
+
       return {
         ...base,
-        grid: undefined,
         series: [{
-          type: 'pie', radius: '65%', center: ['50%', '55%'],
+          type: 'pie',
+          radius: innerRadius && innerRadius !== '0%' ? [innerRadius, radius] : radius,
+          center: ['50%', '55%'],
+          roseType: roseType ? 'area' : undefined,
           data: pieData,
-          label: { color: '#aaa', fontSize: 10 },
+          label: { show: showLabel, color: labelColor, fontSize: 10 },
         }],
       }
     }
+
     case 'echarts-gauge': {
       const key = seriesKeys[0]?.[0] ?? pb?.pointKey
       const value = key ? applyTransform(pointData[key] ?? 0, transform) : 62
+      const min = sv(cfg, 'min', 0)
+      const max = sv(cfg, 'max', 100)
+      const unit = sv(cfg, 'unit', '')
+      const pointerColor = sv(cfg, 'pointerColor', '#4a9eff')
+      const detailColor = sv(cfg, 'detailColor', '#eeeeee')
+      const detailSize = sv(cfg, 'detailSize', 14)
+      const axisLineWidth = sv(cfg, 'axisLineWidth', 8)
+      const axisLineColorsStr = sv(cfg, 'axisLineColors', '0.3:#27ae60,0.7:#e67e22,1:#c0392b')
+      const axisLineColors = parseGaugeColors(axisLineColorsStr)
+
       return {
         ...base,
-        grid: undefined,
         series: [{
-          type: 'gauge', radius: '80%', center: ['50%', '60%'],
-          axisLine: { lineStyle: { width: 8, color: [[0.3, '#27ae60'], [0.7, '#e67e22'], [1, '#c0392b']] } },
-          pointer: { itemStyle: { color: '#4a9eff' } },
+          type: 'gauge',
+          min,
+          max,
+          radius: '80%',
+          center: ['50%', '60%'],
+          axisLine: { lineStyle: { width: axisLineWidth, color: axisLineColors } },
+          pointer: { itemStyle: { color: pointerColor } },
           axisTick: { lineStyle: { color: '#444' } },
           splitLine: { lineStyle: { color: '#444' } },
           axisLabel: { color: '#aaa', fontSize: 10 },
-          detail: { valueAnimation: false, color: '#eee', fontSize: 14 },
+          detail: {
+            valueAnimation: false,
+            color: detailColor,
+            fontSize: detailSize,
+            formatter: unit ? `{value} ${unit}` : '{value}',
+          },
           data: [{ value }],
         }],
       }
     }
+
     case 'echarts-scatter': {
+      const dotColor = sv(cfg, 'dotColor', '#4a9eff')
+      const dotSize = sv(cfg, 'dotSize', 8)
+      const dotOpacity = sv(cfg, 'dotOpacity', 0.8)
+      const xAxisColor = sv(cfg, 'xAxisColor', '#444')
+      const yAxisColor = sv(cfg, 'yAxisColor', '#444')
+      const splitLineColor = sv(cfg, 'splitLineColor', '#2a2a3e')
+      const grid = {
+        top: sv(cfg, 'gridTop', 30),
+        bottom: sv(cfg, 'gridBottom', 30),
+        left: sv(cfg, 'gridLeft', 40),
+        right: sv(cfg, 'gridRight', 10),
+      }
+
       const xKeys = seriesKeys[0] ?? []
       const yKeys = seriesKeys[1] ?? []
       const data = xKeys.length && yKeys.length
-        ? xKeys.map((k, i) => [applyTransform(pointData[k] ?? 0, transform), applyTransform(pointData[yKeys[i] ?? k] ?? 0, transform)])
+        ? xKeys.map((k, i) => [
+            applyTransform(pointData[k] ?? 0, transform),
+            applyTransform(pointData[yKeys[i] ?? k] ?? 0, transform),
+          ])
         : [[10, 20], [30, 50], [50, 30], [70, 80], [90, 40]]
+
       return {
         ...base,
-        xAxis: { type: 'value', axisLine: { lineStyle: { color: '#444' } }, splitLine: { lineStyle: { color: '#2a2a3e' } } },
-        yAxis: { type: 'value', axisLine: { lineStyle: { color: '#444' } }, splitLine: { lineStyle: { color: '#2a2a3e' } } },
-        series: [{ type: 'scatter', data, itemStyle: { color: '#4a9eff' } }],
+        grid,
+        xAxis: { type: 'value', axisLine: { lineStyle: { color: xAxisColor } }, splitLine: { lineStyle: { color: splitLineColor } } },
+        yAxis: { type: 'value', axisLine: { lineStyle: { color: yAxisColor } }, splitLine: { lineStyle: { color: splitLineColor } } },
+        series: [{
+          type: 'scatter',
+          data,
+          symbolSize: dotSize,
+          itemStyle: { color: dotColor, opacity: dotOpacity },
+        }],
       }
     }
+
+    case 'echarts-heatmap': {
+      const colorLow = sv(cfg, 'colorLow', '#313695')
+      const colorHigh = sv(cfg, 'colorHigh', '#a50026')
+      const showVisualMap = sv(cfg, 'showVisualMap', true)
+      const xAxisColor = sv(cfg, 'xAxisColor', '#444')
+      const yAxisColor = sv(cfg, 'yAxisColor', '#444')
+      const grid = {
+        top: sv(cfg, 'gridTop', 30),
+        bottom: sv(cfg, 'gridBottom', 30),
+        left: sv(cfg, 'gridLeft', 40),
+        right: sv(cfg, 'gridRight', 10),
+      }
+
+      const xKeys = seriesKeys[0] ?? []
+      const yKeys = seriesKeys[1] ?? []
+      const vKeys = seriesKeys[2] ?? []
+
+      // 收集唯一的 X/Y 分类
+      const xCats = xKeys.length
+        ? [...new Set(xKeys.map((k) => String(pointData[k] ?? k)))]
+        : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
+      const yCats = yKeys.length
+        ? [...new Set(yKeys.map((k) => String(pointData[k] ?? k)))]
+        : ['Morning', 'Afternoon', 'Evening']
+
+      const heatData: [number, number, number][] = xKeys.length && yKeys.length && vKeys.length
+        ? xKeys.map((xk, i) => {
+            const xVal = String(pointData[xk] ?? xk)
+            const yVal = String(pointData[yKeys[i] ?? xk] ?? yKeys[i] ?? xk)
+            const v = applyTransform(Number(pointData[vKeys[i] ?? xk] ?? 0), transform)
+            return [xCats.indexOf(xVal), yCats.indexOf(yVal), v]
+          })
+        : [
+            [0, 0, 5], [0, 1, 1], [0, 2, 0],
+            [1, 0, 3], [1, 1, 8], [1, 2, 2],
+            [2, 0, 1], [2, 1, 4], [2, 2, 9],
+            [3, 0, 7], [3, 1, 2], [3, 2, 3],
+            [4, 0, 2], [4, 1, 6], [4, 2, 1],
+          ]
+
+      const maxVal = Math.max(...heatData.map(([,, v]) => v), 1)
+
+      return {
+        ...base,
+        grid,
+        xAxis: { type: 'category', data: xCats, axisLine: { lineStyle: { color: xAxisColor } }, splitArea: { show: true } },
+        yAxis: { type: 'category', data: yCats, axisLine: { lineStyle: { color: yAxisColor } }, splitArea: { show: true } },
+        visualMap: showVisualMap ? {
+          min: 0, max: maxVal,
+          calculable: true,
+          orient: 'horizontal',
+          left: 'center',
+          bottom: 0,
+          textStyle: { color: '#aaa', fontSize: 9 },
+          inRange: { color: [colorLow, colorHigh] },
+        } : {
+          min: 0, max: maxVal,
+          show: false,
+          inRange: { color: [colorLow, colorHigh] },
+        },
+        series: [{
+          type: 'heatmap',
+          data: heatData,
+          label: { show: false },
+          emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.5)' } },
+        }],
+      }
+    }
+
     default:
-      return base
+      return { ...base, grid: { top: 30, right: 10, bottom: 30, left: 40 } }
   }
 }
 
@@ -142,6 +360,11 @@ export default function ChartWidget({ el, zoom, pointData = {} }: Props) {
     if (!chartRef.current) return
     chartRef.current.setOption(buildOption(el, pointData), { notMerge: true })
   }, [el, pointData])
+
+  // 确保 schema 存在（开发时提示）
+  if (import.meta.env.DEV && !chartSchema[el.type]) {
+    console.warn(`[ChartWidget] no schema for type: ${el.type}`)
+  }
 
   return (
     <div
