@@ -42,6 +42,7 @@ type MarqueeRef = {
 
 export default function CanvasBoard() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const overlayCanvasRef = useRef<HTMLCanvasElement>(null)
   const dragRef = useRef<DragRef | null>(null)
   const resizeRef = useRef<ResizeRef | null>(null)
   const drawingRef = useRef<{ startX: number; startY: number } | null>(null)
@@ -78,36 +79,42 @@ export default function CanvasBoard() {
       drawElement(ctx, element, zoom)
     }
 
-    // Draw selection indicators
-    if (selectedIds.length === 1) {
-      const selEl = canvas.elements.find((e) => e.id === selectedIds[0])
-      if (selEl) drawSelectionHandles(ctx, selEl, zoom)
-    } else if (selectedIds.length > 1) {
-      const selEls = canvas.elements.filter((e) => selectedIds.includes(e.id))
-      selEls.forEach((e) => {
-        // highlight each selected element with dashed border
-        ctx.save()
-        ctx.strokeStyle = 'rgba(74,158,255,0.5)'
-        ctx.lineWidth = 1
-        ctx.setLineDash([3, 3])
-        ctx.strokeRect(e.x * zoom - 2, e.y * zoom - 2, e.width * zoom + 4, e.height * zoom + 4)
-        ctx.setLineDash([])
-        ctx.restore()
-      })
-      drawMultiSelectBox(ctx, selEls, zoom)
-    }
-
-    // Draw marquee
-    if (marqueeRef.current) {
-      const m = marqueeRef.current
-      drawMarquee(ctx, m.startX, m.startY, m.curX, m.curY)
+    // Draw selection handles on overlay canvas
+    const oc = overlayCanvasRef.current
+    if (oc) {
+      oc.width = el.width
+      oc.height = el.height
+      const octx = oc.getContext('2d')
+      if (octx) {
+        octx.clearRect(0, 0, oc.width, oc.height)
+        if (selectedIds.length === 1) {
+          const selEl = canvas.elements.find((e) => e.id === selectedIds[0])
+          if (selEl) drawSelectionHandles(octx, selEl, zoom)
+        } else if (selectedIds.length > 1) {
+          const selEls = canvas.elements.filter((e) => selectedIds.includes(e.id))
+          selEls.forEach((e) => {
+            octx.save()
+            octx.strokeStyle = 'rgba(74,158,255,0.5)'
+            octx.lineWidth = 1
+            octx.setLineDash([3, 3])
+            octx.strokeRect(e.x * zoom - 2, e.y * zoom - 2, e.width * zoom + 4, e.height * zoom + 4)
+            octx.setLineDash([])
+            octx.restore()
+          })
+          drawMultiSelectBox(octx, selEls, zoom)
+        }
+        if (marqueeRef.current) {
+          const m = marqueeRef.current
+          drawMarquee(octx, m.startX, m.startY, m.curX, m.curY)
+        }
+      }
     }
   }, [canvas, zoom, selectedIds])
 
   useEffect(() => { draw() }, [draw])
 
   const getCanvasPos = (e: React.MouseEvent) => {
-    const rect = canvasRef.current!.getBoundingClientRect()
+    const rect = overlayCanvasRef.current!.getBoundingClientRect()
     return {
       x: (e.clientX - rect.left),          // canvas pixel coords (already scaled)
       y: (e.clientY - rect.top),
@@ -245,7 +252,7 @@ export default function CanvasBoard() {
 
     if (drawingRef.current && activeTool !== 'select') {
       pushHistory(store.project)
-      const rect = canvasRef.current!.getBoundingClientRect()
+      const rect = overlayCanvasRef.current!.getBoundingClientRect()
       const lx = (e.clientX - rect.left) / zoom
       const ly = (e.clientY - rect.top) / zoom
       const sx = drawingRef.current.startX
@@ -360,19 +367,26 @@ export default function CanvasBoard() {
         borderRadius: 2,
         flexShrink: 0,
       }}>
-        <canvas
-          ref={canvasRef}
-          style={{ display: 'block', cursor: activeTool === 'select' ? 'default' : 'crosshair' }}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onContextMenu={handleContextMenu}
-        />
+        {/* Content canvas — behind overlay widgets */}
+        <canvas ref={canvasRef} style={{ display: 'block' }} />
+        {/* DOM overlay widgets (image/chart) — interleaved by zIndex */}
         {overlayElements.map((el) =>
           el.type.startsWith('echarts-')
             ? <ChartWidget key={el.id} el={el} zoom={zoom} />
             : <ImageWidget key={el.id} el={el} zoom={zoom} />
         )}
+        {/* Selection/marquee overlay canvas — always on top, receives all mouse events */}
+        <canvas
+          ref={overlayCanvasRef}
+          style={{
+            position: 'absolute', inset: 0, display: 'block',
+            cursor: activeTool === 'select' ? 'default' : 'crosshair',
+          }}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onContextMenu={handleContextMenu}
+        />
       </div>
 
       {/* ── Right-click context menu ── */}
