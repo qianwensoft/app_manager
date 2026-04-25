@@ -113,6 +113,23 @@ export default function CanvasBoard() {
 
   useEffect(() => { draw() }, [draw])
 
+  // Trackpad pinch-to-zoom — must be non-passive to call preventDefault
+  const zoomRef = useRef(zoom)
+  useEffect(() => { zoomRef.current = zoom }, [zoom])
+
+  useEffect(() => {
+    const el = overlayCanvasRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return
+      e.preventDefault()
+      const delta = -e.deltaY * 0.01
+      store.setZoom(zoomRef.current + delta)
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
+
   const getCanvasPos = (e: React.MouseEvent) => {
     const rect = overlayCanvasRef.current!.getBoundingClientRect()
     return {
