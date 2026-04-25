@@ -16,6 +16,7 @@ const (
 	OpenEventsList  = "open:events:list"
 	OpenDataInterfaceQuery = "open:dataiface:query"
 	OpenDataInterfaceWrite = "open:dataiface:write"
+	OpenStompSubscribe     = "open:stomp:subscribe"
 )
 
 // 屏幕分享链接授权范围
@@ -39,6 +40,7 @@ var OpenScopeDescriptions = []struct {
 	{OpenEventsList, "设备自定义事件列表（扫码等）"},
 	{OpenDataInterfaceQuery, "数据接口查询（只读数据集）"},
 	{OpenDataInterfaceWrite, "数据接口事务（写操作）"},
+	{OpenStompSubscribe, "WebSocket/STOMP 实时订阅"},
 }
 
 // ScreenShareScopeDescriptions 屏幕分享可选能力

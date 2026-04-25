@@ -467,6 +467,7 @@ func SetupRouter() *gin.Engine {
 	// WebSocket
 	r.GET("/ws/stomp", StompWSAuth, StompWS)
 	r.GET("/ws/stomp-scada", StompScadaShareAuth, StompScadaShareWS)
+	r.GET("/ws/open/stomp", OpenStompWSAuth, OpenStompWS)
 	r.GET("/ws/screen/:deviceId", auth.ScreenWSAuth(), ScreenWS)
 	r.GET("/ws/shell/:deviceId", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"), ShellWS)
 	r.GET("/ws/logcat/:deviceId", auth.AuthMiddleware(), LogcatWS)

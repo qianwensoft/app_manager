@@ -78,6 +78,7 @@ const routes = [
       { path: 'apps', name: 'Apps', meta: { title: 'APK 管理' }, component: () => import('@/views/Apps.vue') },
       { path: 'tasks', name: 'Tasks', meta: { title: '任务队列' }, component: () => import('@/views/Tasks.vue') },
       { path: 'apikeys', name: 'ApiKeys', meta: { title: '授权管理' }, component: () => import('@/views/ApiKeys.vue') },
+      { path: 'open-stomp-debug', name: 'OpenStompDebug', meta: { title: 'STOMP 调试' }, component: () => import('@/views/OpenStompDebug.vue') },
       { path: 'users', name: 'Users', meta: { title: '用户管理' }, component: () => import('@/views/Users.vue') },
       { path: 'audit', name: 'AuditLog', meta: { title: '审计日志' }, component: () => import('@/views/AuditLog.vue') },
       { path: 'settings', name: 'Settings', meta: { title: '系统管理' }, component: () => import('@/views/Settings.vue') },
