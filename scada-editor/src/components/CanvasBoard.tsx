@@ -147,8 +147,8 @@ export default function CanvasBoard() {
         }
       }
 
-      // 2. Hit test element
-      const hit = [...canvas.elements].reverse().find((el) => hitTest(el, mx, my, zoom))
+      // 2. Hit test element — highest zIndex first
+      const hit = [...canvas.elements].sort((a, b) => b.zIndex - a.zIndex).find((el) => hitTest(el, mx, my, zoom))
       if (hit) {
         // If hit element belongs to a group, redirect selection to the group
         const parentGroup = canvas.elements.find(
@@ -323,7 +323,7 @@ export default function CanvasBoard() {
     e.preventDefault()
     if (!canvas) return
     const { x: mx, y: my } = getCanvasPos(e)
-    const hit = [...canvas.elements].reverse().find((el) => hitTest(el, mx, my, zoom))
+    const hit = [...canvas.elements].sort((a, b) => b.zIndex - a.zIndex).find((el) => hitTest(el, mx, my, zoom))
     if (!hit) { setCtxMenu(null); return }
     const parentGroup = canvas.elements.find(
       (el) => el.type === 'group' && el.children?.includes(hit.id)
