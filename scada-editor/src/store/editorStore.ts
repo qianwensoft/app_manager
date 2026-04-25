@@ -430,8 +430,11 @@ export const useEditorStore = create<EditorStore>()(
         if (!c) return
         const el = c.elements.find((e) => e.id === id)
         if (!el) return
-        const next = c.elements.find((e) => e.zIndex === el.zIndex + 1)
-        if (next) { next.zIndex -= 1; el.zIndex += 1 }
+        // 找 zIndex 比当前大的最小元素
+        const next = c.elements
+          .filter((e) => e.id !== id && e.zIndex > el.zIndex)
+          .sort((a, b) => a.zIndex - b.zIndex)[0]
+        if (next) { const tmp = next.zIndex; next.zIndex = el.zIndex; el.zIndex = tmp }
         s.isDirty = true
       }),
 
@@ -440,9 +443,12 @@ export const useEditorStore = create<EditorStore>()(
         const c = s.project.canvases[s.project.activeCanvasId]
         if (!c) return
         const el = c.elements.find((e) => e.id === id)
-        if (!el || el.zIndex === 0) return
-        const prev = c.elements.find((e) => e.zIndex === el.zIndex - 1)
-        if (prev) { prev.zIndex += 1; el.zIndex -= 1 }
+        if (!el) return
+        // 找 zIndex 比当前小的最大元素
+        const prev = c.elements
+          .filter((e) => e.id !== id && e.zIndex < el.zIndex)
+          .sort((a, b) => b.zIndex - a.zIndex)[0]
+        if (prev) { const tmp = prev.zIndex; prev.zIndex = el.zIndex; el.zIndex = tmp }
         s.isDirty = true
       }),
 
