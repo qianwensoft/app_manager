@@ -283,21 +283,26 @@ function attachStreamStomp() {
     heartbeatOutgoing: 0,
     onConnect: () => {
       client.subscribe('/topic/events', (message) => {
-        let j
         try {
-          j = JSON.parse(message.body)
-        } catch {
-          return
+          let j
+          try {
+            j = JSON.parse(message.body)
+          } catch (e) {
+            console.warn('[event stream STOMP] parse failed', e)
+            return
+          }
+          if (typeof j !== 'object' || j == null) return
+          liveRows.value.unshift({
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+            receivedAt: Date.now(),
+            messageType: j.type || '(无 type)',
+            deviceId: j.device_id,
+            summary: stompSummary(j)
+          })
+          if (liveRows.value.length > LIVE_CAP) liveRows.value.length = LIVE_CAP
+        } catch (e) {
+          console.warn('[event stream STOMP] handler failed (subscription stays active)', e)
         }
-        if (typeof j !== 'object' || j == null) return
-        liveRows.value.unshift({
-          id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-          receivedAt: Date.now(),
-          messageType: j.type || '(无 type)',
-          deviceId: j.device_id,
-          summary: stompSummary(j)
-        })
-        if (liveRows.value.length > LIVE_CAP) liveRows.value.length = LIVE_CAP
       })
 
       streamListenerId.value = store.registerExternalListener({

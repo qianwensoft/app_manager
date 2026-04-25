@@ -34,6 +34,8 @@
     <string name="listen_state_delete_confirm">将删除服务器上本机的监听快照，并停止本机监听。确定？</string>
     <string name="listen_state_deleted_ok">已删除记录</string>
     <string name="main_tile_app_list">应用列表</string>
+    <string name="main_tile_scada">组态</string>
+    <string name="scada_webview_title">组态预览</string>
     <string name="main_tile_device">设备信息</string>
     <string name="main_tile_perm_mgmt">权限管理</string>
     <string name="main_tile_placeholder">敬请期待</string>

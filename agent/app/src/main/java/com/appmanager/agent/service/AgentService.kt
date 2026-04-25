@@ -25,6 +25,7 @@ import com.appmanager.agent.util.AppVersions
 import com.appmanager.agent.util.ServerUrlUtil
 import com.appmanager.agent.util.CustomEventBroadcastHelper
 import com.appmanager.agent.util.EventReporter
+import com.appmanager.agent.AgentMenuSync
 import com.appmanager.agent.ws.AgentWebSocket
 import com.appmanager.agent.ws.CommandAction
 import com.appmanager.agent.ws.DeviceInfoMessage
@@ -110,6 +111,8 @@ class AgentService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        // 恢复上次持久化的菜单 intent_action 监听（App 重启后重新注册）
+        com.appmanager.agent.MenuIntentReceiver.reregister(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -164,6 +167,7 @@ class AgentService : LifecycleService() {
                 heartbeatManager.start()
                 deviceInfoCollector.start()
                 EventReporter.init(webSocket, tok)
+                AgentMenuSync.fetchManifestAsync(serviceScope, this@AgentService, url, tok)
             },
             onDisconnected = {
                 updateNotification("重连中...")
@@ -202,6 +206,7 @@ class AgentService : LifecycleService() {
         shellManager?.stop()
         logcatManager?.stop()
         CustomEventBroadcastHelper.stop(this)
+        com.appmanager.agent.MenuIntentReceiver.unregister(this)
         if (::webSocket.isInitialized) webSocket.disconnect()
         activeWsServerUrl = ""
         activeWsDeviceToken = ""

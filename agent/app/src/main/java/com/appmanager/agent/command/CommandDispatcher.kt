@@ -1,6 +1,7 @@
 package com.appmanager.agent.command
 
 import android.util.Log
+import com.appmanager.agent.AgentMenuSync
 import com.appmanager.agent.DeviceProfileSync
 import com.appmanager.agent.service.AgentService
 import com.appmanager.agent.util.OutboundMessagePresenter
@@ -21,6 +22,14 @@ object CommandDispatcher {
                     DeviceProfileSync.applyFromServer(service, data)
                 } else {
                     Log.w(TAG, "device_profile_sync missing data")
+                }
+            }
+            "agent_menu_sync" -> {
+                val data = msg.data as? Map<*, *>
+                if (data != null) {
+                    AgentMenuSync.applyFromServer(service, data)
+                } else {
+                    Log.w(TAG, "agent_menu_sync missing data")
                 }
             }
             "webrtc_signal" -> {
@@ -168,14 +177,22 @@ object CommandDispatcher {
                     CommandAction.FS_UPLOAD_END -> FsCommandHandler.uploadEnd(msg, service)
                     CommandAction.FS_UPLOAD_CANCEL -> FsCommandHandler.uploadCancel(msg, service)
                     CommandAction.START_CUSTOM_EVENT_LISTEN -> {
-                        val rules = com.appmanager.agent.util.CustomEventBroadcastHelper
-                            .parseRulesFromServer(msg.data as? Map<*, *>)
-                        com.appmanager.agent.util.CustomEventBroadcastHelper.start(service, rules)
-                        Log.i(TAG, "Custom event listen started, rules=${rules?.size ?: 0} (using defaults=${rules == null})")
+                        try {
+                            val rules = com.appmanager.agent.util.CustomEventBroadcastHelper
+                                .parseRulesFromServer(msg.data as? Map<*, *>)
+                            com.appmanager.agent.util.CustomEventBroadcastHelper.start(service, rules)
+                            Log.i(TAG, "Custom event listen started, rules=${rules?.size ?: 0} (using defaults=${rules == null})")
+                        } catch (t: Throwable) {
+                            Log.e(TAG, "start_custom_event_listen failed", t)
+                        }
                     }
                     CommandAction.STOP_CUSTOM_EVENT_LISTEN -> {
-                        com.appmanager.agent.util.CustomEventBroadcastHelper.stop(service)
-                        Log.i(TAG, "Custom event listen stopped")
+                        try {
+                            com.appmanager.agent.util.CustomEventBroadcastHelper.stop(service)
+                            Log.i(TAG, "Custom event listen stopped")
+                        } catch (t: Throwable) {
+                            Log.e(TAG, "stop_custom_event_listen failed", t)
+                        }
                     }
                     CommandAction.OPEN_URL -> IntentCommandHandler.openUrl(msg, service)
                     CommandAction.BROADCAST_INTENT -> IntentCommandHandler.broadcastIntent(msg, service)

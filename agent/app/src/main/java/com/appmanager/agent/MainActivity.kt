@@ -26,6 +26,7 @@ import com.appmanager.agent.service.AgentService
 import com.appmanager.agent.ui.CatalogListActivity
 import com.appmanager.agent.ui.DeviceListenStateActivity
 import com.appmanager.agent.ui.DeviceInfoActivity
+import com.appmanager.agent.ui.ScadaWebViewActivity
 import com.appmanager.agent.ui.SettingsActivity
 import com.appmanager.agent.util.AppVersions
 
@@ -34,6 +35,8 @@ class MainActivity : AppCompatActivity() {
     companion object {
         /** 与 AndroidManifest 中 intent-filter 的 action 一致 */
         const val ACTION_REQUEST_SCREEN = "com.appmanager.agent.ACTION_REQUEST_SCREEN"
+        /** 打开已下发的组态预览（可选 extra_params 追加到 URL） */
+        const val ACTION_OPEN_SCADA_MENU = "com.appmanager.agent.ACTION_OPEN_SCADA_MENU"
         private const val REQUEST_CODE_SCREEN = 1001
     }
 
@@ -51,6 +54,7 @@ class MainActivity : AppCompatActivity() {
         override fun onReceive(context: Context?, intent: Intent?) {
             runOnUiThread {
                 updateDeviceInfo(AgentConfig.get(this@MainActivity))
+                refreshScadaTile()
             }
         }
     }
@@ -83,8 +87,9 @@ class MainActivity : AppCompatActivity() {
             settingsLauncher.launch(Intent(this, SettingsActivity::class.java))
         }
         findViewById<View>(R.id.card_tile_app_list).setOnClickListener {
-            Toast.makeText(this, R.string.toast_coming_soon, Toast.LENGTH_SHORT).show()
+            openScadaFromStore(null)
         }
+        refreshScadaTile()
         findViewById<View>(R.id.card_tile_device_info).setOnClickListener {
             startActivity(Intent(this, DeviceInfoActivity::class.java))
         }
@@ -114,6 +119,27 @@ class MainActivity : AppCompatActivity() {
         }
 
         window.decorView.post { handleIntent(intent) }
+    }
+
+    private fun refreshScadaTile() {
+        val tv = findViewById<TextView>(R.id.tv_tile_scada_label)
+        val url = AgentMenuStore.getFirstHomePreviewUrl(this)
+        tv.text = if (url != null) getString(R.string.main_tile_scada) else getString(R.string.main_tile_scada)
+    }
+
+    /** 从本地缓存打开第一个首页组态；[extrasUrlSuffix] 追加到 URL query */
+    private fun openScadaFromStore(extrasUrlSuffix: String?) {
+        var url = AgentMenuStore.getFirstHomePreviewUrl(this)
+        if (url.isNullOrBlank()) {
+            Toast.makeText(this, "暂无下发组态菜单", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (!extrasUrlSuffix.isNullOrBlank()) {
+            url = if (url.contains("?")) "$url&$extrasUrlSuffix" else "$url?$extrasUrlSuffix"
+        }
+        startActivity(
+            Intent(this, ScadaWebViewActivity::class.java).putExtra(ScadaWebViewActivity.EXTRA_URL, url)
+        )
     }
 
     override fun onResume() {
@@ -157,7 +183,27 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun handleIntent(intent: Intent?) {
-        if (intent?.action != ACTION_REQUEST_SCREEN) return
+        val action = intent?.action ?: return
+        // 内置：打开首页第一个组态
+        if (action == ACTION_OPEN_SCADA_MENU) {
+            val extra = intent.getStringExtra("extra_params")
+            openScadaFromStore(extra)
+            return
+        }
+        // 按 intent_action 匹配已下发菜单，支持每个菜单配置独立 action
+        val menuUrl = AgentMenuStore.getPreviewUrlByIntent(this, action)
+        if (menuUrl != null) {
+            val extra = intent.getStringExtra("extra_params")
+            val url = if (!extra.isNullOrBlank()) {
+                if (menuUrl.contains("?")) "$menuUrl&$extra" else "$menuUrl?$extra"
+            } else menuUrl
+            startActivity(
+                Intent(this, ScadaWebViewActivity::class.java)
+                    .putExtra(ScadaWebViewActivity.EXTRA_URL, url)
+            )
+            return
+        }
+        if (action != ACTION_REQUEST_SCREEN) return
         val cfg = AgentConfig.get(this)
         if (!cfg.allowRemoteScreen) {
             Toast.makeText(

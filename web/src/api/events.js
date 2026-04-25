@@ -12,6 +12,10 @@ export const batchStartCustomEventListen = (deviceIds, scope = {}) =>
 export const batchStopCustomEventListen = (deviceIds) =>
   http.post('/custom-events/listen/stop', { device_ids: deviceIds })
 
+/** 删除某台设备的监听快照（会先尽力下发 stop_custom_event_listen） */
+export const deleteCustomEventListenState = (deviceId) =>
+  http.delete(`/custom-events/listen-state/device/${deviceId}`)
+
 /** @param {{ device_id?: string, event_key?: string, include_inactive?: string }} [params] */
 export const getCustomListenState = (params) => http.get('/custom-events/listen-state', { params })
 export const getCustomListenAggregates = () => http.get('/custom-events/listen-state/aggregates')

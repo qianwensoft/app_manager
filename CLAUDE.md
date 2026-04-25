@@ -33,6 +33,23 @@ npm run build            # production build → web/dist/
 
 Proxy target can be overridden with `VITE_PROXY_TARGET` env var.
 
+### Web — SCADA (组态)
+
+Standalone React app in `scada-editor/` (Vite + React + Zustand + TanStack Query). Served at `/scada-editor/` by the Go server; opened from the Vue shell via `openScadaEditor()` in `Layout.vue`.
+
+```bash
+cd scada-editor && npm install
+npm run dev      # dev server (proxies /api to http://127.0.0.1:8080)
+npm run build    # production build → scada-editor/dist/
+```
+
+- **Pages**: `ScadaListPage` (`/scada`), `EditorPage` (`/editor/:id`), `PreviewPage` (`/preview/:id`), `SchemaPage` (`/schema`).
+- **Store**: `src/store/editorStore.ts` (Zustand) — multi-canvas project, undo/redo history, element CRUD, z-order, lock/visibility.
+- **Canvas**: `CanvasBoard.tsx` — HTML5 Canvas 2D rendering, drag/resize/marquee select, right-click context menu (z-order + delete), locked element guard.
+- **Widgets**: `WidgetPanel.tsx` (drag-to-canvas), `ChartWidget.tsx` (ECharts), `ImageWidget.tsx` (image-bg/widget/decoration/border-box).
+- **Sim engine**: `server/scada/sim.go` — `StartSimEngine()` started after `database.Ready`; pushes point data via STOMP `/topic/scada/point-data/:code`.
+- **REST**: `/api/scada/*` (Gin routes in `server/api/scada.go`).
+
 ### Agent (Android)
 ```bash
 make agent               # assembleDebug → agent/app/build/outputs/apk/debug/
@@ -122,6 +139,15 @@ JSON messages over WebSocket with fields: `type`, `action`, `commandId`, `data`.
 Flat packages by domain (no `internal/`): `api/`, `agent/`, `screen/`, `auth/`, `adb/`, `task/`, `models/`, `database/`, `config/`, `storage/`, `event/`, `logcat/`, `shell/`, `stomp/`, `audit/`, `custompreset/`, `migrations/`.
 
 Singletons initialized in `main.go` and used directly: `database.DB`, `agent.AgentHub`, `screen.ScreenHub`, `task.Q`, `config.C`.
+
+### Data stack (datasets / open interfaces)
+
+- **Models**: `DataSource`（仅连接；`config_json` 可含 `pool_max_open` / `pool_max_idle` / `pool_conn_max_lifetime_sec` 与 `dsn_fields`）；`Dataset`（`kind`: `static` | `query` | `buffer` | `transaction`）；`DataStructure`（`dataset_id`+`code` 唯一）；`DataInterface`（`data_structure_id`、`param_defaults_json` 可选）。
+- **SQL 驱动抽象**: `server/dbdriver` — `OpenDataSource`（含连接池）、`ListTables`、`ListColumns`、`QuoteTableIdent`、缓冲单列 `InsertSingleColumnRow`。
+- **API 摘录**: `GET /api/data/sources/:id/tables/:table/columns`；`GET|POST|PUT|DELETE /api/data/datasets/:id/structures`；开放入站 `POST /api/open/v1/ingress/buffer/:dataset_code`（`X-Webhook-Secret`）；后台 `StartBufferPollers` 轮询 `http_poll` 写入缓冲表。
+- **`kind=buffer`**: 配置在 **`meta_json`**（`server/datastack`）。`http_webhook` 默认须 `buffer_table`；`http_poll` 可省略物理表（`cache_required=false`）。
+- **接口默认参数**: `applyDataInterfaceParamDefaults` 合并 **数据结构 `default_param_values`** 与 **`param_defaults_json`**，再与请求 `param_values` 合并（请求键优先）。
+- **Connectors**: 避免出站 HTTP 回调本系统开放数据 URL 形成环（出站层 allowlist 仍为 TBD）。
 
 ### Auth Middleware Chain
 

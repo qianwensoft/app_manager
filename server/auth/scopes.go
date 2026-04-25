@@ -14,6 +14,8 @@ const (
 	OpenAppsInstall = "open:apps:install"
 	OpenTasksGet    = "open:tasks:get"
 	OpenEventsList  = "open:events:list"
+	OpenDataInterfaceQuery = "open:dataiface:query"
+	OpenDataInterfaceWrite = "open:dataiface:write"
 )
 
 // 屏幕分享链接授权范围
@@ -35,6 +37,8 @@ var OpenScopeDescriptions = []struct {
 	{OpenAppsInstall, "安装 APK 到设备"},
 	{OpenTasksGet, "查询安装任务"},
 	{OpenEventsList, "设备自定义事件列表（扫码等）"},
+	{OpenDataInterfaceQuery, "数据接口查询（只读数据集）"},
+	{OpenDataInterfaceWrite, "数据接口事务（写操作）"},
 }
 
 // ScreenShareScopeDescriptions 屏幕分享可选能力

@@ -68,6 +68,7 @@ import { ref, onMounted, nextTick } from 'vue'
 import QRCode from 'qrcode'
 import { ElMessage } from 'element-plus'
 import http from '@/api/http'
+import { copyText } from '@/utils/clipboard'
 
 const qrCanvas = ref(null)
 const serverUrl = ref('')
@@ -162,7 +163,7 @@ async function deleteLink(id) {
 }
 
 function copyUrl() {
-  navigator.clipboard.writeText(currentUploadUrl.value)
+  copyText(currentUploadUrl.value)
   ElMessage.success('已复制')
 }
 

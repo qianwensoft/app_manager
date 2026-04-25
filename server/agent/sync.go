@@ -4,6 +4,7 @@ import (
 	"app-manager/database"
 	"app-manager/models"
 	"log"
+	"strings"
 	"time"
 )
 
@@ -21,7 +22,7 @@ func heartbeatBool(v interface{}) (bool, bool) {
 }
 
 // SyncDeviceStatus updates device status in DB when agent connects/disconnects.
-// deviceID is either numeric DB id (来自 Web 端) 或 Agent 扫码 token / ADB serial。
+// deviceID is either numeric DB id（来自 Web 端）或 Agent 扫码 token / ADB serial / 硬件串号。
 func SyncDeviceStatus(deviceID string, connected bool) {
 	updates := map[string]interface{}{
 		"agent_connected": connected,
@@ -49,38 +50,66 @@ func SyncDeviceStatus(deviceID string, connected bool) {
 	}
 }
 
-// ensureAgentDevice 保证存在 agent_token 对应的设备行（扫码 token 首次上报）。
-// 若提供了 androidSerial，先按 android_serial 查找同一台物理设备（重装 App 场景），
-// 找到则更新其 agent_token，避免产生重复设备记录。
+func normalizeAndroidSerial(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if strings.EqualFold(s, "unknown") {
+		return ""
+	}
+	return s
+}
+
+// ensureAgentDevice 保证 Agent 接入在库中有对应设备行。
+// 若提供有效硬件串号 androidSerial，则以串号为唯一键：已存在同串号行则只更新 agent_token（重装 App / 换 Token），否则新建并写入串号。
+// 若无串号，则仍按 agent_token 占位，待心跳上报串号后再收敛到唯一串号行。
 func ensureAgentDevice(deviceKey, androidSerial string) error {
 	if isNumericID(deviceKey) {
 		return nil
 	}
+	key := strings.TrimSpace(deviceKey)
+	sn := normalizeAndroidSerial(androidSerial)
+	now := time.Now()
 
-	// 1. 先查 android_serial 是否已有记录（重装 App 场景）
-	if androidSerial != "" && androidSerial != "unknown" {
+	if sn != "" {
 		var existing models.Device
-		err := database.DB.Where("android_serial = ?", androidSerial).First(&existing).Error
+		err := database.DB.Where("android_serial = ?", sn).First(&existing).Error
 		if err == nil && existing.ID > 0 {
-			// 找到同一台物理设备，更新 agent_token（不更改 serial 等其他字段）
-			now := time.Now()
 			return database.DB.Model(&existing).Updates(map[string]interface{}{
-				"agent_token":    deviceKey,
-				"serial":         "agent-" + deviceKey,
+				"agent_token":     key,
+				"serial":          "agent-" + key,
 				"agent_connected": true,
 				"status":          "online",
 				"last_seen_at":    now,
 			}).Error
 		}
+		var byTok models.Device
+		if err := database.DB.Where("agent_token = ?", key).First(&byTok).Error; err == nil {
+			return database.DB.Model(&byTok).Updates(map[string]interface{}{
+				"android_serial":  sn,
+				"serial":          "agent-" + key,
+				"agent_connected": true,
+				"status":          "online",
+				"last_seen_at":    now,
+			}).Error
+		}
+		d := models.Device{
+			Serial:         "agent-" + key,
+			Name:           "Agent 设备",
+			AgentToken:     key,
+			AndroidSerial:  sn,
+			LastSeenAt:     &now,
+			CreatedAt:      now,
+		}
+		return database.DB.Create(&d).Error
 	}
 
-	// 2. 没有找到同一台物理设备，按 agent_token 首次创建
 	var d models.Device
-	now := time.Now()
-	return database.DB.Where("agent_token = ?", deviceKey).FirstOrCreate(&d, models.Device{
-		Serial:     "agent-" + deviceKey,
+	return database.DB.Where("agent_token = ?", key).FirstOrCreate(&d, models.Device{
+		Serial:     "agent-" + key,
 		Name:       "Agent 设备",
-		AgentToken: deviceKey,
+		AgentToken: key,
 		LastSeenAt: &now,
 		CreatedAt:  now,
 	}).Error
@@ -173,11 +202,23 @@ func HandleHeartbeat(deviceID string, info map[string]interface{}) {
 	if av, ok := strFromInfo(info["agent_version"]); ok && av != "" {
 		updates["agent_version"] = av
 	}
-	// 手机硬件序列号（Build.SERIAL），作为物理设备唯一标识，写入专用字段用于跨重装识别
 	androidSerial := ""
 	if as, ok := strFromInfo(info["android_serial"]); ok && as != "" && as != "unknown" {
-		androidSerial = as
-		updates["android_serial"] = as
+		androidSerial = normalizeAndroidSerial(as)
+		if androidSerial != "" {
+			updates["android_serial"] = androidSerial
+		}
+	}
+
+	if androidSerial != "" && haveID {
+		var dup int64
+		database.DB.Model(&models.Device{}).
+			Where("android_serial = ? AND id <> ?", androidSerial, dbID).
+			Count(&dup)
+		if dup > 0 {
+			log.Printf("HandleHeartbeat: android_serial %q already bound to another device; skip writing serial on device %d", androidSerial, dbID)
+			delete(updates, "android_serial")
+		}
 	}
 
 	result := DeviceScope(deviceID).Updates(updates)
@@ -209,4 +250,3 @@ func HandleHeartbeat(deviceID string, info map[string]interface{}) {
 		PublishDeviceProfileUpdated(dbID)
 	}
 }
-

@@ -29,7 +29,23 @@
             <el-option label="网页" value="webview_url" />
           </el-select>
         </el-form-item>
-        <el-form-item label="目标 ref"><el-input v-model="form.target_ref" placeholder="scada_code" /></el-form-item>
+        <el-form-item label="目标 ref">
+          <el-select
+            v-if="form.target_type === 'scada_preview'"
+            v-model="form.target_ref"
+            filterable
+            placeholder="选择已发布的组态"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="s in publishedScadas"
+              :key="s.scada_code"
+              :label="`${s.scada_name}（${s.scada_code}）`"
+              :value="s.scada_code"
+            />
+          </el-select>
+          <el-input v-else v-model="form.target_ref" placeholder="URL" />
+        </el-form-item>
         <el-form-item label="Intent Action"><el-input v-model="form.intent_action" placeholder="com.appmanager.agent.ACTION_SCADA_xxx" /></el-form-item>
         <el-form-item label="首页磁贴"><el-switch v-model="form.show_on_agent_home" /></el-form-item>
         <el-form-item label="排序"><el-input-number v-model="form.sort_order" /></el-form-item>
@@ -62,6 +78,7 @@ import http from '@/api/http'
 const loading = ref(false)
 const items = ref([])
 const devices = ref([])
+const publishedScadas = ref([])
 const dlg = ref(false)
 const form = ref({
   id: null,
@@ -83,6 +100,8 @@ const load = async () => {
     items.value = res.data || []
     const devRes = await http.get('/devices')
     devices.value = devRes.data || []
+    const scadaRes = await http.get('/scada/infos')
+    publishedScadas.value = (scadaRes.data || []).filter(s => s.publish_status === 1)
   } finally {
     loading.value = false
   }

@@ -43,6 +43,9 @@ func loop() {
 }
 
 func tick() {
+	if database.DB == nil {
+		return
+	}
 	var points []models.ScadaSimPoint
 	if err := database.DB.Where("enabled = ?", true).Find(&points).Error; err != nil {
 		return
@@ -139,6 +142,21 @@ func aggregatePush(scadaCode, link string, v float64) {
 	}
 	topic := "/topic/scada/point-data/" + scadaCode
 	stomp.DefaultHub.PublishJSON(topic, string(b))
+}
+
+// GetLastSnapshot returns the last pushed point-data for a scada code (for HTTP polling).
+func GetLastSnapshot(scadaCode string) map[string]float64 {
+	pushMu.Lock()
+	defer pushMu.Unlock()
+	m := lastPush[scadaCode]
+	if m == nil {
+		return map[string]float64{}
+	}
+	cp := make(map[string]float64, len(m))
+	for k, v := range m {
+		cp[k] = v
+	}
+	return cp
 }
 
 // RemoveScadaFromCache 删除组态时清理推送聚合（可选）

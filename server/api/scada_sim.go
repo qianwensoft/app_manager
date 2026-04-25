@@ -3,6 +3,7 @@ package api
 import (
 	"app-manager/database"
 	"app-manager/models"
+	scadasim "app-manager/scada"
 	"net/http"
 	"strconv"
 
@@ -69,4 +70,14 @@ func UpdateScadaSimPoint(c *gin.Context) {
 func DeleteScadaSimPoint(c *gin.Context) {
 	database.DB.Delete(&models.ScadaSimPoint{}, c.Param("id"))
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// GetScadaSimSnapshot returns the latest in-memory point-data snapshot for HTTP polling.
+func GetScadaSimSnapshot(c *gin.Context) {
+	code := c.Param("scada_code")
+	if code == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "scada_code required"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": scadasim.GetLastSnapshot(code)})
 }

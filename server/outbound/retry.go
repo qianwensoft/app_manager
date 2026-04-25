@@ -49,6 +49,9 @@ func RetryDelivery(db *gorm.DB, deliveryID uint) (models.OutboundDelivery, error
 					continue
 				}
 				vars := TemplateVars(rec, &dev, &def)
+				MergeParamsJSONObjectIntoVars(vars, block.Phase.ParamsJSON)
+				MergeStepEventDataToContext(vars, ls.Step, rec)
+				MergeStepTemplateParamsFromConfigJSON(vars, ls.Step.ConfigJSON)
 				return runOneLoadedStep(db, co, block.Phase, ls, rec, &dev, &def, vars, false), nil
 			}
 			return models.OutboundDelivery{}, fmt.Errorf("阶段 #%d 下找不到步骤 #%d（配置可能已变更）", orig.PhaseID, orig.StepID)
@@ -75,5 +78,16 @@ func RetryDelivery(db *gorm.DB, deliveryID uint) (models.OutboundDelivery, error
 		meta.StepType = "http"
 	}
 	vars := TemplateVars(rec, &dev, &def)
-	return ExecuteHTTPWebhook(db, co, ep, ep.App, rec, &dev, &def, vars, meta, false), nil
+	if orig.PhaseID > 0 {
+		var ph models.OutboundConnectorPhase
+		if db.Where("id = ?", orig.PhaseID).First(&ph).Error == nil {
+			MergeParamsJSONObjectIntoVars(vars, ph.ParamsJSON)
+		}
+	}
+	var stRow models.OutboundConnectorStep
+	if meta.StepID > 0 && db.Where("id = ?", meta.StepID).First(&stRow).Error == nil {
+		MergeStepEventDataToContext(vars, stRow, rec)
+		MergeStepTemplateParamsFromConfigJSON(vars, stRow.ConfigJSON)
+	}
+	return ExecuteHTTPWebhook(db, co, ep, ep.App, rec, &dev, &def, vars, meta, false, stRow, nil), nil
 }

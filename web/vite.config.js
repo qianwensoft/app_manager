@@ -28,6 +28,8 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   // 与 Go 后端一致；局域网调试可设 VITE_PROXY_TARGET=http://本机IP:8080
   const backend = env.VITE_PROXY_TARGET || 'http://127.0.0.1:8080'
+  // scada-editor dev server；生产不走此代理（build 产物直接由后端静态托管）
+  const scadaDev = env.VITE_SCADA_DEV || 'http://127.0.0.1:5174'
 
   return {
     customLogger: createFilteredLogger(),
@@ -38,11 +40,18 @@ export default defineConfig(({ mode }) => {
     server: {
       host: '0.0.0.0',
       port: 3000,
+      allowedHosts: true,
       proxy: {
         '/api': {
           target: backend,
           changeOrigin: true,
           secure: false
+        },
+        // 开发模式下将 scada-editor 子路径代理到独立 dev server（不 rewrite，保留 /scada-editor 前缀）
+        '/scada-editor': {
+          target: scadaDev,
+          changeOrigin: true,
+          secure: false,
         },
         // STOMP / 屏幕等 WebSocket：target 必须用 http(s)，不能写 ws://，否则升级握手常失败
         '/ws': {

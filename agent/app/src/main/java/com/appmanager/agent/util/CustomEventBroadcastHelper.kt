@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.core.content.ContextCompat
 import org.json.JSONObject
@@ -16,6 +18,17 @@ import java.nio.charset.Charset
 object CustomEventBroadcastHelper {
 
     private const val TAG = "CustomEventIntent"
+
+    /** register/unregister 必须在主线程；命令自 WebSocket 回调线程下发，若直接注册会导致仅首次有效或随机失效。 */
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private fun runOnMain(block: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            block()
+        } else {
+            mainHandler.post(block)
+        }
+    }
 
     data class EventRule(
         val eventType: String,
@@ -79,11 +92,15 @@ object CustomEventBroadcastHelper {
     }
 
     fun start(context: Context, rules: List<EventRule>?) {
-        stop(context)
+        val app = context.applicationContext
+        runOnMain { startInternal(app, rules) }
+    }
+
+    private fun startInternal(appCtx: Context, rules: List<EventRule>?) {
+        stopInternal(appCtx)
         val use = if (rules.isNullOrEmpty()) defaultRules() else rules
         activeRules = use
 
-        val appCtx = context.applicationContext
         val filter = IntentFilter()
         val seen = HashSet<String>()
         for (r in use) {
@@ -100,22 +117,48 @@ object CustomEventBroadcastHelper {
 
         val r = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context?, intent: Intent?) {
-                if (intent == null) return
-                val action = intent.action ?: return
-                for (rule in activeRules) {
-                    if (action !in rule.actions) continue
-                    val pair = extractFromIntent(rule.extraKeys, intent) ?: continue
-                    val (value, usedKey) = pair
-                    val payload = JSONObject().apply {
-                        put("value", value)
-                        put("intent_action", action)
-                        put("extra_key", usedKey)
-                    }
-                    EventReporter.report(rule.eventType, payload.toString())
-                    Log.i(TAG, "event=${rule.eventType} action=$action key=$usedKey len=${value.length}")
+                // 必须吞掉所有异常：onReceive 内抛错会导致后续广播分发异常，表现为「监听失效」。
+                val incoming = try {
+                    intent
+                } catch (t: Throwable) {
+                    Log.e(TAG, "onReceive: intent access failed", t)
                     return
+                } ?: return
+
+                val action = try {
+                    incoming.action
+                } catch (t: Throwable) {
+                    Log.e(TAG, "onReceive: read intent.action failed", t)
+                    return
+                } ?: return
+
+                val rulesSnapshot = activeRules
+                try {
+                    for (rule in rulesSnapshot) {
+                        if (action !in rule.actions) continue
+                        try {
+                            val pair = extractFromIntent(rule.extraKeys, incoming) ?: continue
+                            val (value, usedKey) = pair
+                            val payload = JSONObject().apply {
+                                put("value", value)
+                                put("intent_action", action)
+                                put("extra_key", usedKey)
+                            }
+                            EventReporter.report(rule.eventType, payload.toString())
+                            Log.i(TAG, "event=${rule.eventType} action=$action key=$usedKey len=${value.length}")
+                            return
+                        } catch (t: Throwable) {
+                            Log.e(
+                                TAG,
+                                "rule handling failed (listener stays active) eventType=${rule.eventType} action=$action",
+                                t
+                            )
+                        }
+                    }
+                    Log.v(TAG, "no rule matched action=$action extras=${incoming.extras?.keySet()}")
+                } catch (t: Throwable) {
+                    Log.e(TAG, "onReceive failed action=$action", t)
                 }
-                Log.v(TAG, "no rule matched action=$action extras=${intent.extras?.keySet()}")
             }
         }
         receiver = r
@@ -135,28 +178,43 @@ object CustomEventBroadcastHelper {
     }
 
     fun stop(context: Context) {
+        val app = context.applicationContext
+        runOnMain { stopInternal(app) }
+    }
+
+    private fun stopInternal(appCtx: Context) {
         val rec = receiver ?: return
         receiver = null
         activeRules = emptyList()
         try {
-            context.applicationContext.unregisterReceiver(rec)
+            appCtx.unregisterReceiver(rec)
         } catch (e: Exception) {
             Log.w(TAG, "unregisterReceiver", e)
         }
     }
 
     private fun extractFromIntent(keys: List<String>, intent: Intent): Pair<String, String>? {
-        val b = intent.extras
-        if (b != null) {
-            for (k in keys) {
-                if (!b.containsKey(k)) continue
-                val v = b.get(k) ?: continue
-                val s = extraToString(v) ?: continue
-                if (s.isNotEmpty()) return Pair(s, k)
+        return try {
+            val b = intent.extras
+            if (b != null) {
+                for (k in keys) {
+                    if (!b.containsKey(k)) continue
+                    val v = try {
+                        b.get(k)
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "extras.get failed key=$k", t)
+                        continue
+                    } ?: continue
+                    val s = extraToString(v) ?: continue
+                    if (s.isNotEmpty()) return Pair(s, k)
+                }
             }
+            intent.dataString?.trim()?.takeIf { it.isNotEmpty() }?.let { return Pair(it, "intent.data") }
+            null
+        } catch (t: Throwable) {
+            Log.e(TAG, "extractFromIntent failed", t)
+            null
         }
-        intent.dataString?.trim()?.takeIf { it.isNotEmpty() }?.let { return Pair(it, "intent.data") }
-        return null
     }
 
     private fun extraToString(v: Any?): String? {

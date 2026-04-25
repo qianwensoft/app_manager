@@ -2,13 +2,11 @@ package api
 
 import (
 	"app-manager/agent"
-	"app-manager/config"
 	"app-manager/database"
 	"app-manager/models"
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -110,46 +108,32 @@ func buildMenuPayloadForDevice(deviceID uint) []map[string]interface{} {
 			continue
 		}
 		var scada models.ScadaInfo
-		previewURL := ""
+		previewPath := ""
 		contentVer := int64(0)
 		if m.TargetType == "scada_preview" && m.TargetRef != "" {
 			if err := database.DB.Where("scada_code = ?", m.TargetRef).First(&scada).Error; err == nil {
 				contentVer = scada.ContentVersion
 				if scada.PublishStatus == 1 && scada.ShareToken != "" {
-					base := publicServerBaseURL()
-					previewURL = base + "/share/scada?token=" + scada.ShareToken
+					// 只下发相对路径，Agent 用自己存储的 serverUrl 拼完整地址
+					// 避免服务端推导的 host 与 Agent 实际访问地址不符（如内网穿透场景）
+					previewPath = "/share/scada?token=" + scada.ShareToken
 				}
 			}
 		}
 		out = append(out, map[string]interface{}{
-			"id":                   m.ID,
-			"title":                m.Title,
-			"icon":                 m.Icon,
-			"target_type":          m.TargetType,
-			"target_ref":           m.TargetRef,
-			"show_on_agent_home":   m.ShowOnAgentHome,
-			"intent_action":        m.IntentAction,
-			"default_extras_json":  m.DefaultExtrasJSON,
-			"preview_url":          previewURL,
-			"content_version":      contentVer,
+			"id":                  m.ID,
+			"title":               m.Title,
+			"icon":                m.Icon,
+			"target_type":         m.TargetType,
+			"target_ref":          m.TargetRef,
+			"show_on_agent_home":  m.ShowOnAgentHome,
+			"intent_action":       m.IntentAction,
+			"default_extras_json": m.DefaultExtrasJSON,
+			"preview_path":        previewPath,
+			"content_version":     contentVer,
 		})
 	}
 	return out
-}
-
-func publicServerBaseURL() string {
-	if u := strings.TrimSpace(config.C.Server.PublicBaseURL); u != "" {
-		return strings.TrimRight(u, "/")
-	}
-	host := strings.TrimSpace(config.C.Server.Host)
-	if host == "" || host == "0.0.0.0" {
-		host = "127.0.0.1"
-	}
-	port := config.C.Server.Port
-	if port == 0 {
-		port = 8080
-	}
-	return fmt.Sprintf("http://%s:%d", host, port)
 }
 
 // AgentMenuManifest Agent 拉取菜单（凭 X-Device-Token）
