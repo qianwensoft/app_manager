@@ -69,7 +69,7 @@ export default function CanvasViewer({ canvas, zoom = 1, pointData = {} }: Props
     <div style={{ position: 'relative', display: 'inline-block' }}>
       <canvas ref={canvasRef} style={{ display: 'block' }} />
       {chartElements.map((el) => (
-        <ChartWidget key={el.id} el={el} zoom={zoom} />
+        <ChartWidget key={el.id} el={el} zoom={zoom} pointData={pointData} />
       ))}
       {imageElements.map((el) => (
         <ImageWidget key={el.id} el={el} zoom={zoom} />

@@ -10,6 +10,7 @@ import ChartWidget from './ChartWidget'
 import ImageWidget from './ImageWidget'
 import { WIDGET_DRAG_TYPE, buildWidgetElement } from './WidgetPanel'
 import type { WidgetDef } from './WidgetPanel'
+import BindingDrawer from './BindingDrawer'
 
 const HANDLE_EDGES: [boolean, boolean, boolean, boolean][] = [
   [true,  true,  false, false],
@@ -53,6 +54,7 @@ export default function CanvasBoard() {
   const { activeTool, selectedIds, zoom } = store
 
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; id: string } | null>(null)
+  const [bindingId, setBindingId] = useState<string | null>(null)
 
   // 注册 canvas 元素到 store，供保存时截图
   useEffect(() => {
@@ -462,6 +464,23 @@ export default function CanvasBoard() {
           ))}
           <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
           <button
+            onClick={() => { setBindingId(ctxMenu.id); closeCtxMenu() }}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              width: '100%', padding: '6px 14px',
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: 'var(--accent)', fontSize: 12, textAlign: 'left',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--accent-muted)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'none' }}
+          >
+            <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 6h16M4 12h10M4 18h7M17 15l2 2 4-4" />
+            </svg>
+            数据绑定
+          </button>
+          <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
+          <button
             onClick={() => {
               pushHistory(store.project)
               store.deleteElements([ctxMenu.id])
@@ -484,6 +503,11 @@ export default function CanvasBoard() {
             删除
           </button>
         </div>
+      )}
+
+      {/* ── Data binding drawer ── */}
+      {bindingId && (
+        <BindingDrawer elementId={bindingId} onClose={() => setBindingId(null)} />
       )}
     </div>
   )

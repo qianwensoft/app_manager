@@ -63,7 +63,9 @@ export interface PointBinding {
   pointKey: string
   deviceCode: string
   linkName?: string
-  transform?: string // JS 表达式
+  transform?: string
+  chartSeriesKeys?: string[][]
+  chartCategoryKey?: string
 }
 
 export interface ElementAnimation {
