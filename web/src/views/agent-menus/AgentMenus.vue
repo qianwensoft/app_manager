@@ -6,8 +6,9 @@
     <el-table :data="items" border v-loading="loading">
       <el-table-column prop="title" label="标题" />
       <el-table-column prop="target_type" label="类型" width="120" />
-      <el-table-column prop="target_ref" label="目标(scada_code/URL)" min-width="160" />
+      <el-table-column prop="target_ref" label="目标(ref)" min-width="160" />
       <el-table-column prop="intent_action" label="Intent" width="180" />
+      <el-table-column prop="min_agent_version" label="最小版本" width="120" />
       <el-table-column prop="show_on_agent_home" label="首页" width="70">
         <template #default="{ row }">{{ row.show_on_agent_home ? '是' : '否' }}</template>
       </el-table-column>
@@ -20,12 +21,15 @@
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="dlg" :title="form.id ? '菜单' : '新建菜单'" width="560px">
+    <el-dialog v-model="dlg" :title="form.id ? '菜单' : '新建菜单'" width="720px">
       <el-form label-width="120px">
         <el-form-item label="标题"><el-input v-model="form.title" /></el-form-item>
         <el-form-item label="类型">
           <el-select v-model="form.target_type" style="width: 100%">
             <el-option label="组态预览" value="scada_preview" />
+            <el-option label="表单页面" value="form_app" />
+            <el-option label="表单预览" value="form_app_preview" />
+            <el-option label="扫码入口" value="form_app_scan_entry" />
             <el-option label="网页" value="webview_url" />
           </el-select>
         </el-form-item>
@@ -44,9 +48,30 @@
               :value="s.scada_code"
             />
           </el-select>
+          <el-select
+            v-else-if="form.target_type.startsWith('form_app')"
+            v-model="form.target_ref"
+            filterable
+            placeholder="选择已发布的表单应用"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="f in publishedForms"
+              :key="f.code"
+              :label="`${f.name}（${f.code}）`"
+              :value="f.code"
+            />
+          </el-select>
           <el-input v-else v-model="form.target_ref" placeholder="URL" />
         </el-form-item>
         <el-form-item label="Intent Action"><el-input v-model="form.intent_action" placeholder="com.appmanager.agent.ACTION_SCADA_xxx" /></el-form-item>
+        <el-form-item label="最小 Agent 版本"><el-input v-model="form.min_agent_version" placeholder="如 1.2.0" /></el-form-item>
+        <el-form-item label="能力要求(JSON)">
+          <el-input v-model="form.required_caps_json" type="textarea" :rows="2" placeholder='["scan_router_v1","exclusive_scan_v1"]' />
+        </el-form-item>
+        <el-form-item label="扫码配置(JSON)">
+          <el-input v-model="form.scan_config_json" type="textarea" :rows="6" placeholder='{"mode":"router","scan_router_key":"default","matchers":[]}' />
+        </el-form-item>
         <el-form-item label="首页磁贴"><el-switch v-model="form.show_on_agent_home" /></el-form-item>
         <el-form-item label="排序"><el-input-number v-model="form.sort_order" /></el-form-item>
       </el-form>
@@ -79,6 +104,7 @@ const loading = ref(false)
 const items = ref([])
 const devices = ref([])
 const publishedScadas = ref([])
+const publishedForms = ref([])
 const dlg = ref(false)
 const form = ref({
   id: null,
@@ -86,6 +112,9 @@ const form = ref({
   target_type: 'scada_preview',
   target_ref: '',
   intent_action: '',
+  min_agent_version: '',
+  required_caps_json: '[]',
+  scan_config_json: '{"mode":"router","scan_router_key":"default","matchers":[]}',
   show_on_agent_home: true,
   sort_order: 0
 })
@@ -102,6 +131,8 @@ const load = async () => {
     devices.value = devRes.data || []
     const scadaRes = await http.get('/scada/infos')
     publishedScadas.value = (scadaRes.data || []).filter(s => s.publish_status === 1)
+    const formRes = await http.get('/form-app/infos')
+    publishedForms.value = (formRes.data || []).filter(f => f.publish_status === 1)
   } finally {
     loading.value = false
   }
@@ -116,6 +147,9 @@ const openItem = row => {
         target_type: 'scada_preview',
         target_ref: '',
         intent_action: 'com.appmanager.agent.ACTION_SCADA_MENU',
+        min_agent_version: '',
+        required_caps_json: '[]',
+        scan_config_json: '{"mode":"router","scan_router_key":"default","matchers":[]}',
         show_on_agent_home: true,
         sort_order: 0
       }

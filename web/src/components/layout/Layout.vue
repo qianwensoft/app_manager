@@ -39,6 +39,9 @@
         <div class="menu-item-external menu-item-flat" @click="openScadaEditor">
           <el-icon><Histogram /></el-icon><span>组态编辑器 ↗</span>
         </div>
+        <div class="menu-item-external menu-item-flat" @click="openFormApp">
+          <el-icon><EditPen /></el-icon><span>表单设计器 ↗</span>
+        </div>
         <el-menu-item index="/agent-menus">
           <el-icon><Menu /></el-icon><span>Agent 菜单</span>
         </el-menu-item>
@@ -50,6 +53,9 @@
         </el-menu-item>
         <el-menu-item index="/apikeys">
           <el-icon><Key /></el-icon><span>授权管理</span>
+        </el-menu-item>
+        <el-menu-item index="/thirdparty">
+          <el-icon><Connection /></el-icon><span>第三方平台</span>
         </el-menu-item>
         <!-- admin 专属 -->
         <template v-if="auth.isAdmin">
@@ -89,7 +95,7 @@
 import { computed, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useRoute, useRouter } from 'vue-router'
-import { Monitor, Phone, VideoCamera, Document, Box, List, Key, Notebook, Connection, Cpu, Bell, Setting, Share, Link, Tools, UserFilled, User, Histogram, Menu } from '@element-plus/icons-vue'
+import { Monitor, Phone, VideoCamera, Document, Box, List, Key, Notebook, Connection, Cpu, Bell, Setting, Share, Link, Tools, UserFilled, User, Histogram, Menu, EditPen } from '@element-plus/icons-vue'
 import QuickSearch from './QuickSearch.vue'
 
 const auth = useAuthStore()
@@ -99,6 +105,13 @@ const router = useRouter()
 const openScadaEditor = () => {
   const token = localStorage.getItem('token')
   const base = `${window.location.origin}/scada-editor/`
+  const url = `${base}${token ? `?_token=${encodeURIComponent(token)}` : ''}`
+  window.open(url, '_blank')
+}
+
+const openFormApp = () => {
+  const token = localStorage.getItem('token')
+  const base = `${window.location.origin}/form-app/forms`
   const url = `${base}${token ? `?_token=${encodeURIComponent(token)}` : ''}`
   window.open(url, '_blank')
 }

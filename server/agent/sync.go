@@ -3,6 +3,7 @@ package agent
 import (
 	"app-manager/database"
 	"app-manager/models"
+	"encoding/json"
 	"log"
 	"strings"
 	"time"
@@ -95,12 +96,12 @@ func ensureAgentDevice(deviceKey, androidSerial string) error {
 			}).Error
 		}
 		d := models.Device{
-			Serial:         "agent-" + key,
-			Name:           "Agent 设备",
-			AgentToken:     key,
-			AndroidSerial:  sn,
-			LastSeenAt:     &now,
-			CreatedAt:      now,
+			Serial:        "agent-" + key,
+			Name:          "Agent 设备",
+			AgentToken:    key,
+			AndroidSerial: sn,
+			LastSeenAt:    &now,
+			CreatedAt:     now,
 		}
 		return database.DB.Create(&d).Error
 	}
@@ -201,6 +202,17 @@ func HandleHeartbeat(deviceID string, info map[string]interface{}) {
 	}
 	if av, ok := strFromInfo(info["agent_version"]); ok && av != "" {
 		updates["agent_version"] = av
+	}
+	if caps, ok := info["capabilities"].([]interface{}); ok {
+		arr := make([]string, 0, len(caps))
+		for _, c := range caps {
+			if s, ok := c.(string); ok && strings.TrimSpace(s) != "" {
+				arr = append(arr, strings.TrimSpace(s))
+			}
+		}
+		if b, err := json.Marshal(arr); err == nil {
+			updates["agent_capabilities_json"] = string(b)
+		}
 	}
 	androidSerial := ""
 	if as, ok := strFromInfo(info["android_serial"]); ok && as != "" && as != "unknown" {

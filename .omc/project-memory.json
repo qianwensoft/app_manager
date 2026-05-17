@@ -1,0 +1,537 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1776431267382,
+  "projectRoot": "/Volumes/data/workspace/qianwen/app-manager",
+  "techStack": {
+    "languages": [
+      {
+        "name": "C/C++",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "Makefile"
+        ]
+      }
+    ],
+    "frameworks": [],
+    "packageManager": null,
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": "make build",
+    "testCommand": "make test",
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "bin",
+      "docs",
+      "lib",
+      "scripts"
+    ],
+    "gitBranches": null
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "agent": {
+      "path": "agent",
+      "purpose": null,
+      "fileCount": 5,
+      "lastAccessed": 1776431267365,
+      "keyFiles": [
+        "build.gradle",
+        "gradle.properties",
+        "gradlew",
+        "settings.gradle"
+      ]
+    },
+    "bin": {
+      "path": "bin",
+      "purpose": "Executable scripts",
+      "fileCount": 5,
+      "lastAccessed": 1776431267366,
+      "keyFiles": [
+        "adb-bridge",
+        "app-manager",
+        "app-manager-darwin-arm64",
+        "app-manager-linux-amd64",
+        "app-manager-windows-amd64.exe"
+      ]
+    },
+    "bridge": {
+      "path": "bridge",
+      "purpose": null,
+      "fileCount": 4,
+      "lastAccessed": 1776431267366,
+      "keyFiles": [
+        "app-manager-bridge",
+        "go.mod",
+        "go.sum",
+        "main.go"
+      ]
+    },
+    "data": {
+      "path": "data",
+      "purpose": "Data files",
+      "fileCount": 1,
+      "lastAccessed": 1776431267366,
+      "keyFiles": [
+        "app-manager.db"
+      ]
+    },
+    "database": {
+      "path": "database",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1776431267367,
+      "keyFiles": []
+    },
+    "dist": {
+      "path": "dist",
+      "purpose": "Distribution/build output",
+      "fileCount": 1,
+      "lastAccessed": 1776431267367,
+      "keyFiles": []
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 5,
+      "lastAccessed": 1776431267367,
+      "keyFiles": [
+        "android-agent.md",
+        "architecture.md",
+        "plan.md",
+        "server-backend.md",
+        "web-frontend.md"
+      ]
+    },
+    "lib": {
+      "path": "lib",
+      "purpose": "Library code",
+      "fileCount": 0,
+      "lastAccessed": 1776431267368,
+      "keyFiles": []
+    },
+    "scripts": {
+      "path": "scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 3,
+      "lastAccessed": 1776431267368,
+      "keyFiles": [
+        "bump-agent-version.sh",
+        "sync-agent-apk.env.example",
+        "sync-agent-apk.sh"
+      ]
+    },
+    "server": {
+      "path": "server",
+      "purpose": null,
+      "fileCount": 8,
+      "lastAccessed": 1776431267369,
+      "keyFiles": [
+        "app-manager",
+        "config.example.yaml",
+        "config.sqlite.18080.yaml",
+        "config.sqlite.yaml",
+        "config.yaml"
+      ]
+    },
+    "uploads": {
+      "path": "uploads",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1776431267369,
+      "keyFiles": []
+    },
+    "web": {
+      "path": "web",
+      "purpose": null,
+      "fileCount": 9,
+      "lastAccessed": 1776431267370,
+      "keyFiles": [
+        "Makefile",
+        "frontend.log",
+        "index.html",
+        "package-lock.json",
+        "package.json"
+      ]
+    },
+    "agent/app": {
+      "path": "agent/app",
+      "purpose": "Application code",
+      "fileCount": 4,
+      "lastAccessed": 1776431267371,
+      "keyFiles": [
+        "build.gradle",
+        "release.keystore",
+        "release.keystore.README.md"
+      ]
+    },
+    "agent/lib": {
+      "path": "agent/lib",
+      "purpose": "Library code",
+      "fileCount": 0,
+      "lastAccessed": 1776431267371,
+      "keyFiles": []
+    },
+    "agent/scripts": {
+      "path": "agent/scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 1,
+      "lastAccessed": 1776431267372,
+      "keyFiles": [
+        "dump-crash-log.sh"
+      ]
+    },
+    "server/api": {
+      "path": "server/api",
+      "purpose": "API routes",
+      "fileCount": 49,
+      "lastAccessed": 1776431267374,
+      "keyFiles": [
+        "adb_keepalive.go",
+        "agent_catalog.go",
+        "agent_fs.go"
+      ]
+    },
+    "server/config": {
+      "path": "server/config",
+      "purpose": "Configuration files",
+      "fileCount": 1,
+      "lastAccessed": 1776431267374,
+      "keyFiles": [
+        "config.go"
+      ]
+    },
+    "web/dist": {
+      "path": "web/dist",
+      "purpose": "Distribution/build output",
+      "fileCount": 1,
+      "lastAccessed": 1776431267375,
+      "keyFiles": [
+        "index.html"
+      ]
+    },
+    "web/node_modules": {
+      "path": "web/node_modules",
+      "purpose": "Dependencies",
+      "fileCount": 1,
+      "lastAccessed": 1776431267376,
+      "keyFiles": []
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "web/src/views/data/DatasetForm.vue",
+      "accessCount": 91,
+      "lastAccessed": 1776461824886,
+      "type": "directory"
+    },
+    {
+      "path": "server/api/data_stack.go",
+      "accessCount": 49,
+      "lastAccessed": 1776461860635,
+      "type": "file"
+    },
+    {
+      "path": "web/src/views/data/DataStack.vue",
+      "accessCount": 26,
+      "lastAccessed": 1776457257546,
+      "type": "file"
+    },
+    {
+      "path": "server/models/data_stack.go",
+      "accessCount": 8,
+      "lastAccessed": 1776461560251,
+      "type": "file"
+    },
+    {
+      "path": "server/api/router.go",
+      "accessCount": 7,
+      "lastAccessed": 1776432486987,
+      "type": "file"
+    },
+    {
+      "path": "",
+      "accessCount": 6,
+      "lastAccessed": 1776460892673,
+      "type": "directory"
+    },
+    {
+      "path": "server/datastack/dataset_meta.go",
+      "accessCount": 6,
+      "lastAccessed": 1776460976607,
+      "type": "file"
+    },
+    {
+      "path": "server/api/ws.go",
+      "accessCount": 5,
+      "lastAccessed": 1776433000458,
+      "type": "file"
+    },
+    {
+      "path": "server",
+      "accessCount": 5,
+      "lastAccessed": 1776460954842,
+      "type": "directory"
+    },
+    {
+      "path": "web/src/components/CreateTableColumnDesigner.vue",
+      "accessCount": 4,
+      "lastAccessed": 1776457491934,
+      "type": "file"
+    },
+    {
+      "path": "web/src/utils/createTableDdl.js",
+      "accessCount": 4,
+      "lastAccessed": 1776457521836,
+      "type": "directory"
+    },
+    {
+      "path": "web/src/api/dataStack.js",
+      "accessCount": 4,
+      "lastAccessed": 1776457836783,
+      "type": "directory"
+    },
+    {
+      "path": "web/src",
+      "accessCount": 4,
+      "lastAccessed": 1776461081058,
+      "type": "directory"
+    },
+    {
+      "path": "server/datastack/buffer_http.go",
+      "accessCount": 3,
+      "lastAccessed": 1776431830005,
+      "type": "file"
+    },
+    {
+      "path": "server/dbdriver/pool.go",
+      "accessCount": 3,
+      "lastAccessed": 1776432309318,
+      "type": "file"
+    },
+    {
+      "path": "server/dbdriver/open.go",
+      "accessCount": 3,
+      "lastAccessed": 1776432309335,
+      "type": "file"
+    },
+    {
+      "path": "server/models",
+      "accessCount": 3,
+      "lastAccessed": 1776461543600,
+      "type": "directory"
+    },
+    {
+      "path": "server/dbdriver/quote.go",
+      "accessCount": 3,
+      "lastAccessed": 1776461770610,
+      "type": "file"
+    },
+    {
+      "path": "server/dbdriver/driver.go",
+      "accessCount": 2,
+      "lastAccessed": 1776431853388,
+      "type": "file"
+    },
+    {
+      "path": "server/models/outbound.go",
+      "accessCount": 2,
+      "lastAccessed": 1776431853404,
+      "type": "file"
+    },
+    {
+      "path": "server/api/dataset_query_exec.go",
+      "accessCount": 2,
+      "lastAccessed": 1776431868775,
+      "type": "file"
+    },
+    {
+      "path": "server/datastack/buffer_poll.go",
+      "accessCount": 2,
+      "lastAccessed": 1776431868836,
+      "type": "file"
+    },
+    {
+      "path": "server/api/data_stack_structures.go",
+      "accessCount": 2,
+      "lastAccessed": 1776431877873,
+      "type": "file"
+    },
+    {
+      "path": "server/api/data_stack_code.go",
+      "accessCount": 2,
+      "lastAccessed": 1776431897075,
+      "type": "file"
+    },
+    {
+      "path": "server/api/data_stack_param_merge.go",
+      "accessCount": 2,
+      "lastAccessed": 1776431920880,
+      "type": "file"
+    },
+    {
+      "path": "server/datastack/buffer_meta.go",
+      "accessCount": 2,
+      "lastAccessed": 1776432328094,
+      "type": "file"
+    },
+    {
+      "path": "server/datastack/event_bound_schema.go",
+      "accessCount": 2,
+      "lastAccessed": 1776432607852,
+      "type": "file"
+    },
+    {
+      "path": "web/src/views/data",
+      "accessCount": 2,
+      "lastAccessed": 1776460874285,
+      "type": "directory"
+    },
+    {
+      "path": "server/dbdriver/columns.go",
+      "accessCount": 2,
+      "lastAccessed": 1776461770310,
+      "type": "file"
+    },
+    {
+      "path": "server/outbound/phased_runner.go",
+      "accessCount": 1,
+      "lastAccessed": 1776431652926,
+      "type": "file"
+    },
+    {
+      "path": "server/api/outbound.go",
+      "accessCount": 1,
+      "lastAccessed": 1776431652987,
+      "type": "file"
+    },
+    {
+      "path": "web/src/views/EventListeners.vue",
+      "accessCount": 1,
+      "lastAccessed": 1776431665191,
+      "type": "file"
+    },
+    {
+      "path": "web/src/views/CustomEvents.vue",
+      "accessCount": 1,
+      "lastAccessed": 1776431665795,
+      "type": "file"
+    },
+    {
+      "path": "server/api/dataset_param_sql.go",
+      "accessCount": 1,
+      "lastAccessed": 1776431675537,
+      "type": "file"
+    },
+    {
+      "path": "agent/app/src/main/java/com/appmanager/agent/util/AgentCatalogApi.kt",
+      "accessCount": 1,
+      "lastAccessed": 1776431693626,
+      "type": "file"
+    },
+    {
+      "path": "agent/app/src/main/java/com/appmanager/agent/ui/CatalogListActivity.kt",
+      "accessCount": 1,
+      "lastAccessed": 1776431705317,
+      "type": "file"
+    },
+    {
+      "path": "server/api/dataiface_script.go",
+      "accessCount": 1,
+      "lastAccessed": 1776431710537,
+      "type": "file"
+    },
+    {
+      "path": "server/api/event.go",
+      "accessCount": 1,
+      "lastAccessed": 1776431715233,
+      "type": "file"
+    },
+    {
+      "path": "server/models/custom_event.go",
+      "accessCount": 1,
+      "lastAccessed": 1776431836980,
+      "type": "file"
+    },
+    {
+      "path": "server/dbdriver/tables.go",
+      "accessCount": 1,
+      "lastAccessed": 1776431860016,
+      "type": "file"
+    },
+    {
+      "path": "server/database/db.go",
+      "accessCount": 1,
+      "lastAccessed": 1776431860078,
+      "type": "file"
+    },
+    {
+      "path": "server/api/data_stack_keys.go",
+      "accessCount": 1,
+      "lastAccessed": 1776431868447,
+      "type": "file"
+    },
+    {
+      "path": "server/dbdriver/registry.go",
+      "accessCount": 1,
+      "lastAccessed": 1776432404405,
+      "type": "file"
+    },
+    {
+      "path": "server/api/data_stack_pool.go",
+      "accessCount": 1,
+      "lastAccessed": 1776432404604,
+      "type": "file"
+    },
+    {
+      "path": "server/datastack/event_bound_meta.go",
+      "accessCount": 1,
+      "lastAccessed": 1776432518331,
+      "type": "file"
+    },
+    {
+      "path": "server/datastack/event_bound_ingest.go",
+      "accessCount": 1,
+      "lastAccessed": 1776432636817,
+      "type": "file"
+    },
+    {
+      "path": "server/datastack",
+      "accessCount": 1,
+      "lastAccessed": 1776460961568,
+      "type": "directory"
+    },
+    {
+      "path": "server/api",
+      "accessCount": 1,
+      "lastAccessed": 1776461694101,
+      "type": "directory"
+    },
+    {
+      "path": "server/api/data_stack_ddl.go",
+      "accessCount": 1,
+      "lastAccessed": 1776461703068,
+      "type": "file"
+    },
+    {
+      "path": "server/dbdriver",
+      "accessCount": 1,
+      "lastAccessed": 1776461712473,
+      "type": "directory"
+    }
+  ],
+  "userDirectives": []
+}

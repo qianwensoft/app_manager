@@ -188,6 +188,14 @@ class MainActivity : AppCompatActivity() {
         if (action == ACTION_OPEN_SCADA_MENU) {
             val extra = intent.getStringExtra("extra_params")
             openScadaFromStore(extra)
+            AgentMenuExecutionReporter.report(
+                this,
+                intentAction = action,
+                eventType = "manual_open",
+                scanValue = "",
+                targetUrl = AgentMenuStore.getFirstHomePreviewUrl(this) ?: "",
+                status = "success"
+            )
             return
         }
         // 按 intent_action 匹配已下发菜单，支持每个菜单配置独立 action
@@ -200,6 +208,14 @@ class MainActivity : AppCompatActivity() {
             startActivity(
                 Intent(this, ScadaWebViewActivity::class.java)
                     .putExtra(ScadaWebViewActivity.EXTRA_URL, url)
+            )
+            AgentMenuExecutionReporter.report(
+                this,
+                intentAction = action,
+                eventType = "intent_open",
+                scanValue = intent.getStringExtra("scan_data") ?: "",
+                targetUrl = url,
+                status = "success"
             )
             return
         }

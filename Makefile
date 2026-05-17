@@ -4,6 +4,7 @@
 ROOT       := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 WEB        := $(ROOT)/web
 SCADA_EDITOR := $(ROOT)/scada-editor
+FORM_APP   := $(ROOT)/form-app
 SERVER     := $(ROOT)/server
 AGENT      := $(ROOT)/agent
 BRIDGE     := $(ROOT)/bridge
@@ -26,6 +27,7 @@ SERVER_BIN := $(BIN_DIR)/app-manager
 .PHONY: help all clean \
 	deps-web web web-build \
 	deps-scada-editor scada-editor-build \
+	deps-form-app form-app-build \
 	server server-only server-linux-amd64 server-linux-arm64 server-darwin-amd64 server-darwin-arm64 server-windows-amd64 \
 	agent agent-debug agent-release agent-release-build install-agent bump-agent-version \
 	bridge bridge-linux-amd64 bridge-linux-arm64 bridge-darwin-amd64 bridge-darwin-arm64 bridge-windows-amd64 bridge-all \
@@ -69,6 +71,7 @@ deps-web:
 web-build: deps-web
 	cd $(WEB) && $(NPM) run build
 	$(MAKE) scada-editor-build
+	$(MAKE) form-app-build
 
 web: web-build
 
@@ -79,6 +82,14 @@ scada-editor-build: deps-scada-editor
 	cd $(SCADA_EDITOR) && $(NPM) run build
 	rm -rf $(WEB)/dist/scada-editor
 	cp -R $(SCADA_EDITOR)/dist $(WEB)/dist/scada-editor
+
+deps-form-app:
+	cd $(FORM_APP) && $(NPM) ci
+
+form-app-build: deps-form-app
+	cd $(FORM_APP) && $(NPM) run build
+	rm -rf $(WEB)/dist/form-app
+	cp -R $(FORM_APP)/dist $(WEB)/dist/form-app
 
 # ─── Go 服务端 ─────────────────────────────────────────────────────────────
 

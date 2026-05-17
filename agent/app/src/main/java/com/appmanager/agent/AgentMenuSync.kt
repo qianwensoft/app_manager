@@ -5,6 +5,9 @@ import android.content.Intent
 import android.util.Log
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import java.security.MessageDigest
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -62,15 +65,37 @@ object AgentMenuSync {
                 Log.d(TAG, "menu-manifest unchanged since=$since")
                 return
             }
+            if (!verifyBundleSignature(map, tok)) {
+                Log.w(TAG, "menu bundle signature mismatch; ignored")
+                return
+            }
             applyFromServer(context, map)
         }
     }
 
+    private fun verifyBundleSignature(data: Map<String, Any>, deviceToken: String): Boolean {
+        val bundleHash = data["bundle_hash"] as? String ?: return true
+        val signature = data["signature"] as? String ?: return true
+        val copy = data.toMutableMap()
+        copy.remove("bundle_hash")
+        copy.remove("signature")
+        val raw = Gson().toJson(copy).toByteArray(Charsets.UTF_8)
+        val digest = MessageDigest.getInstance("SHA-256").digest(raw).joinToString("") { "%02x".format(it) }
+        if (!digest.equals(bundleHash, ignoreCase = true)) return false
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(deviceToken.toByteArray(Charsets.UTF_8), "HmacSHA256"))
+        val signed = mac.doFinal(bundleHash.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+        return signed.equals(signature, ignoreCase = true)
+    }
+
     fun applyFromServer(context: Context, data: Map<*, *>) {
-        val rev = (data["revision"] as? Number)?.toLong() ?: 0L
+        val rev = (data["bundle_revision"] as? Number)?.toLong()
+            ?: (data["revision"] as? Number)?.toLong()
+            ?: 0L
         val menus = data["menus"] ?: return
         val json = Gson().toJson(menus)
-        AgentMenuStore.save(context.applicationContext, rev, json)
+        val bundleJson = Gson().toJson(data)
+        AgentMenuStore.save(context.applicationContext, rev, json, bundleJson)
         Log.i(TAG, "menus synced revision=$rev bytes=${json.length}")
         MenuIntentReceiver.reregister(context.applicationContext)
         context.applicationContext.sendBroadcast(

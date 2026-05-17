@@ -236,6 +236,32 @@ export const chartSchema: Record<string, ChartSchemaDef> = {
       ...gridStyleFields,
     ],
   },
+
+  'echarts-trend': {
+    label: '趋势图',
+    bindingFields: [],
+    styleFields: [
+      ...commonStyleFields,
+      { key: 'smooth',      label: '平滑曲线',   type: 'boolean', default: true,          group: '系列' },
+      { key: 'areaStyle',   label: '面积填充',   type: 'boolean', default: false,         group: '系列' },
+      { key: 'lineWidth',   label: '线宽',       type: 'number',  default: 2,             group: '系列' },
+      { key: 'showSymbol',  label: '显示数据点', type: 'boolean', default: false,         group: '系列' },
+      { key: 'showLegend',  label: '显示图例',   type: 'boolean', default: false,         group: '系列' },
+      {
+        key: 'renderEngine', label: '渲染引擎', type: 'select', default: 'echarts',
+        group: '高频模式',
+        options: [
+          { value: 'echarts',      label: 'ECharts（默认）' },
+          { value: 'uplot-canvas', label: 'uPlot Canvas（高频）' },
+          { value: 'uplot-webgl',  label: 'uPlot WebGL（超高频）' },
+        ],
+      },
+      { key: 'displayPoints',    label: '显示点数（LTTB）', type: 'number', default: 500,     group: '高频模式', hint: '降采样目标点数，越小越流畅' },
+      { key: 'historyCapacity',  label: '历史容量',         type: 'number', default: 100000,  group: '高频模式', hint: '内存 ring buffer 容量（点数）' },
+      ...axisStyleFields,
+      ...gridStyleFields,
+    ],
+  },
 }
 
 /** 获取图表 schema，不存在时返回 undefined */

@@ -3,7 +3,7 @@ server/config.yaml
 .env
 web/.env.local
 scripts/sync-agent-apk.env
-
+*/node_modules
 # Go 构建产物
 app-manager
 *.exe

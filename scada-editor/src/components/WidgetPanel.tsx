@@ -112,6 +112,21 @@ const BOX_ITEMS: WidgetDef[] = [
   { type: 'image-border-box', label: '边框-38', iconPath: '', imageSrc: img('box/box38.png'), defaults: { width: 378, height: 180, imageUrl: img('box/box38.png'), borderImageConfig: { width: '24px', outset: '0', slice: '24 fill', repeat: 'stretch' } } },
 ]
 
+const LAYOUT_ITEMS: WidgetDef[] = [
+  {
+    type: 'layout-carousel',
+    label: '轮播容器',
+    iconPath: 'M2 12h20M8 6l-6 6 6 6M16 6l6 6-6 6',
+    defaults: { width: 400, height: 300, fill: 'rgba(20,30,50,0.8)', stroke: '#4a9eff', strokeWidth: 1, layoutSlides: 3, layoutInterval: 3000 },
+  },
+  {
+    type: 'layout-modal',
+    label: '弹窗容器',
+    iconPath: 'M4 4h16v16H4V4ZM4 10h16M9 4v6',
+    defaults: { width: 360, height: 240, fill: '', stroke: '#4a9eff', strokeWidth: 1, layoutModalTitle: '弹窗标题', layoutShowClose: true },
+  },
+]
+
 const groups: { name: string; icon: string; items: WidgetDef[] }[] = [
   {
     name: '基础图形', icon: 'M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5Z',
@@ -127,15 +142,90 @@ const groups: { name: string; icon: string; items: WidgetDef[] }[] = [
     items: [
       { type: 'text',   label: '文本', iconPath: 'M4 7V5h16v2M9 5v14m6-14v14M9 19h6', defaults: { width: 120, height: 40, text: '文本', fontSize: 16, fontColor: '#fff', fill: 'transparent' } },
       { type: 'button', label: '按钮', iconPath: 'M3 8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8Z', defaults: { width: 100, height: 40, text: '按钮', fontSize: 14, fontColor: '#fff', fill: '#2980b9', stroke: '#4a9eff' } },
-    ],
-  },
-  {
-    name: '动态元件', icon: 'M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4',
-    items: [
-      { type: 'dynamic-valve', label: '阀门', iconPath: 'M8 12h8M12 8v8M12 3v2M12 19v2M3 12h2M19 12h2', defaults: { width: 60, height: 60, fill: '#27ae60', stroke: '#2ecc71' } },
-      { type: 'dynamic-pump',  label: '泵',   iconPath: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20ZM8 12h8M12 8v8', defaults: { width: 60, height: 60, fill: '#8e44ad', stroke: '#9b59b6' } },
-      { type: 'dynamic-tank',  label: '储罐', iconPath: 'M8 3h8v18H8V3ZM6 8h2M16 8h2M12 8v8', defaults: { width: 80, height: 100, fill: '#2c3e50', stroke: '#3498db' } },
-      { type: 'dynamic-pipe',  label: '管道', iconPath: 'M3 12h18M3 9h18M3 15h18', defaults: { width: 120, height: 20, fill: '#7f8c8d', stroke: '#95a5a6' } },
+      {
+        type: 'table',
+        label: '表格',
+        iconPath: 'M3 3h18v18H3V3ZM3 9h18M3 15h18M9 3v18M15 3v18',
+        defaults: {
+          width: 300, height: 200, fill: '', fontColor: '#e0e0e0', fontSize: 12,
+          tableColumns: [
+            { key: 'col1', title: '列1', width: 100 },
+            { key: 'col2', title: '列2', width: 100 },
+            { key: 'col3', title: '列3', width: 100 },
+          ],
+          tableData: [
+            { col1: '-', col2: '-', col3: '-' },
+          ],
+          tableStriped: true,
+          tableBordered: true,
+        },
+      },
+      {
+        type: 'form-input',
+        label: '文本输入',
+        iconPath: 'M3 5h18M3 10h18M3 15h12',
+        defaults: { width: 240, height: 36, fill: 'rgba(255,255,255,0.06)', stroke: 'rgba(255,255,255,0.18)', strokeWidth: 1, fontColor: '#ccc', fontSize: 13, formFieldKey: 'field1', formFieldLabel: '字段', formGroupId: 'form1' },
+      },
+      {
+        type: 'form-number',
+        label: '数字输入',
+        iconPath: 'M7 8h10M7 12h10M7 16h6',
+        defaults: { width: 240, height: 36, fill: 'rgba(255,255,255,0.06)', stroke: 'rgba(255,255,255,0.18)', strokeWidth: 1, fontColor: '#ccc', fontSize: 13, formFieldKey: 'num1', formFieldLabel: '数值', formGroupId: 'form1' },
+      },
+      {
+        type: 'form-select',
+        label: '下拉选择',
+        iconPath: 'M3 6h18M3 12h18M3 18h18M17 9l3 3-3 3',
+        defaults: { width: 240, height: 36, fill: 'rgba(255,255,255,0.06)', stroke: 'rgba(255,255,255,0.18)', strokeWidth: 1, fontColor: '#ccc', fontSize: 13, formFieldKey: 'select1', formFieldLabel: '选项', formFieldOptions: '选项A,选项B,选项C', formGroupId: 'form1' },
+      },
+      {
+        type: 'form-textarea',
+        label: '多行文本',
+        iconPath: 'M3 5h18M3 10h18M3 15h18M3 20h12',
+        defaults: { width: 240, height: 72, fill: 'rgba(255,255,255,0.06)', stroke: 'rgba(255,255,255,0.18)', strokeWidth: 1, fontColor: '#ccc', fontSize: 13, formFieldKey: 'memo', formFieldLabel: '备注', formGroupId: 'form1' },
+      },
+      {
+        type: 'form-date',
+        label: '日期选择',
+        iconPath: 'M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z',
+        defaults: { width: 240, height: 36, fill: 'rgba(255,255,255,0.06)', stroke: 'rgba(255,255,255,0.18)', strokeWidth: 1, fontColor: '#ccc', fontSize: 13, formFieldKey: 'date1', formFieldLabel: '日期', formGroupId: 'form1' },
+      },
+      {
+        type: 'form-switch',
+        label: '开关',
+        iconPath: 'M18 8a6 6 0 0 1-6 6 6 6 0 0 1-6-6 6 6 0 0 1 12 0ZM6 8h12',
+        defaults: { width: 240, height: 36, fill: 'rgba(255,255,255,0.06)', stroke: 'rgba(255,255,255,0.18)', strokeWidth: 1, fontColor: '#ccc', fontSize: 13, formFieldKey: 'enabled', formFieldLabel: '启用', formGroupId: 'form1' },
+      },
+      {
+        type: 'form-radio',
+        label: '单选组',
+        iconPath: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20ZM12 8v4M12 16h.01',
+        defaults: { width: 280, height: 36, fill: 'rgba(255,255,255,0.06)', stroke: 'rgba(255,255,255,0.18)', strokeWidth: 1, fontColor: '#ccc', fontSize: 13, formFieldKey: 'radio1', formFieldLabel: '选项', formFieldOptions: '选项A,选项B,选项C', formGroupId: 'form1' },
+      },
+      {
+        type: 'form-checkbox',
+        label: '多选组',
+        iconPath: 'M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11',
+        defaults: { width: 280, height: 36, fill: 'rgba(255,255,255,0.06)', stroke: 'rgba(255,255,255,0.18)', strokeWidth: 1, fontColor: '#ccc', fontSize: 13, formFieldKey: 'checks', formFieldLabel: '多选', formFieldOptions: '选项A,选项B,选项C', formGroupId: 'form1' },
+      },
+      {
+        type: 'form-rate',
+        label: '评分',
+        iconPath: 'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z',
+        defaults: { width: 200, height: 36, fill: 'rgba(255,255,255,0.06)', stroke: 'rgba(255,255,255,0.18)', strokeWidth: 1, fontColor: '#ccc', fontSize: 13, formFieldKey: 'rate', formFieldLabel: '评分', formGroupId: 'form1' },
+      },
+      {
+        type: 'form-slider',
+        label: '滑块',
+        iconPath: 'M4 12h16M8 6l-4 6 4 6',
+        defaults: { width: 280, height: 36, fill: 'rgba(255,255,255,0.06)', stroke: 'rgba(255,255,255,0.18)', strokeWidth: 1, fontColor: '#ccc', fontSize: 13, formFieldKey: 'slider1', formFieldLabel: '滑块', formGroupId: 'form1' },
+      },
+      {
+        type: 'form-submit',
+        label: '提交按钮',
+        iconPath: 'M5 12h14M12 5l7 7-7 7',
+        defaults: { width: 120, height: 40, fill: '#2980b9', stroke: '#4a9eff', strokeWidth: 1, fontColor: '#fff', fontSize: 14, text: '提交', formGroupId: 'form1', borderRadius: 4 },
+      },
     ],
   },
   {
@@ -147,6 +237,7 @@ const groups: { name: string; icon: string; items: WidgetDef[] }[] = [
       { type: 'echarts-gauge',   label: '仪表盘', iconPath: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20ZM12 12L8.5 8.5M12 7v1', defaults: { width: 200, height: 200 } },
       { type: 'echarts-scatter', label: '散点图', iconPath: 'M3 3v18h18M7 7h.01M12 11h.01M17 8h.01M9 15h.01M15 14h.01', defaults: { width: 300, height: 200 } },
       { type: 'echarts-heatmap', label: '热力图', iconPath: 'M3 3h4v4H3zM9 3h4v4H9zM15 3h4v4h-4zM3 9h4v4H3zM9 9h4v4H9zM15 9h4v4h-4z', defaults: { width: 300, height: 200 } },
+      { type: 'echarts-trend',   label: '趋势图', iconPath: 'M3 3v18h18M3 15l4-6 4 3 4-8 4 5', defaults: { width: 360, height: 220 } },
     ],
   },
   {
@@ -164,6 +255,10 @@ const groups: { name: string; icon: string; items: WidgetDef[] }[] = [
   {
     name: '边框', icon: 'M3 3h18v18H3zM7 7h10v10H7z',
     items: BOX_ITEMS,
+  },
+  {
+    name: 'Layout 容器', icon: 'M3 3h18v18H3V3ZM3 9h18',
+    items: LAYOUT_ITEMS,
   },
 ]
 
@@ -199,7 +294,7 @@ export function buildWidgetElement(def: WidgetDef, canvas: { elements: { length:
 export default function WidgetPanel() {
   const store = useEditorStore()
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
-    '基础图形': true, '文本控件': true, '动态元件': false, '图表': false,
+    '基础图形': true, '文本控件': true, '图表': false,
   })
   const [customOpen, setCustomOpen] = useState(false)
 
@@ -214,7 +309,12 @@ export default function WidgetPanel() {
   const addWidget = (def: WidgetDef) => {
     const canvas = store.activeCanvas()
     if (!canvas) return
-    const el = buildWidgetElement(def, canvas)
+    const isBg = def.type === 'image-bg'
+    const el = buildWidgetElement(def, canvas, isBg ? 0 : 60, isBg ? 0 : 60)
+    if (isBg) {
+      el.selectable = false
+      el.locked = true
+    }
     store.addElement(el)
     store.selectElements([el.id])
   }

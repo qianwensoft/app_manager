@@ -5,9 +5,20 @@ import {
   hitTest, hitTestHandle, hitTestMarquee, snapToGrid, generateId,
 } from '@/utils/canvas'
 import { pushHistory } from '@/hooks/useHistory'
-import type { CanvasElement } from '@/types'
+import type { CanvasElement, ChartConfig } from '@/types'
+import type { PointDataMap } from '@/hooks/useStompPointData'
+import { useStompPointData } from '@/hooks/useStompPointData'
+import { useInterfaceBindingData, resolveElementValue } from '@/hooks/useInterfaceBindingData'
+import { useHighFreqTextData } from '@/hooks/useHighFreqTextData'
+import { useScadaInfo } from '@/hooks/useScada'
 import ChartWidget from './ChartWidget'
+import TrendWidget from './TrendWidget'
+import UPlotTrendWidget from './UPlotTrendWidget'
 import ImageWidget from './ImageWidget'
+import TableWidget from './TableWidget'
+import FormFieldWidget from './FormFieldWidget'
+import LayoutCarouselWidget from './LayoutCarouselWidget'
+import LayoutModalWidget from './LayoutModalWidget'
 import { WIDGET_DRAG_TYPE, buildWidgetElement } from './WidgetPanel'
 import type { WidgetDef } from './WidgetPanel'
 import BindingDrawer from './BindingDrawer'
@@ -51,10 +62,42 @@ export default function CanvasBoard() {
 
   const store = useEditorStore()
   const canvas = store.activeCanvas()
-  const { activeTool, selectedIds, zoom } = store
+  const { activeTool, selectedIds, zoom, liveDataOn } = store
 
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; id: string } | null>(null)
   const [bindingId, setBindingId] = useState<string | null>(null)
+
+  // Live-data: pointData fed to charts when liveDataOn
+  const [pointData, setPointData] = useState<PointDataMap>({})
+
+  const { data: scadaInfo } = useScadaInfo(store.scadaId ?? 0)
+  const scadaCode = scadaInfo?.scada_code ?? ''
+
+  const handlePointData = useCallback((data: PointDataMap) => {
+    setPointData((prev) => ({ ...prev, ...data }))
+  }, [])
+
+  // STOMP subscribes unconditionally once scadaCode is available — simulation bindings
+  // need live data regardless of the liveDataOn toggle (which only gates interface/HTTP data).
+  useStompPointData({
+    scadaCode,
+    onData: handlePointData,
+    enabled: !!scadaCode,
+  })
+
+  const allElements = canvas?.elements ?? []
+  useInterfaceBindingData({
+    elements: liveDataOn ? allElements : [],
+    onData: handlePointData,
+  })
+
+  // High-frequency text data via binary stream (interval_ms < 1000)
+  const highFreqData = useHighFreqTextData(allElements, scadaCode, !!scadaCode)
+
+  // Clear non-simulation pointData when toggling off
+  useEffect(() => {
+    if (!liveDataOn) setPointData({})
+  }, [liveDataOn])
 
   // 注册 canvas 元素到 store，供保存时截图
   useEffect(() => {
@@ -166,8 +209,8 @@ export default function CanvasBoard() {
         }
       }
 
-      // 2. Hit test element — highest zIndex first
-      const hit = [...canvas.elements].sort((a, b) => b.zIndex - a.zIndex).find((el) => hitTest(el, mx, my, zoom))
+      // 2. Hit test element — highest zIndex first, skip locked and non-selectable
+      const hit = [...canvas.elements].sort((a, b) => b.zIndex - a.zIndex).find((el) => el.selectable !== false && !el.locked && hitTest(el, mx, my, zoom))
       if (hit) {
         // If hit element belongs to a group, redirect selection to the group
         const parentGroup = canvas.elements.find(
@@ -342,7 +385,7 @@ export default function CanvasBoard() {
     e.preventDefault()
     if (!canvas) return
     const { x: mx, y: my } = getCanvasPos(e)
-    const hit = [...canvas.elements].sort((a, b) => b.zIndex - a.zIndex).find((el) => hitTest(el, mx, my, zoom))
+    const hit = [...canvas.elements].sort((a, b) => b.zIndex - a.zIndex).find((el) => el.selectable !== false && !el.locked && hitTest(el, mx, my, zoom))
     if (!hit) { setCtxMenu(null); return }
     const parentGroup = canvas.elements.find(
       (el) => el.type === 'group' && el.children?.includes(hit.id)
@@ -368,8 +411,21 @@ export default function CanvasBoard() {
     el.type === 'image-bg' || el.type === 'image-widget' ||
     el.type === 'image-decoration' || el.type === 'image-border-box'
   ))
+  const layoutElements = canvas.elements.filter((el) => el.visible && (
+    el.type === 'layout-carousel' || el.type === 'layout-modal'
+  ))
+  const tableElements = canvas.elements.filter((el) => el.visible && el.type === 'table')
+  const formFieldElements = canvas.elements.filter((el) => el.visible && el.type.startsWith('form-'))
+  // shared mutable ref for form field values (keyed by element id)
+  const formValuesRef = useRef<Record<string, string>>({})
   // 合并 overlay 元素并按 zIndex 排序，保证层级正确
-  const overlayElements = [...chartElements, ...imageElements].sort((a, b) => a.zIndex - b.zIndex)
+  const overlayElements = [...chartElements, ...imageElements, ...layoutElements, ...tableElements, ...formFieldElements].sort((a, b) => a.zIndex - b.zIndex)
+
+  // All text/button elements rendered as DOM overlays to ensure correct stacking above image-bg widgets.
+  // Elements with pointBinding show live values; others show el.text.
+  const textButtonElements = canvas.elements.filter((el) =>
+    el.visible && (el.type === 'text' || el.type === 'button')
+  )
 
   return (
     <div
@@ -379,6 +435,7 @@ export default function CanvasBoard() {
       onDrop={handleDrop}
       onClick={closeCtxMenu}
     >
+      {/* canvas wrapper */}
       <div style={{
         position: 'relative',
         display: 'inline-block',
@@ -390,15 +447,65 @@ export default function CanvasBoard() {
         <canvas ref={canvasRef} style={{ display: 'block' }} />
         {/* DOM overlay widgets (image/chart) — interleaved by zIndex */}
         {overlayElements.map((el) =>
-          el.type.startsWith('echarts-')
-            ? <ChartWidget key={el.id} el={el} zoom={zoom} />
-            : <ImageWidget key={el.id} el={el} zoom={zoom} />
+          el.type === 'echarts-trend'
+            ? ((el.properties?.chartConfig as ChartConfig | undefined)?.renderEngine === 'uplot-canvas' || (el.properties?.chartConfig as ChartConfig | undefined)?.renderEngine === 'uplot-webgl'
+                ? <UPlotTrendWidget key={el.id} el={el} zoom={zoom} pointData={pointData} scadaCode={scadaCode ?? undefined} />
+                : <TrendWidget key={el.id} el={el} zoom={zoom} pointData={pointData} scadaCode={scadaCode ?? undefined} />)
+            : el.type.startsWith('echarts-')
+              ? <ChartWidget key={el.id} el={el} zoom={zoom} pointData={liveDataOn ? pointData : undefined} />
+              : el.type === 'layout-carousel'
+                ? <LayoutCarouselWidget key={el.id} el={el} zoom={zoom} isPreview={false} />
+                : el.type === 'layout-modal'
+                  ? <LayoutModalWidget key={el.id} el={el} zoom={zoom} isPreview={false} />
+                  : el.type === 'table'
+                    ? <TableWidget key={el.id} el={el} zoom={zoom} />
+                    : el.type.startsWith('form-')
+                      ? <FormFieldWidget key={el.id} el={el} zoom={zoom} isPreview={false} canvas={canvas} valuesRef={formValuesRef} />
+                      : <ImageWidget key={el.id} el={el} zoom={zoom} />
         )}
+        {/* Text/button DOM overlays — ensure correct stacking above image-bg regardless of zIndex */}
+        {textButtonElements.map((el) => {
+          const mergedData = { ...pointData, ...highFreqData }
+          const displayText = el.pointBinding ? resolveElementValue(el, mergedData) : el.text
+          return (
+            <div
+              key={`tb-${el.id}`}
+              style={{
+                position: 'absolute',
+                left: el.x * zoom,
+                top: el.y * zoom,
+                width: el.width * zoom,
+                height: el.height * zoom,
+                zIndex: el.zIndex,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent:
+                  el.textAlign === 'left' ? 'flex-start'
+                  : el.textAlign === 'right' ? 'flex-end'
+                  : 'center',
+                color: el.fontColor || '#fff',
+                fontSize: (el.fontSize ?? 14) * zoom,
+                fontFamily: el.fontFamily || 'sans-serif',
+                fontWeight: el.fontWeight === 'bold' ? 'bold' : 'normal',
+                fontStyle: el.fontStyle === 'italic' ? 'italic' : 'normal',
+                pointerEvents: 'none',
+                userSelect: 'none',
+                transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
+                background: el.type === 'button' ? (el.fill || 'transparent') : 'transparent',
+                borderRadius: el.type === 'button' ? ((el.borderRadius ?? 4) * zoom) : undefined,
+                border: el.type === 'button' && el.stroke ? `${(el.strokeWidth ?? 1) * zoom}px solid ${el.stroke}` : undefined,
+              }}
+            >
+              {displayText}
+            </div>
+          )
+        })}
         {/* Selection/marquee overlay canvas — always on top, receives all mouse events */}
         <canvas
           ref={overlayCanvasRef}
           style={{
             position: 'absolute', inset: 0, display: 'block',
+            zIndex: 9999,
             cursor: activeTool === 'select' ? 'default' : 'crosshair',
           }}
           onMouseDown={handleMouseDown}
@@ -507,7 +614,7 @@ export default function CanvasBoard() {
 
       {/* ── Data binding drawer ── */}
       {bindingId && (
-        <BindingDrawer elementId={bindingId} onClose={() => setBindingId(null)} />
+        <BindingDrawer elementId={bindingId} scadaCode={scadaCode} pointData={pointData} onClose={() => setBindingId(null)} />
       )}
     </div>
   )

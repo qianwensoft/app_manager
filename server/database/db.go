@@ -105,6 +105,7 @@ var migrateGroups = [][]interface{}{
 		&models.RecordingShareLink{},
 		&models.DeviceMedia{},
 		&models.DeviceEvent{},
+		&models.AgentMenuExecutionLog{},
 		&models.UploadLink{},
 		&models.UploadedFile{},
 	},
@@ -148,7 +149,15 @@ var migrateGroups = [][]interface{}{
 		&models.DataStructure{},
 		&models.DataInterface{},
 	},
-	// Group 7 — org
+	// Group 7 — form app
+	{
+		&models.FormAppInfo{},
+		&models.FormAppPage{},
+		&models.FormAppPageLink{},
+		&models.FormAppEventRoute{},
+		&models.FormAppAccessPolicy{},
+	},
+	// Group 8 — org
 	{
 		&models.Department{},
 		&models.Position{},
@@ -202,12 +211,13 @@ func initSchema(db *gorm.DB) error {
 	// One-time migrations — each is idempotent internally.
 	// Run them concurrently where safe (all read-then-write, independent tables).
 	var wg sync.WaitGroup
-	wg.Add(5)
+	wg.Add(6)
 	go func() { defer wg.Done(); SeedDefaultCustomEvents(db) }()
 	go func() { defer wg.Done(); MigrateLegacyOutboundPhases(db) }()
 	go func() { defer wg.Done(); MigrateDeviceAndroidSerialUnique(db) }()
 	go func() { defer wg.Done(); MigrateDataStackCode(db) }()
 	go func() { defer wg.Done(); MigrateThirdPartyAuthorizerAppID(db) }()
+	go func() { defer wg.Done(); MigrateFormAppToV2(db) }()
 	wg.Wait()
 	log.Printf("[db] Post-migrate tasks done in %v", time.Since(start))
 

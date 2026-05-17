@@ -4,8 +4,8 @@ import (
 	"app-manager/api"
 	"app-manager/channel"
 	"app-manager/config"
-	"app-manager/datastack"
 	"app-manager/database"
+	"app-manager/datastack"
 	"app-manager/event"
 	"app-manager/mqtt"
 	"app-manager/outbound"
@@ -23,7 +23,7 @@ import (
 
 func main() {
 	// 加载配置
-	cfgPath := "config.yaml"
+	cfgPath := "config.sqlite.yaml"
 	if len(os.Args) > 1 {
 		cfgPath = os.Args[1]
 	}
@@ -62,6 +62,8 @@ func main() {
 		datastack.StartBufferPollers(database.DB)
 		outbound.InitTriggerManager(database.DB)
 		scada.StartSimEngine()
+		scada.StartBatcher()
+		go scada.StartUDPIngress(9000)
 		go func() {
 			ticker := time.NewTicker(30 * time.Minute)
 			defer ticker.Stop()

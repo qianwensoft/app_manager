@@ -6,6 +6,7 @@ import (
 	scadasim "app-manager/scada"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -19,6 +20,33 @@ func ListScadaSimPoints(c *gin.Context) {
 	var rows []models.ScadaSimPoint
 	q.Order("id ASC").Find(&rows)
 	c.JSON(http.StatusOK, gin.H{"data": rows})
+}
+
+// GetScadaSimHistory returns in-memory historical point data for a scada.
+// GET /api/scada/sim-points/history/:scada_code?keys=a,b,c&limit=200
+func GetScadaSimHistory(c *gin.Context) {
+	code := c.Param("scada_code")
+	if code == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "scada_code required"})
+		return
+	}
+	keysRaw := c.Query("keys")
+	if keysRaw == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "keys param required"})
+		return
+	}
+	limit := 200
+	if l := c.Query("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 {
+			limit = v
+		}
+	}
+	keys := strings.Split(keysRaw, ",")
+	for i := range keys {
+		keys[i] = strings.TrimSpace(keys[i])
+	}
+	hist := scadasim.GetHistory(code, keys, limit)
+	c.JSON(http.StatusOK, gin.H{"data": hist})
 }
 
 func CreateScadaSimPoint(c *gin.Context) {

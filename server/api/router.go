@@ -3,8 +3,8 @@ package api
 import (
 	"app-manager/auth"
 	"app-manager/config"
-	"app-manager/datastack"
 	"app-manager/database"
+	"app-manager/datastack"
 	"app-manager/mcp"
 	"os"
 
@@ -38,6 +38,12 @@ func SetupRouter() *gin.Engine {
 		scadaEditorDir = "../scada-editor/dist"
 	}
 	r.Static("/scada-editor", scadaEditorDir)
+	// form-app: 优先 web/dist/form-app（make 构建后），fallback 到 form-app/dist（开发模式）
+	formAppDir := "./web/dist/form-app"
+	if _, err := os.Stat(formAppDir); os.IsNotExist(err) {
+		formAppDir = "../form-app/dist"
+	}
+	r.Static("/form-app", formAppDir)
 
 	// 安装状态检查（正常模式）
 	r.GET("/api/setup/status", GetSetupStatus)
@@ -59,9 +65,12 @@ func SetupRouter() *gin.Engine {
 	r.GET("/api/agent/install-apk", AgentInstallApkDownload)
 	r.POST("/api/agent/pulled-apk-upload", AgentPulledApkUpload)
 	r.GET("/api/agent/menu-manifest", AgentMenuManifest)
+	r.POST("/api/agent/menu-execution/report", AgentMenuExecutionReport)
 
 	// 免登录：组态分享
 	r.GET("/api/scada/info/share/:token", GetScadaInfoByShareToken)
+	// 免登录：表单分享
+	r.GET("/api/form-app/info/share/:token", GetFormAppByShareToken)
 	// 组态静态资源（上传目录映射）
 	r.Static("/api/scada/resource", config.C.Storage.Path)
 
@@ -333,7 +342,7 @@ func SetupRouter() *gin.Engine {
 		sca.PUT("/infos/:scada_id", auth.RequireRole("admin", "operator"), UpdateScadaInfo)
 		sca.DELETE("/infos/:scada_id", auth.RequireRole("admin", "operator"), DeleteScadaInfo)
 		sca.POST("/save-canvas", auth.RequireRole("admin", "operator"), SaveScadaCanvas)
-			sca.POST("/infos/:scada_id/save-canvas", auth.RequireRole("admin", "operator"), SaveScadaCanvasByID)
+		sca.POST("/infos/:scada_id/save-canvas", auth.RequireRole("admin", "operator"), SaveScadaCanvasByID)
 		sca.POST("/infos/:scada_id/publish", auth.RequireRole("admin", "operator"), PublishScada)
 		sca.POST("/infos/:scada_id/unpublish", auth.RequireRole("admin", "operator"), UnpublishScada)
 		sca.POST("/resource/upload/:category", auth.RequireRole("admin", "operator"), UploadScadaResource)
@@ -350,7 +359,8 @@ func SetupRouter() *gin.Engine {
 	sim := r.Group("/api/scada/sim-points", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"))
 	{
 		sim.GET("", ListScadaSimPoints)
-			sim.GET("/snapshot/:scada_code", GetScadaSimSnapshot)
+		sim.GET("/snapshot/:scada_code", GetScadaSimSnapshot)
+		sim.GET("/history/:scada_code", GetScadaSimHistory)
 		sim.POST("", CreateScadaSimPoint)
 		sim.PUT("/:id", UpdateScadaSimPoint)
 		sim.DELETE("/:id", DeleteScadaSimPoint)
@@ -398,10 +408,50 @@ func SetupRouter() *gin.Engine {
 	amenu := r.Group("/api/agent-menus", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"))
 	{
 		amenu.GET("", ListAgentMenuItems)
+		amenu.GET("/execution-logs", ListAgentMenuExecutionLogs)
 		amenu.POST("", CreateAgentMenuItem)
 		amenu.PUT("/:id", UpdateAgentMenuItem)
 		amenu.DELETE("/:id", DeleteAgentMenuItem)
 		amenu.POST("/deploy", DeployAgentMenus)
+	}
+	fapp := r.Group("/api/form-app", auth.AuthMiddleware(), auth.RequireRole("admin", "operator", "viewer"))
+	{
+		fapp.GET("/infos", ListFormApps)
+		fapp.GET("/infos/:id", GetFormApp)
+		fapp.GET("/infos/code/:code", GetFormAppByCode)
+		fapp.POST("/infos", auth.RequireRole("admin", "operator"), CreateFormApp)
+		fapp.PUT("/infos/:id", auth.RequireRole("admin", "operator"), UpdateFormApp)
+		fapp.DELETE("/infos/:id", auth.RequireRole("admin", "operator"), DeleteFormApp)
+		fapp.POST("/infos/:id/save-schema", auth.RequireRole("admin", "operator"), SaveFormAppSchema)
+		fapp.POST("/repair-generated-schemas", auth.RequireRole("admin", "operator"), RepairGeneratedFormSchemas)
+		fapp.POST("/infos/:id/generate-pages-from-table", auth.RequireRole("admin", "operator"), GenerateFormAppPagesFromTable)
+		fapp.POST("/infos/:id/publish", auth.RequireRole("admin", "operator"), PublishFormApp)
+		fapp.POST("/infos/:id/unpublish", auth.RequireRole("admin", "operator"), UnpublishFormApp)
+		fapp.POST("/infos/:id/deploy-to-devices", auth.RequireRole("admin", "operator"), DeployFormAppToDevices)
+		fapp.POST("/runtime/query", auth.RequireRole("admin", "operator"), FormRuntimeQuery)
+		fapp.POST("/runtime/submit", auth.RequireRole("admin", "operator"), FormRuntimeSubmit)
+
+		fapp.GET("/infos/:id/pages", GetFormAppPages)
+		fapp.POST("/infos/:id/pages", auth.RequireRole("admin", "operator"), CreateFormAppPage)
+		fapp.GET("/pages/:page_id", GetFormAppPage)
+		fapp.PUT("/pages/:page_id", auth.RequireRole("admin", "operator"), UpdateFormAppPage)
+		fapp.DELETE("/pages/:page_id", auth.RequireRole("admin", "operator"), DeleteFormAppPage)
+		fapp.POST("/pages/:page_id/duplicate", auth.RequireRole("admin", "operator"), DuplicateFormAppPage)
+		fapp.POST("/infos/:id/pages/batch-delete", auth.RequireRole("admin", "operator"), BatchDeleteFormAppPages)
+		fapp.POST("/infos/:id/pages/clear", auth.RequireRole("admin", "operator"), ClearFormAppPages)
+		fapp.POST("/infos/:id/pages/regenerate", auth.RequireRole("admin", "operator"), RegenerateSinglePage)
+		fapp.POST("/infos/:id/pages/reorder", auth.RequireRole("admin", "operator"), ReorderFormAppPages)
+
+		fapp.GET("/infos/:id/links", GetFormAppPageLinks)
+		fapp.POST("/infos/:id/links", auth.RequireRole("admin", "operator"), CreateFormAppPageLink)
+		fapp.PUT("/links/:link_id", auth.RequireRole("admin", "operator"), UpdateFormAppPageLink)
+		fapp.DELETE("/links/:link_id", auth.RequireRole("admin", "operator"), DeleteFormAppPageLink)
+
+		fapp.GET("/infos/:id/event-routes", GetFormAppEventRoutes)
+		fapp.POST("/infos/:id/event-routes", auth.RequireRole("admin", "operator"), CreateFormAppEventRoute)
+		fapp.PUT("/event-routes/:route_id", auth.RequireRole("admin", "operator"), UpdateFormAppEventRoute)
+		fapp.DELETE("/event-routes/:route_id", auth.RequireRole("admin", "operator"), DeleteFormAppEventRoute)
+		fapp.POST("/infos/:id/test-event", auth.RequireRole("admin", "operator"), TestFormAppEvent)
 	}
 
 	// 组织架构
@@ -468,6 +518,7 @@ func SetupRouter() *gin.Engine {
 	r.GET("/ws/stomp", StompWSAuth, StompWS)
 	r.GET("/ws/stomp-scada", StompScadaShareAuth, StompScadaShareWS)
 	r.GET("/ws/open/stomp", OpenStompWSAuth, OpenStompWS)
+	r.GET("/ws/scada/stream/:scada_code", ScadaStreamWS)
 	r.GET("/ws/screen/:deviceId", auth.ScreenWSAuth(), ScreenWS)
 	r.GET("/ws/shell/:deviceId", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"), ShellWS)
 	r.GET("/ws/logcat/:deviceId", auth.AuthMiddleware(), LogcatWS)
@@ -510,6 +561,10 @@ func SetupRouter() *gin.Engine {
 		path := c.Request.URL.Path
 		if len(path) >= 14 && path[:14] == "/scada-editor/" {
 			c.File("./web/dist/scada-editor/index.html")
+			return
+		}
+		if len(path) >= 10 && path[:10] == "/form-app/" {
+			c.File("./web/dist/form-app/index.html")
 			return
 		}
 		c.File("./web/dist/index.html")

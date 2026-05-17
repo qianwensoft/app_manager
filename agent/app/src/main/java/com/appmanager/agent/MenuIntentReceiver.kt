@@ -40,12 +40,45 @@ object MenuIntentReceiver {
         val r = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context, intent: Intent) {
                 val action = intent.action ?: return
-                val url = AgentMenuStore.getPreviewUrlByIntent(ctx, action) ?: return
+                val scanValue = intent.getStringExtra("scan_data")
+                    ?: intent.getStringExtra("barcode")
+                    ?: intent.getStringExtra("data")
+                    ?: ""
+                val eventType = intent.getStringExtra("event_type") ?: "intent_scan"
+
+                val menuItem = AgentMenuStore.getMenuByIntent(ctx, action)
+                if (menuItem != null && menuItem.targetType == "form_app_entry") {
+                    val formAppCode = menuItem.formAppCode ?: menuItem.targetRef
+                    val pageKey = menuItem.formAppPageKey ?: "form"
+                    val serverUrl = AgentMenuStore.getServerUrl(ctx)
+
+                    Log.i(TAG, "launching FormAppActivity: code=$formAppCode, page=$pageKey")
+                    ctx.startActivity(
+                        Intent(ctx, FormAppActivity::class.java)
+                            .putExtra("form_app_code", formAppCode)
+                            .putExtra("page_key", pageKey)
+                            .putExtra("server_url", serverUrl)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                    return
+                }
+
+                val url = AgentMenuStore.resolveByScanEvent(ctx, action, eventType, scanValue)
+                    ?: AgentMenuStore.getPreviewUrlByIntent(ctx, action)
+                    ?: return
                 val extra = intent.getStringExtra("extra_params")
                 val finalUrl = if (!extra.isNullOrBlank()) {
                     if (url.contains("?")) "$url&$extra" else "$url?$extra"
                 } else url
                 Log.i(TAG, "menu intent received action=$action -> $finalUrl")
+                AgentMenuExecutionReporter.report(
+                    ctx,
+                    intentAction = action,
+                    eventType = eventType,
+                    scanValue = scanValue,
+                    targetUrl = finalUrl,
+                    status = "success"
+                )
                 ctx.startActivity(
                     Intent(ctx, ScadaWebViewActivity::class.java)
                         .putExtra(ScadaWebViewActivity.EXTRA_URL, finalUrl)

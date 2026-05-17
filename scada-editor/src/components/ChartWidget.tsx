@@ -1,8 +1,9 @@
 import { useRef, useEffect } from 'react'
 import * as echarts from 'echarts'
-import type { CanvasElement } from '@/types'
+import type { CanvasElement, PointBinding } from '@/types'
 import type { PointDataMap } from '@/hooks/useStompPointData'
 import { getStyleValue, type StyleFieldDef, chartSchema } from '@/schema/chartSchema'
+import { applyFormatter } from '@/hooks/useInterfaceBindingData'
 
 interface Props {
   el: CanvasElement
@@ -39,10 +40,97 @@ function parseGaugeColors(s: string): [number, string][] {
   }).filter(([r]) => !isNaN(r))
 }
 
-function buildOption(el: CanvasElement, pointData: PointDataMap): echarts.EChartsOption {
+/**
+ * Resolve effective point data for a chart element.
+ * - point/simulation mode: use pointData as-is with pb.chartSeriesKeys
+ * - static mode: pull from pb.staticData and inject into pointData-compatible keys
+ * - interface mode: read __iface_series_* keys from pointData
+ */
+function resolveChartData(pb: PointBinding | undefined, rawPointData: PointDataMap): {
+  seriesKeys: string[][]
+  categoryKey: string | undefined
+  pointData: PointDataMap
+} {
+  if (!pb) return { seriesKeys: [], categoryKey: undefined, pointData: rawPointData }
+
+  const mode = pb.mode ?? 'point'
+
+  if (mode === 'static') {
+    const sd = pb.staticData ?? {}
+    const syntheticData: PointDataMap = {}
+    const seriesKeys: string[][] = []
+
+    for (const [key, val] of Object.entries(sd)) {
+      if (Array.isArray(val)) {
+        const keys: string[] = []
+        ;(val as unknown[]).forEach((v, i) => {
+          const k = `__static_${key}_${i}`
+          syntheticData[k] = Number(v)
+          keys.push(k)
+        })
+        seriesKeys.push(keys)
+      } else {
+        const k = `__static_${key}`
+        syntheticData[k] = Number(val)
+        seriesKeys.push([k])
+      }
+    }
+    return { seriesKeys, categoryKey: undefined, pointData: { ...rawPointData, ...syntheticData } }
+  }
+
+  if (mode === 'interface') {
+    // __iface_series_0_0, __iface_series_0_1, ... already in rawPointData
+    const seriesKeys: string[][] = []
+    let idx = 0
+    while (true) {
+      const keys: string[] = []
+      let i = 0
+      while (rawPointData[`__iface_series_${idx}_${i}`] !== undefined) {
+        keys.push(`__iface_series_${idx}_${i}`)
+        i++
+      }
+      if (rawPointData[`__iface_series_${idx}`] !== undefined) {
+        keys.push(`__iface_series_${idx}`)
+      }
+      if (keys.length === 0) break
+      seriesKeys.push(keys)
+      idx++
+    }
+    return { seriesKeys, categoryKey: undefined, pointData: rawPointData }
+  }
+
+  if (mode === 'simulation') {
+    // simLinkName is the STOMP point key pushed by the sim engine.
+    // For gauge/single-value charts, inject it as seriesKeys[0][0] so
+    // existing case logic can find it. For multi-series charts, fall
+    // back to chartSeriesKeys if explicitly configured.
+    const simKey = pb.simLinkName
+    if (simKey && (!pb.chartSeriesKeys || pb.chartSeriesKeys.length === 0)) {
+      return {
+        seriesKeys: [[simKey]],
+        categoryKey: pb.chartCategoryKey,
+        pointData: rawPointData,
+      }
+    }
+    return {
+      seriesKeys: pb.chartSeriesKeys ?? [],
+      categoryKey: pb.chartCategoryKey,
+      pointData: rawPointData,
+    }
+  }
+
+  // point mode (default)
+  return {
+    seriesKeys: pb.chartSeriesKeys ?? [],
+    categoryKey: pb.chartCategoryKey,
+    pointData: rawPointData,
+  }
+}
+
+function buildOption(el: CanvasElement, rawPointData: PointDataMap): echarts.EChartsOption {
   const cfg = (el.properties?.chartConfig ?? {}) as Record<string, unknown>
   const pb = el.pointBinding
-  const seriesKeys = pb?.chartSeriesKeys ?? []
+  const { seriesKeys, categoryKey, pointData } = resolveChartData(pb, rawPointData)
   const transform = pb?.transform
 
   // 共用 title / bg
@@ -79,8 +167,8 @@ function buildOption(el: CanvasElement, pointData: PointDataMap): echarts.EChart
         right: sv(cfg, 'gridRight', 10),
       }
 
-      const categories = pb?.chartCategoryKey
-        ? (pointData[pb.chartCategoryKey] as unknown as string[] | undefined) ?? ['A', 'B', 'C', 'D', 'E']
+      const categories = categoryKey
+        ? (pointData[categoryKey] as unknown as string[] | undefined) ?? ['A', 'B', 'C', 'D', 'E']
         : ['A', 'B', 'C', 'D', 'E']
 
       const series: echarts.SeriesOption[] = (seriesKeys.length > 0 ? seriesKeys : [[]]).map((keys, i) => ({
@@ -122,8 +210,8 @@ function buildOption(el: CanvasElement, pointData: PointDataMap): echarts.EChart
         right: sv(cfg, 'gridRight', 10),
       }
 
-      const categories = pb?.chartCategoryKey
-        ? (pointData[pb.chartCategoryKey] as unknown as string[] | undefined) ?? ['1', '2', '3', '4', '5', '6']
+      const categories = categoryKey
+        ? (pointData[categoryKey] as unknown as string[] | undefined) ?? ['1', '2', '3', '4', '5', '6']
         : ['1', '2', '3', '4', '5', '6']
 
       const series: echarts.SeriesOption[] = (seriesKeys.length > 0 ? seriesKeys : [[]]).map((keys, i) => {
@@ -160,8 +248,8 @@ function buildOption(el: CanvasElement, pointData: PointDataMap): echarts.EChart
       const roseType = sv(cfg, 'roseType', false)
 
       const keys = seriesKeys[0] ?? []
-      const nameArr = pb?.chartCategoryKey
-        ? (pointData[pb.chartCategoryKey] as unknown as string[] | undefined)
+      const nameArr = categoryKey
+        ? (pointData[categoryKey] as unknown as string[] | undefined)
         : undefined
 
       const pieData = keys.length
@@ -191,7 +279,7 @@ function buildOption(el: CanvasElement, pointData: PointDataMap): echarts.EChart
     }
 
     case 'echarts-gauge': {
-      const key = seriesKeys[0]?.[0] ?? pb?.pointKey
+      const key = seriesKeys[0]?.[0] ?? (pb?.mode === 'point' || !pb?.mode ? pb?.pointKey : undefined)
       const value = key ? applyTransform(pointData[key] ?? 0, transform) : 62
       const min = sv(cfg, 'min', 0)
       const max = sv(cfg, 'max', 100)
@@ -202,6 +290,11 @@ function buildOption(el: CanvasElement, pointData: PointDataMap): echarts.EChart
       const axisLineWidth = sv(cfg, 'axisLineWidth', 8)
       const axisLineColorsStr = sv(cfg, 'axisLineColors', '0.3:#27ae60,0.7:#e67e22,1:#c0392b')
       const axisLineColors = parseGaugeColors(axisLineColorsStr)
+      const fmt = pb?.formatter
+
+      const detailFormatter = fmt
+        ? (v: number) => applyFormatter(v, fmt)
+        : unit ? `{value} ${unit}` : '{value}'
 
       return {
         ...base,
@@ -220,7 +313,7 @@ function buildOption(el: CanvasElement, pointData: PointDataMap): echarts.EChart
             valueAnimation: false,
             color: detailColor,
             fontSize: detailSize,
-            formatter: unit ? `{value} ${unit}` : '{value}',
+            formatter: detailFormatter,
           },
           data: [{ value }],
         }],

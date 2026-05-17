@@ -3,6 +3,7 @@ package com.appmanager.agent
 import android.content.Context
 import com.appmanager.agent.config.AgentConfig
 import com.google.gson.Gson
+import com.google.gson.JsonObject
 import com.google.gson.reflect.TypeToken
 
 /**
@@ -11,19 +12,24 @@ import com.google.gson.reflect.TypeToken
 object AgentMenuStore {
     private const val PREF = "agent_menu_store"
     private const val KEY_MENUS = "menus_json"
+    private const val KEY_BUNDLE = "bundle_json"
     private const val KEY_REVISION = "revision"
 
     private val listType = object : TypeToken<List<Map<String, Any?>>>() {}.type
 
-    fun save(context: Context, revision: Long, menusJson: String) {
+    fun save(context: Context, revision: Long, menusJson: String, bundleJson: String) {
         context.getSharedPreferences(PREF, Context.MODE_PRIVATE).edit()
             .putLong(KEY_REVISION, revision)
             .putString(KEY_MENUS, menusJson)
+            .putString(KEY_BUNDLE, bundleJson)
             .apply()
     }
 
     fun revision(context: Context): Long =
         context.getSharedPreferences(PREF, Context.MODE_PRIVATE).getLong(KEY_REVISION, 0L)
+
+    fun bundleJSON(context: Context): String? =
+        context.getSharedPreferences(PREF, Context.MODE_PRIVATE).getString(KEY_BUNDLE, null)
 
     private fun loadList(context: Context): List<Map<String, Any?>> {
         val json = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)
@@ -75,4 +81,74 @@ object AgentMenuStore {
     /** 返回全部已注册的 intent_action（非空），供动态注册广播接收器。 */
     fun getAllIntentActions(context: Context): List<String> =
         loadList(context).mapNotNull { (it["intent_action"] as? String)?.trim()?.takeIf { a -> a.isNotEmpty() } }.distinct()
+
+    data class MenuItem(
+        val targetType: String?,
+        val targetRef: String?,
+        val formAppCode: String?,
+        val formAppPageKey: String?
+    )
+
+    fun getMenuByIntent(context: Context, intentAction: String): MenuItem? {
+        if (intentAction.isBlank()) return null
+        for (m in loadList(context)) {
+            if ((m["intent_action"] as? String)?.trim() == intentAction) {
+                return MenuItem(
+                    targetType = m["target_type"] as? String,
+                    targetRef = m["target_ref"] as? String,
+                    formAppCode = m["form_app_code"] as? String,
+                    formAppPageKey = m["form_app_page_key"] as? String
+                )
+            }
+        }
+        return null
+    }
+
+    fun getServerUrl(context: Context): String {
+        val serverUrl = AgentConfig.get(context).serverUrl.trim().trimEnd('/')
+        return ServerUrlUtil.httpBaseFromWs(serverUrl)
+    }
+
+    fun resolveByScanEvent(
+        context: Context,
+        intentAction: String,
+        eventType: String,
+        scanValue: String
+    ): String? {
+        val rows = loadList(context)
+        for (m in rows) {
+            val action = (m["intent_action"] as? String)?.trim().orEmpty()
+            if (action != intentAction) continue
+            val cfgRaw = (m["scan_config_json"] as? String)?.trim().orEmpty()
+            if (cfgRaw.isEmpty()) {
+                return resolvePreviewUrl(context, m)
+            }
+            val cfg = runCatching { Gson().fromJson(cfgRaw, JsonObject::class.java) }.getOrNull() ?: continue
+            val mode = cfg.get("mode")?.asString?.trim().orEmpty().ifEmpty { "router" }
+            if (mode == "exclusive") {
+                // 独占模式交由页面内处理扫描输入，仅负责打开目标页。
+                return resolvePreviewUrl(context, m)
+            }
+            val rules = cfg.getAsJsonArray("matchers") ?: return resolvePreviewUrl(context, m)
+            for (rule in rules) {
+                val r = rule?.asJsonObject ?: continue
+                val evt = r.get("event_type")?.asString?.trim()
+                if (!evt.isNullOrBlank() && evt != eventType) continue
+                val kind = r.get("kind")?.asString?.trim().orEmpty()
+                val expected = r.get("value")?.asString ?: ""
+                val matched = when (kind) {
+                    "prefix" -> scanValue.startsWith(expected)
+                    "regex" -> runCatching { Regex(expected).containsMatchIn(scanValue) }.getOrDefault(false)
+                    "equals" -> scanValue == expected
+                    "enum" -> {
+                        val arr = r.getAsJsonArray("values")
+                        arr?.any { it?.asString == scanValue } == true
+                    }
+                    else -> true
+                }
+                if (matched) return resolvePreviewUrl(context, m)
+            }
+        }
+        return null
+    }
 }

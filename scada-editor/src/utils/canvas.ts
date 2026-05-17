@@ -79,44 +79,6 @@ export function drawElement(ctx: CanvasRenderingContext2D, el: CanvasElement, zo
     }
     case 'image':
       break
-    case 'dynamic-valve': {
-      ctx.beginPath()
-      ctx.arc(x + w / 2, y + h / 2, Math.min(w, h) / 2, 0, Math.PI * 2)
-      if (el.fill) ctx.fill()
-      if (el.stroke) ctx.stroke()
-      ctx.strokeStyle = el.stroke || '#2ecc71'
-      ctx.lineWidth = (el.strokeWidth ?? 2) * zoom
-      ctx.beginPath()
-      ctx.moveTo(x + w * 0.25, y + h * 0.25); ctx.lineTo(x + w * 0.75, y + h * 0.75)
-      ctx.moveTo(x + w * 0.75, y + h * 0.25); ctx.lineTo(x + w * 0.25, y + h * 0.75)
-      ctx.stroke()
-      break
-    }
-    case 'dynamic-pump': {
-      ctx.beginPath()
-      ctx.arc(x + w / 2, y + h / 2, Math.min(w, h) / 2, 0, Math.PI * 2)
-      if (el.fill) ctx.fill()
-      if (el.stroke) ctx.stroke()
-      ctx.strokeStyle = el.stroke || '#9b59b6'
-      ctx.lineWidth = (el.strokeWidth ?? 2) * zoom
-      ctx.beginPath()
-      ctx.moveTo(x + w / 2, y + h * 0.2); ctx.lineTo(x + w / 2, y + h * 0.8)
-      ctx.moveTo(x + w * 0.2, y + h / 2); ctx.lineTo(x + w * 0.8, y + h / 2)
-      ctx.stroke()
-      break
-    }
-    case 'dynamic-tank': {
-      const r = Math.min(w, h) * 0.1
-      ctx.beginPath()
-      ctx.roundRect(x, y, w, h, r)
-      if (el.fill) ctx.fill()
-      if (el.stroke) ctx.stroke()
-      ctx.fillStyle = (el.stroke || '#3498db') + '55'
-      ctx.beginPath()
-      ctx.roundRect(x + 2, y + h * 0.4, w - 4, h * 0.58, [0, 0, r, r])
-      ctx.fill()
-      break
-    }
     case 'dynamic-pipe': {
       const mid = y + h / 2
       ctx.fillStyle = el.fill || '#7f8c8d'
@@ -133,6 +95,28 @@ export function drawElement(ctx: CanvasRenderingContext2D, el: CanvasElement, zo
         ctx.lineTo(ax - 4 * zoom, mid + 4 * zoom)
         ctx.stroke()
       }
+      break
+    }
+    case 'form-input':
+    case 'form-number':
+    case 'form-select':
+    case 'form-textarea':
+    case 'form-date':
+    case 'form-switch':
+    case 'form-radio':
+    case 'form-checkbox':
+    case 'form-rate':
+    case 'form-slider':
+    case 'form-grid':
+    case 'form-submit': {
+      const isSubmit = el.type === 'form-submit'
+      ctx.fillStyle = isSubmit ? (el.fill || '#2980b9') : (el.fill || 'rgba(255,255,255,0.06)')
+      ctx.fillRect(x, y, w, h)
+      ctx.setLineDash([])
+      ctx.strokeStyle = el.stroke || (isSubmit ? '#4a9eff' : 'rgba(255,255,255,0.18)')
+      ctx.lineWidth = (el.strokeWidth ?? 1) * zoom
+      ctx.strokeRect(x, y, w, h)
+      // DOM overlay handles all content rendering; canvas only draws the frame
       break
     }
     default:

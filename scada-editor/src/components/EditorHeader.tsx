@@ -7,6 +7,7 @@ import { Tooltip } from '@/components/ui/tooltip'
 import { Badge } from '@/components/ui/badge'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel } from '@/components/ui/dropdown-menu'
 import AccessPoliciesModal from '@/components/AccessPoliciesModal'
+import SimPointsModal from '@/components/SimPointsModal'
 
 const Icon = ({ d, size = 14 }: { d: string; size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -17,6 +18,7 @@ const Icon = ({ d, size = 14 }: { d: string; size?: number }) => (
 const Icons = {
   Undo:    'M3 7v6h6M3.5 13A9 9 0 1 0 5.5 6.5',
   Redo:    'M21 7v6h-6M20.5 13A9 9 0 1 1 18.5 6.5',
+  Points:  'M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18',
   ZoomIn:  'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16ZM21 21l-4.35-4.35M11 8v6M8 11h6',
   ZoomOut: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16ZM21 21l-4.35-4.35M8 11h6',
   Eye:     'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8ZM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z',
@@ -36,19 +38,27 @@ const Div = () => <div style={{ width: 1, height: 18, background: 'var(--border)
 
 interface Props {
   scadaName?: string
+  scadaCode?: string
   publishStatus?: number
   onPreview?: () => void
   onBack?: () => void
 }
 
-export default function EditorHeader({ scadaName, publishStatus, onPreview, onBack }: Props) {
+export default function EditorHeader({ scadaName, scadaCode, publishStatus, onPreview, onBack }: Props) {
   const store = useEditorStore()
   const { isDirty, zoom, setZoom, project, scadaId } = store
   const saveCanvas = useSaveCanvas()
   const { undo, redo, canUndo, canRedo } = useHistory()
   const [showPolicies, setShowPolicies] = useState(false)
+  const [showPoints, setShowPoints] = useState(false)
 
   const openInNewTab = (path: string) => window.open(path, '_blank')
+
+  const doSave = () => {
+    if (!scadaId) return
+    const previewImage = store.getSnapshot(480) ?? undefined
+    saveCanvas.mutate({ id: scadaId, project, previewImage })
+  }
 
   return (
     <>
@@ -121,14 +131,52 @@ export default function EditorHeader({ scadaName, publishStatus, onPreview, onBa
       {/* Undo / Redo */}
       <Tooltip content="撤销 Ctrl+Z">
         <Button size="icon" variant="ghost" onClick={undo} disabled={!canUndo} aria-label="撤销">
-          <Icon d={Icons.Undo} size={13} />
+          <Icon d={Icons.Undo} size={15} />
         </Button>
       </Tooltip>
-      <Tooltip content="重做 Ctrl+Y">
+      <Tooltip content="重做 Ctrl+Shift+Z">
         <Button size="icon" variant="ghost" onClick={redo} disabled={!canRedo} aria-label="重做">
-          <Icon d={Icons.Redo} size={13} />
+          <Icon d={Icons.Redo} size={15} />
         </Button>
       </Tooltip>
+
+      <Div />
+
+      {/* Live-data toggle */}
+      <button
+        onClick={() => store.toggleLiveData()}
+        title={store.liveDataOn ? '关闭接口/静态数据加载' : '开启接口数据加载（模拟数据始终推送）'}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 5,
+          height: 26, padding: '0 8px',
+          borderRadius: 'var(--radius-sm)',
+          border: `1px solid ${store.liveDataOn ? 'var(--border-accent)' : 'var(--border)'}`,
+          background: store.liveDataOn ? 'var(--accent-muted)' : 'transparent',
+          color: store.liveDataOn ? 'var(--accent)' : 'var(--text-muted)',
+          fontSize: 11, fontWeight: 500, cursor: 'pointer',
+          transition: 'all 0.15s',
+        }}
+      >
+        {/* pill */}
+        <div style={{
+          width: 26, height: 13, borderRadius: 7,
+          background: store.liveDataOn ? 'var(--accent)' : 'var(--border-strong)',
+          position: 'relative', transition: 'background 0.15s', flexShrink: 0,
+        }}>
+          <div style={{
+            position: 'absolute', top: 1.5, left: store.liveDataOn ? 14 : 1.5,
+            width: 10, height: 10, borderRadius: '50%',
+            background: '#fff', transition: 'left 0.15s',
+          }} />
+        </div>
+        加载数据
+        {store.liveDataOn && (
+          <span style={{
+            width: 5, height: 5, borderRadius: '50%',
+            background: '#22c55e', boxShadow: '0 0 4px #22c55e',
+          }} />
+        )}
+      </button>
 
       <Div />
 
@@ -171,11 +219,7 @@ export default function EditorHeader({ scadaName, publishStatus, onPreview, onBa
 
       {/* Save */}
       <button
-        onClick={() => {
-          if (!scadaId) return
-          const previewImage = store.getSnapshot(480) ?? undefined
-          saveCanvas.mutate({ id: scadaId, project, previewImage })
-        }}
+        onClick={doSave}
         disabled={saveCanvas.isPending}
         style={{
           display: 'inline-flex', alignItems: 'center', gap: 5,
@@ -194,6 +238,13 @@ export default function EditorHeader({ scadaName, publishStatus, onPreview, onBa
         <Icon d={Icons.Save} size={12} />
         {saveCanvas.isPending ? '保存中…' : '保存'}
       </button>
+
+      {/* Point Management */}
+      <Tooltip content="点位管理">
+        <Button size="icon" variant="ghost" onClick={() => setShowPoints(true)} aria-label="点位管理">
+          <Icon d={Icons.Points} size={13} />
+        </Button>
+      </Tooltip>
 
       <Div />
 
@@ -237,6 +288,9 @@ export default function EditorHeader({ scadaName, publishStatus, onPreview, onBa
 
     {showPolicies && scadaId && (
       <AccessPoliciesModal scadaId={scadaId} onClose={() => setShowPolicies(false)} />
+    )}
+    {showPoints && scadaCode && (
+      <SimPointsModal scadaCode={scadaCode} onClose={() => setShowPoints(false)} />
     )}
   </>
   )

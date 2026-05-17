@@ -3,7 +3,7 @@ import { useEditorStore } from '@/store/editorStore'
 import { useHistory } from './useHistory'
 import { pushHistory } from './useHistory'
 
-export function useKeyboardShortcuts() {
+export function useKeyboardShortcuts(onSave?: () => void) {
   const store = useEditorStore()
   const { undo, redo } = useHistory()
 
@@ -14,6 +14,7 @@ export function useKeyboardShortcuts() {
 
       const ctrl = e.ctrlKey || e.metaKey
 
+      if (ctrl && e.key === 's') { e.preventDefault(); onSave?.(); return }
       if (ctrl && e.key === 'z') { e.preventDefault(); undo(); return }
       if (ctrl && (e.key === 'y' || (e.shiftKey && e.key === 'Z'))) { e.preventDefault(); redo(); return }
 

@@ -92,9 +92,9 @@ function TabLabel({ id, name, active }: { id: number; name: string; active: bool
   )
 }
 
-export default function CanvasTabs({ layerCollapsed = false, onToggleLayer }: Props) {
+export default function CanvasTabs(_props: Props) {
   const store = useEditorStore()
-  const { project } = store
+  const { project, layerCollapsed, toggleLayerCollapsed } = store
   const activeId = project.activeCanvasId
   const canvases = Object.values(project.canvases ?? {})
 
@@ -111,12 +111,18 @@ export default function CanvasTabs({ layerCollapsed = false, onToggleLayer }: Pr
             <rect x={3} y={3} width={18} height={18} rx={2} />
           </svg>
           <TabLabel id={c.id} name={c.name} active={activeId === c.id} />
-          {canvases.length > 1 && activeId === c.id && (
+          {canvases.length > 1 && activeId === c.id && c.id !== MAIN_CANVAS_ID && (
             <button
               className="icon-btn"
               style={{ width: 16, height: 16, borderRadius: 3, marginLeft: 2 }}
-              onClick={(e) => { e.stopPropagation(); /* future: remove canvas */ }}
-              title="关闭"
+              onClick={(e) => {
+                e.stopPropagation()
+                if (c.elements.length > 0) {
+                  if (!window.confirm(`画布"${c.name}"中有 ${c.elements.length} 个元素，确认删除？`)) return
+                }
+                store.deleteCanvas(c.id)
+              }}
+              title="删除画布"
             >
               <CloseIcon />
             </button>
@@ -167,7 +173,7 @@ export default function CanvasTabs({ layerCollapsed = false, onToggleLayer }: Pr
 
       {/* Layer panel toggle */}
       <button
-        onClick={onToggleLayer}
+        onClick={toggleLayerCollapsed}
         title={layerCollapsed ? '展开图层' : '收起图层'}
         style={{
           display: 'flex', alignItems: 'center', gap: 5,

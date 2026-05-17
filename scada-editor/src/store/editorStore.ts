@@ -57,6 +57,7 @@ interface EditorStore {
   addCanvas: (canvas: CanvasData) => void
   updateCanvas: (id: number, updates: Partial<CanvasData>) => void
   deleteCanvas: (id: number) => void
+  fitCanvasToContent: (id: number, padding?: number) => void
 
   // actions - elements
   addElement: (el: CanvasElement) => void
@@ -93,6 +94,12 @@ interface EditorStore {
   setTool: (tool: DrawingTool) => void
   setZoom: (zoom: number) => void
   setPanOffset: (offset: { x: number; y: number }) => void
+
+  // ui prefs — persisted to localStorage
+  liveDataOn: boolean
+  toggleLiveData: () => void
+  layerCollapsed: boolean
+  toggleLayerCollapsed: () => void
 }
 
 const initialProject: CanvasProject = {
@@ -118,6 +125,8 @@ export const useEditorStore = create<EditorStore>()(
     panOffset: { x: 0, y: 0 },
     _clipboard: [],
     _canvasEl: null,
+    liveDataOn: localStorage.getItem('scada:liveDataOn') === 'true',
+    layerCollapsed: localStorage.getItem('scada:layerCollapsed') === 'true',
     registerCanvasEl: (el) => set(() => ({ _canvasEl: el })),
     getSnapshot: (maxWidth = 480) => {
       const el = get()._canvasEl
@@ -169,10 +178,29 @@ export const useEditorStore = create<EditorStore>()(
         s.isDirty = true
       }),
 
+    fitCanvasToContent: (id, padding = 20) =>
+      set((s) => {
+        const c = s.project.canvases[id]
+        if (!c || !c.elements.length) return
+        const maxX = Math.max(...c.elements.map((e) => e.x + e.width))
+        const maxY = Math.max(...c.elements.map((e) => e.y + e.height))
+        c.width = Math.max(1, maxX + padding)
+        c.height = Math.max(1, maxY + padding)
+        s.isDirty = true
+      }),
+
     addElement: (el) =>
       set((s) => {
         const c = s.project.canvases[s.project.activeCanvasId]
-        if (c) { c.elements.push(el); s.isDirty = true }
+        if (c) {
+          c.elements.push(el)
+          s.isDirty = true
+          if (c.adaptiveMode === 'fit' && c.elements.length) {
+            const pad = 20
+            c.width = Math.max(c.width, Math.max(...c.elements.map((e) => e.x + e.width)) + pad)
+            c.height = Math.max(c.height, Math.max(...c.elements.map((e) => e.y + e.height)) + pad)
+          }
+        }
       }),
 
     updateElement: (id, updates) =>
@@ -206,6 +234,11 @@ export const useEditorStore = create<EditorStore>()(
         }
         Object.assign(el, updates)
         s.isDirty = true
+        if (c.adaptiveMode === 'fit' && c.elements.length) {
+          const pad = 20
+          c.width = Math.max(...c.elements.map((e) => e.x + e.width)) + pad
+          c.height = Math.max(...c.elements.map((e) => e.y + e.height)) + pad
+        }
       }),
 
     deleteElements: (ids) =>
@@ -232,6 +265,11 @@ export const useEditorStore = create<EditorStore>()(
           })
         }
         el.x = x; el.y = y; s.isDirty = true
+        if (c.adaptiveMode === 'fit' && c.elements.length) {
+          const pad = 20
+          c.width = Math.max(...c.elements.map((e) => e.x + e.width)) + pad
+          c.height = Math.max(...c.elements.map((e) => e.y + e.height)) + pad
+        }
       }),
 
     reorderElements: (ids) =>
@@ -477,5 +515,15 @@ export const useEditorStore = create<EditorStore>()(
     setTool: (tool) => set((s) => { s.activeTool = tool }),
     setZoom: (zoom) => set((s) => { s.zoom = Math.max(0.1, Math.min(5, zoom)) }),
     setPanOffset: (offset) => set((s) => { s.panOffset = offset }),
+    toggleLiveData: () => set((s) => {
+      const next = !s.liveDataOn
+      s.liveDataOn = next
+      localStorage.setItem('scada:liveDataOn', String(next))
+    }),
+    toggleLayerCollapsed: () => set((s) => {
+      const next = !s.layerCollapsed
+      s.layerCollapsed = next
+      localStorage.setItem('scada:layerCollapsed', String(next))
+    }),
   }))
 )
