@@ -1,4 +1,4 @@
-import { ref, computed, watch, nextTick, onUnmounted, unref } from 'vue'
+import { ref, computed, watch, nextTick, onUnmounted, unref, reactive } from 'vue'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { Client } from '@stomp/stompjs'
 import QRCode from 'qrcode'
@@ -12,7 +12,9 @@ import { savedWirelessPortFromDevice, WIRELESS_ADB_MENU_INTENT } from '@/utils/w
  * @param {import('vue').MaybeRefOrGetter<string|number|null|undefined>} deviceIdSource
  */
 export function useWirelessAdb(deviceIdSource) {
+  console.log('[useWirelessAdb] 🚀 初始化，deviceIdSource =', deviceIdSource)
   const auth = useAuthStore()
+  console.log('[useWirelessAdb] ✓ auth store 已加载')
   const device = ref(null)
   const adbStatus = ref({ usb: null, wireless: null })
   const adbStatusLoading = ref(false)
@@ -35,6 +37,14 @@ export function useWirelessAdb(deviceIdSource) {
   const grantReadLogsResult = ref('')
   const grantReadLogsSuccess = ref(false)
 
+  console.log('[useWirelessAdb] 📊 所有 ref 已初始化:', {
+    adbStatusLoading: adbStatusLoading.value,
+    connecting: connecting.value,
+    pairing: pairing.value,
+    openingWirelessAdb: openingWirelessAdb.value,
+    grantingReadLogs: grantingReadLogs.value
+  })
+
   let wirelessAdbStomp = null
   let connectingPollTimer = null
 
@@ -45,26 +55,42 @@ export function useWirelessAdb(deviceIdSource) {
     }
   }
 
+  /** 轮询用尽仍为 connecting 时，把界面回落到 offline，避免永久卡在「连接中」 */
+  function settleConnectingTimeout() {
+    if (adbStatus.value.wireless?.state !== 'connecting') return
+    adbStatus.value = {
+      ...adbStatus.value,
+      wireless: { ...adbStatus.value.wireless, state: 'offline' }
+    }
+    applyWirelessConnectPortFromDevice()
+    ElMessage.warning('连接超时：设备未进入已连接状态，请确认无线调试已开启且 IP、端口正确')
+  }
+
   /** connecting 态短轮询，避免 adb 列表长期卡在 connecting 时页面不更新 */
   function scheduleConnectingPoll() {
     stopConnectingPoll()
     if (adbStatus.value.wireless?.state !== 'connecting') return
+    // 后端 connecting 超过 12s 会判为 offline；前端轮询窗口需覆盖该时长后再回落
+    const maxTries = 10
     let tries = 0
     connectingPollTimer = setInterval(async () => {
       tries += 1
-      if (tries > 8) {
-        stopConnectingPoll()
-        return
-      }
       try {
         const res = await deviceApi.getAdbStatus(deviceId.value)
         adbStatus.value = res || {}
         if (adbStatus.value.wireless?.state !== 'connecting') {
           stopConnectingPoll()
           if (adbStatus.value.wireless?.state === 'device') await loadDevice()
+          return
         }
       } catch {
         stopConnectingPoll()
+        return
+      }
+      // 仍为 connecting 且已用尽重试：停止轮询并回落到 offline
+      if (tries >= maxTries) {
+        stopConnectingPoll()
+        settleConnectingTimeout()
       }
     }, 2000)
   }
@@ -109,9 +135,12 @@ export function useWirelessAdb(deviceIdSource) {
   async function refreshAdbStatus() {
     const id = deviceId.value
     if (!id) return
+    console.log('[refreshAdbStatus] 🔵 开始，设置 adbStatusLoading = true')
     adbStatusLoading.value = true
     try {
+      console.log('[refreshAdbStatus] 📞 调用 API...')
       const res = await deviceApi.getAdbStatus(id)
+      console.log('[refreshAdbStatus] ✅ API 返回:', res)
       adbStatus.value = res || {}
       if (adbStatus.value.wireless?.state === 'device') {
         await loadDevice()
@@ -119,9 +148,12 @@ export function useWirelessAdb(deviceIdSource) {
         applyWirelessConnectPortFromDevice()
       }
     } catch (e) {
+      console.error('[refreshAdbStatus] ❌ API 错误:', e)
       ElMessage.error(e?.message || '检测失败')
     } finally {
+      console.log('[refreshAdbStatus] 🏁 finally 块执行，设置 adbStatusLoading = false')
       adbStatusLoading.value = false
+      console.log('[refreshAdbStatus] 验证: adbStatusLoading.value =', adbStatusLoading.value)
       scheduleConnectingPoll()
     }
   }
@@ -310,26 +342,45 @@ export function useWirelessAdb(deviceIdSource) {
   watch(
     deviceId,
     async (id) => {
+      console.log('[useWirelessAdb] 🔄 watch(deviceId) 触发, id =', id)
       disconnectWirelessAdbStomp()
       wirelessAdbScanAck.value = ''
       if (!id) {
         device.value = null
         adbStatus.value = { usb: null, wireless: null }
+        console.log('[useWirelessAdb] ⚠️ deviceId 为空，跳过初始化')
         return
       }
+      console.log('[useWirelessAdb] 📡 开始 loadDevice...')
       await loadDevice()
+      console.log('[useWirelessAdb] 📡 开始 refreshAdbStatus...')
       await refreshAdbStatus()
+      console.log('[useWirelessAdb] 📡 开始 connectWirelessAdbStomp...')
       connectWirelessAdbStomp()
+      console.log('[useWirelessAdb] ✅ watch(deviceId) 完成')
     },
     { immediate: true }
   )
 
+  // 🔧 DEBUG: 强制 reset 所有 loading 状态（每 3 秒检查一次）
+  const resetTimer = setInterval(() => {
+    if (adbStatusLoading.value) {
+      console.warn('[useWirelessAdb] 强制 reset adbStatusLoading')
+      adbStatusLoading.value = false
+    }
+    if (connecting.value) {
+      console.warn('[useWirelessAdb] 强制 reset connecting')
+      connecting.value = false
+    }
+  }, 3000)
+
   onUnmounted(() => {
     stopConnectingPoll()
     disconnectWirelessAdbStomp()
+    clearInterval(resetTimer)
   })
 
-  return {
+  return reactive({
     device,
     adbStatus,
     adbStatusLoading,
@@ -364,5 +415,5 @@ export function useWirelessAdb(deviceIdSource) {
     doPair,
     doConnect,
     doGrantReadLogs
-  }
+  })
 }

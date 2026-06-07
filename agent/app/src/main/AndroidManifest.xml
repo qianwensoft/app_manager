@@ -38,6 +38,10 @@
     <!-- 硬件信息 -->
     <uses-permission android:name="android.permission.BATTERY_STATS" />
 
+    <!-- 前台应用检测（需要在系统设置中手动授权） -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+
     <!-- Logcat 读取（signature/privileged 权限，需通过 adb pm grant 授权） -->
     <uses-permission android:name="android.permission.READ_LOGS" />
 
@@ -126,6 +130,20 @@
             android:label="@string/main_tile_listen_state"
             android:theme="@style/Theme.AppManagerMain"
             android:parentActivityName=".MainActivity" />
+
+        <activity
+            android:name=".ui.AboutActivity"
+            android:exported="false"
+            android:label="@string/about_title"
+            android:theme="@style/Theme.AppManagerMain"
+            android:parentActivityName=".ui.BackendMenuActivity" />
+
+        <activity
+            android:name=".ui.SystemUpdateActivity"
+            android:exported="false"
+            android:label="@string/system_update_title"
+            android:theme="@style/Theme.AppManagerMain"
+            android:parentActivityName=".ui.BackendMenuActivity" />
 
         <activity
             android:name=".ui.InAppWebActivity"

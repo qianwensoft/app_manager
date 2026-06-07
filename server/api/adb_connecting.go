@@ -10,10 +10,72 @@ import (
 // adb connecting 状态在设备不可达时可能长期不消失；超过该时长在状态查询/保活时主动 disconnect。
 const adbConnectingStale = 12 * time.Second
 
+// 保活自动重连的指数退避：避免不可达设备每 30 秒在 connecting↔offline 之间无限抖动。
+const (
+	adbKeepaliveBaseBackoff = 30 * time.Second
+	adbKeepaliveMaxBackoff  = 10 * time.Minute
+)
+
 var (
 	adbConnectingMu    sync.Mutex
 	adbConnectingSince = map[string]time.Time{}
+
+	adbBackoffMu sync.Mutex
+	adbBackoff   = map[string]adbBackoffEntry{}
 )
+
+type adbBackoffEntry struct {
+	fails int
+	next  time.Time
+}
+
+// adbKeepaliveInBackoff 返回该 serial 是否仍处于退避窗口内（本轮保活应跳过重连）。
+func adbKeepaliveInBackoff(serial string) bool {
+	serial = strings.TrimSpace(serial)
+	if serial == "" {
+		return false
+	}
+	adbBackoffMu.Lock()
+	defer adbBackoffMu.Unlock()
+	e, ok := adbBackoff[serial]
+	if !ok {
+		return false
+	}
+	return time.Now().Before(e.next)
+}
+
+// adbKeepaliveRecordFailure 记录一次自动重连失败并按指数退避推后下次尝试时间。
+func adbKeepaliveRecordFailure(serial string) {
+	serial = strings.TrimSpace(serial)
+	if serial == "" {
+		return
+	}
+	adbBackoffMu.Lock()
+	defer adbBackoffMu.Unlock()
+	e := adbBackoff[serial]
+	e.fails++
+	shift := e.fails - 1
+	if shift > 20 {
+		shift = 20
+	}
+	backoff := adbKeepaliveBaseBackoff << shift
+	if backoff > adbKeepaliveMaxBackoff {
+		backoff = adbKeepaliveMaxBackoff
+	}
+	e.next = time.Now().Add(backoff)
+	adbBackoff[serial] = e
+}
+
+// adbKeepaliveClearBackoff 在连接成功后清除退避记录。
+func adbKeepaliveClearBackoff(serial string) {
+	serial = strings.TrimSpace(serial)
+	if serial == "" {
+		return
+	}
+	adbBackoffMu.Lock()
+	delete(adbBackoff, serial)
+	adbBackoffMu.Unlock()
+}
 
 func noteAdbConnectAttempt(serial string) {
 	serial = strings.TrimSpace(serial)

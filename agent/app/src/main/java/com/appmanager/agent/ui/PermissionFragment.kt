@@ -21,6 +21,7 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import com.appmanager.agent.R
 import com.appmanager.agent.service.TouchAccessibilityService
+import com.appmanager.agent.util.ForegroundAppDetector
 import com.appmanager.agent.util.StorageAccessUtil
 
 class PermissionFragment : Fragment() {
@@ -69,6 +70,18 @@ class PermissionFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+
+        // 使用情况访问权限警告横幅
+        val warningBanner = view.findViewById<View>(R.id.usageStatsWarning)
+        val btnGrantUsageStats = view.findViewById<Button>(R.id.btnGrantUsageStats)
+
+        btnGrantUsageStats.setOnClickListener {
+            try {
+                startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+            } catch (e: Exception) {
+                Toast.makeText(requireContext(), "无法打开设置页面", Toast.LENGTH_SHORT).show()
+            }
+        }
 
         // 一键申请
         view.findViewById<Button>(R.id.btnRequestAll).setOnClickListener {
@@ -155,6 +168,20 @@ class PermissionFragment : Fragment() {
         )
 
         setupSpecialPermission(
+            view.findViewById(R.id.cardUsageStats),
+            label = "使用情况访问权限",
+            hint = "允许 Agent 检测当前前台应用包名并推送到服务器，用于触发器过滤等功能",
+            checkFn = { ForegroundAppDetector.hasUsageStatsPermission(requireContext()) },
+            grantFn = {
+                try {
+                    startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                } catch (e: Exception) {
+                    Toast.makeText(requireContext(), "无法打开设置页面", Toast.LENGTH_SHORT).show()
+                }
+            }
+        )
+
+        setupSpecialPermission(
             view.findViewById(R.id.cardReadLogs),
             label = "读取日志（READ_LOGS）",
             hint = "需通过「无线 ADB → 授权 READ_LOGS」由服务器授予，授权后重启 Agent 生效",
@@ -177,6 +204,12 @@ class PermissionFragment : Fragment() {
     override fun onResume() {
         super.onResume()
         val v = view ?: return
+
+        // 更新使用情况访问权限警告横幅显示状态
+        val warningBanner = v.findViewById<View>(R.id.usageStatsWarning)
+        val hasUsageStatsPermission = ForegroundAppDetector.hasUsageStatsPermission(requireContext())
+        warningBanner?.visibility = if (hasUsageStatsPermission) View.GONE else View.VISIBLE
+
         // 刷新运行时权限行
         refreshRuntimePermRows(v)
         // 刷新特殊权限卡片

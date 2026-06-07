@@ -3,6 +3,7 @@ package agent
 import (
 	"app-manager/database"
 	"app-manager/models"
+	"app-manager/stomp"
 	"encoding/json"
 	"log"
 	"strings"
@@ -56,6 +57,9 @@ func SyncDeviceStatus(deviceID string, connected bool) {
 			log.Printf("Failed to sync device status after register [%s]: %v", deviceID, err)
 		}
 	}
+
+	// 推送 Agent 连接状态变化到 STOMP（用于实时更新监控页面）
+	publishAgentConnectionChange()
 }
 
 // persistAgentConnectionKey 在 Agent 上线时把当前 WebSocket 连接键写入 agent_token（若为空），
@@ -233,6 +237,10 @@ func HandleHeartbeat(deviceID string, info map[string]interface{}) {
 	if av, ok := strFromInfo(info["agent_version"]); ok && av != "" {
 		updates["agent_version"] = av
 	}
+	// 前台应用包名：只有明确传递了值时才更新（避免空值覆盖）
+	if fg, ok := strFromInfo(info["foreground_package"]); ok && fg != "" {
+		updates["foreground_package"] = fg
+	}
 	if caps, ok := info["capabilities"].([]interface{}); ok {
 		arr := make([]string, 0, len(caps))
 		for _, c := range caps {
@@ -280,6 +288,7 @@ func HandleHeartbeat(deviceID string, info map[string]interface{}) {
 	}
 
 	profileChanged := false
+	foregroundAppChanged := false
 	if haveID {
 		if v, ok := updates["agent_alias"].(string); ok && v != old.AgentAlias {
 			profileChanged = true
@@ -287,8 +296,72 @@ func HandleHeartbeat(deviceID string, info map[string]interface{}) {
 		if v, ok := updates["group_name"].(string); ok && v != old.GroupName {
 			profileChanged = true
 		}
+		if v, ok := updates["foreground_package"].(string); ok && v != old.ForegroundPackage {
+			foregroundAppChanged = true
+		}
 	}
 	if profileChanged {
 		PublishDeviceProfileUpdated(dbID)
+	}
+	if foregroundAppChanged {
+		// 前台应用变化时推送到监控页面
+		publishAgentConnectionChange()
+	}
+}
+
+// publishAgentConnectionChange 推送 Agent 连接状态变化事件到 STOMP
+func publishAgentConnectionChange() {
+	// 查询当前在线设备数量
+	var onlineCount int64
+	database.DB.Model(&models.Device{}).Where("agent_connected = ?", true).Count(&onlineCount)
+
+	// 查询在线设备列表（最多100个）
+	var devices []models.Device
+	database.DB.Where("agent_connected = ?", true).
+		Order("last_seen_at DESC").
+		Limit(100).
+		Find(&devices)
+
+	// 预加载所有 APK 应用的包名-名称映射
+	var apps []models.App
+	database.DB.Select("package_name, name").Find(&apps)
+	appNameMap := make(map[string]string, len(apps))
+	for _, app := range apps {
+		if app.PackageName != "" {
+			appNameMap[app.PackageName] = app.Name
+		}
+	}
+
+	// 构建简化的设备信息列表（包含前台应用信息）
+	agents := make([]map[string]interface{}, 0, len(devices))
+	for _, d := range devices {
+		agent := map[string]interface{}{
+			"device_id":         d.ID,
+			"conn_key":          "", // 填充后续可从 AgentHub 获取
+			"name":              d.Name,
+			"serial":            d.Serial,
+			"android_serial":    d.AndroidSerial,
+			"status":            d.Status,
+			"last_seen_at":      d.LastSeenAt,
+			"foreground_package": d.ForegroundPackage,
+		}
+		// 如果前台应用包名在 APK 管理中存在，填充应用名称
+		if d.ForegroundPackage != "" {
+			if appName, ok := appNameMap[d.ForegroundPackage]; ok {
+				agent["foreground_app_name"] = appName
+			}
+		}
+		agents = append(agents, agent)
+	}
+
+	payload := map[string]interface{}{
+		"type":         "agent_connection_change",
+		"online_count": onlineCount,
+		"agents":       agents,
+		"timestamp":    time.Now().UTC().Format(time.RFC3339),
+	}
+
+	if data, err := json.Marshal(payload); err == nil {
+		stomp.DefaultHub.PublishJSON("/topic/monitor/agent-connections", string(data))
 	}
 }

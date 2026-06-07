@@ -67,6 +67,12 @@ class BackendMenuActivity : AppCompatActivity() {
         findViewById<View>(R.id.card_tile_listen_state).setOnClickListener {
             startActivity(Intent(this, DeviceListenStateActivity::class.java))
         }
+        findViewById<View>(R.id.card_tile_about).setOnClickListener {
+            startActivity(Intent(this, AboutActivity::class.java))
+        }
+        findViewById<View>(R.id.card_tile_system_update).setOnClickListener {
+            startActivity(Intent(this, SystemUpdateActivity::class.java))
+        }
 
         // 动态后台推送菜单（show_on_agent_home=false）
         buildBackendPushedMenus()

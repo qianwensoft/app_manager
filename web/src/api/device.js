@@ -63,6 +63,12 @@ export const pullInstalledApk = async (id, packageName) => {
   return { blob, filename }
 }
 
+/**
+ * Agent 在线：从设备导出 APK 到服务器 APK 管理（不下载到本地）
+ */
+export const exportInstalledApkToServer = (id, packageName) =>
+  http.post(`/devices/${id}/apps/export-to-server`, { package_name: packageName }, { timeout: 300000 })
+
 // ADB 操作
 export const rebootDevice = (id) => http.post(`/devices/${id}/adb/reboot`)
 

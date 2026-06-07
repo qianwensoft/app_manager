@@ -103,7 +103,7 @@ func GetApp(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": app})
 }
 
-// UpdateAppMeta 更新 APK 元信息（当前仅支持描述）。
+// UpdateAppMeta 更新 APK 元信息（名称和描述）。
 func UpdateAppMeta(c *gin.Context) {
 	var app models.App
 	if err := database.DB.First(&app, c.Param("id")).Error; err != nil {
@@ -111,16 +111,30 @@ func UpdateAppMeta(c *gin.Context) {
 		return
 	}
 	var req struct {
+		Name        string `json:"name"`
 		Description string `json:"description"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if err := database.DB.Model(&app).Update("description", trimAppDescription(req.Description)).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+
+	updates := make(map[string]interface{})
+	if req.Name != "" {
+		updates["name"] = strings.TrimSpace(req.Name)
 	}
+	if req.Description != "" || c.Request.ContentLength > 0 {
+		// 允许清空描述
+		updates["description"] = trimAppDescription(req.Description)
+	}
+
+	if len(updates) > 0 {
+		if err := database.DB.Model(&app).Updates(updates).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
+
 	_ = database.DB.First(&app, app.ID).Error
 	c.JSON(http.StatusOK, gin.H{"data": app})
 }

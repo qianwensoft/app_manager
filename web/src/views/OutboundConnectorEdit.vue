@@ -302,6 +302,22 @@
               <el-option v-for="d in definitions" :key="d.id" :label="`${d.key} — ${d.name}`" :value="d.id" />
             </el-select>
           </el-form-item>
+          <el-form-item label="前台应用包名过滤" v-if="form.trigger_type === 'device_event'">
+            <el-select
+              v-model="form.trigger_config.foreground_packages"
+              multiple
+              filterable
+              allow-create
+              default-first-option
+              clearable
+              style="width: 100%"
+              placeholder="留空表示全局生效，任何前台应用都触发"
+            >
+            </el-select>
+            <div class="hint" style="margin-top: 4px">
+              配置后，只有当设备前台应用在此列表中时才触发连接器。例如：com.example.scanner、com.example.reader
+            </div>
+          </el-form-item>
           <el-form-item label="设备范围" v-if="form.trigger_type !== 'http_webhook'">
             <el-select v-model="form.device_ids" multiple filterable collapse-tags clearable style="width: 100%" placeholder="不选表示全部设备">
               <el-option v-for="dv in devices" :key="dv.id" :label="`#${dv.id} ${dv.name || dv.serial || '-'}`" :value="dv.id" />
@@ -1696,7 +1712,7 @@ function resetFormNew() {
   form.priority = 0
   form.enabled = true
   form.trigger_type = 'device_event'
-  form.trigger_config = {}
+  form.trigger_config = { foreground_packages: [] }
   form.definition_ids = []
   form.device_ids = []
   form.phases = [defaultConnPhase()]
@@ -1719,6 +1735,10 @@ function applyRowToForm(row) {
   form.trigger_type = row.trigger_type || 'device_event'
   form.webhook_id = row.webhook_id || 0
   form.trigger_config = row.trigger_config ? { ...row.trigger_config } : {}
+  // 确保 foreground_packages 是数组
+  if (!Array.isArray(form.trigger_config.foreground_packages)) {
+    form.trigger_config.foreground_packages = []
+  }
   form.definition_ids = [...(row.definition_ids || [])]
   form.device_ids = [...(row.device_ids || [])]
   form.phases = phases

@@ -104,6 +104,7 @@ class AgentService : LifecycleService() {
 
     private lateinit var heartbeatManager: HeartbeatManager
     private lateinit var deviceInfoCollector: DeviceInfoCollector
+    private var foregroundAppMonitor: ForegroundAppMonitor? = null
     private var screenCaptureManager: ScreenCaptureManager? = null
     private var cameraStreamManager: CameraStreamManager? = null
     private var shellManager: ShellManager? = null
@@ -191,6 +192,25 @@ class AgentService : LifecycleService() {
                 updateNotification("已连接")
                 heartbeatManager.start()
                 deviceInfoCollector.start()
+
+                // 启动前台应用监听器（实时上报前台应用变化）
+                if (foregroundAppMonitor == null) {
+                    foregroundAppMonitor = ForegroundAppMonitor(this@AgentService) { packageName ->
+                        // 前台应用变化时立即上报
+                        if (::webSocket.isInitialized) {
+                            webSocket.send(
+                                DeviceInfoMessage(
+                                    deviceId = tok,
+                                    data = collectDeviceInfoData(this@AgentService).copy(
+                                        foregroundPackage = packageName
+                                    )
+                                )
+                            )
+                        }
+                    }
+                }
+                foregroundAppMonitor?.start()
+
                 webSocket.send(
                     DeviceInfoMessage(
                         deviceId = tok,
@@ -207,6 +227,7 @@ class AgentService : LifecycleService() {
                 updateNotification("重连中...")
                 heartbeatManager.stop()
                 deviceInfoCollector.stop()
+                foregroundAppMonitor?.stop()
             }
         )
 
@@ -235,6 +256,7 @@ class AgentService : LifecycleService() {
         // stopSelf() 若在初始化前触发（如未配置 serverUrl），lateinit 未赋值会崩溃
         if (::heartbeatManager.isInitialized) heartbeatManager.stop()
         if (::deviceInfoCollector.isInitialized) deviceInfoCollector.stop()
+        foregroundAppMonitor?.stop()
         screenCaptureManager?.stop()
         cameraStreamManager?.stopAll()
         shellManager?.stop()

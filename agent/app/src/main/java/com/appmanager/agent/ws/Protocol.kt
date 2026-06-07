@@ -63,7 +63,9 @@ data class DeviceInfoData(
     /** Agent APK 版本，供服务端设备档案展示 */
     @SerializedName("agent_version") val agentVersion: String = "",
     /** 手机硬件序列号（Build.SERIAL），服务端用于跨重装唯一识别设备 */
-    @SerializedName("android_serial") val androidSerial: String = ""
+    @SerializedName("android_serial") val androidSerial: String = "",
+    /** 当前前台应用包名 */
+    @SerializedName("foreground_package") val foregroundPackage: String = ""
 )
 
 data class ScreenFrameMessage(

@@ -439,6 +439,115 @@ func fallbackPulledApkFilename(pkg, path string) string {
 	return base + ext
 }
 
+// ExportInstalledApkToServer 从设备导出 APK 并保存到服务器 APK 管理系统（不下载到浏览器）
+func ExportInstalledApkToServer(c *gin.Context) {
+	device := getDeviceByID(c)
+	if device == nil {
+		return
+	}
+	var req struct {
+		PackageName string `json:"package_name" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 package_name"})
+		return
+	}
+	pkg := strings.TrimSpace(req.PackageName)
+	if pkg == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "empty package_name"})
+		return
+	}
+	routeKey, err := agent.AgentConnectionKey(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !agent.AgentHub.IsConnected(routeKey) {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Agent 未在线，无法导出 APK"})
+		return
+	}
+
+	rid := randomAgentRequestID()
+	ch := agent.RegisterPulledApkWait(rid, device.ID)
+	uploadPath := "/api/agent/pulled-apk-upload?request_id=" + url.QueryEscape(rid)
+	_ = agent.AgentHub.Send(routeKey, map[string]interface{}{
+		"type":   "command",
+		"action": "export_installed_apk",
+		"data": map[string]interface{}{
+			"request_id":   rid,
+			"package_name": pkg,
+			"upload_path":  uploadPath,
+		},
+	})
+
+	select {
+	case rep := <-ch:
+		if rep.Err != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": rep.Err})
+			return
+		}
+		if rep.Path == "" {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "无文件"})
+			return
+		}
+		defer os.Remove(rep.Path)
+
+		fname := rep.FileName
+		if fname == "" {
+			fname = fallbackPulledApkFilename(pkg, rep.Path)
+		}
+
+		// 读取文件内容
+		fileData, err := os.ReadFile(rep.Path)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "读取文件失败: " + err.Error()})
+			return
+		}
+
+		// 创建 APK 记录并保存文件
+		app := models.App{
+			Name:        fname,
+			PackageName: pkg,
+			VersionName: "", // 可以后续解析 APK 获取
+			VersionCode: 0,
+			FileSize:    int64(len(fileData)),
+		}
+
+		// 保存文件到存储路径
+		storagePath := config.C.Storage.Path
+		if storagePath == "" {
+			storagePath = "./uploads"
+		}
+		destPath := filepath.Join(storagePath, fname)
+
+		if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "创建目录失败: " + err.Error()})
+			return
+		}
+
+		if err := os.WriteFile(destPath, fileData, 0644); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存文件失败: " + err.Error()})
+			return
+		}
+
+		app.FilePath = destPath
+
+		// 保存到数据库
+		if err := database.DB.Create(&app).Error; err != nil {
+			os.Remove(destPath) // 清理文件
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "保存数据库失败: " + err.Error()})
+			return
+		}
+
+		logAudit(c, "导出 APK", fmt.Sprintf("从设备 %s 导出应用 %s 到 APK 管理", device.Name, pkg), nil)
+		c.JSON(http.StatusOK, gin.H{"message": "导出成功", "app": app})
+
+	case <-time.After(5 * time.Minute):
+		agent.ForgetPulledApkWait(rid)
+		c.JSON(http.StatusGatewayTimeout, gin.H{"error": "导出 APK 超时（体积大或设备权限不足）"})
+	}
+}
+
 // RefreshAgentDeviceInfoFromAgent 通知在线 Agent 立即上报 device_info（含 Wi‑Fi SSID 等），写入库后返回最新设备行。
 func RefreshAgentDeviceInfoFromAgent(c *gin.Context) {
 	device := getDeviceByID(c)
@@ -942,6 +1051,7 @@ func AdbConnectByAgentIP(c *gin.Context) {
 		return
 	}
 	clearAdbConnectingNote(serial)
+	adbKeepaliveClearBackoff(serial)
 
 	// 连接成功：仅持久化端口；IP 每次取 Agent 上报
 	now := time.Now()

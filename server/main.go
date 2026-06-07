@@ -23,6 +23,8 @@ import (
 )
 
 func main() {
+	api.SetStartTime(time.Now())
+
 	// 加载配置
 	cfgPath := "config.sqlite.yaml"
 	if len(os.Args) > 1 {
@@ -66,6 +68,7 @@ func main() {
 		database.SeedAdmin(database.DB)
 		datastack.StartBufferPollers(database.DB)
 		outbound.InitTriggerManager(database.DB)
+		api.StartMetricsAggregator()
 		scada.StartSimEngine()
 		scada.StartBatcher()
 		go scada.StartUDPIngress(9000)

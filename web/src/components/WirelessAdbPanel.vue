@@ -228,9 +228,12 @@ const props = defineProps({
 })
 
 const injected = inject('wirelessAdb', null)
+console.log('[WirelessAdbPanel] injected =', injected)
 const deviceId = computed(() => props.deviceId)
-const localAdb = injected ?? useWirelessAdb(deviceId)
-const adb = injected ?? localAdb
+
+// 🔧 FIX: 不使用 injected，总是创建新实例以避免 provide/inject 的 ref 嵌套问题
+const adb = useWirelessAdb(deviceId)
+console.log('[WirelessAdbPanel] adb created (独立实例):', adb)
 
 watch(
   () => adb.pairMethod,

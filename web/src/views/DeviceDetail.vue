@@ -611,14 +611,33 @@
       <el-tab-pane label="已安装应用" name="apps">
         <el-space wrap style="margin-bottom:12px;align-items:center">
           <el-input v-model="appFilter" placeholder="搜索包名或应用名" style="width:300px" />
+          <el-select v-model="appTypeFilter" placeholder="应用类型" style="width:120px" clearable>
+            <el-option label="全部" value="" />
+            <el-option label="用户应用" value="user" />
+            <el-option label="系统应用" value="system" />
+          </el-select>
           <el-button :loading="appsRefreshing" :disabled="!device?.agent_connected" @click="refreshAppsFromAgent">
             从 Agent 刷新
+          </el-button>
+          <el-button
+            v-if="canMutate"
+            type="primary"
+            :disabled="selectedApps.length === 0"
+            @click="batchExportApps"
+          >
+            导出选中应用 ({{ selectedApps.length }})
           </el-button>
         </el-space>
         <div v-if="device?.agent_connected" style="font-size:12px;color:#909399;margin:-4px 0 8px">
           列表含系统应用；安装/卸载后请点「从 Agent 刷新」。下载 APK 依赖系统是否允许读取安装包路径，失败时请用 ADB 或 Root 环境。
         </div>
-        <el-table :data="filteredApps" border height="500">
+        <el-table
+          :data="filteredApps"
+          border
+          height="500"
+          @selection-change="handleAppSelectionChange"
+        >
+          <el-table-column type="selection" width="55" />
           <el-table-column prop="app_label" label="应用名" min-width="140" show-overflow-tooltip />
           <el-table-column prop="package_name" label="包名" min-width="180" show-overflow-tooltip />
           <el-table-column label="类型" width="88">
@@ -814,10 +833,12 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const wirelessAdb = useWirelessAdb(computed(() => route.params.id))
-provide('wirelessAdb', wirelessAdb)
+// provide('wirelessAdb', wirelessAdb)  // 🔧 移除 provide，避免 ref 嵌套导致模板无法自动解包
 const device = ref(null)
 const apps = ref([])
 const appFilter = ref('')
+const appTypeFilter = ref('')
+const selectedApps = ref([])
 const refreshing = ref(false)
 const agentInfoRefreshing = ref(false)
 const screenshotting = ref(false)
@@ -1223,12 +1244,27 @@ const audios = computed(() => (fileHub.value.media || []).filter((m) => m.catego
 
 const filteredApps = computed(() => {
   const q = appFilter.value.trim().toLowerCase()
-  if (!q) return apps.value
-  return apps.value.filter((a) => {
-    const pkg = (a.package_name || '').toLowerCase()
-    const label = (a.app_label || '').toLowerCase()
-    return pkg.includes(q) || label.includes(q)
-  })
+  const typeFilter = appTypeFilter.value
+
+  let filtered = apps.value
+
+  // 类型筛选
+  if (typeFilter === 'user') {
+    filtered = filtered.filter(a => !a.is_system)
+  } else if (typeFilter === 'system') {
+    filtered = filtered.filter(a => a.is_system)
+  }
+
+  // 关键词搜索
+  if (q) {
+    filtered = filtered.filter((a) => {
+      const pkg = (a.package_name || '').toLowerCase()
+      const label = (a.app_label || '').toLowerCase()
+      return pkg.includes(q) || label.includes(q)
+    })
+  }
+
+  return filtered
 })
 
 // ─── ADB 状态辅助 ──────────────────────────────────────────────────────────────
@@ -1780,6 +1816,81 @@ const downloadApkFromDevice = async (row) => {
     n.close()
     pullApkPkg.value = ''
   }
+}
+
+const handleAppSelectionChange = (selection) => {
+  selectedApps.value = selection
+}
+
+const batchExportApps = async () => {
+  if (!device.value?.agent_connected) {
+    ElMessage.warning('需要 Agent 在线')
+    return
+  }
+
+  if (selectedApps.value.length === 0) {
+    ElMessage.warning('请先选择要导出的应用')
+    return
+  }
+
+  ElMessageBox.confirm(
+    `确认将选中的 ${selectedApps.value.length} 个应用导出到 APK 管理？导出后可在「APK 管理」页面下载。`,
+    '批量导出',
+    {
+      confirmButtonText: '确认导出',
+      cancelButtonText: '取消',
+      type: 'warning'
+    }
+  ).then(async () => {
+    const loadingNotification = ElNotification({
+      title: '批量导出中',
+      message: `正在导出 ${selectedApps.value.length} 个应用，请勿关闭页面...`,
+      type: 'info',
+      duration: 0
+    })
+
+    let successCount = 0
+    let failCount = 0
+    const failedApps = []
+
+    for (let i = 0; i < selectedApps.value.length; i++) {
+      const app = selectedApps.value[i]
+      try {
+        loadingNotification.message = `正在导出 ${i + 1}/${selectedApps.value.length}: ${app.app_label || app.package_name}`
+
+        // 调用 Agent 导出 APK 到服务器
+        await deviceApi.exportInstalledApkToServer(route.params.id, app.package_name)
+        successCount++
+      } catch (e) {
+        console.error(`导出失败: ${app.package_name}`, e)
+        failCount++
+        failedApps.push(app.app_label || app.package_name)
+      }
+    }
+
+    loadingNotification.close()
+
+    if (failCount === 0) {
+      ElNotification({
+        title: '批量导出完成',
+        message: `成功导出 ${successCount} 个应用到 APK 管理`,
+        type: 'success',
+        duration: 3000
+      })
+    } else {
+      ElNotification({
+        title: '批量导出完成（部分失败）',
+        message: `成功: ${successCount}，失败: ${failCount}。失败应用: ${failedApps.join(', ')}`,
+        type: 'warning',
+        duration: 5000
+      })
+    }
+
+    // 清空选中
+    selectedApps.value = []
+  }).catch(() => {
+    // 用户取消
+  })
 }
 
 const reboot = async () => {

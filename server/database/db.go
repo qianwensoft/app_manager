@@ -105,6 +105,8 @@ var migrateGroups = [][]interface{}{
 		&models.AgentUpdate{},
 		&models.AgentMenuItem{},
 		&models.AgentMenuAssignment{},
+		&models.ApiCallMetric{},
+		&models.AgentOnlineSample{},
 	},
 	// Group 2 — device activity
 	{

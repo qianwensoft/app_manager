@@ -11,6 +11,8 @@ type TriggerConfig struct {
 	TypeField string `json:"type_field"`
 	// 通用：本连接器匹配的事件类型值列表（空=匹配全部；支持前缀 "order.*"）
 	MatchValues []string `json:"match_values"`
+	// device_event 专属：前台应用包名白名单（空=不限制，任何前台应用都触发；非空=仅当前台应用在列表中时触发）
+	ForegroundPackages []string `json:"foreground_packages"`
 
 	// websocket / stomp 通用
 	URL             string            `json:"url"`

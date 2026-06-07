@@ -84,7 +84,9 @@ const routes = [
       { path: 'audit', name: 'AuditLog', meta: { title: '审计日志' }, component: () => import('@/views/AuditLog.vue') },
       { path: 'settings', name: 'Settings', meta: { title: '系统管理' }, component: () => import('@/views/Settings.vue') },
       { path: 'data', name: 'DataStack', meta: { title: '数据源与接口' }, component: () => import('@/views/data/DataStack.vue') },
-      { path: 'agent-menus', name: 'AgentMenus', meta: { title: 'Agent 菜单下发' }, component: () => import('@/views/agent-menus/AgentMenus.vue') }
+      { path: 'agent-menus', name: 'AgentMenus', meta: { title: 'Agent 菜单下发' }, component: () => import('@/views/agent-menus/AgentMenus.vue') },
+      { path: 'about', name: 'About', meta: { title: '关于' }, component: () => import('@/views/About.vue') },
+      { path: 'system-update', name: 'SystemUpdate', meta: { title: '系统更新' }, component: () => import('@/views/SystemUpdate.vue') }
     ]
   }
 ]

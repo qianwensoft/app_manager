@@ -127,6 +127,24 @@ func (h *Hub) HasLocal(deviceID string) bool {
 	return ok
 }
 
+// OnlineCount 返回本进程当前持有的 Agent WebSocket 连接数。
+func (h *Hub) OnlineCount() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.connections)
+}
+
+// ConnectedDeviceIDs 返回本进程当前在线的全部 deviceID 拷贝。
+func (h *Hub) ConnectedDeviceIDs() []string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	ids := make([]string, 0, len(h.connections))
+	for id := range h.connections {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 // DeliverRaw enqueues pre-serialized JSON to a local agent connection (cluster inbound).
 func (h *Hub) DeliverRaw(deviceID string, data []byte) error {
 	h.mu.RLock()

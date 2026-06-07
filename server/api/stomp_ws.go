@@ -21,6 +21,7 @@ var stompDestDeviceEventAnalysis = regexp.MustCompile(`^/topic/device/(\d+)/even
 var stompDestScadaPointData = regexp.MustCompile(`^/topic/scada/point-data/([^/]+)$`)
 var stompDestOutboundConnectorTrace = regexp.MustCompile(`^/topic/outbound/connectors/(\d+)/execution-trace$`)
 var stompDestOutboundWebhookDebug = regexp.MustCompile(`^/topic/outbound/webhooks/(\d+)/debug$`)
+var stompDestMonitorAgentConnections = regexp.MustCompile(`^/topic/monitor/agent-connections$`)
 
 const stompDestDevices = "/topic/devices"
 const stompDestEvents = "/topic/events"
@@ -87,6 +88,11 @@ func StompWS(c *gin.Context) {
 				unsubs[subID] = stomp.DefaultHub.Subscribe(dest, subID, send)
 				log.Printf("STOMP SUBSCRIBE user=%d dest=%s sub=%s", c.GetUint("user_id"), dest, subID)
 			default:
+				if mMon := stompDestMonitorAgentConnections.FindStringSubmatch(dest); mMon != nil {
+					unsubs[subID] = stomp.DefaultHub.Subscribe(dest, subID, send)
+					log.Printf("STOMP SUBSCRIBE user=%d dest=%s sub=%s", c.GetUint("user_id"), dest, subID)
+					continue
+				}
 				if mSc := stompDestScadaPointData.FindStringSubmatch(dest); mSc != nil {
 					if mSc[1] != "" {
 						unsubs[subID] = stomp.DefaultHub.Subscribe(dest, subID, send)

@@ -37,9 +37,12 @@ export interface Device {
   agent_alias: string
   allow_remote_screen: boolean
   android_serial: string
+  wireless_adb_port: number
   wireless_adb_serial: string
   last_seen_at: string | null
   agent_menu_revision: number
+  /** Current foreground app package name reported by Agent heartbeat */
+  foreground_package: string
   created_at: string
 }
 

@@ -19,7 +19,11 @@
       </el-upload>
     </div>
     <el-table :data="apps" border>
-      <el-table-column prop="name" label="文件名" min-width="140" show-overflow-tooltip />
+      <el-table-column label="应用名称" min-width="140" show-overflow-tooltip>
+        <template #default="{ row }">
+          <span :title="row.name">{{ row.name || '未命名应用' }}</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="package_name" label="包名" min-width="160" show-overflow-tooltip />
       <el-table-column prop="version_name" label="版本" width="120" />
       <el-table-column prop="file_size" label="大小" width="100">
@@ -31,7 +35,7 @@
       <el-table-column prop="description" label="描述" min-width="160" show-overflow-tooltip />
       <el-table-column label="操作" width="280" fixed="right">
         <template #default="{ row }">
-          <el-button size="small" type="primary" link @click="openDescEdit(row)">编辑描述</el-button>
+          <el-button size="small" type="primary" link @click="openEdit(row)">编辑</el-button>
           <el-button size="small" type="primary" @click="openInstall(row)">安装</el-button>
           <el-button size="small" type="warning" @click="openUninstall(row)">卸载</el-button>
           <el-button size="small" type="danger" @click="remove(row.id)">删除</el-button>
@@ -39,18 +43,29 @@
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="descDialog" title="编辑描述" width="520px" destroy-on-close>
-      <el-input
-        v-model="descEditText"
-        type="textarea"
-        :rows="5"
-        maxlength="4000"
-        show-word-limit
-        placeholder="APK 说明"
-      />
+    <el-dialog v-model="editDialog" title="编辑应用信息" width="520px" destroy-on-close>
+      <el-form label-width="80px">
+        <el-form-item label="应用名称">
+          <el-input
+            v-model="editForm.name"
+            placeholder="应用名称"
+            maxlength="100"
+          />
+        </el-form-item>
+        <el-form-item label="描述">
+          <el-input
+            v-model="editForm.description"
+            type="textarea"
+            :rows="5"
+            maxlength="4000"
+            show-word-limit
+            placeholder="APK 说明"
+          />
+        </el-form-item>
+      </el-form>
       <template #footer>
-        <el-button @click="descDialog = false">取消</el-button>
-        <el-button type="primary" :loading="descSaving" @click="saveDescription">保存</el-button>
+        <el-button @click="editDialog = false">取消</el-button>
+        <el-button type="primary" :loading="editSaving" @click="saveEdit">保存</el-button>
       </template>
     </el-dialog>
 
@@ -88,10 +103,10 @@ const currentApp = ref(null)
 const installAndLaunch = ref(true)
 const uploadDescription = ref('')
 
-const descDialog = ref(false)
-const descEditText = ref('')
-const descEditId = ref(null)
-const descSaving = ref(false)
+const editDialog = ref(false)
+const editForm = ref({ name: '', description: '' })
+const editId = ref(null)
+const editSaving = ref(false)
 
 const formatUploadTime = (row) => {
   if (!row?.created_at) return '-'
@@ -123,24 +138,30 @@ const handleUploadRequest = async (options) => {
   }
 }
 
-const openDescEdit = (app) => {
-  descEditId.value = app.id
-  descEditText.value = app.description || ''
-  descDialog.value = true
+const openEdit = (app) => {
+  editId.value = app.id
+  editForm.value = {
+    name: app.name || '',
+    description: app.description || ''
+  }
+  editDialog.value = true
 }
 
-const saveDescription = async () => {
-  if (descEditId.value == null) return
-  descSaving.value = true
+const saveEdit = async () => {
+  if (editId.value == null) return
+  editSaving.value = true
   try {
-    await appApi.updateAppMeta(descEditId.value, { description: descEditText.value })
+    await appApi.updateAppMeta(editId.value, {
+      name: editForm.value.name,
+      description: editForm.value.description
+    })
     ElMessage.success('已保存')
-    descDialog.value = false
+    editDialog.value = false
     await load()
   } catch (e) {
     ElMessage.error(e.response?.data?.error || e.message || '保存失败')
   } finally {
-    descSaving.value = false
+    editSaving.value = false
   }
 }
 

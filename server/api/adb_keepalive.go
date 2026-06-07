@@ -39,9 +39,14 @@ func keepaliveOnce() {
 		serial := ip + ":" + strconv.Itoa(port)
 		st := resolveAdbSerialState(cli, serial)
 		if st == "device" {
+			adbKeepaliveClearBackoff(serial)
 			continue
 		}
 		if st == "connecting" {
+			continue
+		}
+		// 不可达设备退避中：跳过本轮重连，避免 connecting↔offline 无限抖动
+		if adbKeepaliveInBackoff(serial) {
 			continue
 		}
 		noteAdbConnectAttempt(serial)
@@ -49,6 +54,7 @@ func keepaliveOnce() {
 		if err != nil {
 			_ = cli.Disconnect(serial)
 			clearAdbConnectingNote(serial)
+			adbKeepaliveRecordFailure(serial)
 			log.Printf("[adb-keepalive] device %d %s connect error: %v", d.ID, serial, err)
 			continue
 		}
@@ -57,8 +63,20 @@ func keepaliveOnce() {
 		if strings.Contains(outLow, "failed") || strings.Contains(outLow, "cannot") || strings.Contains(outLow, "refused") {
 			_ = cli.Disconnect(serial)
 			clearAdbConnectingNote(serial)
+			adbKeepaliveRecordFailure(serial)
 			database.DB.Model(&models.Device{}).Where("id = ?", d.ID).Update("status", "offline")
 			log.Printf("[adb-keepalive] device %d %s offline: %s", d.ID, serial, out)
+			continue
 		}
+		// connect 命令未报错，但需确认是否真正进入 device 状态；否则计入失败以触发退避
+		settled := waitAdbSerialState(cli, serial, 4*time.Second)
+		if settled == "device" {
+			adbKeepaliveClearBackoff(serial)
+			continue
+		}
+		_ = cli.Disconnect(serial)
+		clearAdbConnectingNote(serial)
+		adbKeepaliveRecordFailure(serial)
+		log.Printf("[adb-keepalive] device %d %s not ready (state=%s), backing off", d.ID, serial, settled)
 	}
 }

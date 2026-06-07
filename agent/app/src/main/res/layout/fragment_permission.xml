@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
@@ -8,6 +9,50 @@
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:padding="16dp">
+
+        <!-- 使用情况访问权限提示横幅 -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/usageStatsWarning"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            app:cardBackgroundColor="#FFF3E0"
+            app:cardElevation="2dp"
+            app:cardCornerRadius="8dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="12dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="⚠️ 需要授权使用情况访问权限"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:textColor="#E65100" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="前台应用检测功能需要此权限。未授权时无法检测当前正在使用的应用。"
+                    android:textSize="12sp"
+                    android:textColor="#5D4037" />
+
+                <Button
+                    android:id="@+id/btnGrantUsageStats"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="立即授权"
+                    android:textSize="12sp"
+                    style="@style/Widget.MaterialComponents.Button.TextButton" />
+
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
 
         <!-- 一键申请全部 -->
         <Button
@@ -69,6 +114,11 @@
 
         <include
             android:id="@+id/cardWirelessAdb"
+            layout="@layout/item_special_permission"
+            android:layout_marginTop="8dp" />
+
+        <include
+            android:id="@+id/cardUsageStats"
             layout="@layout/item_special_permission"
             android:layout_marginTop="8dp" />
 

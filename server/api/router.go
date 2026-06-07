@@ -30,6 +30,9 @@ func SetupRouter() *gin.Engine {
 		c.Next()
 	})
 
+	// 接口调用量埋点（内存累加，定期 flush；仅统计 /api/*）
+	r.Use(MetricsMiddleware())
+
 	// 静态文件
 	r.Static("/assets", "./web/dist/assets")
 	r.StaticFile("/", "./web/dist/index.html")
@@ -70,6 +73,7 @@ func SetupRouter() *gin.Engine {
 	r.POST("/api/agent/pulled-apk-upload", AgentPulledApkUpload)
 	r.GET("/api/agent/menu-manifest", AgentMenuManifest)
 	r.POST("/api/agent/menu-execution/report", AgentMenuExecutionReport)
+	r.GET("/api/agent/update/check", AgentUpdateCheck)
 
 	// 免登录：组态分享
 	r.GET("/api/scada/info/share/:token", GetScadaInfoByShareToken)
@@ -121,6 +125,7 @@ func SetupRouter() *gin.Engine {
 		d.GET("/:id/apps", GetDeviceApps)
 		d.POST("/:id/apps/refresh", RefreshDeviceAppsFromAgent)
 		d.POST("/:id/apps/pull-apk", auth.RequireRole("admin", "operator"), PullInstalledApkFromAgent)
+		d.POST("/:id/apps/export-to-server", auth.RequireRole("admin", "operator"), ExportInstalledApkToServer)
 		d.POST("/:id/agent/refresh-info", RefreshAgentDeviceInfoFromAgent)
 		d.POST("/:id/agent/open-wireless-adb", auth.RequireRole("admin", "operator"), OpenWirelessAdbOnAgent)
 		d.POST("/:id/agent/trigger-menu", auth.RequireRole("admin", "operator"), TriggerAgentMenuOnAgent)
@@ -191,6 +196,15 @@ func SetupRouter() *gin.Engine {
 		settings.PUT("/register", UpdateRegisterSetting)
 		settings.GET("/cluster", ClusterStatus)
 		settings.GET("/cluster/agent-route/:deviceKey", ClusterAgentRoute)
+		settings.GET("/system-info", GetSystemInfo)
+		settings.PUT("/env", UpdateEnvSettings)
+		settings.POST("/ffmpeg/check", CheckFFmpeg)
+		settings.POST("/ffmpeg/install", InstallFFmpeg)
+		// 运行监控：Agent 在线连接 + 接口调用量趋势/详情
+		settings.GET("/agent-connections", GetAgentConnections)
+		settings.GET("/agent-online-trend", GetAgentOnlineTrend)
+		settings.GET("/api-call-trend", GetApiCallTrend)
+		settings.GET("/api-call-details", GetApiCallDetails)
 	}
 
 	// 用户管理（仅 admin）
