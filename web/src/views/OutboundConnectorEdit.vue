@@ -45,6 +45,19 @@
             <el-input-number v-model="form.debounce_diff_event_ms" :min="0" :max="600000" :step="100" />
             <span class="hint">事件类型切换后，距上次执行不足此值则跳过（0 关闭）</span>
           </el-form-item>
+          <el-form-item label="相同扫码防抖 ms">
+            <el-input-number v-model="form.debounce_same_scan_ms" :min="0" :max="600000" :step="100" />
+            <span class="hint">同一设备、相同 event_data.value（条码）重复上报时跳过（0 关闭）</span>
+          </el-form-item>
+          <el-form-item label="广播后冷却 ms">
+            <el-input-number v-model="form.loop_cooldown_ms" :min="0" :max="600000" :step="100" />
+            <span class="hint">本连接器 broadcast_intent 成功后，同设备在冷却期内不再触发（建议 1500–3000；0 关闭）</span>
+          </el-form-item>
+          <el-alert type="info" :closable="false" show-icon class="loop-guard-alert" title="防扫码回环">
+            <template #description>
+              出站广播会自动带 extra <code>_appmanager_outbound</code>，Agent 监听会忽略该标记；若模拟广播仍被业务 App 转成扫码，请开启「相同扫码防抖」与「广播后冷却」。
+            </template>
+          </el-alert>
           <el-form-item label="触发方式">
             <el-select v-model="form.trigger_type" style="width: 220px" @change="onTriggerTypeChange">
               <el-option label="设备事件（内部）" value="device_event" />
@@ -54,6 +67,8 @@
               <el-option label="HTTP 轮询" value="http_poll" />
               <el-option label="数据接口轮询" value="data_poll" />
               <el-option label="MQTT / Kafka 订阅" value="channel" />
+              <el-option label="Cron 定时" value="cron" />
+              <el-option label="系统事件" value="system_event" />
             </el-select>
           </el-form-item>
 
@@ -242,6 +257,40 @@
             </el-form-item>
           </template>
 
+          <!-- Cron 定时触发器 -->
+          <template v-if="form.trigger_type === 'cron'">
+            <el-form-item label="Cron 表达式" required>
+              <el-input v-model="form.trigger_config.cron_expression" placeholder="0 9 * * MON-FRI（分 时 日 月 周）" />
+            </el-form-item>
+            <el-form-item label="时区">
+              <el-input v-model="form.trigger_config.cron_timezone" placeholder="Asia/Shanghai（空=服务器本地）" />
+            </el-form-item>
+            <el-form-item label="事件类型">
+              <el-input v-model="form.trigger_config.cron_event_type" placeholder="cron.tick（默认）" />
+            </el-form-item>
+            <el-form-item label="类型字段路径">
+              <el-input v-model="form.trigger_config.type_field" placeholder="event_type（默认）" />
+            </el-form-item>
+            <el-form-item label="匹配值">
+              <el-select v-model="form.trigger_config.match_values" multiple filterable allow-create default-first-option style="width:100%" placeholder="如 cron.tick">
+                <el-option value="cron.tick" label="cron.tick" />
+              </el-select>
+            </el-form-item>
+          </template>
+
+          <!-- 系统事件触发器 -->
+          <template v-if="form.trigger_type === 'system_event'">
+            <el-form-item label="订阅事件" required>
+              <el-select v-model="form.trigger_config.match_values" multiple filterable allow-create default-first-option style="width:100%" placeholder="至少一项">
+                <el-option value="device.online" label="device.online — 设备上线" />
+                <el-option value="device.offline" label="device.offline — 设备离线" />
+                <el-option value="install.completed" label="install.completed — 安装完成" />
+                <el-option value="install.*" label="install.* — 安装相关（前缀）" />
+              </el-select>
+            </el-form-item>
+            <div class="hint" style="margin: -8px 0 12px 100px">Agent WS 连接/断开触发 online/offline；安装任务成功触发 install.completed。</div>
+          </template>
+
           <!-- 运行状态 -->
           <el-form-item v-if="!isNew && form.trigger_type !== 'device_event'" label="触发器状态">
             <span :class="['trigger-status', triggerStatus.status]">{{ triggerStatusLabel }}</span>
@@ -340,10 +389,12 @@
                       title="展示时长（毫秒），默认 8000"
                     />
                   </template>
-                  <template v-else>
+                  <template v-else-if="st.step_type === 'broadcast_intent'">
                     <el-input v-model="st._action" placeholder="Intent action" style="width: 200px" />
                     <el-input v-model="st._pkg" placeholder="包名(可选)" style="width: 140px" />
-                    <el-input v-model="st._extrasJson" type="textarea" :rows="1" placeholder='extras JSON，如 {"data":"{{device_event.event_data}}"}' style="flex: 1" />
+                    <span class="broadcast-extras-summary" :title="broadcastExtrasSummary(st, true)">
+                      {{ broadcastExtrasSummary(st) }}
+                    </span>
                   </template>
                   <div class="step-delays" title="本步骤执行前、执行完成后各自等待的毫秒数">
                     <span class="delay-lbl">前(ms)</span>
@@ -381,6 +432,56 @@
                         <el-option label="不合并 event_data（仅用全局变量与上游已写入的 context / http.last）" value="off" />
                         <el-option label="合并 device_event.event_data → context（本步请求或展示前生效）" value="event_data_json" />
                       </el-select>
+                    </div>
+                    <div v-if="st.step_type === 'broadcast_intent'" class="step-cx-block">
+                      <div class="step-cx-title">模拟数据标签 (extras)</div>
+                      <p class="step-cx-desc">
+                        键名为目标 App / 扫码枪约定的 Intent extra；值为条码或占位符。常用：
+                        <code v-pre>{{context.value}}</code>（原始扫码）、上游 HTTP 写入的 <code v-pre>{{context.xxx}}</code>。
+                      </p>
+                      <div v-for="(row, ri) in st._extrasRows" :key="ri" class="param-mapping-row">
+                        <el-select
+                          v-model="row.key"
+                          filterable
+                          allow-create
+                          default-first-option
+                          placeholder="数据标签"
+                          style="width: 168px"
+                          size="small"
+                          @change="onBroadcastExtraRowChange(st)"
+                        >
+                          <el-option v-for="k in broadcastExtraKeySuggestions" :key="k" :label="k" :value="k" />
+                        </el-select>
+                        <el-autocomplete
+                          v-model="row.value"
+                          :fetch-suggestions="broadcastExtraValueSuggest"
+                          placeholder="{{context.value}}"
+                          style="flex: 1; min-width: 180px"
+                          size="small"
+                          clearable
+                          @change="onBroadcastExtraRowChange(st)"
+                          @select="onBroadcastExtraRowChange(st)"
+                        />
+                        <el-button link type="danger" size="small" @click="removeBroadcastExtraRow(st, ri)">删</el-button>
+                      </div>
+                      <el-space wrap style="margin-top: 4px">
+                        <el-button size="small" plain @click="addBroadcastExtraRow(st)">+ 加标签</el-button>
+                        <el-button size="small" plain @click="fillBroadcastExtrasContextValue(st)">填入扫码值</el-button>
+                        <el-button size="small" type="primary" plain @click="importBroadcastKeysFromDefinitions(st)">从绑定事件导入</el-button>
+                        <el-button size="small" link type="primary" @click="st._extrasAdvanced = !st._extrasAdvanced">
+                          {{ st._extrasAdvanced ? '收起 JSON' : '高级 JSON' }}
+                        </el-button>
+                      </el-space>
+                      <el-input
+                        v-if="st._extrasAdvanced"
+                        v-model="st._extrasJson"
+                        type="textarea"
+                        :rows="3"
+                        class="broadcast-extras-json"
+                        placeholder='{"se4500":"{{context.value}}"}'
+                        style="margin-top: 8px"
+                        @blur="syncExtrasRowsFromJson(st)"
+                      />
                     </div>
                     <div v-if="st.step_type === 'http'" class="step-cx-block">
                       <div class="step-cx-title">执行后 · 返回值 → 上下文</div>
@@ -1040,6 +1141,8 @@ const form = reactive({
   default_retry_max: 2,
   debounce_same_event_ms: 0,
   debounce_diff_event_ms: 0,
+  debounce_same_scan_ms: 0,
+  loop_cooldown_ms: 0,
   priority: 0,
   enabled: true,
   trigger_type: 'device_event',
@@ -1066,7 +1169,7 @@ const pageTitle = computed(() => {
 
 const triggerStatusLabel = computed(() => {
   const s = triggerStatus.value?.status
-  const map = { running: '运行中', stopped: '已停止', error: '错误', manager_not_started: '未启动' }
+  const map = { running: '运行中', listening: '监听中', stopped: '已停止', error: '错误', manager_not_started: '未启动' }
   return map[s] || s || '未知'
 })
 
@@ -1141,6 +1244,151 @@ const CHAIN_CONTEXT_DEMO_OVERRIDES = {
   '{{context.token}}': 'demo-token'
 }
 
+/** 常见 PDA / 扫码枪 Intent extra 键名 */
+const COMMON_BROADCAST_EXTRA_KEYS = [
+  'data', 'barcode_string', 'barcode', 'SCAN_DATA', 'scannerdata',
+  'se4500', 'decode_data', 'BARCODE', 'SCAN_BARCODE1', 'barcodeData', 'decodeData'
+]
+
+function parseExtrasToRows(extras) {
+  if (!extras || typeof extras !== 'object' || Array.isArray(extras)) return []
+  return Object.entries(extras).map(([key, value]) => ({
+    key: String(key),
+    value: value == null ? '' : String(value)
+  }))
+}
+
+function rowsToExtrasObject(rows) {
+  const out = {}
+  for (const row of rows || []) {
+    const k = String(row?.key || '').trim()
+    if (!k) continue
+    out[k] = String(row?.value ?? '')
+  }
+  return out
+}
+
+function syncExtrasJsonFromRows(st) {
+  try {
+    st._extrasJson = JSON.stringify(rowsToExtrasObject(st._extrasRows), null, 0)
+  } catch {
+    st._extrasJson = '{}'
+  }
+}
+
+function ensureBroadcastExtrasRows(st) {
+  if (!Array.isArray(st._extrasRows)) {
+    try {
+      st._extrasRows = parseExtrasToRows(JSON.parse(st._extrasJson || '{}'))
+    } catch {
+      st._extrasRows = []
+    }
+  }
+}
+
+function syncExtrasRowsFromJson(st) {
+  try {
+    const o = JSON.parse(st._extrasJson || '{}')
+    if (typeof o !== 'object' || o === null || Array.isArray(o)) return
+    st._extrasRows = parseExtrasToRows(o)
+  } catch {
+    ElMessage.warning('extras JSON 格式无效，已保留当前行编辑内容')
+  }
+}
+
+function addBroadcastExtraRow(st) {
+  ensureBroadcastExtrasRows(st)
+  st._extrasRows.push({ key: '', value: '{{context.value}}' })
+  syncExtrasJsonFromRows(st)
+}
+
+function removeBroadcastExtraRow(st, ri) {
+  ensureBroadcastExtrasRows(st)
+  st._extrasRows.splice(ri, 1)
+  syncExtrasJsonFromRows(st)
+}
+
+function onBroadcastExtraRowChange(st) {
+  syncExtrasJsonFromRows(st)
+}
+
+function fillBroadcastExtrasContextValue(st) {
+  ensureBroadcastExtrasRows(st)
+  if (!st._extrasRows.length) {
+    st._extrasRows.push({ key: '', value: '{{context.value}}' })
+  } else {
+    for (const row of st._extrasRows) {
+      if (!String(row.value || '').trim()) row.value = '{{context.value}}'
+    }
+  }
+  syncExtrasJsonFromRows(st)
+}
+
+function importBroadcastKeysFromDefinitions(st) {
+  const keys = broadcastExtraKeySuggestions.value
+  if (!keys.length) {
+    ElMessage.info('暂无可用数据标签（请先绑定事件定义或手动添加）')
+    return
+  }
+  ensureBroadcastExtrasRows(st)
+  const existing = new Set(st._extrasRows.map((r) => String(r.key || '').trim()).filter(Boolean))
+  let added = 0
+  for (const k of keys) {
+    if (existing.has(k)) continue
+    st._extrasRows.push({ key: k, value: '{{context.value}}' })
+    existing.add(k)
+    added++
+  }
+  if (!added) {
+    ElMessage.info('绑定事件中的数据标签已全部添加')
+    return
+  }
+  syncExtrasJsonFromRows(st)
+  ElMessage.success(`已导入 ${added} 个数据标签`)
+}
+
+function broadcastExtrasSummary(st, full = false) {
+  ensureBroadcastExtrasRows(st)
+  const rows = (st._extrasRows || []).filter((r) => String(r.key || '').trim())
+  if (!rows.length) return full ? '未配置模拟数据标签' : '未配置 extras'
+  if (full) {
+    return rows.map((r) => `${r.key}=${r.value || '（空）'}`).join(' · ')
+  }
+  const preview = rows.slice(0, 2).map((r) => r.key).join(', ')
+  const more = rows.length > 2 ? ` 等${rows.length}个` : ''
+  return `${rows.length} 个标签：${preview}${more}`
+}
+
+function broadcastExtraValueSuggest(q, cb) {
+  const presets = ['{{context.value}}', '{{device_event.event_data}}']
+  for (const k of availableContextKeys.value) {
+    if (k.startsWith('context.')) presets.push(`{{${k}}}`)
+  }
+  const uniq = [...new Set(presets)]
+  const qn = String(q || '').trim().toLowerCase()
+  cb(uniq.filter((v) => !qn || v.toLowerCase().includes(qn)).map((v) => ({ value: v })))
+}
+
+const broadcastExtraKeySuggestions = computed(() => {
+  const seen = new Set()
+  const out = []
+  const add = (k) => {
+    const s = String(k || '').trim()
+    if (!s || seen.has(s)) return
+    seen.add(s)
+    out.push(s)
+  }
+  const linked = new Set(form.definition_ids || [])
+  const pool = linked.size
+    ? definitions.value.filter((d) => linked.has(d.id))
+    : definitions.value
+  for (const d of pool) {
+    for (const k of d.extra_keys || []) add(k)
+  }
+  for (const k of COMMON_BROADCAST_EXTRA_KEYS) add(k)
+  return out.sort()
+})
+
 async function loadTemplateDemo() {
   loadingTemplateDemo.value = true
   try {
@@ -1179,9 +1427,11 @@ function collectConnectorTemplateSamples() {
         }
       }
       if (typ === 'broadcast_intent') {
+        ensureBroadcastExtrasRows(st)
+        syncExtrasJsonFromRows(st)
         const ex = (st._extrasJson || '').trim()
-        if (ex) {
-          labels.push('广播 Intent · extras JSON')
+        if (ex && ex !== '{}') {
+          labels.push('广播 Intent · extras')
           strings.push(ex)
         }
         const act = (st._action || '').trim()
@@ -1347,7 +1597,9 @@ function defaultConnStep() {
     _stepTemplateParamsText: '',
     _action: '',
     _pkg: '',
-    _extrasJson: '{}'
+    _extrasJson: '{}',
+    _extrasRows: [],
+    _extrasAdvanced: false
   }
 }
 
@@ -1368,12 +1620,13 @@ function mapPhaseFromApi(ph) {
       _pkg: cfg.package || '',
       _extrasJson: '{}'
     }
-    if (s.step_type === 'broadcast_intent' && cfg.extras) {
-      try {
-        st._extrasJson = JSON.stringify(cfg.extras)
-      } catch {
-        st._extrasJson = '{}'
+    if (s.step_type === 'broadcast_intent') {
+      st._extrasRows = parseExtrasToRows(cfg.extras || {})
+      if (!st._extrasRows.length) {
+        st._extrasRows = [{ key: '', value: '{{context.value}}' }]
       }
+      st._extrasAdvanced = false
+      syncExtrasJsonFromRows(st)
     }
     if (s.step_type === 'data_interface') {
       const di = cfg.data_interface || {}
@@ -1438,6 +1691,8 @@ function resetFormNew() {
   form.default_retry_max = 2
   form.debounce_same_event_ms = 0
   form.debounce_diff_event_ms = 0
+  form.debounce_same_scan_ms = 0
+  form.loop_cooldown_ms = 0
   form.priority = 0
   form.enabled = true
   form.trigger_type = 'device_event'
@@ -1457,6 +1712,8 @@ function applyRowToForm(row) {
   form.default_retry_max = row.default_retry_max ?? 0
   form.debounce_same_event_ms = row.debounce_same_event_ms ?? 0
   form.debounce_diff_event_ms = row.debounce_diff_event_ms ?? 0
+  form.debounce_same_scan_ms = row.debounce_same_scan_ms ?? 0
+  form.loop_cooldown_ms = row.loop_cooldown_ms ?? 0
   form.priority = row.priority ?? 0
   form.enabled = row.enabled !== false
   form.trigger_type = row.trigger_type || 'device_event'
@@ -1525,6 +1782,15 @@ function onTriggerTypeChange(val) {
     match_values: form.trigger_config.match_values || []
   }
   form.trigger_config = { ...keep }
+  if (val === 'cron') {
+    if (!form.trigger_config.type_field) form.trigger_config.type_field = 'event_type'
+    if (!form.trigger_config.cron_event_type) form.trigger_config.cron_event_type = 'cron.tick'
+    if (!form.trigger_config.match_values?.length) form.trigger_config.match_values = ['cron.tick']
+    if (!form.trigger_config.cron_expression) form.trigger_config.cron_expression = '0 * * * *'
+  }
+  if (val === 'system_event') {
+    if (!form.trigger_config.match_values?.length) form.trigger_config.match_values = ['device.online']
+  }
 }
 
 async function loadAllEndpoints() {
@@ -1718,10 +1984,14 @@ function onConnStepTypeChange(ph, si) {
       context_merge_after: 'off',
       context_merge: off ? 'off' : 'event_data_json'
     }
-  } else {
+  } else if (st.step_type === 'broadcast_intent') {
     st._action = st._action || ''
     st._pkg = st._pkg || ''
-    st._extrasJson = st._extrasJson || '{}'
+    ensureBroadcastExtrasRows(st)
+    if (!st._extrasRows.length) {
+      st._extrasRows.push({ key: '', value: '{{context.value}}' })
+    }
+    syncExtrasJsonFromRows(st)
     const off = prevLeg === 'off' && !prevBefore
     st.config = {
       ...(st.config || {}),
@@ -1892,11 +2162,22 @@ function buildPhasesArray(opts = {}) {
         if (forSave && !action) {
           return { error: '「广播 Intent」步骤需填写 action' }
         }
-        let extras = {}
-        try {
-          extras = JSON.parse(st._extrasJson || '{}')
-        } catch {
-          return { error: '广播步骤 extras 须为合法 JSON 对象' }
+        ensureBroadcastExtrasRows(st)
+        if (st._extrasAdvanced) syncExtrasRowsFromJson(st)
+        syncExtrasJsonFromRows(st)
+        let extras = rowsToExtrasObject(st._extrasRows)
+        if (st._extrasAdvanced) {
+          try {
+            extras = JSON.parse(st._extrasJson || '{}')
+            if (typeof extras !== 'object' || extras === null || Array.isArray(extras)) {
+              return { error: '广播步骤 extras 须为合法 JSON 对象' }
+            }
+          } catch {
+            return { error: '广播步骤 extras 须为合法 JSON 对象' }
+          }
+        }
+        if (forSave && !Object.keys(extras).length) {
+          return { error: '「广播 Intent」请至少配置一个模拟数据标签（extras 键值）' }
         }
         const cfg = { action: action || '', extras: extras || {}, ...stepContextMergePayload(st) }
         const pkg = (st._pkg || '').trim()
@@ -1980,6 +2261,8 @@ async function saveConn() {
     default_retry_max: form.default_retry_max,
     debounce_same_event_ms: form.debounce_same_event_ms ?? 0,
     debounce_diff_event_ms: form.debounce_diff_event_ms ?? 0,
+    debounce_same_scan_ms: form.debounce_same_scan_ms ?? 0,
+    loop_cooldown_ms: form.loop_cooldown_ms ?? 0,
     priority: form.priority,
     enabled: form.enabled,
     trigger_type: form.trigger_type || 'device_event',
@@ -2524,6 +2807,18 @@ onUnmounted(() => {
   gap: 6px;
   margin-bottom: 6px;
   flex-wrap: wrap;
+}
+.broadcast-extras-summary {
+  font-size: 12px;
+  color: #64748b;
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.broadcast-extras-json :deep(textarea) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
 }
 .trigger-status {
   display: inline-block;

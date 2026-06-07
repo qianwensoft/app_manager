@@ -39,6 +39,11 @@ type TriggerConfig struct {
 	DataPollParams      map[string]interface{} `json:"data_poll_params"`
 	DataPollResultField string                 `json:"data_poll_result_field"`
 
+	// cron 专属（5 段：分 时 日 月 周）
+	CronExpression string `json:"cron_expression"` // 如 "0 9 * * MON-FRI"
+	CronTimezone   string `json:"cron_timezone"`   // IANA 时区，空=服务器本地
+	CronEventType  string `json:"cron_event_type"` // 触发事件类型，默认 cron.tick
+
 	// channel 专属（mqtt / kafka）
 	ChannelType      string `json:"channel_type"`       // mqtt | kafka
 	ChannelTopic     string `json:"channel_topic"`      // MQTT topic 或 Kafka topic

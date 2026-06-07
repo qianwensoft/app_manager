@@ -198,7 +198,7 @@
               show-icon
               style="margin-bottom: 12px"
               title="说明"
-              description="与「自定义事件中心」一致：启用会按当前已选规则向本机 Agent 下发监听；停用会下发停止并标记未激活；删除会移除本机监听快照。需 Agent 在线时下发才能立即生效。"
+              description="与「自定义事件中心」一致：启用会按当前已选规则向本机 Agent 下发监听；停用会下发停止并标记未激活；删除会向 Agent 下发停止监听并移除本机监听快照。"
             />
             <el-table :data="deviceListenTableData" border size="small" v-loading="deviceListenLoading" empty-text="暂无监听记录">
               <el-table-column label="状态" width="100" align="center">
@@ -227,6 +227,120 @@
             <div v-if="canMutate && !deviceListenSnapshot && !deviceListenLoading" style="margin-top: 12px">
               <el-button type="primary" @click="startDeviceCustomListen">启用监听</el-button>
             </div>
+          </el-card>
+
+          <el-card shadow="never" class="events-out-card" style="margin-top: 16px">
+            <template #header>
+              <span>事件分析</span>
+              <el-tag v-if="eventAnalysisActive" type="warning" size="small" style="float: right; margin-top: 2px">
+                分析中
+              </el-tag>
+            </template>
+            <el-alert
+              type="info"
+              :closable="false"
+              show-icon
+              style="margin-bottom: 12px"
+              title="自动识别扫码广播"
+              description="点击「开始分析」后，请在设备上连续扫码 2～3 次。Agent 将捕获广播 Action 与 Extra 键，经 STOMP 实时推送匹配建议（与 ADB logcat 分析流程一致）。分析期间会暂停正式监听。"
+            />
+            <el-form label-width="88px" size="small" style="margin-bottom: 12px" :disabled="eventAnalysisActive">
+              <el-form-item label="探针模式">
+                <el-radio-group v-model="eventAnalysisProbeMode">
+                  <el-radio value="preset">预设探针</el-radio>
+                  <el-radio value="custom">自定义探针</el-radio>
+                </el-radio-group>
+              </el-form-item>
+              <el-form-item v-if="eventAnalysisProbeMode === 'custom'" label="Action">
+                <el-select
+                  v-model="eventAnalysisProbeActions"
+                  multiple
+                  filterable
+                  allow-create
+                  default-first-option
+                  collapse-tags
+                  collapse-tags-tooltip
+                  placeholder="输入广播 Action，如 com.se4500.onDecodeComplete 或 com.se4500.*"
+                  style="width: 100%"
+                />
+                <div style="font-size: 12px; color: #909399; margin-top: 4px">
+                  支持精确 Action 与通配：<code>com.vendor.*</code>、<code>*</code>（匹配预设目录内全部动作）
+                </div>
+              </el-form-item>
+            </el-form>
+            <el-space wrap style="margin-bottom: 12px">
+              <el-button
+                v-if="canMutate"
+                type="primary"
+                :loading="eventAnalysisLoading"
+                :disabled="eventAnalysisActive || !device.agent_connected"
+                @click="startEventAnalysis"
+              >
+                开始分析
+              </el-button>
+              <el-button
+                v-if="canMutate && eventAnalysisActive"
+                type="warning"
+                :loading="eventAnalysisLoading"
+                @click="stopEventAnalysis"
+              >
+                结束分析
+              </el-button>
+              <el-button
+                v-if="canMutate && eventAnalysisSuggestions.length"
+                type="success"
+                :disabled="eventAnalysisActive"
+                @click="applyEventAnalysisSuggestions"
+              >
+                应用推荐监听
+              </el-button>
+            </el-space>
+            <div v-if="!device.agent_connected" style="font-size: 12px; color: #e6a23c; margin-bottom: 8px">
+              需 Agent 在线才能下发探针。
+            </div>
+            <div v-if="eventAnalysisActive || eventAnalysisScanCount > 0" style="font-size: 12px; color: #606266; margin-bottom: 8px">
+              已捕获扫码 <strong>{{ eventAnalysisScanCount }}</strong> 次
+              <span v-if="eventAnalysisMinScans > 0">（建议 ≥ {{ eventAnalysisMinScans }} 次）</span>
+              <span v-if="eventAnalysisSessionId" style="margin-left: 8px; color: #909399">会话 {{ eventAnalysisSessionId.slice(0, 8) }}…</span>
+              <span v-if="eventAnalysisProbeMode === 'custom' && eventAnalysisProbePatterns.length" style="margin-left: 8px; color: #909399">
+                探针 {{ eventAnalysisProbePatterns.join('、') }}
+              </span>
+            </div>
+            <el-table
+              :data="eventAnalysisObservations"
+              border
+              size="small"
+              empty-text="暂无观测；开始分析后在设备上扫码"
+              style="margin-bottom: 12px"
+            >
+              <el-table-column prop="intent_action" label="广播 Action" min-width="220" show-overflow-tooltip />
+              <el-table-column prop="extra_key" label="Extra 键" width="140" show-overflow-tooltip />
+              <el-table-column label="样例值" min-width="120" show-overflow-tooltip>
+                <template #default="{ row }">
+                  {{ (row.sample_values || [])[0] || '—' }}
+                </template>
+              </el-table-column>
+              <el-table-column prop="hit_count" label="次数" width="72" align="center" />
+            </el-table>
+            <div v-if="eventAnalysisSuggestions.length" style="font-size: 13px; font-weight: 500; margin-bottom: 8px">匹配建议</div>
+            <el-table
+              v-if="eventAnalysisSuggestions.length"
+              :data="eventAnalysisSuggestions"
+              border
+              size="small"
+              empty-text="暂无匹配定义"
+            >
+              <el-table-column prop="name" label="事件定义" min-width="160" show-overflow-tooltip />
+              <el-table-column prop="key" label="上报键" width="160" show-overflow-tooltip />
+              <el-table-column prop="score" label="匹配分" width="80" align="center" />
+              <el-table-column label="命中组合" min-width="200">
+                <template #default="{ row }">
+                  <el-tag v-for="p in (row.matched_pairs || []).slice(0, 2)" :key="p" size="small" style="margin: 2px 4px 2px 0">
+                    {{ p }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+            </el-table>
           </el-card>
 
           <el-card shadow="never" class="events-out-card" style="margin-top: 16px">
@@ -548,175 +662,20 @@
               <code v-if="usbSerial" style="font-family:monospace;background:#f4f4f5;padding:2px 8px;border-radius:4px">{{ usbSerial }}</code>
               <el-text v-else type="info" size="small">暂无 USB Serial（纯 Agent 或无线设备）</el-text>
               <el-tag
-                v-if="adbStatus.usb"
-                :type="usbStateType(adbStatus.usb.state)"
+                v-if="wirelessAdb.adbStatus.usb"
+                :type="usbStateType(wirelessAdb.adbStatus.usb.state)"
                 size="small"
-              >{{ usbStateLabel(adbStatus.usb.state) }}</el-tag>
-              <el-button size="small" :loading="adbStatusLoading" @click="refreshAdbStatus">检测状态</el-button>
+              >{{ usbStateLabel(wirelessAdb.adbStatus.usb.state) }}</el-tag>
+              <el-button size="small" :loading="wirelessAdb.adbStatusLoading" @click="wirelessAdb.refreshAdbStatus">检测状态</el-button>
             </div>
           </el-card>
 
           <!-- 无线 ADB -->
           <el-card shadow="never">
             <template #header>
-              <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-                <span style="font-weight:600">无线 ADB</span>
-                <!-- 已连接：在 header 直接展示地址 + 断开按钮 -->
-                <template v-if="adbStatus.wireless?.state === 'device'">
-                  <el-tag type="success" size="small">
-                    <el-icon style="vertical-align:-2px;margin-right:2px"><CircleCheckFilled /></el-icon>
-                    已连接
-                  </el-tag>
-                  <code style="font-family:monospace;background:#f0f9eb;color:#67c23a;padding:2px 10px;border-radius:4px;border:1px solid #b3e19d;font-size:13px">
-                    {{ device.wireless_adb_serial || adbStatus.wireless?.serial }}
-                  </code>
-                  <el-button
-                    type="danger"
-                    plain
-                    size="small"
-                    :loading="adbDisconnecting"
-                    @click="doAdbDisconnect"
-                  >断开</el-button>
-                </template>
-                <!-- 未连接：显示状态 tag + 检测按钮 -->
-                <template v-else>
-                  <el-tag v-if="adbStatus.wireless" :type="wirelessStateType(adbStatus.wireless.state)" size="small">
-                    {{ wirelessStateLabel(adbStatus.wireless.state) }}
-                  </el-tag>
-                  <el-button size="small" :loading="adbStatusLoading" @click="refreshAdbStatus">检测状态</el-button>
-                </template>
-              </div>
+              <span style="font-weight:600">无线 ADB</span>
             </template>
-
-            <!-- ── 已连接：隐藏配对和连接表单 ── -->
-            <template v-if="adbStatus.wireless?.state === 'device'">
-              <div style="display:flex;align-items:center;gap:8px;color:#67c23a;font-size:13px;padding:4px 0">
-                <el-icon><CircleCheckFilled /></el-icon>
-                <span>无线 ADB 连接正常，配对与连接操作已隐藏。如需重新配置请点击「断开」后重新操作。</span>
-              </div>
-            </template>
-
-            <!-- ── 未连接（配对 + 连接）── -->
-            <template v-else>
-              <!-- 上次记录的 serial 但当前已断开 -->
-              <el-alert
-                v-if="device.wireless_adb_serial && adbStatus.wireless && adbStatus.wireless.state !== 'not_configured'"
-                type="warning"
-                :closable="false"
-                show-icon
-                style="margin-bottom:12px"
-                :title="`无线 ADB 连接已断开（${device.wireless_adb_serial}）`"
-                description="可重新在下方输入端口点「连接」，或点「断开」清除记录。"
-              >
-                <template #default>
-                  <el-button
-                    size="small"
-                    type="danger"
-                    plain
-                    :loading="adbDisconnecting"
-                    style="margin-top:6px"
-                    @click="doAdbDisconnect"
-                  >断开并清除记录</el-button>
-                </template>
-              </el-alert>
-
-              <!-- 配对方式选择 -->
-              <el-divider content-position="left" style="margin-top:0">第一步：配对（Android 11+）</el-divider>
-              <el-radio-group v-model="pairMethod" style="margin-bottom:14px">
-                <el-radio-button value="code">配对码</el-radio-button>
-                <el-radio-button value="qrcode">二维码</el-radio-button>
-              </el-radio-group>
-
-              <!-- 配对码 -->
-              <template v-if="pairMethod === 'code'">
-                <el-alert
-                  type="info"
-                  :closable="false"
-                  show-icon
-                  style="margin-bottom:12px"
-                  description="在手机「开发者选项 → 无线调试」开启「使用配对码配对设备」，获取配对端口和 6 位配对码。"
-                />
-                <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
-                  <div>
-                    <div style="font-size:12px;color:#606266;margin-bottom:4px">配对端口</div>
-                    <el-input-number v-model="wirelessPairPort" :min="1" :max="65535" :controls="false" style="width:110px" placeholder="端口" />
-                  </div>
-                  <div>
-                    <div style="font-size:12px;color:#606266;margin-bottom:4px">6 位配对码</div>
-                    <el-input v-model="wirelessPairCode" placeholder="例：123456" style="width:130px" maxlength="6" />
-                  </div>
-                  <el-button
-                    :loading="pairing"
-                    :disabled="!wirelessPairPort || wirelessPairCode.length < 4"
-                    @click="doPair"
-                  >{{ pairing ? '配对中...' : '配对' }}</el-button>
-                </div>
-              </template>
-
-              <!-- 二维码 -->
-              <template v-else>
-                <el-alert
-                  type="info"
-                  :closable="false"
-                  show-icon
-                  style="margin-bottom:12px"
-                  description="用手机 Agent 应用扫描下方二维码，手机将自动打开「无线调试」设置页面。启用调试后，将页面上显示的端口号填入下方「连接」步骤中。"
-                />
-                <div style="display:flex;align-items:flex-start;gap:24px;flex-wrap:wrap">
-                  <canvas ref="pairQrCanvas" style="border-radius:8px;border:1px solid #e4e7ed" />
-                  <div style="font-size:13px;color:#606266;line-height:1.8;max-width:320px">
-                    <p style="margin:0 0 8px;font-weight:500">操作步骤：</p>
-                    <ol style="margin:0;padding-left:18px">
-                      <li>打开手机上的 Agent 应用</li>
-                      <li>点击右上角扫码按钮，扫描左侧二维码</li>
-                      <li>手机自动跳转到「无线调试」设置页面</li>
-                      <li>手机上启用无线调试，记录显示的 IP 地址和端口号</li>
-                      <li>将端口号填入下方「连接端口」后点「连接」</li>
-                    </ol>
-                  </div>
-                </div>
-              </template>
-
-              <el-alert
-                v-if="pairResult"
-                :type="pairSuccess ? 'success' : 'error'"
-                :title="pairResult"
-                :closable="true"
-                show-icon
-                style="margin-top:10px"
-                @close="pairResult = ''"
-              />
-
-              <!-- 连接 -->
-              <el-divider content-position="left">第二步：连接</el-divider>
-              <el-alert
-                type="info"
-                :closable="false"
-                show-icon
-                style="margin-bottom:12px"
-                description="填写「无线调试」页面显示的主端口（非配对端口）。跳过配对直接连接时默认填 5555。"
-              />
-              <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
-                <div>
-                  <div style="font-size:12px;color:#606266;margin-bottom:4px">连接端口</div>
-                  <el-input-number v-model="wirelessConnectPort" :min="1" :max="65535" :controls="false" style="width:110px" />
-                </div>
-                <el-button
-                  type="primary"
-                  :loading="connecting"
-                  @click="doConnect"
-                >{{ connecting ? '连接中...' : '连接' }}</el-button>
-              </div>
-              <el-alert
-                v-if="connectResult"
-                :type="connectSuccess ? 'success' : 'error'"
-                :title="connectResult"
-                :closable="true"
-                show-icon
-                style="margin-top:10px"
-                @close="connectResult = ''"
-              />
-            </template>
+            <WirelessAdbPanel :device-id="route.params.id" />
           </el-card>
 
           <!-- ADB 工具 -->
@@ -726,7 +685,7 @@
             <!-- 授权 READ_LOGS -->
             <el-divider content-position="left" style="margin-top:0">授权日志权限</el-divider>
             <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px">
-              <el-button :loading="grantingReadLogs" @click="doGrantReadLogs">
+              <el-button :loading="wirelessAdb.grantingReadLogs" @click="wirelessAdb.doGrantReadLogs">
                 授权 Agent READ_LOGS
               </el-button>
               <el-text type="info" size="small">
@@ -734,13 +693,13 @@
               </el-text>
             </div>
             <el-alert
-              v-if="grantReadLogsResult"
-              :type="grantReadLogsSuccess ? 'success' : 'error'"
-              :title="grantReadLogsResult"
+              v-if="wirelessAdb.grantReadLogsResult"
+              :type="wirelessAdb.grantReadLogsSuccess ? 'success' : 'error'"
+              :title="wirelessAdb.grantReadLogsResult"
               :closable="true"
               show-icon
               style="margin-top:4px;margin-bottom:8px"
-              @close="grantReadLogsResult = ''"
+              @close="wirelessAdb.grantReadLogsResult = ''"
             />
 
             <!-- Shell Runner -->
@@ -835,10 +794,9 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick, provide } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
-import { CircleCheckFilled } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { copyText } from '@/utils/clipboard'
 import * as deviceApi from '@/api/device'
@@ -848,11 +806,15 @@ import { WS_BASE } from '@/utils/ws'
 import http from '@/api/http'
 import * as eventsApi from '@/api/events'
 import * as ob from '@/api/outbound'
+import { createEventAnalysisStomp } from '@/utils/eventAnalysisStomp'
 import QRCode from 'qrcode'
-
+import WirelessAdbPanel from '@/components/WirelessAdbPanel.vue'
+import { useWirelessAdb } from '@/composables/useWirelessAdb'
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const wirelessAdb = useWirelessAdb(computed(() => route.params.id))
+provide('wirelessAdb', wirelessAdb)
 const device = ref(null)
 const apps = ref([])
 const appFilter = ref('')
@@ -870,23 +832,6 @@ const appsRefreshing = ref(false)
 const pullApkPkg = ref('')
 
 // ─── ADB 管理 ─────────────────────────────────────────────────────────────────
-const adbStatus = ref({ usb: null, wireless: null })
-const adbStatusLoading = ref(false)
-const adbDisconnecting = ref(false)
-const pairMethod = ref('code') // 'code' | 'qrcode'
-const pairQrCanvas = ref(null)
-const wirelessPairPort = ref(null)
-const wirelessPairCode = ref('')
-const pairing = ref(false)
-const pairResult = ref('')
-const pairSuccess = ref(false)
-const wirelessConnectPort = ref(5555)
-const connecting = ref(false)
-const connectResult = ref('')
-const connectSuccess = ref(false)
-const grantingReadLogs = ref(false)
-const grantReadLogsResult = ref('')
-const grantReadLogsSuccess = ref(false)
 const reconnectQrCanvas = ref(null)
 const shellCommand = ref('')
 const shellOutput = ref(null)
@@ -1104,7 +1049,7 @@ watch(
     }
     if (t === 'adb') {
       activeMainTab.value = 'adb'
-      refreshAdbStatus()
+      wirelessAdb.refreshAdbStatus()
     }
     if (t === 'events') {
       activeMainTab.value = 'events'
@@ -1129,6 +1074,150 @@ const deviceListenTableData = computed(() => {
   return [deviceListenSnapshot.value]
 })
 
+const eventAnalysisActive = ref(false)
+const eventAnalysisLoading = ref(false)
+const eventAnalysisSessionId = ref('')
+const eventAnalysisScanCount = ref(0)
+const eventAnalysisMinScans = ref(2)
+const eventAnalysisProbeMode = ref('preset')
+const eventAnalysisProbeActions = ref([])
+const eventAnalysisProbePatterns = ref([])
+const eventAnalysisObservations = ref([])
+const eventAnalysisSuggestions = ref([])
+let eventAnalysisStomp = null
+
+function applyEventAnalysisPayload(payload) {
+  if (!payload) return
+  eventAnalysisSessionId.value = payload.session_id || ''
+  eventAnalysisActive.value = payload.active === true
+  eventAnalysisScanCount.value = Number(payload.scan_count) || 0
+  if (payload.probe_mode) eventAnalysisProbeMode.value = payload.probe_mode
+  if (Array.isArray(payload.probe_patterns)) {
+    eventAnalysisProbePatterns.value = payload.probe_patterns
+  }
+  eventAnalysisObservations.value = payload.observations || []
+  eventAnalysisSuggestions.value = payload.suggestions || []
+}
+
+function ensureEventAnalysisStomp() {
+  const did = Number(device.value?.id)
+  if (!did) return
+  if (!eventAnalysisStomp) {
+    eventAnalysisStomp = createEventAnalysisStomp(did, () => auth.token, applyEventAnalysisPayload)
+  }
+  eventAnalysisStomp.start()
+}
+
+function stopEventAnalysisStomp() {
+  eventAnalysisStomp?.stop()
+  eventAnalysisStomp = null
+}
+
+async function loadEventAnalysisSession() {
+  const id = Number(device.value?.id)
+  if (!id) return
+  try {
+    const res = await eventsApi.getCustomEventAnalyzeSession(id)
+    const data = res?.data
+    if (!data?.session) {
+      eventAnalysisActive.value = false
+      return
+    }
+    applyEventAnalysisPayload({
+      session_id: data.session.session_id,
+      active: data.session.active,
+      scan_count: data.session.scan_count,
+      probe_mode: data.session.probe_mode,
+      probe_patterns: data.session.probe_patterns,
+      observations: data.observations,
+      suggestions: data.suggestions
+    })
+    if (data.session.active) ensureEventAnalysisStomp()
+  } catch {
+    /* */
+  }
+}
+
+async function startEventAnalysis() {
+  const id = Number(device.value?.id)
+  if (!id) return
+  if (eventAnalysisProbeMode.value === 'custom' && !eventAnalysisProbeActions.value.length) {
+    ElMessage.warning('自定义探针请至少填写一个 Action')
+    return
+  }
+  eventAnalysisLoading.value = true
+  try {
+    const res = await eventsApi.startCustomEventAnalyze(id, {
+      minScans: 2,
+      probeMode: eventAnalysisProbeMode.value,
+      probeActions: eventAnalysisProbeMode.value === 'custom' ? eventAnalysisProbeActions.value : undefined
+    })
+    const d = res?.data || {}
+    eventAnalysisMinScans.value = d.min_scans || 2
+    eventAnalysisSessionId.value = d.session_id || ''
+    eventAnalysisActive.value = true
+    eventAnalysisScanCount.value = 0
+    eventAnalysisObservations.value = []
+    eventAnalysisSuggestions.value = []
+    if (d.probe_mode) eventAnalysisProbeMode.value = d.probe_mode
+    eventAnalysisProbePatterns.value = d.probe_patterns || []
+    ensureEventAnalysisStomp()
+    if (!d.agent_notified) {
+      ElMessage.warning('分析会话已创建，但 Agent 未在线，请待设备上线后重新开始')
+    } else if (d.probe_mode === 'custom') {
+      const pat = (d.probe_patterns || []).join('、') || '—'
+      ElMessage.success(`自定义探针已下发（${pat}，注册 ${d.action_count || 0} 个动作），请在设备上连续扫码`)
+    } else {
+      ElMessage.success(`探针已下发（覆盖 ${d.action_count || 0} 个广播动作），请在设备上连续扫码`)
+    }
+  } catch (e) {
+    ElMessage.error(e?.message || '开始分析失败')
+  } finally {
+    eventAnalysisLoading.value = false
+  }
+}
+
+async function stopEventAnalysis() {
+  const id = Number(device.value?.id)
+  if (!id) return
+  eventAnalysisLoading.value = true
+  try {
+    const res = await eventsApi.stopCustomEventAnalyze(id)
+    const d = res?.data || {}
+    eventAnalysisActive.value = false
+    if (d.session) {
+      applyEventAnalysisPayload({
+        session_id: d.session.session_id,
+        active: false,
+        scan_count: d.session.scan_count,
+        probe_mode: d.session.probe_mode,
+        probe_patterns: d.session.probe_patterns,
+        observations: d.observations,
+        suggestions: d.suggestions
+      })
+    }
+    ElMessage.success('分析已结束')
+  } catch (e) {
+    ElMessage.error(e?.message || '结束分析失败')
+  } finally {
+    eventAnalysisLoading.value = false
+  }
+}
+
+async function applyEventAnalysisSuggestions() {
+  const id = Number(device.value?.id)
+  if (!id || !eventAnalysisSuggestions.value.length) return
+  const defIds = eventAnalysisSuggestions.value.map((s) => s.definition_id).filter(Boolean)
+  if (!defIds.length) return
+  try {
+    await eventsApi.batchStartCustomEventListen([id], { definitionIds: defIds })
+    ElMessage.success(`已按推荐启用 ${defIds.length} 条事件定义`)
+    await loadDeviceListenState()
+  } catch {
+    /* */
+  }
+}
+
 const screenshots = computed(() => (fileHub.value.media || []).filter((m) => m.category === 'screenshot'))
 const audios = computed(() => (fileHub.value.media || []).filter((m) => m.category === 'audio'))
 
@@ -1148,6 +1237,7 @@ const usbSerial = computed(() => {
   if (!s || s.startsWith('agent-') || s.includes(':')) return ''
   return s
 })
+
 const usbStateType = (state) => {
   if (state === 'device') return 'success'
   if (state === 'unauthorized') return 'warning'
@@ -1158,114 +1248,6 @@ const usbStateLabel = (state) => {
   const map = { device: '已连接', offline: '离线', unauthorized: '未授权', no_device: '未找到', not_configured: '未配置' }
   return map[state] || state
 }
-const wirelessStateType = (state) => {
-  if (state === 'device') return 'success'
-  if (state === 'offline' || state === 'no_device') return 'danger'
-  if (state === 'not_configured') return 'info'
-  return 'warning'
-}
-const wirelessStateLabel = (state) => {
-  const map = { device: '已连接', offline: '未连接', no_device: '未找到', not_configured: '未配置' }
-  return map[state] || state
-}
-
-// ─── ADB 管理操作 ──────────────────────────────────────────────────────────────
-const refreshAdbStatus = async () => {
-  adbStatusLoading.value = true
-  try {
-    const res = await deviceApi.getAdbStatus(route.params.id)
-    adbStatus.value = res || {}
-    // 检测到已连接时同步刷新设备数据，确保 wireless_adb_serial 最新
-    if (adbStatus.value.wireless?.state === 'device') {
-      await load()
-    }
-  } catch (e) {
-    ElMessage.error(e.message || '检测失败')
-  } finally {
-    adbStatusLoading.value = false
-  }
-}
-
-const renderPairQrCode = async () => {
-  await nextTick()
-  if (!pairQrCanvas.value) return
-  const payload = JSON.stringify({
-    type: 'wireless_adb_guide',
-    deviceId: Number(route.params.id),
-    serverUrl: location.origin
-  })
-  await QRCode.toCanvas(pairQrCanvas.value, payload, { width: 200, margin: 2 })
-}
-
-// 切换到二维码方式时自动渲染
-watch(pairMethod, (v) => {
-  if (v === 'qrcode') nextTick(renderPairQrCode)
-})
-
-const doAdbDisconnect = async () => {
-  try {
-    await ElMessageBox.confirm('确认断开无线 ADB 连接？这将清除已记录的无线 Serial。', '提示', { type: 'warning' })
-  } catch { return }
-  adbDisconnecting.value = true
-  try {
-    await deviceApi.adbWirelessDisconnect(route.params.id)
-    ElMessage.success('已断开')
-    await load()
-    await refreshAdbStatus()
-  } catch (e) {
-    ElMessage.error(e.response?.data?.error || e.message || '断开失败')
-  } finally {
-    adbDisconnecting.value = false
-  }
-}
-
-const doPair = async () => {
-  pairResult.value = ''
-  pairing.value = true
-  try {
-    await deviceApi.adbPairByAgentIP(route.params.id, wirelessPairPort.value, wirelessPairCode.value)
-    pairResult.value = '配对成功，请在第二步中点击「连接」完成建立'
-    pairSuccess.value = true
-  } catch (e) {
-    pairResult.value = e.response?.data?.error || e.message || '配对失败'
-    pairSuccess.value = false
-  } finally {
-    pairing.value = false
-  }
-}
-
-const doConnect = async () => {
-  connectResult.value = ''
-  connecting.value = true
-  try {
-    const res = await deviceApi.adbConnectByAgentIP(route.params.id, wirelessConnectPort.value)
-    connectResult.value = res.message || '连接成功'
-    connectSuccess.value = true
-    await load()
-    await refreshAdbStatus()
-  } catch (e) {
-    connectResult.value = e.response?.data?.error || e.message || '连接失败'
-    connectSuccess.value = false
-  } finally {
-    connecting.value = false
-  }
-}
-
-const doGrantReadLogs = async () => {
-  grantReadLogsResult.value = ''
-  grantingReadLogs.value = true
-  try {
-    const res = await deviceApi.grantAgentReadLogs(route.params.id)
-    grantReadLogsResult.value = res?.message || '授权成功'
-    grantReadLogsSuccess.value = true
-  } catch (e) {
-    grantReadLogsResult.value = e.response?.data?.error || e.message || '授权失败'
-    grantReadLogsSuccess.value = false
-  } finally {
-    grantingReadLogs.value = false
-  }
-}
-
 const runShellCommand = async () => {
   if (!shellCommand.value.trim()) return
   shellRunning.value = true
@@ -1373,7 +1355,7 @@ async function loadOutboundConnectorsForDevice() {
 
 async function loadDeviceEventsOutbound() {
   if (!device.value?.id) return
-  await Promise.all([loadDeviceListenState(), loadOutboundConnectorsForDevice()])
+  await Promise.all([loadDeviceListenState(), loadOutboundConnectorsForDevice(), loadEventAnalysisSession()])
 }
 
 async function startDeviceCustomListen() {
@@ -1404,13 +1386,18 @@ async function deleteDeviceCustomListen() {
   const id = Number(device.value.id)
   if (!id) return
   try {
-    await ElMessageBox.confirm('将删除本机监听快照并尽力下发停止。确定？', '删除监听记录', { type: 'warning' })
-    await eventsApi.deleteCustomEventListenState(id)
-    ElMessage.success('已删除')
+    await ElMessageBox.confirm('将删除本机监听快照并向 Agent 下发停止监听。确定？', '删除监听记录', { type: 'warning' })
+    const res = await eventsApi.deleteCustomEventListenState(id)
+    const notified = res?.agent_notified === true
+    if (device.value.agent_connected && !notified) {
+      ElMessage.warning('已删除服务器记录，但 Agent 未确认在线，本机监听可能仍在运行；请待 Agent 上线后再次停用或在本机「事件监听」页删除')
+    } else {
+      ElMessage.success(notified ? '已删除并已通知 Agent 停止监听' : '已删除（Agent 离线，上线后不会自动恢复监听）')
+    }
     await loadDeviceListenState()
   } catch (e) {
     if (e !== 'cancel') {
-      /* */
+      ElMessage.error(e?.message || '删除失败')
     }
   }
 }
@@ -1471,8 +1458,7 @@ const onMainTabChange = (name) => {
     loadApps()
   }
   if (name === 'adb') {
-    refreshAdbStatus()
-    if (pairMethod.value === 'qrcode') nextTick(renderPairQrCode)
+    wirelessAdb.refreshAdbStatus()
   }
   if (name === 'events') {
     loadDeviceEventsOutbound()
@@ -1939,6 +1925,7 @@ onMounted(async () => {
 onUnmounted(() => {
   if (profileListenerId) eventListeners.revoke(profileListenerId)
   if (isRecording.value) stopRecording()
+  stopEventAnalysisStomp()
 })
 </script>
 

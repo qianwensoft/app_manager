@@ -19,6 +19,9 @@ import TableWidget from './TableWidget'
 import FormFieldWidget from './FormFieldWidget'
 import LayoutCarouselWidget from './LayoutCarouselWidget'
 import LayoutModalWidget from './LayoutModalWidget'
+import LayoutTabsWidget from './LayoutTabsWidget'
+import LayoutCollapseWidget from './LayoutCollapseWidget'
+import AlarmLightWidget from './AlarmLightWidget'
 import { WIDGET_DRAG_TYPE, buildWidgetElement } from './WidgetPanel'
 import type { WidgetDef } from './WidgetPanel'
 import BindingDrawer from './BindingDrawer'
@@ -413,13 +416,15 @@ export default function CanvasBoard() {
   ))
   const layoutElements = canvas.elements.filter((el) => el.visible && (
     el.type === 'layout-carousel' || el.type === 'layout-modal'
+    || el.type === 'layout-tabs' || el.type === 'layout-collapse'
   ))
+  const alarmElements = canvas.elements.filter((el) => el.visible && el.type === 'alarm-light')
   const tableElements = canvas.elements.filter((el) => el.visible && el.type === 'table')
   const formFieldElements = canvas.elements.filter((el) => el.visible && el.type.startsWith('form-'))
   // shared mutable ref for form field values (keyed by element id)
   const formValuesRef = useRef<Record<string, string>>({})
   // 合并 overlay 元素并按 zIndex 排序，保证层级正确
-  const overlayElements = [...chartElements, ...imageElements, ...layoutElements, ...tableElements, ...formFieldElements].sort((a, b) => a.zIndex - b.zIndex)
+  const overlayElements = [...chartElements, ...imageElements, ...layoutElements, ...alarmElements, ...tableElements, ...formFieldElements].sort((a, b) => a.zIndex - b.zIndex)
 
   // All text/button elements rendered as DOM overlays to ensure correct stacking above image-bg widgets.
   // Elements with pointBinding show live values; others show el.text.
@@ -455,9 +460,15 @@ export default function CanvasBoard() {
               ? <ChartWidget key={el.id} el={el} zoom={zoom} pointData={liveDataOn ? pointData : undefined} />
               : el.type === 'layout-carousel'
                 ? <LayoutCarouselWidget key={el.id} el={el} zoom={zoom} isPreview={false} />
-                : el.type === 'layout-modal'
-                  ? <LayoutModalWidget key={el.id} el={el} zoom={zoom} isPreview={false} />
-                  : el.type === 'table'
+                : el.type === 'layout-tabs'
+                  ? <LayoutTabsWidget key={el.id} el={el} zoom={zoom} isPreview={false} />
+                  : el.type === 'layout-collapse'
+                    ? <LayoutCollapseWidget key={el.id} el={el} zoom={zoom} isPreview={false} />
+                    : el.type === 'layout-modal'
+                      ? <LayoutModalWidget key={el.id} el={el} zoom={zoom} isPreview={false} />
+                      : el.type === 'alarm-light'
+                        ? <AlarmLightWidget key={el.id} el={el} zoom={zoom} isPreview={false} />
+                        : el.type === 'table'
                     ? <TableWidget key={el.id} el={el} zoom={zoom} />
                     : el.type.startsWith('form-')
                       ? <FormFieldWidget key={el.id} el={el} zoom={zoom} isPreview={false} canvas={canvas} valuesRef={formValuesRef} />

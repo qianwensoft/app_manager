@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     package="com.appmanager.agent">
 
     <!-- 网络 -->
@@ -24,6 +25,11 @@
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
+    <!-- Android 11+ 完整文件访问（须在 Manifest 声明后系统设置才会出现授权项） -->
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
+
     <!-- Android 13+ 分类媒体权限 -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
@@ -69,6 +75,10 @@
                 <action android:name="com.appmanager.agent.ACTION_OPEN_SCADA_MENU" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="com.appmanager.agent.ACTION_OPEN_WIRELESS_ADB" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
 
         <activity
@@ -84,9 +94,23 @@
             android:label="设备信息" />
 
         <activity
+            android:name=".ui.BackendMenuActivity"
+            android:exported="false"
+            android:label="@string/main_tile_backend"
+            android:theme="@style/Theme.AppManagerMain"
+            android:parentActivityName=".MainActivity" />
+
+        <activity
+            android:name=".ui.PersonalCenterActivity"
+            android:exported="false"
+            android:label="@string/personal_center_title"
+            android:theme="@style/Theme.AppManagerMain"
+            android:parentActivityName=".MainActivity" />
+
+        <activity
             android:name=".ui.SettingsActivity"
             android:exported="false"
-            android:label="@string/main_tile_settings"
+            android:label="@string/settings_title"
             android:theme="@style/Theme.AppManagerMain"
             android:parentActivityName=".MainActivity" />
 
@@ -107,6 +131,13 @@
             android:name=".ui.InAppWebActivity"
             android:exported="false"
             android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
+
+        <activity
+            android:name=".FormAppActivity"
+            android:exported="false"
+            android:label="表单应用"
+            android:theme="@style/Theme.AppManagerMain"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
 
         <service
             android:name=".service.AgentService"

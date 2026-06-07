@@ -42,6 +42,10 @@ object CustomEventBroadcastHelper {
     @Volatile
     private var activeRules: List<EventRule> = emptyList()
 
+    /** 出站 broadcast_intent 注入的 extra 键；带此键的广播不上报，防止扫码→连接器→模拟广播→再触发回环。 */
+    @Volatile
+    private var ignoreOutboundExtraKey: String? = "_appmanager_outbound"
+
     fun getActiveRules(): List<EventRule> = activeRules
 
     fun isListening(): Boolean = receiver != null
@@ -91,6 +95,13 @@ object CustomEventBroadcastHelper {
         )
     }
 
+    /** 解析服务端 loop_guard（start_custom_event_listen / listen-state 快照）。 */
+    fun configureLoopGuard(data: Map<*, *>?) {
+        val g = data?.get("loop_guard") as? Map<*, *>
+        val key = (g?.get("ignore_extra_key") as? String)?.trim().orEmpty()
+        ignoreOutboundExtraKey = key.ifEmpty { null }
+    }
+
     fun start(context: Context, rules: List<EventRule>?) {
         val app = context.applicationContext
         runOnMain { startInternal(app, rules) }
@@ -131,6 +142,11 @@ object CustomEventBroadcastHelper {
                     Log.e(TAG, "onReceive: read intent.action failed", t)
                     return
                 } ?: return
+
+                if (shouldIgnoreOutboundEcho(incoming)) {
+                    Log.v(TAG, "skip outbound echo action=$action")
+                    return
+                }
 
                 val rulesSnapshot = activeRules
                 try {
@@ -190,6 +206,17 @@ object CustomEventBroadcastHelper {
             appCtx.unregisterReceiver(rec)
         } catch (e: Exception) {
             Log.w(TAG, "unregisterReceiver", e)
+        }
+    }
+
+    private fun shouldIgnoreOutboundEcho(intent: Intent): Boolean {
+        val key = ignoreOutboundExtraKey?.trim().orEmpty()
+        if (key.isEmpty()) return false
+        return try {
+            intent.extras?.containsKey(key) == true
+        } catch (t: Throwable) {
+            Log.w(TAG, "shouldIgnoreOutboundEcho failed", t)
+            false
         }
     }
 

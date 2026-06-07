@@ -39,15 +39,45 @@ func SyncDeviceStatus(deviceID string, connected bool) {
 		log.Printf("Failed to sync device status [%s]: %v", deviceID, result.Error)
 		return
 	}
-	// 扫码 token 首次上线：库中尚无对应行时自动建一条（serial 占位，避免与 id 比较混用）
+	if connected && !isNumericID(deviceID) {
+		persistAgentConnectionKey(deviceID)
+	}
+	// 首次上线：库中尚无对应行时自动建一条；连接键为硬件机器码时同时写入 android_serial
 	if connected && result.RowsAffected == 0 && !isNumericID(deviceID) {
-		if err := ensureAgentDevice(deviceID, ""); err != nil {
+		androidSerial := ""
+		if shouldTryAndroidSerialLookup(deviceID) {
+			androidSerial = normalizeAndroidSerial(deviceID)
+		}
+		if err := ensureAgentDevice(deviceID, androidSerial); err != nil {
 			log.Printf("Failed to auto-register agent device [%s]: %v", deviceID, err)
 			return
 		}
 		if err := DeviceScope(deviceID).Updates(updates).Error; err != nil {
 			log.Printf("Failed to sync device status after register [%s]: %v", deviceID, err)
 		}
+	}
+}
+
+// persistAgentConnectionKey 在 Agent 上线时把当前 WebSocket 连接键写入 agent_token（若为空），
+// 避免 ADB 预注册设备仅有 serial/android_serial 时无法向 Hub 下发命令。
+func persistAgentConnectionKey(deviceKey string) {
+	key := strings.TrimSpace(deviceKey)
+	if key == "" || isNumericID(key) {
+		return
+	}
+	id, ok := resolveDeviceKeyToID(key)
+	if !ok {
+		return
+	}
+	var d models.Device
+	if err := database.DB.First(&d, id).Error; err != nil {
+		return
+	}
+	if strings.TrimSpace(d.AgentToken) == key {
+		return
+	}
+	if err := database.DB.Model(&d).Update("agent_token", key).Error; err != nil {
+		log.Printf("Failed to persist agent_token for device %d key=%s: %v", id, key, err)
 	}
 }
 

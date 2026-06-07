@@ -13,6 +13,84 @@ import (
 
 var reSQLNamedParam = regexp.MustCompile(`:([a-zA-Z_][a-zA-Z0-9_]*)`)
 
+// stripMissingInsertParams 对 INSERT INTO t (c1, c2, ...) VALUES (:p1, :p2, ...) 语句，
+// 自动移除 params 中不存在的命名参数对应的列/值对，使数据库自增字段（如 id）可省略。
+// 非 INSERT 语句原样返回。
+func stripMissingInsertParams(sqlStr string, params map[string]interface{}) string {
+	upper := strings.ToUpper(strings.TrimSpace(sqlStr))
+	if !strings.HasPrefix(upper, "INSERT") {
+		return sqlStr
+	}
+	open1 := strings.Index(sqlStr, "(")
+	if open1 < 0 {
+		return sqlStr
+	}
+	close1 := strings.Index(sqlStr[open1:], ")")
+	if close1 < 0 {
+		return sqlStr
+	}
+	close1 += open1
+
+	afterClose1Upper := strings.ToUpper(sqlStr[close1+1:])
+	valIdx := strings.Index(afterClose1Upper, "VALUES")
+	if valIdx < 0 {
+		return sqlStr
+	}
+	valKwStart := close1 + 1 + valIdx
+	valKwEnd := valKwStart + len("VALUES")
+	restAfterValues := strings.TrimLeft(sqlStr[valKwEnd:], " \t\r\n")
+	if !strings.HasPrefix(restAfterValues, "(") {
+		return sqlStr
+	}
+	open2 := valKwEnd + strings.Index(sqlStr[valKwEnd:], "(")
+	close2 := strings.LastIndex(sqlStr, ")")
+	if close2 <= open2 {
+		return sqlStr
+	}
+
+	colsStr := sqlStr[open1+1 : close1]
+	valsStr := sqlStr[open2+1 : close2]
+	cols := splitSQLList(colsStr)
+	vals := splitSQLList(valsStr)
+	if len(cols) != len(vals) {
+		return sqlStr
+	}
+
+	var newCols, newVals []string
+	changed := false
+	for i, v := range vals {
+		m := reSQLNamedParam.FindStringSubmatch(v)
+		if m == nil {
+			// 非命名参数（字面量、函数调用等），始终保留
+			newCols = append(newCols, cols[i])
+			newVals = append(newVals, v)
+			continue
+		}
+		paramName := m[1]
+		if _, ok := params[paramName]; ok {
+			newCols = append(newCols, cols[i])
+			newVals = append(newVals, v)
+		} else {
+			changed = true
+		}
+	}
+	if !changed {
+		return sqlStr
+	}
+	prefix := sqlStr[:open1]
+	between := sqlStr[close1+1 : open2]
+	suffix := sqlStr[close2+1:]
+	return prefix + "(" + strings.Join(newCols, ", ") + ")" + between + "(" + strings.Join(newVals, ", ") + ")" + suffix
+}
+
+func splitSQLList(s string) []string {
+	parts := strings.Split(s, ",")
+	for i, p := range parts {
+		parts[i] = strings.TrimSpace(p)
+	}
+	return parts
+}
+
 var mockRand = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 // extractSQLNamedParamNames 从 SQL 中提取所有 :name 参数名（去重，保序）。

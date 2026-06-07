@@ -29,9 +29,18 @@ func openDB(dbCfg config.DatabaseConfig) (*gorm.DB, error) {
 		if dsn == "" {
 			dsn = "./data/app-manager.db"
 		}
+		// 使用 modernc.org/sqlite（DriverName: "sqlite"）专属的 _pragma 语法。
+		// 旧写法 _journal_mode/_busy_timeout 是 mattn/go-sqlite3 语法，modernc 会忽略，
+		// 导致 busy_timeout 从未生效，并发启动写入直接 SQLITE_BUSY。
+		// _txlock=immediate 让事务在 BEGIN 时即获取写锁，配合 busy_timeout 串行等待。
+		sep := "?"
+		if strings.Contains(dsn, "?") {
+			sep = "&"
+		}
+		dsn += sep + "_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_txlock=immediate"
 		return gorm.Open(sqlite.Dialector{
 			DriverName: "sqlite",
-			DSN:        dsn + "?_journal_mode=WAL&_busy_timeout=5000",
+			DSN:        dsn,
 		}, &gorm.Config{})
 	default:
 		return nil, fmt.Errorf("unsupported database type: %q (use mysql or sqlite)", dbCfg.Type)
@@ -156,6 +165,7 @@ var migrateGroups = [][]interface{}{
 		&models.FormAppPageLink{},
 		&models.FormAppEventRoute{},
 		&models.FormAppAccessPolicy{},
+		&models.FormAppDraft{},
 	},
 	// Group 8 — org
 	{
@@ -209,16 +219,30 @@ func initSchema(db *gorm.DB) error {
 	log.Printf("[db] AutoMigrate done in %v", time.Since(start))
 
 	// One-time migrations — each is idempotent internally.
-	// Run them concurrently where safe (all read-then-write, independent tables).
-	var wg sync.WaitGroup
-	wg.Add(6)
-	go func() { defer wg.Done(); SeedDefaultCustomEvents(db) }()
-	go func() { defer wg.Done(); MigrateLegacyOutboundPhases(db) }()
-	go func() { defer wg.Done(); MigrateDeviceAndroidSerialUnique(db) }()
-	go func() { defer wg.Done(); MigrateDataStackCode(db) }()
-	go func() { defer wg.Done(); MigrateThirdPartyAuthorizerAppID(db) }()
-	go func() { defer wg.Done(); MigrateFormAppToV2(db) }()
-	wg.Wait()
+	postMigrate := []func(*gorm.DB){
+		SeedDefaultCustomEvents,
+		SeedDefaultAgentMenus,
+		MigrateLegacyOutboundPhases,
+		MigrateDeviceAndroidSerialUnique,
+		MigrateDataStackCode,
+		MigrateThirdPartyAuthorizerAppID,
+		MigrateFormAppToV2,
+		MigrateWirelessAdbPort,
+	}
+	if strings.ToLower(strings.TrimSpace(db.Dialector.Name())) == "mysql" {
+		// MySQL 支持并发写，并行执行加速启动。
+		var wg sync.WaitGroup
+		wg.Add(len(postMigrate))
+		for _, fn := range postMigrate {
+			go func(f func(*gorm.DB)) { defer wg.Done(); f(db) }(fn)
+		}
+		wg.Wait()
+	} else {
+		// SQLite 单写者：顺序执行，避免启动期多写者抢锁。
+		for _, fn := range postMigrate {
+			fn(db)
+		}
+	}
 	log.Printf("[db] Post-migrate tasks done in %v", time.Since(start))
 
 	DB = db

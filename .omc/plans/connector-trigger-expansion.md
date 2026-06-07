@@ -1,8 +1,28 @@
 # Connector Trigger Expansion — Architectural Plan
 
+> **📦 已归档（2026-06-05）**  
+> 本文档描述的触发器扩展**已在代码库落地**。请以 `docs/plan.md` v3.0 §4.3 与下列实现映射为准。  
+> 未实现项（`cron`、`system_event` 等）见 `docs/plan.md` Phase C1/C2。
+
+| 计划命名 | 实际实现 | 关键文件 |
+|----------|----------|----------|
+| `event` | `device_event` | `outbound/dispatch.go` |
+| `webhook` | `http_webhook` + `OutboundWebhook` | `outbound/trigger_webhook.go` |
+| `http_poll` | `http_poll` | `outbound/trigger_poll.go` |
+| `websocket` | `websocket` | `outbound/trigger_ws.go` |
+| — | `stomp`（计划外增量） | `outbound/trigger_stomp.go` |
+| `data_poll` | `data_poll` | `outbound/trigger_data_poll.go` |
+| `channel` (MQTT/Kafka) | `channel` | `outbound/trigger_channel.go` |
+| TriggerManager | `InitTriggerManager` + 会话共享 | `outbound/trigger_manager.go` |
+| 前端表单 | `OutboundConnectorEdit.vue` | `web/src/views/` |
+
+---
+
 ## 1. Executive Summary
 
 当前出站连接器系统仅支持设备自定义事件触发（`trigger_type = "event"`）。本次扩展新增五种触发类型——Webhook 入站、HTTP 轮询、WebSocket 订阅、DataInterface 数据轮询、外部通道（MQTT/Kafka）——同时保持现有事件触发流程完全不变。所有触发类型最终都汇聚到同一入口 `RunConnectorOutbound`（`server/outbound/phased_runner.go`）。
+
+**实施状态**：✅ 已完成（2026-06 前）。
 
 ---
 

@@ -1219,6 +1219,7 @@ func OpenDataInterfaceInvoke(c *gin.Context) {
 	}
 	var lastInsertID int64
 	for _, s := range steps {
+		s = stripMissingInsertParams(s, paramVals)
 		used, args, err := RewriteNamedSQLParams(dsSrc.Type, s, paramVals)
 		if err != nil {
 			_ = tx.Rollback()

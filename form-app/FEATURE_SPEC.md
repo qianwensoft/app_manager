@@ -266,27 +266,34 @@ type FormAppInfo struct {
 
 ---
 
-## 待完成功能（Phase 2-3）
+## 待完成功能
 
-### 1. 扫码路由集成
-- **scan_config**：菜单侧扫码策略（barcode/qrcode 事件路由）
-- **scan_router**：根据扫码内容动态跳转表单页
+> **状态同步（2026-06-05）**：全景计划见 `docs/plan.md` v3.0。
 
-### 2. 菜单下发
-- **menu_bundle**：统一下发结构（bundle_revision/menus/linked_pages）
-- **Agent 同步**：Android Agent 拉取菜单配置并展示
+### 已完成（原 Phase 2-3 范围）
+- [x] 多页面设计器 V2（`FormAppDesignerV2`、页面跳转、事件路由配置）
+- [x] 事件路由 API + Web 测试面板（`EventRouteEditorPage`）
+- [x] 菜单下发 API（`deploy-to-devices`）+ Agent `form_app_entry` 目标类型
+- [x] 运行时 `eventManager` 暴露到 `window`（供 Agent Bridge 回调）
+- [x] `SubmitButton` / `ConfirmDialogButton` 设计器组件（`src/designable/`）
+- [x] 字段级验证（`FieldValidator.ts`：required/pattern/min-max）
 
-### 3. 自定义组件
-- **SubmitButton**：提交按钮组件（需实现 Formily 组件协议）
-- **ConfirmDialogButton**：确认对话框按钮（需实现 Formily 组件协议）
+### 进行中（Phase A2）
+- [ ] Agent 扫码库集成 + `scanBarcode()` 实现
+- [ ] `FormAppActivity` 写入 `AndroidManifest.xml`
+- [ ] 端到端：菜单下发 → Agent WebView → 扫码 → 页面跳转
 
-### 4. 表单验证
-- **字段级验证**：required/pattern/min/max/custom validator
-- **跨字段验证**：依赖关系验证
+### 已完成（Phase C6）
+- [x] 三端契约：`schema/api/form-app.ts`、`schema/form-app/*`（与 `server/models`、运行时 types 对齐）
 
-### 5. 权限控制
-- **字段级权限**：根据用户角色显示/隐藏字段
-- **操作权限**：提交/查看/编辑权限控制
+### 已完成（Phase C4）
+- [x] 条件渲染（`visible_when` 字段显示/隐藏联动）
+- [x] 级联查询（`listen_targets` + `options_interface_code` / `runtime_schema.bindings`）
+- [x] 表单草稿保存（localStorage + `GET/PUT/DELETE /api/form-app/runtime/draft`）
+
+### 计划中
+- [ ] 字段级 / 操作级权限控制
+- [ ] AI 语义生成
 
 ---
 
@@ -301,10 +308,15 @@ form-app/
 │   │   ├── GeneratedFormAppPage.tsx  # 生成页面运行时
 │   │   ├── TestAppDemoPage.tsx       # test_app 演示
 │   │   ├── SchemaPage.tsx            # Schema 文档
-│   │   ├── FormPreviewPage.tsx       # 预览页（待实现）
+│   │   ├── FormPreviewPage.tsx       # 预览页
+│   │   ├── FormAppDesignerV2.tsx     # 多页面设计器
+│   │   ├── EventRouteEditorPage.tsx  # 事件路由配置
 │   ├── designable/
-│   │   ├── SubmitButton.tsx          # 自定义提交按钮（待实现）
-│   │   ├── ConfirmDialogButton.tsx   # 自定义确认按钮（待实现）
+│   │   ├── SubmitButton.tsx          # 自定义提交按钮
+│   │   ├── ConfirmDialogButton.tsx   # 自定义确认按钮
+│   ├── runtime/
+│   │   ├── MultiPageRuntime.tsx      # 多页面运行时
+│   │   ├── EventHandler.ts           # eventManager + 路由处理
 │   ├── App.tsx                       # 路由配置
 │   ├── main.tsx                      # 入口
 │   ├── styles.css                    # 全局样式

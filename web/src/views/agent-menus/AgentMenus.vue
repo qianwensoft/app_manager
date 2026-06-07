@@ -9,8 +9,12 @@
       <el-table-column prop="target_ref" label="目标(ref)" min-width="160" />
       <el-table-column prop="intent_action" label="Intent" width="180" />
       <el-table-column prop="min_agent_version" label="最小版本" width="120" />
-      <el-table-column prop="show_on_agent_home" label="首页" width="70">
-        <template #default="{ row }">{{ row.show_on_agent_home ? '是' : '否' }}</template>
+      <el-table-column prop="show_on_agent_home" label="显示位置" width="100">
+        <template #default="{ row }">
+          <el-tag :type="row.show_on_agent_home ? 'success' : 'info'" size="small">
+            {{ row.show_on_agent_home ? '前台' : '后台' }}
+          </el-tag>
+        </template>
       </el-table-column>
       <el-table-column label="操作" width="200">
         <template #default="{ row }">
@@ -72,7 +76,12 @@
         <el-form-item label="扫码配置(JSON)">
           <el-input v-model="form.scan_config_json" type="textarea" :rows="6" placeholder='{"mode":"router","scan_router_key":"default","matchers":[]}' />
         </el-form-item>
-        <el-form-item label="首页磁贴"><el-switch v-model="form.show_on_agent_home" /></el-form-item>
+        <el-form-item label="显示位置">
+          <el-radio-group v-model="form.show_on_agent_home">
+            <el-radio :label="true">前台（主屏幕直接显示）</el-radio>
+            <el-radio :label="false">后台（点「管理后台」后可见）</el-radio>
+          </el-radio-group>
+        </el-form-item>
         <el-form-item label="排序"><el-input-number v-model="form.sort_order" /></el-form-item>
       </el-form>
       <template #footer>

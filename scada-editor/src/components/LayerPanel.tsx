@@ -1,4 +1,21 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, type ReactNode } from 'react'
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+  arrayMove,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { useEditorStore } from '@/store/editorStore'
 import { pushHistory } from '@/hooks/useHistory'
 
@@ -35,7 +52,10 @@ const typeColor: Record<string, string> = {
   'image-decoration': '#e879f9',
   'image-border-box': '#2dd4bf',
   'layout-carousel': '#38bdf8',
+  'layout-tabs': '#818cf8',
+  'layout-collapse': '#a78bfa',
   'layout-modal': '#f97316',
+  'alarm-light': '#ef4444',
   table: '#a3e635',
 }
 
@@ -46,7 +66,8 @@ const typeShort: Record<string, string> = {
   'echarts-bar': 'BAR', 'echarts-line': 'LCH', 'echarts-pie': 'PIE', 'echarts-gauge': 'GAU',
   'echarts-scatter': 'SCT', 'echarts-heatmap': 'HMP', 'echarts-trend': 'TRD',
   'image-bg': 'BG', 'image-widget': 'WGT', 'image-decoration': 'DEC', 'image-border-box': 'BOX',
-  'layout-carousel': 'CRS', 'layout-modal': 'MDL', table: 'TBL',
+  'layout-carousel': 'CRS', 'layout-tabs': 'TAB', 'layout-collapse': 'CLP', 'layout-modal': 'MDL',
+  'alarm-light': 'ALM', table: 'TBL',
 }
 
 const EyeOpen = () => (
@@ -75,6 +96,42 @@ const ChevronIcon = ({ open }: { open: boolean }) => (
     <path d="M9 18l6-6-6-6" />
   </svg>
 )
+const GripIcon = () => (
+  <svg width={10} height={10} viewBox="0 0 24 24" fill="currentColor" style={{ opacity: 0.45 }}>
+    <circle cx={9} cy={6} r={1.5} /><circle cx={15} cy={6} r={1.5} />
+    <circle cx={9} cy={12} r={1.5} /><circle cx={15} cy={12} r={1.5} />
+    <circle cx={9} cy={18} r={1.5} /><circle cx={15} cy={18} r={1.5} />
+  </svg>
+)
+
+interface DragHandleProps {
+  listeners?: ReturnType<typeof useSortable>['listeners']
+  attributes?: ReturnType<typeof useSortable>['attributes']
+}
+
+function SortableLayerWrapper({
+  id,
+  children,
+}: {
+  id: string
+  children: (drag: DragHandleProps) => ReactNode
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.65 : 1,
+        position: 'relative',
+        zIndex: isDragging ? 20 : undefined,
+      }}
+    >
+      {children({ listeners, attributes })}
+    </div>
+  )
+}
 
 export default function LayerPanel() {
   const store = useEditorStore()
@@ -94,6 +151,11 @@ export default function LayerPanel() {
     return () => window.removeEventListener('mousedown', close)
   }, [!!ctxMenu])
 
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
+
   if (!canvas || layerCollapsed) return null
 
   const sorted = [...canvas.elements].sort((a, b) => b.zIndex - a.zIndex)
@@ -112,7 +174,7 @@ export default function LayerPanel() {
   const toggleGroup = (id: string) =>
     setExpandedGroups((prev) => ({ ...prev, [id]: !prev[id] }))
 
-  const renderRow = (el: (typeof sorted)[0], indent = 0) => {
+  const renderRow = (el: (typeof sorted)[0], indent = 0, drag?: DragHandleProps) => {
     const isSelected = selectedIds.includes(el.id)
     const dotColor = typeColor[el.type] ?? '#64748b'
     const isGroup = el.type === 'group'
@@ -132,8 +194,21 @@ export default function LayerPanel() {
             setCtxMenu({ x: e.clientX, y: e.clientY, id: el.id })
           }}
           className={`layer-row${isSelected ? ' active' : ''}${el.locked ? ' locked' : ''}`}
-          style={{ paddingLeft: 6 + indent * 12 }}
+          style={{ paddingLeft: (drag ? 2 : 6) + indent * 12 }}
         >
+          {drag && (
+            <button
+              type="button"
+              className="icon-btn layer-drag-handle"
+              style={{ width: 14, height: 20, flexShrink: 0, cursor: 'grab', touchAction: 'none' }}
+              title="拖拽排序"
+              onClick={(e) => e.stopPropagation()}
+              {...drag.attributes}
+              {...drag.listeners}
+            >
+              <GripIcon />
+            </button>
+          )}
           {isGroup && (
             <button className="icon-btn" style={{ width: 14, height: 14, flexShrink: 0 }}
               onClick={(e) => { e.stopPropagation(); toggleGroup(el.id) }}>
@@ -226,6 +301,17 @@ export default function LayerPanel() {
   // Separate modals from regular elements
   const modalElements = sorted.filter((e) => e.type === 'layout-modal')
   const topLevel = sorted.filter((e) => !groupChildIds.has(e.id) && e.type !== 'layout-modal')
+  const topLevelIds = topLevel.map((e) => e.id)
+
+  const handleLayerDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const oldIndex = topLevelIds.indexOf(String(active.id))
+    const newIndex = topLevelIds.indexOf(String(over.id))
+    if (oldIndex < 0 || newIndex < 0) return
+    pushHistory(store.project)
+    store.reorderLayersByDisplay(arrayMove(topLevelIds, oldIndex, newIndex))
+  }
 
   // Find which buttons/elements have open-modal events pointing to each modal
   const modalTriggers = (modalId: string) =>
@@ -348,7 +434,15 @@ export default function LayerPanel() {
             暂无元素<br />从左侧组件库添加
           </div>
         )}
-        {topLevel.map((el) => renderRow(el))}
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleLayerDragEnd}>
+          <SortableContext items={topLevelIds} strategy={verticalListSortingStrategy}>
+            {topLevel.map((el) => (
+              <SortableLayerWrapper key={el.id} id={el.id}>
+                {(drag) => renderRow(el, 0, drag)}
+              </SortableLayerWrapper>
+            ))}
+          </SortableContext>
+        </DndContext>
       </div>
 
       {/* Right-click context menu */}

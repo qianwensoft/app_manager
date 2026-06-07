@@ -1,9 +1,7 @@
 import { useParams, useNavigate } from 'react-router-dom'
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useScadaInfo } from '@/hooks/useScada'
-import { useStompPointData, type PointDataMap } from '@/hooks/useStompPointData'
-import { useHttpPollingPointData } from '@/hooks/useHttpPollingPointData'
-import { useInterfaceBindingData } from '@/hooks/useInterfaceBindingData'
+import { useCanvasBindingData } from '@/hooks/useCanvasBindingData'
 import CanvasViewer from '@/components/CanvasViewer'
 import type { CanvasProject, CanvasData } from '@/types'
 
@@ -22,7 +20,6 @@ export default function PreviewPage() {
   const { data: info, isLoading } = useScadaInfo(Number(id))
   const [project, setProject] = useState<CanvasProject | null>(null)
   const [activeId, setActiveId] = useState<number | null>(null)
-  const [pointData, setPointData] = useState<PointDataMap>({})
   const [dataMode, setDataMode] = useState<DataMode>('none')
   const [headerCollapsed, setHeaderCollapsed] = useState(false)
   const [headerHovered, setHeaderHovered] = useState(false)
@@ -40,25 +37,15 @@ export default function PreviewPage() {
     }
   }, [info])
 
-  const handleData = useCallback((data: PointDataMap) => {
-    setPointData((prev) => ({ ...prev, ...data }))
-  }, [])
-
-  useStompPointData({
-    scadaCode: info?.scada_code ?? '',
-    onData: handleData,
-    enabled: dataMode === 'stomp' && !!info?.scada_code,
-  })
-
-  useHttpPollingPointData({
-    scadaCode: info?.scada_code ?? '',
-    intervalMs: 2000,
-    onData: handleData,
-    enabled: dataMode === 'http' && !!info?.scada_code,
-  })
-
   const allElements = project && activeId ? (project.canvases[activeId]?.elements ?? []) : []
-  useInterfaceBindingData({ elements: allElements, onData: handleData })
+  const { pointData, tableLiveData } = useCanvasBindingData({
+    scadaCode: info?.scada_code ?? '',
+    elements: allElements,
+    stompEnabled: dataMode === 'stomp',
+    httpPollEnabled: dataMode === 'http',
+    httpPollIntervalMs: 2000,
+    interfaceEnabled: true,
+  })
 
   const activeCanvas: CanvasData | undefined =
     project && activeId ? project.canvases[activeId] : undefined
@@ -216,6 +203,7 @@ export default function PreviewPage() {
               fitContainer
               fitMode="fit"
               pointData={pointData}
+              tableLiveData={tableLiveData}
               scadaCode={info?.scada_code}
               onSwitchCanvas={setActiveId}
             />

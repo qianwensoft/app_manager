@@ -24,7 +24,14 @@ SERVER_BIN := $(BIN_DIR)/app-manager
 
 .DEFAULT_GOAL := help
 
-.PHONY: help all clean \
+# ─── pbc40 部署目标 ────────────────────────────────────────────────────────
+# 目标机器：pbc40（192.168.102.40），部署目录：/opt/app-manager，端口：88
+PBC40_HOST    ?= pbc40
+PBC40_DIR     ?= /opt/app-manager
+PBC40_CONFIG  := server/config.pbc40.yaml
+PBC40_SERVICE := app-manager
+
+.PHONY: help all clean docker-build docker-up \
 	deps-web web web-build \
 	deps-scada-editor scada-editor-build \
 	deps-form-app form-app-build \
@@ -32,7 +39,8 @@ SERVER_BIN := $(BIN_DIR)/app-manager
 	agent agent-debug agent-release agent-release-build install-agent bump-agent-version \
 	bridge bridge-linux-amd64 bridge-linux-arm64 bridge-darwin-amd64 bridge-darwin-arm64 bridge-windows-amd64 bridge-all \
 	release release-linux release-darwin release-windows release-all release-zip release-tar \
-	check test fmt
+	check test fmt schema-check \
+	deploy-pbc40 deploy-pbc40-server deploy-pbc40-web deploy-pbc40-agent deploy-pbc40-restart deploy-pbc40-quick
 
 help:
 	@echo "App Manager — 常用目标"
@@ -48,6 +56,15 @@ help:
 	@echo "    AGENT_VERSION=x.y.z     直接指定版本名"
 	@echo "    AGENT_CODE=N            直接指定 versionCode"
 	@echo "    FORCE=1                 强制升级（无论是否有 agent 提交）"
+	@echo "  make deploy-pbc40          完整构建（server+web+APK）并部署到 pbc40，访问 http://192.168.102.40:88"
+	@echo "  make deploy-pbc40-quick    跳过重新构建，直接同步已有产物"
+	@echo "  make deploy-pbc40-server   仅重新编译 server 并同步"
+	@echo "  make deploy-pbc40-web      仅重新构建前端（web+scada+form-app）并同步"
+	@echo "  make deploy-pbc40-agent    仅构建并上传 release APK"
+	@echo "  make deploy-pbc40-restart  仅在远程重启服务"
+	@echo "    PBC40_HOST=pbc40           SSH 主机名（默认 pbc40，需配置 ~/.ssh/config）"
+	@echo "    PBC40_DIR=/opt/app-manager 远程部署目录"
+	@echo ""
 	@echo "  make release          生成 Linux 发布包（默认）"
 	@echo "  make release-linux    生成 Linux 发布包 + systemd 服务"
 	@echo "  make release-darwin   生成 macOS 发布包 + launchd 服务"
@@ -56,6 +73,8 @@ help:
 	@echo "  make release-zip      release 再打 zip"
 	@echo "  make release-tar      release 再打 tar.gz"
 	@echo "  make clean            清理 bin、dist、web/dist、agent build"
+	@echo "  make docker-build     构建 Docker 镜像 app-manager:$(VERSION)"
+	@echo "  make docker-up        docker compose up -d --build"
 	@echo ""
 	@echo "交叉编译（输出到 $(BIN_DIR)/）："
 	@echo "  make server-linux-amd64 | server-linux-arm64 | server-darwin-amd64 | server-darwin-arm64 | server-windows-amd64"
@@ -279,6 +298,105 @@ release-tar: release
 	cd $(RELEASE_DIR) && tar czvf app-manager-$(VERSION).tar.gz app-manager-$(VERSION)
 	@echo "$(RELEASE_DIR)/app-manager-$(VERSION).tar.gz"
 
+# ─── 部署到 pbc40（192.168.102.40:88）─────────────────────────────────────
+#
+# 前提：ssh pbc40 免密可用（~/.ssh/config 配置 Host pbc40 → 192.168.102.40）
+#       pbc40 已创建 /opt/app-manager 目录且 app-manager.service 已安装
+#
+# 常用命令：
+#   make deploy-pbc40          完整构建（server + web + agent）并部署，部署后自动重启服务
+#   make deploy-pbc40-quick    跳过重新构建，直接同步已有产物（用于仅改了配置/前端）
+#   make deploy-pbc40-server   仅重新编译 server 并同步（不重建前端）
+#   make deploy-pbc40-web      仅重新构建前端并同步（不重新编译 server）
+#   make deploy-pbc40-agent    仅构建并上传 APK
+#   make deploy-pbc40-restart  仅在远程重启服务（不传文件）
+
+# 完整构建 + 部署（server + 全部前端 + APK）
+deploy-pbc40: web server-linux-amd64 agent-release-build
+	@echo ">>> 同步到 $(PBC40_HOST):$(PBC40_DIR) ..."
+	ssh $(PBC40_HOST) "mkdir -p $(PBC40_DIR)/server $(PBC40_DIR)/data $(PBC40_DIR)/uploads"
+	# 上传 server 二进制
+	rsync -avz --progress $(BIN_DIR)/app-manager-linux-amd64 $(PBC40_HOST):$(PBC40_DIR)/app-manager
+	# 上传配置文件（首次；已存在则跳过，避免覆盖生产配置）
+	rsync -avz --ignore-existing $(SERVER)/config.pbc40.yaml $(PBC40_HOST):$(PBC40_DIR)/server/config.pbc40.yaml
+	# 上传前端资源（web/dist 含 scada-editor 和 form-app）
+	rsync -avz --delete --progress $(WEB)/dist/ $(PBC40_HOST):$(PBC40_DIR)/web/dist/
+	# 上传 APK
+	rsync -avz --progress \
+		$(AGENT)/app/build/outputs/apk/release/app-release.apk \
+		$(PBC40_HOST):$(PBC40_DIR)/agent-app.apk 2>/dev/null || \
+		echo "[WARN] APK 未找到，跳过上传"
+	# 设置可执行权限并重启服务
+	ssh $(PBC40_HOST) "chmod +x $(PBC40_DIR)/app-manager && \
+		(systemctl restart $(PBC40_SERVICE) 2>/dev/null || \
+		 service $(PBC40_SERVICE) restart 2>/dev/null || \
+		 (pkill -f 'app-manager.*config' 2>/dev/null; \
+		  nohup $(PBC40_DIR)/app-manager $(PBC40_DIR)/server/config.pbc40.yaml \
+		    >> /var/log/app-manager.log 2>&1 &))"
+	@echo ">>> 部署完成，访问地址：http://192.168.102.40:88"
+
+# 跳过重建，直接同步已有产物（快速更新）
+deploy-pbc40-quick:
+	@echo ">>> 快速同步到 $(PBC40_HOST):$(PBC40_DIR) （不重新构建）..."
+	ssh $(PBC40_HOST) "mkdir -p $(PBC40_DIR)/server $(PBC40_DIR)/data $(PBC40_DIR)/uploads"
+	@[ -f $(BIN_DIR)/app-manager-linux-amd64 ] && \
+		rsync -avz --progress $(BIN_DIR)/app-manager-linux-amd64 $(PBC40_HOST):$(PBC40_DIR)/app-manager || \
+		echo "[SKIP] server 二进制不存在，跳过"
+	rsync -avz --ignore-existing $(SERVER)/config.pbc40.yaml $(PBC40_HOST):$(PBC40_DIR)/server/config.pbc40.yaml
+	@[ -d $(WEB)/dist ] && \
+		rsync -avz --delete --progress $(WEB)/dist/ $(PBC40_HOST):$(PBC40_DIR)/web/dist/ || \
+		echo "[SKIP] web/dist 不存在，跳过前端同步"
+	ssh $(PBC40_HOST) "chmod +x $(PBC40_DIR)/app-manager 2>/dev/null; \
+		(systemctl restart $(PBC40_SERVICE) 2>/dev/null || \
+		 service $(PBC40_SERVICE) restart 2>/dev/null || \
+		 (pkill -f 'app-manager.*config' 2>/dev/null; \
+		  nohup $(PBC40_DIR)/app-manager $(PBC40_DIR)/server/config.pbc40.yaml \
+		    >> /var/log/app-manager.log 2>&1 &))"
+	@echo ">>> 快速部署完成，访问地址：http://192.168.102.40:88"
+
+# 仅重新编译 server 并部署（不重建前端）
+deploy-pbc40-server: server-linux-amd64
+	rsync -avz --progress $(BIN_DIR)/app-manager-linux-amd64 $(PBC40_HOST):$(PBC40_DIR)/app-manager
+	rsync -avz --ignore-existing $(SERVER)/config.pbc40.yaml $(PBC40_HOST):$(PBC40_DIR)/server/config.pbc40.yaml
+	ssh $(PBC40_HOST) "chmod +x $(PBC40_DIR)/app-manager && \
+		(systemctl restart $(PBC40_SERVICE) 2>/dev/null || \
+		 service $(PBC40_SERVICE) restart 2>/dev/null || \
+		 (pkill -f 'app-manager.*config' 2>/dev/null; \
+		  nohup $(PBC40_DIR)/app-manager $(PBC40_DIR)/server/config.pbc40.yaml \
+		    >> /var/log/app-manager.log 2>&1 &))"
+	@echo ">>> Server 部署完成，访问地址：http://192.168.102.40:88"
+
+# 仅重新构建前端并部署
+deploy-pbc40-web: web
+	rsync -avz --delete --progress $(WEB)/dist/ $(PBC40_HOST):$(PBC40_DIR)/web/dist/
+	@echo ">>> 前端部署完成"
+
+# 仅构建并上传 APK
+deploy-pbc40-agent: agent-release-build
+	rsync -avz --progress \
+		$(AGENT)/app/build/outputs/apk/release/app-release.apk \
+		$(PBC40_HOST):$(PBC40_DIR)/agent-app.apk
+	@echo ">>> APK 上传完成：$(PBC40_DIR)/agent-app.apk"
+
+# 仅重启远程服务（不传文件）
+deploy-pbc40-restart:
+	ssh $(PBC40_HOST) \
+		"(systemctl restart $(PBC40_SERVICE) 2>/dev/null || \
+		  service $(PBC40_SERVICE) restart 2>/dev/null || \
+		  (pkill -f 'app-manager.*config' 2>/dev/null; sleep 1; \
+		   nohup $(PBC40_DIR)/app-manager $(PBC40_DIR)/server/config.pbc40.yaml \
+		     >> /var/log/app-manager.log 2>&1 &)) && \
+		 echo '服务已重启'"
+	@echo ">>> 访问地址：http://192.168.102.40:88"
+
+# ─── Docker ─────────────────────────────────────────────────────────────────
+
+docker-build:
+	docker build -t app-manager:$(VERSION) .
+
+docker-up:
+	docker compose up -d --build
+
 # ─── 清理与检查 ───────────────────────────────────────────────────────────
 
 clean:
@@ -292,5 +410,8 @@ fmt:
 test:
 	cd $(SERVER) && $(GO) test ./...
 
-check: fmt test
+schema-check:
+	cd $(SERVER) && $(GO) test ./tests -run TestSchemaReconcile -count=1 -p 1
+
+check: fmt test schema-check
 	cd $(SERVER) && $(GO) vet ./...

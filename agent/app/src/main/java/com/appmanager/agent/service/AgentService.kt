@@ -20,9 +20,11 @@ import com.appmanager.agent.MainActivity
 import com.appmanager.agent.R
 import com.appmanager.agent.command.CommandDispatcher
 import com.appmanager.agent.config.AgentConfig
+import com.appmanager.agent.config.AgentRegistration
 import com.appmanager.agent.util.DisplayUtil
 import com.appmanager.agent.util.AppVersions
 import com.appmanager.agent.util.ServerUrlUtil
+import com.appmanager.agent.CustomEventListenSync
 import com.appmanager.agent.util.CustomEventBroadcastHelper
 import com.appmanager.agent.util.EventReporter
 import com.appmanager.agent.AgentMenuSync
@@ -49,8 +51,19 @@ class AgentService : LifecycleService() {
 
     companion object {
         const val ACTION_START_SCREEN = "START_SCREEN_CAPTURE"
+        const val ACTION_WIRELESS_ADB_ACK = "WIRELESS_ADB_GUIDE_ACK"
+        const val EXTRA_WIRELESS_ADB_DEVICE_ID = "wireless_adb_device_id"
+        const val EXTRA_WIRELESS_ADB_TOKEN_MATCHED = "wireless_adb_token_matched"
         const val EXTRA_RESULT_CODE = "resultCode"
         const val EXTRA_DATA = "data"
+
+        fun reportWirelessAdbGuideAck(context: android.content.Context, scannedDeviceId: Long, tokenMatched: Boolean) {
+            context.startForegroundService(Intent(context, AgentService::class.java).apply {
+                action = ACTION_WIRELESS_ADB_ACK
+                putExtra(EXTRA_WIRELESS_ADB_DEVICE_ID, scannedDeviceId)
+                putExtra(EXTRA_WIRELESS_ADB_TOKEN_MATCHED, tokenMatched)
+            })
+        }
         @Volatile
         private var installCallbackRef: java.lang.ref.WeakReference<AgentService>? = null
 
@@ -88,7 +101,6 @@ class AgentService : LifecycleService() {
     private val NOTIF_ID = 1001
 
     lateinit var webSocket: AgentWebSocket
-        private set
 
     private lateinit var heartbeatManager: HeartbeatManager
     private lateinit var deviceInfoCollector: DeviceInfoCollector
@@ -97,6 +109,10 @@ class AgentService : LifecycleService() {
     private var shellManager: ShellManager? = null
     private var logcatManager: LogcatManager? = null
     private var deviceToken: String = ""
+
+    /** 当前 WebSocket / 上报使用的设备连接键（机器码或 Token）。 */
+    val connectionDeviceToken: String
+        get() = deviceToken
 
     /** 当前 WebSocket 建立时使用的地址与 Token；与 SharedPreferences 不一致时需重连 */
     private var activeWsServerUrl: String = ""
@@ -118,6 +134,15 @@ class AgentService : LifecycleService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
 
+        if (intent?.action == ACTION_WIRELESS_ADB_ACK) {
+            val scannedId = intent.getLongExtra(EXTRA_WIRELESS_ADB_DEVICE_ID, 0L)
+            val tokenMatched = intent.getBooleanExtra(EXTRA_WIRELESS_ADB_TOKEN_MATCHED, true)
+            if (::webSocket.isInitialized) {
+                reportWirelessAdbGuideAck(scannedId, tokenMatched)
+            }
+            return START_STICKY
+        }
+
         // 处理屏幕录制授权回调
         if (intent?.action == ACTION_START_SCREEN) {
             val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, -1)
@@ -138,7 +163,7 @@ class AgentService : LifecycleService() {
 
         startForeground(NOTIF_ID, buildNotification("连接中..."))
 
-        val config = AgentConfig.get(this)
+        val config = AgentRegistration.ensureMachineCodeConfig(this)
         val url = config.serverUrl.trim()
         val tok = config.deviceToken.trim()
         if (url.isEmpty()) {
@@ -166,8 +191,17 @@ class AgentService : LifecycleService() {
                 updateNotification("已连接")
                 heartbeatManager.start()
                 deviceInfoCollector.start()
+                webSocket.send(
+                    DeviceInfoMessage(
+                        deviceId = tok,
+                        data = collectDeviceInfoData(this@AgentService)
+                    )
+                )
+                screenCaptureManager?.notifyLinkReady()
                 EventReporter.init(webSocket, tok)
+                com.appmanager.agent.util.CustomEventProbeHelper.bind(webSocket, tok)
                 AgentMenuSync.fetchManifestAsync(serviceScope, this@AgentService, url, tok)
+                CustomEventListenSync.syncFromServerAsync(serviceScope, this@AgentService, url, tok)
             },
             onDisconnected = {
                 updateNotification("重连中...")
@@ -206,6 +240,7 @@ class AgentService : LifecycleService() {
         shellManager?.stop()
         logcatManager?.stop()
         CustomEventBroadcastHelper.stop(this)
+        com.appmanager.agent.util.CustomEventProbeHelper.stop(this)
         com.appmanager.agent.MenuIntentReceiver.unregister(this)
         if (::webSocket.isInitialized) webSocket.disconnect()
         activeWsServerUrl = ""
@@ -243,6 +278,7 @@ class AgentService : LifecycleService() {
     /** 切换服务器或 Token：停子模块、断旧 WebSocket，便于下面重新 new AgentWebSocket */
     private fun reconnectForNewEndpoint() {
         CustomEventBroadcastHelper.stop(this)
+        com.appmanager.agent.util.CustomEventProbeHelper.stop(this)
         if (::heartbeatManager.isInitialized) heartbeatManager.stop()
         if (::deviceInfoCollector.isInitialized) deviceInfoCollector.stop()
         stopScreenCapture()
@@ -502,9 +538,9 @@ class AgentService : LifecycleService() {
     }
 
     // ─── Logcat ───────────────────────────────────────────────────────────────
-    fun startLogcat(filter: String = "") {
+    fun startLogcat(filters: List<String> = emptyList()) {
         logcatManager = LogcatManager(webSocket, deviceToken)
-        logcatManager?.start(filter)
+        logcatManager?.start(filters)
     }
 
     fun stopLogcat() {
@@ -670,6 +706,58 @@ class AgentService : LifecycleService() {
     private fun updateNotification(status: String) {
         val manager = getSystemService(NotificationManager::class.java)
         manager.notify(NOTIF_ID, buildNotification(status))
+    }
+
+    /**
+     * Web 打开屏幕查看时下发 start_screen：已在采集则刷新 meta，否则走系统授权。
+     */
+    fun requestScreenCapture() {
+        if (screenCaptureManager != null) {
+            screenCaptureManager?.notifyLinkReady()
+            return
+        }
+        promptScreenCapturePermission()
+    }
+
+    fun openWirelessAdbSettings() {
+        Handler(Looper.getMainLooper()).post {
+            com.appmanager.agent.util.WirelessAdbHelper.openWirelessDebugSettings(applicationContext)
+        }
+    }
+
+    fun triggerAgentMenuIntent(intentAction: String) {
+        Handler(Looper.getMainLooper()).post {
+            val action = intentAction.trim()
+            if (action.isEmpty()) return@post
+            if (action == com.appmanager.agent.util.WirelessAdbHelper.ACTION_OPEN ||
+                action == com.appmanager.agent.MainActivity.ACTION_OPEN_WIRELESS_ADB
+            ) {
+                com.appmanager.agent.util.WirelessAdbHelper.openWirelessDebugSettings(applicationContext)
+                return@post
+            }
+            val launch = Intent(this, com.appmanager.agent.MainActivity::class.java).apply {
+                this.action = action
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            }
+            try {
+                startActivity(launch)
+            } catch (e: Exception) {
+                Log.e(TAG, "triggerAgentMenuIntent startActivity failed action=$action", e)
+            }
+        }
+    }
+
+    fun reportWirelessAdbGuideAck(scannedDeviceId: Long, tokenMatched: Boolean) {
+        if (!::webSocket.isInitialized) return
+        webSocket.send(
+            mapOf(
+                "type" to "wireless_adb_guide_ack",
+                "data" to mapOf(
+                    "device_id" to scannedDeviceId,
+                    "token_matched" to tokenMatched
+                )
+            )
+        )
     }
 
     /**

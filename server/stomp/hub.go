@@ -21,6 +21,13 @@ type Hub struct {
 // DefaultHub is used for recording progress and other app events.
 var DefaultHub = NewHub()
 
+var publishHook func(topic, jsonBody string)
+
+// SetPublishHook is called after local delivery (e.g. cluster Redis mirror).
+func SetPublishHook(fn func(topic, jsonBody string)) {
+	publishHook = fn
+}
+
 func NewHub() *Hub {
 	return &Hub{topics: make(map[string][]*subscriber)}
 }
@@ -50,8 +57,17 @@ func (h *Hub) Subscribe(topic, subscriptionID string, send func([]byte)) (unsub 
 	}
 }
 
-// PublishJSON sends a JSON body as STOMP MESSAGE to all subscribers of topic.
+// PublishJSON sends a JSON body as STOMP MESSAGE to all local subscribers of topic,
+// then invokes the optional publish hook for cross-node fan-out.
 func (h *Hub) PublishJSON(topic string, jsonBody string) {
+	h.PublishJSONLocal(topic, jsonBody)
+	if publishHook != nil {
+		publishHook(topic, jsonBody)
+	}
+}
+
+// PublishJSONLocal delivers only to subscribers on this process (no cluster hook).
+func (h *Hub) PublishJSONLocal(topic string, jsonBody string) {
 	h.mu.RLock()
 	list := append([]*subscriber(nil), h.topics[topic]...)
 	h.mu.RUnlock()

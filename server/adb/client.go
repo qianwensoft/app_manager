@@ -10,9 +10,13 @@ import (
 	"time"
 )
 
+// DefaultConnectTimeout adb connect 专用超时（不可达主机时默认 Exec 可达 30s+，易导致页面长期「连接中」）。
+const DefaultConnectTimeout = 10 * time.Second
+
 type Client struct {
-	adbPath string
-	timeout time.Duration
+	adbPath        string
+	timeout        time.Duration
+	connectTimeout time.Duration
 }
 
 // ExePath 返回实际用于 exec 的 adb 路径（与 ListDevices/Shell 等一致）。
@@ -29,13 +33,17 @@ func NewClient(adbPath string, timeoutSec int) *Client {
 		}
 	}
 	return &Client{
-		adbPath: p,
-		timeout: time.Duration(timeoutSec) * time.Second,
+		adbPath:        p,
+		timeout:        time.Duration(timeoutSec) * time.Second,
+		connectTimeout: DefaultConnectTimeout,
 	}
 }
 
-func (c *Client) Exec(args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
+func (c *Client) execWithTimeout(timeout time.Duration, args ...string) (string, error) {
+	if timeout <= 0 {
+		timeout = c.timeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	var out bytes.Buffer
 	cmd := exec.CommandContext(ctx, c.adbPath, args...)
@@ -43,6 +51,10 @@ func (c *Client) Exec(args ...string) (string, error) {
 	cmd.Stderr = &out
 	err := cmd.Run()
 	return strings.TrimSpace(out.String()), err
+}
+
+func (c *Client) Exec(args ...string) (string, error) {
+	return c.execWithTimeout(c.timeout, args...)
 }
 
 func (c *Client) ExecOnDevice(serial string, args ...string) (string, error) {
@@ -59,22 +71,46 @@ func (c *Client) GetState(serial string) (string, error) {
 }
 
 func (c *Client) ListDevices() ([]string, error) {
-	out, err := c.Exec("devices")
+	states, err := c.ListDeviceStates()
 	if err != nil {
 		return nil, err
 	}
 	var serials []string
-	for _, line := range strings.Split(out, "\n")[1:] {
-		parts := strings.Fields(line)
-		if len(parts) >= 2 && parts[1] == "device" {
-			serials = append(serials, parts[0])
+	for serial, st := range states {
+		if st == "device" {
+			serials = append(serials, serial)
 		}
 	}
 	return serials, nil
 }
 
+// ListDeviceStates 解析 adb devices 输出，返回 serial -> state（device/offline/connecting/unauthorized 等）。
+func (c *Client) ListDeviceStates() (map[string]string, error) {
+	out, err := c.Exec("devices")
+	if err != nil {
+		return nil, err
+	}
+	states := make(map[string]string)
+	for _, line := range strings.Split(out, "\n")[1:] {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Fields(line)
+		if len(parts) < 2 {
+			continue
+		}
+		states[parts[0]] = parts[1]
+	}
+	return states, nil
+}
+
 func (c *Client) ConnectTCP(ip string, port int) (string, error) {
-	return c.Exec("connect", fmt.Sprintf("%s:%d", ip, port))
+	t := c.connectTimeout
+	if t <= 0 {
+		t = DefaultConnectTimeout
+	}
+	return c.execWithTimeout(t, "connect", fmt.Sprintf("%s:%d", ip, port))
 }
 
 // PairTCP 使用 Android 11+ 无线调试配对码与设备配对。

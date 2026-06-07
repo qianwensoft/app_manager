@@ -10,8 +10,10 @@
 - **Phase 2**：快速生成重构（已完成）
 - **Phase 3**：前端设计器重构（已完成）
 - **Phase 4**：运行时渲染器（已完成）
-- **Phase 5**：Agent 集成（待实施）
+- **Phase 5**：Agent 集成（骨架完成，扫码 E2E 待闭环）— 详见 `docs/phase5-summary.md`
 - **Phase 6**：测试与优化（待实施）
+
+> **状态说明（2026-06-05）**：以代码为准。全景计划见 `docs/plan.md` v3.0 Phase A2/A4。
 
 ## 已完成功能
 
@@ -147,11 +149,14 @@ POST /api/form-app/runtime/submit
 
 ## 待完成功能
 
-### Phase 5：Agent 集成（3-4天）
-- [ ] 扩展 AgentMenuItem 支持 form_app_entry
-- [ ] 实现菜单下发 API
-- [ ] Android Agent 端 FormAppActivity
-- [ ] JavaScript Bridge 处理扫码事件
+### Phase 5 剩余（约 1–2 天）— 见 `docs/plan.md` Phase A2
+- [x] 扩展 AgentMenuItem 支持 `form_app_entry`（`server/models/agent_menu.go`）
+- [x] 菜单下发 API（`POST /api/form-app/infos/:id/deploy-to-devices`）
+- [x] Android `FormAppActivity` + `FormAppBridge`（`agent/.../FormAppActivity.kt`）
+- [x] 前端 `eventManager` 暴露到 `window`（`form-app/src/runtime/EventHandler.ts`）
+- [x] 集成扫码库（ZXing），实现 `scanBarcode()`（`FormAppActivity.kt`）
+- [x] `FormAppActivity` 注册到 `AndroidManifest.xml`
+- [ ] 真机端到端验证（菜单下发 → 扫码跳转）
 
 ### Phase 6：测试与优化（3-4天）
 - [ ] 端到端测试
@@ -198,19 +203,22 @@ make server
 - `docs/phase3-summary.md` - 前端设计器
 - `docs/phase4.1-summary.md` - 基础渲染器
 - `docs/phase4-summary.md` - 完整运行时
+- `docs/phase5-summary.md` - Agent 集成
+- `docs/plan.md` v3.0 - 平台全景计划
 - `CLAUDE.md` - 项目架构说明
 
 ## 总结
 
-已完成核心功能（Phase 1-4），实现了：
+已完成 Phase 1–5 主体，实现了：
 - ✅ 灵活的数据模型（支持多页面）
-- ✅ 完整的管理界面（设计器）
+- ✅ 完整的管理界面（设计器 V2）
 - ✅ 强大的运行时引擎（动态渲染）
-- ✅ 事件路由系统（扫码跳转）
+- ✅ 事件路由系统（Web 端测试面板 + Agent Bridge 回调路径）
 - ✅ 页面导航系统（历史记录）
+- ✅ Agent 菜单下发与 WebView 容器（扫码库待接）
 
-**实际耗时**：约 3-4 天（Phase 1-4）
+**实际耗时**：约 3-4 天（Phase 1-4）+ 约 1 小时（Phase 5 骨架）
 
-**预计剩余**：6-8 天（Phase 5-6 + 优化）
+**预计剩余**：1-2 天（Phase 5 扫码 E2E）+ 3-4 天（Phase 6）
 
-**项目进度**：核心功能 80%，完整功能 60%
+**项目进度**：设计态与 API 完整；设备端运行闭环约 70%

@@ -6,6 +6,8 @@ import (
 	"app-manager/config"
 	"app-manager/database"
 	"app-manager/models"
+	"app-manager/outbound"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -134,6 +136,16 @@ func execute(client *adb.Client, taskID uint) {
 		"output":      output,
 		"finished_at": &now,
 	})
+
+	if status == "success" && t.Action == "install" {
+		payload, _ := json.Marshal(map[string]interface{}{
+			"task_id":   taskID,
+			"app_id":    t.AppID,
+			"device_id": t.DeviceID,
+			"output":    output,
+		})
+		outbound.NotifySystemEvent("install.completed", t.DeviceID, string(payload))
+	}
 }
 
 // postInstallStartApp 安装成功后拉起主界面：优先 ADB monkey，失败或未接 ADB 则改由 Agent start_app。

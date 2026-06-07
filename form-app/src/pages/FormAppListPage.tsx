@@ -135,8 +135,9 @@ export default function FormAppListPage() {
                 <td>{r.updated_at ? new Date(r.updated_at).toLocaleString() : '-'}</td>
                 <td>
                   <div className="row-actions">
-                    <button type="button" onClick={() => navigate(`/designer-v2/${r.id}`)}>多页面设计器</button>
-                    <button type="button" onClick={() => window.open(`/form-app/generated/${encodeURIComponent(r.code)}/form?editor_id=${r.id}`, '_blank')}>打开生成页</button>
+                    <button type="button" onClick={() => navigate(`/designer-v2/${r.id}`)}>配置</button>
+                    <button type="button" onClick={() => navigate(`/designer-v2/${r.id}?step=data`)}>数据</button>
+                    <button type="button" onClick={() => window.open(`/form-app/runtime/${encodeURIComponent(r.code)}`, '_blank')}>运行</button>
                   </div>
                 </td>
               </tr>

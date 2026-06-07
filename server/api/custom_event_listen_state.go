@@ -94,7 +94,7 @@ func persistListenStateAfterStop(results []customEventListenResult) {
 	}
 }
 
-// DeactivateDeviceCustomListenStateForAgentKey Agent 断开时标记监听未激活（设备端实际已 unregister）。
+// DeactivateDeviceCustomListenStateForAgentKey 将库中监听标为未激活（仅 Web/Agent 显式暂停或删除时调用；断线重连不再调用，以便自动恢复）。
 func DeactivateDeviceCustomListenStateForAgentKey(agentKey string) {
 	devID, ok := agent.ResolveDeviceID(agentKey)
 	if !ok {

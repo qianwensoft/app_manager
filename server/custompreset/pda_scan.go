@@ -30,6 +30,13 @@ func PDAScanPresets() []PDAScanPreset {
 			ExtraKeys:   []string{"SCAN_BARCODE1", "SCAN_DATA", "barcode", "data"},
 		},
 		{
+			Key:         "pda_se4500_decode",
+			Name:        "新大陆 SE4500（com.dawn.java）",
+			Description: "SC40 等机型扫码服务 com.se4500.onDecodeComplete，数据标签常为 se4500",
+			Actions:     []string{"com.se4500.onDecodeComplete"},
+			ExtraKeys:   []string{"se4500", "barcode_string", "data", "barcode", "scannerdata", "SCAN_DATA"},
+		},
+		{
 			Key:         "pda_honeywell_decode",
 			Name:        "Honeywell 霍尼韦尔",
 			Description: "Decode 库 Intent 输出",

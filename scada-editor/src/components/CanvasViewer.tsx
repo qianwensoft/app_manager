@@ -1,10 +1,16 @@
-import { useRef, useEffect, useState, useCallback } from 'react'
+import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import type { CanvasData, ChartConfig } from '@/types'
 import { drawGrid, drawElement } from '@/utils/canvas'
 import type { PointDataMap } from '@/hooks/useStompPointData'
 import { resolveElementValue } from '@/hooks/useInterfaceBindingData'
 import { useRuntimeStore } from '@/store/runtimeStore'
 import { useEditorStore } from '@/store/editorStore'
+import { useAnimationTick } from '@/hooks/useAnimationTick'
+import { canvasNeedsAnimationLoop, getCanvasAnimState, mergeAnimStyle } from '@/runtime/animationExecutor'
+import { runTriggeredEvents, type EventRuntimeContext } from '@/runtime/eventExecutor'
+import { useConditionEvents } from '@/hooks/useConditionEvents'
+import AnimationStyleInjector from './AnimationStyleInjector'
+import ElementEventHitLayer from './ElementEventHitLayer'
 import ChartWidget from './ChartWidget'
 import TrendWidget from './TrendWidget'
 import UPlotTrendWidget from './UPlotTrendWidget'
@@ -13,6 +19,9 @@ import TableWidget from './TableWidget'
 import FormFieldWidget from './FormFieldWidget'
 import LayoutCarouselWidget from './LayoutCarouselWidget'
 import LayoutModalWidget from './LayoutModalWidget'
+import LayoutTabsWidget from './LayoutTabsWidget'
+import LayoutCollapseWidget from './LayoutCollapseWidget'
+import AlarmLightWidget from './AlarmLightWidget'
 
 interface Props {
   canvas: CanvasData
@@ -22,6 +31,7 @@ interface Props {
   /** 'fit' = maintain aspect ratio (default when fitContainer); 'fill' = stretch to fill */
   fitMode?: 'fit' | 'fill'
   pointData?: PointDataMap
+  tableLiveData?: Record<string, Record<string, unknown>[]>
   scadaCode?: string
   onSwitchCanvas?: (canvasId: number) => void
 }
@@ -32,6 +42,7 @@ export default function CanvasViewer({
   fitContainer = false,
   fitMode = 'fit',
   pointData = {},
+  tableLiveData = {},
   scadaCode,
   onSwitchCanvas,
 }: Props) {
@@ -72,6 +83,12 @@ export default function CanvasViewer({
 
   const z = resolvedZoom
 
+  const needsAnimLoop = useMemo(
+    () => canvasNeedsAnimationLoop(canvas.elements, pointData),
+    [canvas.elements, pointData],
+  )
+  const animNow = useAnimationTick(needsAnimLoop)
+
   useEffect(() => {
     const el = canvasRef.current
     if (!el) return
@@ -88,9 +105,10 @@ export default function CanvasViewer({
 
     const sorted = [...canvas.elements].sort((a, b) => a.zIndex - b.zIndex)
     for (const element of sorted) {
-      drawElement(ctx, element, z)
+      const animState = getCanvasAnimState(element, pointData, animNow)
+      drawElement(ctx, element, z, animState)
     }
-  }, [canvas, z, pointData])
+  }, [canvas, z, pointData, animNow])
 
   const domElements = canvas.elements.filter(
     (el) => el.visible && (el.type === 'text' || el.type === 'button'),
@@ -105,7 +123,13 @@ export default function CanvasViewer({
     ),
   )
   const layoutElements = canvas.elements.filter(
-    (el) => el.visible && (el.type === 'layout-carousel' || el.type === 'layout-modal'),
+    (el) => el.visible && (
+      el.type === 'layout-carousel' || el.type === 'layout-modal'
+      || el.type === 'layout-tabs' || el.type === 'layout-collapse'
+    ),
+  )
+  const alarmElements = canvas.elements.filter(
+    (el) => el.visible && el.type === 'alarm-light',
   )
   const tableElements = canvas.elements.filter(
     (el) => el.visible && el.type === 'table',
@@ -115,23 +139,18 @@ export default function CanvasViewer({
   )
   const formValuesRef = useRef<Record<string, string>>({})
 
-  const handleElementClick = (el: (typeof domElements)[0]) => {
-    if (!el.events?.length) return
-    for (const ev of el.events) {
-      if (ev.trigger !== 'click') continue
-      if (ev.action === 'open-modal' && ev.target) openModal(ev.target)
-      else if (ev.action === 'close-modal' && ev.target) closeModal(ev.target)
-      else if (ev.action === 'navigate-canvas' && ev.target) {
-        const id = Number(ev.target)
-        if (onSwitchCanvas) onSwitchCanvas(id)
-        else switchCanvas(id)
-      }
-      else if (ev.action === 'navigate' && ev.target) window.open(ev.target, '_blank')
-      else if (ev.action === 'popup' && ev.target) window.open(ev.target, '_blank', 'width=800,height=600')
-      else if (ev.action === 'script' && ev.script) {
-        try { new Function(ev.script)() } catch { /* ignore */ }
-      }
-    }
+  const eventCtx = useMemo<Omit<EventRuntimeContext, 'element'>>(() => ({
+    pointData,
+    openModal,
+    closeModal,
+    switchCanvas,
+    onSwitchCanvas,
+  }), [pointData, openModal, closeModal, switchCanvas, onSwitchCanvas])
+
+  useConditionEvents(canvas.elements, pointData, eventCtx)
+
+  const fireDomEvents = (el: (typeof domElements)[0], trigger: 'click' | 'dblclick' | 'hover') => {
+    runTriggeredEvents(el, trigger, { ...eventCtx, element: el })
   }
 
   // When fitContainer, the outer div fills its parent; the inner canvas is centered
@@ -141,6 +160,7 @@ export default function CanvasViewer({
 
   return (
     <div ref={containerRef} style={outerStyle}>
+      <AnimationStyleInjector elements={canvas.elements} />
       {/* inner wrapper sized to the scaled canvas */}
       <div style={{ position: 'relative', width: canvas.width * z, height: canvas.height * z, flexShrink: 0 }}>
         <canvas ref={canvasRef} style={{ display: 'block' }} />
@@ -152,18 +172,34 @@ export default function CanvasViewer({
             : <ChartWidget key={el.id} el={el} zoom={z} pointData={pointData} />
         )}
         {imageElements.map((el) => (
-          <ImageWidget key={el.id} el={el} zoom={z} />
+          <ImageWidget key={el.id} el={el} zoom={z} pointData={pointData} />
         ))}
-        {layoutElements.map((el) =>
-          el.type === 'layout-carousel'
-            ? <LayoutCarouselWidget key={el.id} el={el} zoom={z} isPreview={true} />
-            : <LayoutModalWidget key={el.id} el={el} zoom={z} isPreview={true} pointData={pointData} scadaCode={scadaCode} onSwitchCanvas={onSwitchCanvas} />
-        )}
+        {layoutElements.map((el) => {
+          if (el.type === 'layout-carousel') {
+            return <LayoutCarouselWidget key={el.id} el={el} zoom={z} isPreview pointData={pointData} />
+          }
+          if (el.type === 'layout-tabs') {
+            return <LayoutTabsWidget key={el.id} el={el} zoom={z} isPreview pointData={pointData} scadaCode={scadaCode} onSwitchCanvas={onSwitchCanvas} />
+          }
+          if (el.type === 'layout-collapse') {
+            return <LayoutCollapseWidget key={el.id} el={el} zoom={z} isPreview pointData={pointData} scadaCode={scadaCode} onSwitchCanvas={onSwitchCanvas} />
+          }
+          return <LayoutModalWidget key={el.id} el={el} zoom={z} isPreview pointData={pointData} scadaCode={scadaCode} onSwitchCanvas={onSwitchCanvas} />
+        })}
+        {alarmElements.map((el) => (
+          <AlarmLightWidget key={el.id} el={el} zoom={z} isPreview pointData={pointData} />
+        ))}
         {tableElements.map((el) => (
-          <TableWidget key={el.id} el={el} zoom={z} pointData={pointData} />
+          <TableWidget
+            key={el.id}
+            el={el}
+            zoom={z}
+            pointData={pointData}
+            liveRows={tableLiveData[el.id]}
+          />
         ))}
         {formFieldElements.map((el) => (
-          <FormFieldWidget key={el.id} el={el} zoom={z} isPreview={true} canvas={canvas} valuesRef={formValuesRef} />
+          <FormFieldWidget key={el.id} el={el} zoom={z} isPreview={true} canvas={canvas} valuesRef={formValuesRef} pointData={pointData} />
         ))}
         {domElements.map((el) => {
           const displayText = resolveElementValue(el, pointData)
@@ -172,8 +208,10 @@ export default function CanvasViewer({
           return (
             <div
               key={el.id}
-              onClick={() => handleElementClick(el)}
-              style={{
+              onClick={() => fireDomEvents(el, 'click')}
+              onDoubleClick={() => fireDomEvents(el, 'dblclick')}
+              onMouseEnter={() => fireDomEvents(el, 'hover')}
+              style={mergeAnimStyle(el, pointData, {
                 position: 'absolute',
                 left: el.x * z,
                 top: el.y * z,
@@ -199,12 +237,18 @@ export default function CanvasViewer({
                 userSelect: 'none',
                 transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
                 boxSizing: 'border-box',
-              }}
+              })}
             >
               {displayText}
             </div>
           )
         })}
+        <ElementEventHitLayer
+          elements={canvas.elements}
+          zoom={z}
+          pointData={pointData}
+          ctx={eventCtx}
+        />
       </div>
     </div>
   )

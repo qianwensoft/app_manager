@@ -6,6 +6,7 @@ import (
 	"app-manager/models"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -883,6 +884,7 @@ func executeFormRuntimeInterface(interfaceCode string, paramValues map[string]in
 		}
 		var lastInsertID int64
 		for _, s := range steps {
+			s = stripMissingInsertParams(s, paramValues)
 			used, args, err := RewriteNamedSQLParams(src.Type, s, paramValues)
 			if err != nil {
 				_ = tx.Rollback()
@@ -958,6 +960,65 @@ func FormRuntimeSubmit(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, out)
+}
+
+// FormRuntimeBootstrap Agent WebView 一次加载应用与页面（凭 X-Device-Token 或 JWT）。
+func FormRuntimeBootstrap(c *gin.Context) {
+	code := strings.TrimSpace(c.Param("code"))
+	if code == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "code required"})
+		return
+	}
+	app, err := formAppByCode(code)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "form app not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	var pages []models.FormAppPage
+	if err := database.DB.Where("form_app_id = ?", app.ID).Order("sort_order ASC, id ASC").Find(&pages).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	var links []models.FormAppPageLink
+	database.DB.Where("form_app_id = ?", app.ID).Find(&links)
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{"app": app, "pages": pages, "links": links}})
+}
+
+// FormRuntimeMatchEvent 运行时扫码/事件路由匹配（Agent 与 Web 共用）。
+func FormRuntimeMatchEvent(c *gin.Context) {
+	var req struct {
+		FormCode  string `json:"form_code" binding:"required"`
+		EventType string `json:"event_type" binding:"required"`
+		EventData string `json:"event_data" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	app, err := formAppByCode(strings.TrimSpace(req.FormCode))
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "form app not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if matched, route := matchFormAppEventRoute(app.ID, req.EventType, req.EventData); matched {
+		c.JSON(http.StatusOK, gin.H{
+			"matched":         true,
+			"target_page_key": route.TargetPageKey,
+			"param_mapping":   route.ParamMapping,
+			"route_id":        route.ID,
+			"priority":        route.Priority,
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"matched": false})
 }
 
 func inferFormComponentByColumn(colName string) string {
@@ -1743,4 +1804,136 @@ func buildGeneratedDetailDesignSchema(cols []dbdriver.ColumnInfo, pk string) map
 		},
 		"schema": schema,
 	}
+}
+
+type formDraftPutRequest struct {
+	FormCode string                 `json:"form_code"`
+	PageKey  string                 `json:"page_key"`
+	Data     map[string]interface{} `json:"data"`
+}
+
+func formAppByCode(code string) (*models.FormAppInfo, error) {
+	var app models.FormAppInfo
+	if err := database.DB.Where("code = ?", strings.TrimSpace(code)).First(&app).Error; err != nil {
+		return nil, err
+	}
+	return &app, nil
+}
+
+func draftUserID(c *gin.Context) uint {
+	v, ok := c.Get("user_id")
+	if !ok {
+		return 0
+	}
+	uid, _ := v.(uint)
+	return uid
+}
+
+func FormRuntimeGetDraft(c *gin.Context) {
+	formCode := strings.TrimSpace(c.Query("form_code"))
+	pageKey := strings.TrimSpace(c.Query("page_key"))
+	if formCode == "" || pageKey == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "form_code and page_key required"})
+		return
+	}
+	app, err := formAppByCode(formCode)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "form app not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	var draft models.FormAppDraft
+	err = database.DB.Where("form_app_id = ? AND user_id = ? AND page_key = ?", app.ID, draftUserID(c), pageKey).First(&draft).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusOK, gin.H{"data": nil})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	var data map[string]interface{}
+	if draft.DataJSON != "" {
+		_ = json.Unmarshal([]byte(draft.DataJSON), &data)
+	}
+	c.JSON(http.StatusOK, gin.H{"data": data})
+}
+
+func FormRuntimePutDraft(c *gin.Context) {
+	var body formDraftPutRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	formCode := strings.TrimSpace(body.FormCode)
+	pageKey := strings.TrimSpace(body.PageKey)
+	if formCode == "" || pageKey == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "form_code and page_key required"})
+		return
+	}
+	app, err := formAppByCode(formCode)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "form app not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if body.Data == nil {
+		body.Data = map[string]interface{}{}
+	}
+	raw, err := json.Marshal(body.Data)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	uid := draftUserID(c)
+	var draft models.FormAppDraft
+	err = database.DB.Where("form_app_id = ? AND user_id = ? AND page_key = ?", app.ID, uid, pageKey).First(&draft).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		draft = models.FormAppDraft{
+			FormAppID: app.ID,
+			UserID:    uid,
+			PageKey:   pageKey,
+			DataJSON:  string(raw),
+		}
+		if err := database.DB.Create(&draft).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	} else if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	} else {
+		if err := database.DB.Model(&draft).Update("data_json", string(raw)).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func FormRuntimeDeleteDraft(c *gin.Context) {
+	formCode := strings.TrimSpace(c.Query("form_code"))
+	pageKey := strings.TrimSpace(c.Query("page_key"))
+	if formCode == "" || pageKey == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "form_code and page_key required"})
+		return
+	}
+	app, err := formAppByCode(formCode)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "form app not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	database.DB.Where("form_app_id = ? AND user_id = ? AND page_key = ?", app.ID, draftUserID(c), pageKey).
+		Delete(&models.FormAppDraft{})
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }

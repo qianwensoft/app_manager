@@ -1,8 +1,4 @@
-type FieldDef = {
-  field: string
-  required?: boolean
-  validation?: { max_length?: number; pattern?: string; min?: number; max?: number }
-}
+import type { FieldDef } from './types'
 
 export function validateField(def: FieldDef, value: any): string | null {
   if (def.required && (value === null || value === undefined || value === '')) {

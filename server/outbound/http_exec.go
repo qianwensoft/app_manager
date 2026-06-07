@@ -218,6 +218,12 @@ func ExecuteHTTPWebhook(db *gorm.DB, connector models.OutboundConnector, endpoin
 		persistOutboundDelivery(db, &d, execOpts)
 		return d
 	}
+	if blocked, reason := BlockedSelfOpenAPIURL(urlStr); blocked {
+		d.Error = reason
+		d.DetailJSON = HTTPSetupDetail("loopback_guard", reason)
+		persistOutboundDelivery(db, &d, execOpts)
+		return d
+	}
 
 	method := strings.ToUpper(strings.TrimSpace(endpoint.Method))
 	if method == "" {

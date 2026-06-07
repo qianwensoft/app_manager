@@ -92,6 +92,33 @@ func DeleteFormAppEventRoute(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "deleted"})
 }
 
+func eventRouteMatches(route models.FormAppEventRoute, eventData string) bool {
+	switch route.MatcherType {
+	case "exact":
+		return eventData == route.MatcherValue
+	case "prefix":
+		return len(eventData) >= len(route.MatcherValue) && eventData[:len(route.MatcherValue)] == route.MatcherValue
+	case "all":
+		return true
+	default:
+		return false
+	}
+}
+
+func matchFormAppEventRoute(formAppID uint, eventType, eventData string) (bool, models.FormAppEventRoute) {
+	var routes []models.FormAppEventRoute
+	if err := database.DB.Where("form_app_id = ? AND enabled = ? AND event_type = ?", formAppID, true, eventType).
+		Order("priority ASC, id ASC").Find(&routes).Error; err != nil {
+		return false, models.FormAppEventRoute{}
+	}
+	for _, route := range routes {
+		if eventRouteMatches(route, eventData) {
+			return true, route
+		}
+	}
+	return false, models.FormAppEventRoute{}
+}
+
 func TestFormAppEvent(c *gin.Context) {
 	idStr := c.Param("id")
 	formAppID, err := strconv.ParseUint(idStr, 10, 32)
@@ -109,33 +136,15 @@ func TestFormAppEvent(c *gin.Context) {
 		return
 	}
 
-	var routes []models.FormAppEventRoute
-	if err := database.DB.Where("form_app_id = ? AND enabled = ? AND event_type = ?", formAppID, true, req.EventType).
-		Order("priority ASC, id ASC").Find(&routes).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	if matched, route := matchFormAppEventRoute(uint(formAppID), req.EventType, req.EventData); matched {
+		c.JSON(http.StatusOK, gin.H{
+			"matched":         true,
+			"target_page_key": route.TargetPageKey,
+			"param_mapping":   route.ParamMapping,
+			"route_id":        route.ID,
+			"priority":        route.Priority,
+		})
 		return
-	}
-
-	for _, route := range routes {
-		matched := false
-		switch route.MatcherType {
-		case "exact":
-			matched = req.EventData == route.MatcherValue
-		case "prefix":
-			matched = len(req.EventData) >= len(route.MatcherValue) && req.EventData[:len(route.MatcherValue)] == route.MatcherValue
-		case "all":
-			matched = true
-		}
-
-		if matched {
-			c.JSON(http.StatusOK, gin.H{
-				"matched":         true,
-				"target_page_key": route.TargetPageKey,
-				"route_id":        route.ID,
-				"priority":        route.Priority,
-			})
-			return
-		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"matched": false})

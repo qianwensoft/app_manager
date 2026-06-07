@@ -304,11 +304,13 @@ POST /api/form-app/infos/:id/deploy-to-devices
 
 ## 待完成功能
 
-### 高优先级
-- [ ] Android 扫码库集成（ZXing/ML Kit）
-- [ ] AndroidManifest.xml 配置
-- [ ] 前端 eventManager 暴露到 window
-- [ ] 端到端测试
+> **状态同步（2026-06-05）**：全景计划见 `docs/plan.md` v3.0。
+
+### 高优先级（Phase A2）
+- [ ] Android 扫码库集成（ZXing/ML Kit），实现 `FormAppBridge.scanBarcode()`
+- [ ] `FormAppActivity` 注册到 `AndroidManifest.xml` + 相机权限
+- [x] 前端 `eventManager` 暴露到 `window`（`EventHandler.ts`）
+- [ ] 端到端测试（菜单下发 → Agent 启动 → 扫码跳转）
 
 ### 中优先级
 - [ ] 条件渲染（根据其他字段值显示/隐藏）
@@ -332,6 +334,7 @@ POST /api/form-app/infos/:id/deploy-to-devices
 - `docs/phase5-summary.md` - Agent 集成
 - `docs/form-app-completion-summary.md` - 项目完成总结
 - `docs/form-app-final-summary.md` - 最终总结（本文档）
+- `docs/plan.md` v3.0 - 平台全景计划
 - `CLAUDE.md` - 项目架构说明
 
 ## 关键成就

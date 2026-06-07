@@ -97,6 +97,19 @@ export interface CanvasElement {
   layoutShowClose?: boolean      // modal: show close button (default true)
   layoutModalDefaultVisible?: boolean  // modal: visible by default in preview/publish (default false)
   layoutModalCanvasId?: number   // modal: canvas ID to embed as body content
+  layoutTabLabels?: string[]     // tabs: tab titles
+  layoutTabCanvases?: number[]   // tabs: canvas ID per tab
+  layoutActiveTab?: number       // tabs: current tab index
+  layoutCollapseTitle?: string   // collapse: header title
+  layoutCollapseExpanded?: boolean // collapse: expanded state
+  layoutCollapseCanvasId?: number  // collapse: embedded canvas
+  alarmNormalColor?: string
+  alarmWarningColor?: string
+  alarmDangerColor?: string
+  alarmThresholdWarning?: number
+  alarmThresholdDanger?: number
+  alarmBlinkMs?: number
+  alarmSoundEnabled?: boolean
   // 扩展属性
   properties?: Record<string, unknown>
   // Table widget fields
@@ -131,9 +144,12 @@ export type ElementType =
   | 'form-radio' | 'form-checkbox' | 'form-rate' | 'form-slider' | 'form-grid'
   | 'echarts-bar' | 'echarts-line' | 'echarts-pie' | 'echarts-gauge'
   | 'echarts-scatter' | 'echarts-heatmap' | 'echarts-trend'
+  | 'echarts-stacked-bar' | 'echarts-horizontal-bar' | 'echarts-area'
+  | 'echarts-radar' | 'echarts-funnel'
   | 'dynamic-pipe'
   | 'image-bg' | 'image-widget' | 'image-decoration' | 'image-border-box'
-  | 'layout-carousel' | 'layout-modal'
+  | 'layout-carousel' | 'layout-modal' | 'layout-tabs' | 'layout-collapse'
+  | 'alarm-light'
   | 'group' | 'custom'
 
 // 对齐类型
@@ -214,11 +230,13 @@ export interface ElementAnimation {
 }
 
 export interface ElementEvent {
-  trigger: 'click' | 'dblclick' | 'hover'
+  trigger: 'click' | 'dblclick' | 'hover' | 'condition'
   action: 'navigate' | 'popup' | 'script' | 'open-modal' | 'close-modal' | 'navigate-canvas'
   /** open-modal / close-modal: modal element ID; navigate-canvas: canvas ID (string); popup: url */
   target?: string
   script?: string
+  /** JS 表达式，可用 v（绑定点位值）；空=始终执行 */
+  condition?: string
 }
 
 // 画布数据

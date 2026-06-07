@@ -1,0 +1,29 @@
+name: Server Tests
+
+on:
+  push:
+    paths:
+      - 'server/**'
+      - '.github/workflows/server-tests.yml'
+  pull_request:
+    paths:
+      - 'server/**'
+      - '.github/workflows/server-tests.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+
+      - name: Schema reconcile (models ↔ schema/)
+        run: cd server && go test ./tests -run TestSchemaReconcile -count=1
+
+      - name: Run server tests
+        # -p 1 avoids SQLITE_BUSY in integration tests sharing one temp DB (server/tests).
+        run: cd server && go test ./... -count=1 -p 1 -timeout 5m

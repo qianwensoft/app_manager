@@ -28,6 +28,21 @@ jwt:
   secret: change-me-in-production
   expire_hour: 24
 
+# API 限流（默认关闭；生产可按需开启）
+cluster:
+  enabled: false
+  node_id: ""
+  redis_url: "redis://127.0.0.1:6379/0"
+
+rate_limit:
+  enabled: false
+  login_per_minute: 20
+  login_burst: 5
+  open_api_per_minute: 120
+  open_api_burst: 30
+  mcp_per_minute: 60
+  mcp_burst: 15
+
 mqtt:
   enabled: false
   broker: tcp://localhost:1883

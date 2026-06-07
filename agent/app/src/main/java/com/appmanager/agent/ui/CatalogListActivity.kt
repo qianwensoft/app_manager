@@ -93,7 +93,12 @@ class CatalogListActivity : AppCompatActivity() {
                 runOnUiThread {
                     progress.visibility = View.GONE
                     if (rows.isEmpty()) {
-                        showEmpty(getString(R.string.catalog_empty))
+                        val emptyMsg = if (mode == MODE_CUSTOM_EVENTS) {
+                            getString(R.string.catalog_custom_events_inactive)
+                        } else {
+                            getString(R.string.catalog_empty)
+                        }
+                        showEmpty(emptyMsg)
                     } else {
                         tvEmpty.visibility = View.GONE
                         adapter.submit(rows)

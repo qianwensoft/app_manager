@@ -1,8 +1,9 @@
 // Package webrtc implements a server-side WebRTC SFU for camera streaming.
 //
 // Signal flow:
-//   Agent  →(offer)→  Server  →(offer)→  Browser
-//   Agent  ←(answer)← Server  ←(answer)← Browser
+//
+//	Agent  →(offer)→  Server  →(offer)→  Browser
+//	Agent  ←(answer)← Server  ←(answer)← Browser
 //
 // Server acts as both answerer (to Agent) and offerer (to Browser).
 // When Agent's track arrives, Server creates offers for all waiting browsers.
@@ -32,10 +33,10 @@ type viewerConn struct {
 
 // DeviceCamera holds all sessions for one (device, camera) pair.
 type DeviceCamera struct {
-	mu             sync.RWMutex
-	publisherPC    *webrtc.PeerConnection
-	trackMimeType  string // set when OnTrack fires; empty means track not yet arrived
-	viewers        map[string]*viewerConn // viewerID → conn
+	mu            sync.RWMutex
+	publisherPC   *webrtc.PeerConnection
+	trackMimeType string                 // set when OnTrack fires; empty means track not yet arrived
+	viewers       map[string]*viewerConn // viewerID → conn
 }
 
 // Hub manages WebRTC sessions across all devices and cameras.
@@ -82,7 +83,7 @@ func (h *Hub) HandleAgentOffer(deviceID string, camera CameraType, offerSDP stri
 	}
 	dc.trackMimeType = ""
 
-	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+	pc, err := webrtc.NewPeerConnection(PeerConnectionConfig())
 	if err != nil {
 		return err
 	}
@@ -125,6 +126,7 @@ func (h *Hub) HandleAgentOffer(deviceID string, camera CameraType, offerSDP stri
 		dc.mu.Lock()
 		dc.trackMimeType = mimeType
 		dc.mu.Unlock()
+		publishTrackReady(deviceID, camera, mimeType)
 
 		// Notify all waiting viewers that track is ready — send them offers
 		dc.mu.RLock()
@@ -143,6 +145,7 @@ func (h *Hub) HandleAgentOffer(deviceID string, camera CameraType, offerSDP stri
 					log.Printf("WebRTC: agent track EOF device=%s camera=%s: %v", deviceID, camera, err)
 					return
 				}
+				publishRTPPacket(deviceID, camera, pkt)
 				dc.mu.RLock()
 				for vid, v := range dc.viewers {
 					if v.track != nil {
@@ -267,7 +270,7 @@ func (h *Hub) sendViewerOffer(deviceID string, camera CameraType, viewerID strin
 		return
 	}
 
-	pc, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+	pc, err := webrtc.NewPeerConnection(PeerConnectionConfig())
 	if err != nil {
 		log.Printf("WebRTC: NewPeerConnection viewer=%s err: %v", viewerID, err)
 		return

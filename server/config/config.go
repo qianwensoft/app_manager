@@ -17,6 +17,68 @@ type Config struct {
 	MQTT      MQTTConfig      `yaml:"mqtt"`
 	Claude    ClaudeConfig    `yaml:"claude"`
 	Channel   ChannelConfig   `yaml:"channel"`
+	RateLimit RateLimitConfig `yaml:"rate_limit"`
+	Cluster   ClusterConfig   `yaml:"cluster"`
+}
+
+// ClusterConfig 多实例水平扩展（Redis Pub/Sub + Agent 路由注册表）。
+type ClusterConfig struct {
+	Enabled  bool   `yaml:"enabled"`
+	NodeID   string `yaml:"node_id"`
+	RedisURL string `yaml:"redis_url"`
+}
+
+// RateLimitConfig API 限流（内存令牌桶，按 IP 或 API Key 分桶）。
+type RateLimitConfig struct {
+	Enabled          bool `yaml:"enabled"`
+	LoginPerMinute   int  `yaml:"login_per_minute"`
+	LoginBurst       int  `yaml:"login_burst"`
+	OpenAPIPerMinute int  `yaml:"open_api_per_minute"`
+	OpenAPIBurst     int  `yaml:"open_api_burst"`
+	MCPPerMinute     int  `yaml:"mcp_per_minute"`
+	MCPBurst         int  `yaml:"mcp_burst"`
+}
+
+func (r RateLimitConfig) LoginRPM() int {
+	if r.LoginPerMinute > 0 {
+		return r.LoginPerMinute
+	}
+	return 20
+}
+
+func (r RateLimitConfig) LoginBurstSize() int {
+	if r.LoginBurst > 0 {
+		return r.LoginBurst
+	}
+	return 5
+}
+
+func (r RateLimitConfig) OpenAPIRPM() int {
+	if r.OpenAPIPerMinute > 0 {
+		return r.OpenAPIPerMinute
+	}
+	return 120
+}
+
+func (r RateLimitConfig) OpenAPIBurstSize() int {
+	if r.OpenAPIBurst > 0 {
+		return r.OpenAPIBurst
+	}
+	return 30
+}
+
+func (r RateLimitConfig) MCPRPM() int {
+	if r.MCPPerMinute > 0 {
+		return r.MCPPerMinute
+	}
+	return 60
+}
+
+func (r RateLimitConfig) MCPBurstSize() int {
+	if r.MCPBurst > 0 {
+		return r.MCPBurst
+	}
+	return 15
 }
 
 type ServerConfig struct {
@@ -100,6 +162,12 @@ func Load(path string) error {
 	// 环境变量覆盖
 	if v := os.Getenv("JWT_SECRET"); v != "" {
 		C.JWT.Secret = v
+	}
+	if v := os.Getenv("DATABASE_TYPE"); v != "" {
+		C.Database.Type = v
+	}
+	if v := os.Getenv("DATABASE_DSN"); v != "" {
+		C.Database.DSN = v
 	}
 	if v := os.Getenv("ADB_PATH"); v != "" {
 		C.ADB.Path = v

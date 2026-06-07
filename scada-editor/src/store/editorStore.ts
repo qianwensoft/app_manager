@@ -89,6 +89,8 @@ interface EditorStore {
   sendBackward: (id: string) => void
   bringToFront: (id: string) => void
   sendToBack: (id: string) => void
+  /** 按图层面板显示顺序（前=顶层）重排 zIndex */
+  reorderLayersByDisplay: (displayOrder: string[]) => void
 
   // actions - editor
   setTool: (tool: DrawingTool) => void
@@ -509,6 +511,22 @@ export const useEditorStore = create<EditorStore>()(
         if (!el) return
         c.elements.forEach((e) => { if (e.id !== id) e.zIndex += 1 })
         el.zIndex = 0
+        s.isDirty = true
+      }),
+
+    reorderLayersByDisplay: (displayOrder) =>
+      set((s) => {
+        const c = s.project.canvases[s.project.activeCanvasId]
+        if (!c || displayOrder.length < 2) return
+        const zPool = displayOrder
+          .map((id) => c.elements.find((e) => e.id === id))
+          .filter((e): e is CanvasElement => !!e)
+          .map((e) => e.zIndex)
+          .sort((a, b) => b - a)
+        displayOrder.forEach((id, i) => {
+          const el = c.elements.find((e) => e.id === id)
+          if (el && zPool[i] !== undefined) el.zIndex = zPool[i]
+        })
         s.isDirty = true
       }),
 

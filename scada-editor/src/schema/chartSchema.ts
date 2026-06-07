@@ -237,6 +237,79 @@ export const chartSchema: Record<string, ChartSchemaDef> = {
     ],
   },
 
+  'echarts-stacked-bar': {
+    label: '堆叠柱状图',
+    bindingFields: [
+      { key: 'series0', kind: 'series', seriesIndex: 0, multi: true, label: '系列 1', placeholder: 'val_a, val_b' },
+      { key: 'series1', kind: 'series', seriesIndex: 1, multi: true, label: '系列 2（可选）', placeholder: 'val_c, val_d', optional: true },
+      { key: 'category', kind: 'category', label: '分类轴', placeholder: 'categories_key', optional: true },
+    ],
+    styleFields: [
+      ...commonStyleFields,
+      { key: 'seriesColors', label: '系列颜色', type: 'text', default: '#4a9eff,#27ae60,#e67e22', group: '系列' },
+      ...axisStyleFields,
+      ...gridStyleFields,
+    ],
+  },
+
+  'echarts-horizontal-bar': {
+    label: '横向柱状图',
+    bindingFields: [
+      { key: 'series0', kind: 'series', seriesIndex: 0, multi: true, label: '数据键', placeholder: 'val_a, val_b, val_c' },
+      { key: 'category', kind: 'category', label: '分类轴', placeholder: 'categories_key', optional: true },
+    ],
+    styleFields: [
+      ...commonStyleFields,
+      { key: 'seriesColors', label: '柱子颜色', type: 'text', default: '#4a9eff', group: '系列' },
+      ...axisStyleFields,
+      ...gridStyleFields,
+    ],
+  },
+
+  'echarts-area': {
+    label: '面积图',
+    bindingFields: [
+      { key: 'series0', kind: 'series', seriesIndex: 0, multi: true, label: '系列 1', placeholder: 'val_a, val_b' },
+      { key: 'series1', kind: 'series', seriesIndex: 1, multi: true, label: '系列 2（可选）', placeholder: 'val_c, val_d', optional: true },
+      { key: 'category', kind: 'category', label: '分类轴', placeholder: 'time_labels_key', optional: true },
+    ],
+    styleFields: [
+      ...commonStyleFields,
+      { key: 'seriesColors', label: '系列颜色', type: 'text', default: '#4a9eff,#27ae60', group: '系列' },
+      { key: 'smooth', label: '平滑曲线', type: 'boolean', default: true, group: '系列' },
+      { key: 'lineWidth', label: '线宽', type: 'number', default: 2, group: '系列' },
+      ...axisStyleFields,
+      ...gridStyleFields,
+    ],
+  },
+
+  'echarts-radar': {
+    label: '雷达图',
+    bindingFields: [
+      { key: 'series0', kind: 'series', seriesIndex: 0, multi: true, label: '维度值键', placeholder: 'dim_a, dim_b, dim_c' },
+      { key: 'category', kind: 'category', label: '维度名称', placeholder: 'dim_names_key', optional: true },
+    ],
+    styleFields: [
+      ...commonStyleFields,
+      { key: 'seriesColors', label: '填充颜色', type: 'text', default: '#4a9eff', group: '样式' },
+      { key: 'showArea', label: '填充区域', type: 'boolean', default: true, group: '样式' },
+    ],
+  },
+
+  'echarts-funnel': {
+    label: '漏斗图',
+    bindingFields: [
+      { key: 'series0', kind: 'series', seriesIndex: 0, multi: true, label: '阶段值键', placeholder: 'step_a, step_b, step_c' },
+      { key: 'category', kind: 'category', label: '阶段名称', placeholder: 'step_names_key', optional: true },
+    ],
+    styleFields: [
+      ...commonStyleFields,
+      { key: 'colors', label: '阶段颜色', type: 'text', default: '#4a9eff,#27ae60,#e67e22,#8e44ad', group: '样式' },
+      { key: 'sort', label: '排序', type: 'select', default: 'descending',
+        options: [{ label: '降序', value: 'descending' }, { label: '升序', value: 'ascending' }], group: '样式' },
+    ],
+  },
+
   'echarts-trend': {
     label: '趋势图',
     bindingFields: [],

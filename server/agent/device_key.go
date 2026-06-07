@@ -112,24 +112,73 @@ func LookupDeviceByConnectionKey(key string) (*models.Device, bool) {
 	return &d, true
 }
 
-// AgentConnectionKey 将 Web/API 中的设备参数（数字 id、Token、ADB serial、硬件串号）映射为 Android Agent 使用的连接键
-//（与 /ws/agent/:key 路径段一致），供 Screen/Shell/Logcat 信令与 Hub 路由使用。
-func AgentConnectionKey(webParam string) (string, error) {
+// AgentConnectionKeyCandidates 返回设备可能使用的 Agent WebSocket 连接键（与 /ws/agent/:key 一致），按优先级排序。
+func AgentConnectionKeyCandidates(webParam string) ([]string, error) {
 	key := strings.TrimSpace(webParam)
 	id, ok := resolveDeviceKeyToID(key)
 	if !ok {
-		return "", fmt.Errorf("未找到对应设备（请检查 id、Token、ADB Serial 或硬件串号）")
+		return nil, fmt.Errorf("未找到对应设备（请检查 id、Token、ADB Serial 或硬件串号）")
 	}
 	var d models.Device
 	sess := database.DB.Session(&gorm.Session{NewDB: true})
 	if err := sess.First(&d, id).Error; err != nil {
-		return "", err
+		return nil, err
 	}
-	if d.AgentToken != "" {
-		return d.AgentToken, nil
+	seen := make(map[string]struct{})
+	var out []string
+	add := func(k string) {
+		k = strings.TrimSpace(k)
+		if k == "" {
+			return
+		}
+		if _, dup := seen[k]; dup {
+			return
+		}
+		seen[k] = struct{}{}
+		out = append(out, k)
 	}
+	add(d.AgentToken)
+	add(d.AndroidSerial)
 	if strings.HasPrefix(d.Serial, "agent-") {
-		return strings.TrimPrefix(d.Serial, "agent-"), nil
+		add(strings.TrimPrefix(d.Serial, "agent-"))
+	} else {
+		add(d.Serial)
 	}
-	return "", fmt.Errorf("该设备未绑定 Agent Token，无法与手机端 WebSocket 对齐。请在「设备详情 → 设备管理」填写与 Agent 扫码配置一致的 Token，或删除本条后仅用扫码接入")
+	if len(out) == 0 {
+		return nil, fmt.Errorf("该设备未绑定 Agent Token，无法与手机端 WebSocket 对齐。请在「设备详情 → 设备管理」填写与 Agent 扫码配置一致的 Token，或删除本条后仅用扫码接入")
+	}
+	return out, nil
+}
+
+// AgentConnectionKey 将 Web/API 中的设备参数（数字 id、Token、ADB serial、硬件串号）映射为 Android Agent 使用的连接键
+//（与 /ws/agent/:key 路径段一致），供 Screen/Shell/Logcat 信令与 Hub 路由使用。
+func AgentConnectionKey(webParam string) (string, error) {
+	routeKey, _, err := CanonicalRouteKey(webParam)
+	return routeKey, err
+}
+
+// CanonicalRouteKey 将 Web/API/Agent WS 参数统一为 Hub 路由键：优先当前 live 连接键，避免摄像头/投屏信令键不一致。
+func CanonicalRouteKey(webParam string) (routeKey string, devID uint, err error) {
+	key := strings.TrimSpace(webParam)
+	id, ok := resolveDeviceKeyToID(key)
+	if !ok {
+		return "", 0, fmt.Errorf("未找到对应设备（请检查 id、Token、ADB Serial 或硬件串号）")
+	}
+	if live := AgentHub.LiveConnectionKeyForDeviceID(id); live != "" {
+		return live, id, nil
+	}
+	keys, err := AgentConnectionKeyCandidates(strconv.FormatUint(uint64(id), 10))
+	if err != nil {
+		return "", id, err
+	}
+	return keys[0], id, nil
+}
+
+// CanonicalRouteKeyFromWS Agent 上行消息中的连接键 → Hub 统一路由键。
+func CanonicalRouteKeyFromWS(agentWSKey string) string {
+	routeKey, _, err := CanonicalRouteKey(agentWSKey)
+	if err != nil {
+		return strings.TrimSpace(agentWSKey)
+	}
+	return routeKey
 }

@@ -1,8 +1,11 @@
 import type { CanvasElement } from '@/types'
+import type { PointDataMap } from '@/hooks/useStompPointData'
+import { mergeAnimStyle } from '@/runtime/animationExecutor'
 
 interface Props {
   el: CanvasElement
   zoom: number
+  pointData?: PointDataMap
 }
 
 // 兼容旧数据：/images/... → {BASE}images/...
@@ -13,11 +16,11 @@ function resolveUrl(url?: string) {
   return url
 }
 
-export default function ImageWidget({ el, zoom }: Props) {
+export default function ImageWidget({ el, zoom, pointData = {} }: Props) {
   const isBorderBox = el.type === 'image-border-box'
   const bc = el.borderImageConfig
 
-  const baseStyle: React.CSSProperties = {
+  const baseStyle: React.CSSProperties = mergeAnimStyle(el, pointData, {
     position: 'absolute',
     left: el.x * zoom,
     top: el.y * zoom,
@@ -28,7 +31,7 @@ export default function ImageWidget({ el, zoom }: Props) {
     transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
     pointerEvents: 'none',
     userSelect: 'none',
-  }
+  })
 
   if (isBorderBox && bc && el.imageUrl) {
     // Scale border-image widths by zoom

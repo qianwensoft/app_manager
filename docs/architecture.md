@@ -596,10 +596,10 @@ docker run -d \
 ## 扩展性设计
 
 ```
-1. 水平扩展
-   - Server 无状态设计，可多实例部署
-   - WebSocket 通过 Redis Pub/Sub 跨实例通信
-   - 数据库切换为 PostgreSQL + 主从复制
+1. 水平扩展（详见 [`horizontal-scaling.md`](horizontal-scaling.md)）
+   - Server REST 无状态；Agent WS 需粘性会话
+   - STOMP 与 Agent 命令经 Redis Pub/Sub（`server/cluster`，`cluster.enabled`）
+   - 屏幕 MJPEG / Shell 等同节点或粘性 LB；共享 MySQL/Postgres
 
 2. 功能扩展
    - 插件系统（自定义 ADB 命令）

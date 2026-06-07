@@ -117,6 +117,9 @@ func ExecuteAgentOutboundStep(db *gorm.DB, connector models.OutboundConnector, s
 			}
 			ex[k] = v
 		}
+		if _, ok := ex[OutboundBroadcastMarkerExtra]; !ok {
+			ex[OutboundBroadcastMarkerExtra] = "1"
+		}
 		data := map[string]interface{}{
 			"action": strings.TrimSpace(m.Action),
 			"extras": ex,
@@ -136,6 +139,7 @@ func ExecuteAgentOutboundStep(db *gorm.DB, connector models.OutboundConnector, s
 		d.DurationMS = time.Since(t0).Milliseconds()
 		d.DetailJSON = MarshalAgentDeliveryDetail(st, rawCfg, cmdID, msg, "")
 		_ = db.Create(&d).Error
+		RecordConnectorLoopCooldown(connector.ID, rec.DeviceID, connector.LoopCooldownMS)
 		return d
 	case "message":
 		var m struct {

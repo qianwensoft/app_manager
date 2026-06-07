@@ -21,6 +21,7 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import com.appmanager.agent.R
 import com.appmanager.agent.service.TouchAccessibilityService
+import com.appmanager.agent.util.StorageAccessUtil
 
 class PermissionFragment : Fragment() {
 
@@ -132,25 +133,8 @@ class PermissionFragment : Fragment() {
             view.findViewById(R.id.cardManageStorage),
             label = "管理所有文件（完整存储访问）",
             hint = "Android 11+ 需要此权限访问全部文件",
-            checkFn = {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
-                    android.os.Environment.isExternalStorageManager()
-                else true
-            },
-            grantFn = {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    try {
-                        startActivity(
-                            Intent(
-                                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                                Uri.parse("package:${requireContext().packageName}")
-                            )
-                        )
-                    } catch (e: Exception) {
-                        startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
-                    }
-                }
-            }
+            checkFn = { StorageAccessUtil.isAllFilesAccessGranted(requireContext()) },
+            grantFn = { StorageAccessUtil.openManageAllFilesSettings(requireContext()) }
         )
 
         setupSpecialPermission(

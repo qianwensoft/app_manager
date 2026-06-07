@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    style="@style/AppManagerGridTile"
+    android:layout_width="0dp"
+    android:layout_height="wrap_content">
+
+    <LinearLayout
+        style="@style/AppManagerGridTileInner">
+
+        <ImageView
+            android:id="@+id/tile_icon"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:contentDescription=""
+            app:tint="@color/agent_tile_icon_tint" />
+
+        <TextView
+            android:id="@+id/tile_label"
+            style="@style/AppManagerGridTileLabel" />
+    </LinearLayout>
+</com.google.android.material.card.MaterialCardView>

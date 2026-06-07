@@ -15,12 +15,12 @@ type Session struct {
 	cancel   context.CancelFunc
 }
 
-func NewSession(deviceID string, conn *websocket.Conn, adbPath, filter string) (*Session, error) {
+func NewSession(deviceID string, conn *websocket.Conn, adbPath string, filters []string) (*Session, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	args := []string{"-s", deviceID, "logcat"}
-	if filter != "" {
-		args = append(args, filter)
+	args := []string{"-s", deviceID, "logcat", "-v", "time"}
+	if len(filters) > 0 {
+		args = append(args, filters...)
 	}
 
 	cmd := exec.CommandContext(ctx, adbPath, args...)

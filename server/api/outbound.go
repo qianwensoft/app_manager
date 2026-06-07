@@ -743,6 +743,8 @@ type outboundConnectorIn struct {
 	DefaultRetryMax     int                    `json:"default_retry_max"`
 	DebounceSameEventMS int                    `json:"debounce_same_event_ms"`
 	DebounceDiffEventMS int                    `json:"debounce_diff_event_ms"`
+	DebounceSameScanMS  int                    `json:"debounce_same_scan_ms"`
+	LoopCooldownMS      int                    `json:"loop_cooldown_ms"`
 	Priority            int                    `json:"priority"`
 	Enabled             *bool                  `json:"enabled"`
 	DefinitionIDs       []uint                 `json:"definition_ids"`
@@ -848,6 +850,9 @@ func validateConnectorIn(req *outboundConnectorIn) error {
 	// device_event 触发器需要绑定事件定义；其他触发器不强制要求
 	if tt == "device_event" && len(req.DefinitionIDs) == 0 {
 		return errors.New("definition_ids 不能为空")
+	}
+	if err := outbound.ValidateTriggerConfig(tt, outbound.ParseTriggerConfig(marshalTriggerConfig(req.TriggerConfig))); err != nil {
+		return err
 	}
 	if len(req.Phases) == 0 {
 		return errors.New("phases 不能为空（可传 endpoint_ids 作为单阶段兼容）")
@@ -1196,6 +1201,8 @@ func connectorDetail(id uint) (gin.H, error) {
 		"default_retry_max":      co.DefaultRetryMax,
 		"debounce_same_event_ms": co.DebounceSameEventMS,
 		"debounce_diff_event_ms": co.DebounceDiffEventMS,
+		"debounce_same_scan_ms":  co.DebounceSameScanMS,
+		"loop_cooldown_ms":       co.LoopCooldownMS,
 		"priority":               co.Priority,
 		"trigger_type":           co.TriggerType,
 		"trigger_config":         tcfg,
@@ -1312,6 +1319,8 @@ func CreateOutboundConnector(c *gin.Context) {
 		DefaultRetryMax:     req.DefaultRetryMax,
 		DebounceSameEventMS: req.DebounceSameEventMS,
 		DebounceDiffEventMS: req.DebounceDiffEventMS,
+		DebounceSameScanMS:  req.DebounceSameScanMS,
+		LoopCooldownMS:      req.LoopCooldownMS,
 		Priority:            req.Priority,
 		TriggerType:         tt,
 		WebhookID:           req.WebhookID,
@@ -1329,6 +1338,12 @@ func CreateOutboundConnector(c *gin.Context) {
 	}
 	if co.DebounceDiffEventMS < 0 {
 		co.DebounceDiffEventMS = 0
+	}
+	if co.DebounceSameScanMS < 0 {
+		co.DebounceSameScanMS = 0
+	}
+	if co.LoopCooldownMS < 0 {
+		co.LoopCooldownMS = 0
 	}
 
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
@@ -1382,11 +1397,19 @@ func UpdateOutboundConnector(c *gin.Context) {
 	co.DefaultRetryMax = req.DefaultRetryMax
 	co.DebounceSameEventMS = req.DebounceSameEventMS
 	co.DebounceDiffEventMS = req.DebounceDiffEventMS
+	co.DebounceSameScanMS = req.DebounceSameScanMS
+	co.LoopCooldownMS = req.LoopCooldownMS
 	if co.DebounceSameEventMS < 0 {
 		co.DebounceSameEventMS = 0
 	}
 	if co.DebounceDiffEventMS < 0 {
 		co.DebounceDiffEventMS = 0
+	}
+	if co.DebounceSameScanMS < 0 {
+		co.DebounceSameScanMS = 0
+	}
+	if co.LoopCooldownMS < 0 {
+		co.LoopCooldownMS = 0
 	}
 	co.Priority = req.Priority
 	if req.Enabled != nil {

@@ -74,3 +74,14 @@ type FormAppAccessPolicy struct {
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
+
+// FormAppDraft 用户表单草稿（按 form_app + user + page_key 唯一）
+type FormAppDraft struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	FormAppID uint      `gorm:"uniqueIndex:idx_form_draft;not null" json:"form_app_id"`
+	UserID    uint      `gorm:"uniqueIndex:idx_form_draft;not null" json:"user_id"`
+	PageKey   string    `gorm:"size:64;uniqueIndex:idx_form_draft;not null" json:"page_key"`
+	DataJSON  string    `gorm:"type:longtext" json:"data_json"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}

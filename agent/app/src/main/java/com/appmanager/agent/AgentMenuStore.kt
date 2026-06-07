@@ -2,6 +2,7 @@ package com.appmanager.agent
 
 import android.content.Context
 import com.appmanager.agent.config.AgentConfig
+import com.appmanager.agent.util.ServerUrlUtil
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.google.gson.reflect.TypeToken
@@ -86,7 +87,7 @@ object AgentMenuStore {
         val targetType: String?,
         val targetRef: String?,
         val formAppCode: String?,
-        val formAppPageKey: String?
+        val formAppPageKey: String?,
     )
 
     fun getMenuByIntent(context: Context, intentAction: String): MenuItem? {
@@ -107,6 +108,29 @@ object AgentMenuStore {
     fun getServerUrl(context: Context): String {
         val serverUrl = AgentConfig.get(context).serverUrl.trim().trimEnd('/')
         return ServerUrlUtil.httpBaseFromWs(serverUrl)
+    }
+
+    /** 首页第一个 form_app_entry 菜单（无 preview_path 的表单入口）。 */
+    fun getFirstHomeFormAppMenu(context: Context): Map<String, Any?>? {
+        for (m in loadList(context)) {
+            val home = m["show_on_agent_home"] as? Boolean ?: false
+            if (!home) continue
+            if (m["target_type"] == "form_app_entry") return m
+        }
+        return null
+    }
+
+    fun launchFormAppEntry(context: Context, m: Map<String, Any?>, newTask: Boolean = false) {
+        val code = (m["form_app_code"] as? String)?.trim().orEmpty()
+            .ifEmpty { (m["target_ref"] as? String)?.trim().orEmpty() }
+        if (code.isEmpty()) return
+        val pageKey = (m["form_app_page_key"] as? String)?.trim().orEmpty().ifEmpty { "form" }
+        val intent = android.content.Intent(context, FormAppActivity::class.java)
+            .putExtra("form_app_code", code)
+            .putExtra("page_key", pageKey)
+            .putExtra("server_url", getServerUrl(context))
+        if (newTask) intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
     }
 
     fun resolveByScanEvent(

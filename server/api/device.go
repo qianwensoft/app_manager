@@ -6,6 +6,7 @@ import (
 	"app-manager/config"
 	"app-manager/database"
 	"app-manager/models"
+	"app-manager/stomp"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -210,11 +211,12 @@ func ConnectDevice(c *gin.Context) {
 		serial := fmt.Sprintf("%s:%d", req.IP, req.Port)
 		now := time.Now()
 		database.DB.Model(&models.Device{}).
-			Where("serial = ? OR wireless_adb_serial = ?", serial, serial).
+			Where("ip = ? OR serial = ?", req.IP, serial).
 			Updates(map[string]interface{}{
 				"status":              "online",
 				"last_seen_at":        now,
-				"wireless_adb_serial": serial,
+				"wireless_adb_port":   req.Port,
+				"wireless_adb_serial": "",
 			})
 	}
 
@@ -473,6 +475,68 @@ func RefreshAgentDeviceInfoFromAgent(c *gin.Context) {
 		agent.ForgetDeviceInfoPushWait(rid)
 		c.JSON(http.StatusGatewayTimeout, gin.H{"error": "Agent 上报设备信息超时"})
 	}
+}
+
+// OpenWirelessAdbOnAgent 通知在线 Agent 打开系统「无线调试」设置页。
+func OpenWirelessAdbOnAgent(c *gin.Context) {
+	if !sendAgentCommand(c, "open_wireless_adb", nil) {
+		return
+	}
+	logAudit(c, "无线 ADB", fmt.Sprintf("设备 %s 已下发打开无线调试", c.Param("id")), nil)
+	c.JSON(http.StatusOK, gin.H{"message": "已通知 Agent 打开无线调试设置"})
+}
+
+// TriggerAgentMenuOnAgent 远程触发 Agent 菜单 intent_action（如无线 ADB 内置菜单）。
+func TriggerAgentMenuOnAgent(c *gin.Context) {
+	var req struct {
+		IntentAction string `json:"intent_action" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 intent_action"})
+		return
+	}
+	action := strings.TrimSpace(req.IntentAction)
+	if action == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "intent_action 不能为空"})
+		return
+	}
+	if !sendAgentCommand(c, "trigger_agent_menu", map[string]interface{}{
+		"intent_action": action,
+	}) {
+		return
+	}
+	logAudit(c, "Agent 菜单", fmt.Sprintf("设备 %s 触发菜单 %s", c.Param("id"), action), nil)
+	c.JSON(http.StatusOK, gin.H{"message": "已下发菜单触发", "intent_action": action})
+}
+
+func sendAgentCommand(c *gin.Context, action string, data map[string]interface{}) bool {
+	device := getDeviceByID(c)
+	if device == nil {
+		return false
+	}
+	devID := device.ID
+	if !agent.AgentHub.SendToDevice(devID, map[string]interface{}{
+		"type":   "command",
+		"action": action,
+		"data":   data,
+	}) {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Agent 未在线，无法下发命令"})
+		return false
+	}
+	return true
+}
+
+// PublishWirelessAdbGuideAck STOMP 推送无线 ADB 扫码回执到 Web。
+func PublishWirelessAdbGuideAck(deviceID uint, tokenMatched bool, scannedDeviceID int64) {
+	payload, _ := json.Marshal(map[string]interface{}{
+		"type": "wireless_adb_guide_ack",
+		"data": map[string]interface{}{
+			"device_id":         deviceID,
+			"scanned_device_id": scannedDeviceID,
+			"token_matched":     tokenMatched,
+		},
+	})
+	stomp.DefaultHub.PublishJSON(fmt.Sprintf("/topic/device/%d/wireless-adb", deviceID), string(payload))
 }
 
 // ADB 快捷操作
@@ -844,8 +908,13 @@ func AdbConnectByAgentIP(c *gin.Context) {
 		return
 	}
 
-	out, err := getADB().ConnectTCP(ip, req.Port)
+	serial := fmt.Sprintf("%s:%d", ip, req.Port)
+	cli := getADB()
+	noteAdbConnectAttempt(serial)
+	out, err := cli.ConnectTCP(ip, req.Port)
 	if err != nil {
+		_ = cli.Disconnect(serial)
+		clearAdbConnectingNote(serial)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error(), "output": out})
 		return
 	}
@@ -853,17 +922,32 @@ func AdbConnectByAgentIP(c *gin.Context) {
 	// adb connect 失败时 exit=0 但输出含 "failed"/"cannot"
 	outLow := strings.ToLower(out)
 	if strings.Contains(outLow, "failed") || strings.Contains(outLow, "cannot") || strings.Contains(outLow, "error") {
+		_ = cli.Disconnect(serial)
+		clearAdbConnectingNote(serial)
 		c.JSON(http.StatusBadRequest, gin.H{"error": out, "ip": ip, "port": req.Port})
 		return
 	}
 
-	// 连接成功：serial = ip:port
-	// 始终更新 wireless_adb_serial（记录最新无线端口）
-	// 仅在无 USB serial 时覆盖主 serial 字段
-	serial := fmt.Sprintf("%s:%d", ip, req.Port)
+	st := waitAdbSerialState(cli, serial, 6*time.Second)
+	if st != "device" {
+		_ = cli.Disconnect(serial)
+		clearAdbConnectingNote(serial)
+		msg := out
+		if st == "connecting" {
+			msg = "连接超时：设备未在限定时间内进入 device 状态，请确认无线调试已开启且端口正确"
+		} else if st != "" && st != "no_device" {
+			msg = fmt.Sprintf("连接未就绪（adb state=%s）", st)
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": msg, "ip": ip, "port": req.Port, "state": st, "output": out})
+		return
+	}
+	clearAdbConnectingNote(serial)
+
+	// 连接成功：仅持久化端口；IP 每次取 Agent 上报
 	now := time.Now()
 	dbUpdates := map[string]interface{}{
-		"wireless_adb_serial": serial,
+		"wireless_adb_port":   req.Port,
+		"wireless_adb_serial": "",
 		"status":              "online",
 		"last_seen_at":        now,
 	}
@@ -1002,6 +1086,8 @@ func GetAdbStatus(c *gin.Context) {
 	}
 	type Entry struct {
 		Serial string `json:"serial"`
+		IP     string `json:"ip,omitempty"`
+		Port   int    `json:"port,omitempty"`
 		State  string `json:"state"` // device / offline / unauthorized / no_device / not_configured
 	}
 	usb := Entry{}
@@ -1011,29 +1097,22 @@ func GetAdbStatus(c *gin.Context) {
 	// USB serial：不含 ":" 且不是 agent- 前缀
 	if serialUsableWithAdb(device.Serial) && !strings.Contains(device.Serial, ":") {
 		usb.Serial = device.Serial
-		if st, err := cli.GetState(device.Serial); err != nil {
-			usb.State = "no_device"
-		} else {
-			usb.State = strings.TrimSpace(st)
-		}
+		usb.State = lookupAdbSerialState(cli, device.Serial)
 	} else {
 		usb.State = "not_configured"
 	}
 
-	// 无线 ADB：先 connect 确保 adb server 有连接记录，再 get-state
-	if device.WirelessAdbSerial != "" {
-		wireless.Serial = device.WirelessAdbSerial
-		// adb server 重启后连接记录会丢失，先 connect 恢复
-		parts := strings.SplitN(device.WirelessAdbSerial, ":", 2)
-		if len(parts) == 2 {
-			if port, convErr := strconv.Atoi(parts[1]); convErr == nil {
-				_, _ = cli.ConnectTCP(parts[0], port)
-			}
-		}
-		if st, err := cli.GetState(device.WirelessAdbSerial); err != nil {
-			wireless.State = "offline"
+	// 无线 ADB：仅查询 adb server 已有连接状态，避免每次检测都 connect 导致长期卡在 connecting
+	port := wirelessAdbPort(device)
+	if port > 0 {
+		wireless.Port = port
+		ip := wirelessAdbIP(device, "")
+		wireless.IP = ip
+		if ip != "" {
+			wireless.Serial = fmt.Sprintf("%s:%d", ip, port)
+			wireless.State = resolveAdbSerialState(cli, wireless.Serial)
 		} else {
-			wireless.State = strings.TrimSpace(st)
+			wireless.State = "not_configured"
 		}
 	} else {
 		wireless.State = "not_configured"
@@ -1042,24 +1121,38 @@ func GetAdbStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"usb": usb, "wireless": wireless})
 }
 
-// AdbWirelessDisconnect 断开无线 ADB 并清除 DB 中的 wireless_adb_serial。
+// AdbWirelessDisconnect 断开无线 ADB。默认保留 wireless_adb_port 供下次重连；clear_record=true 时清除端口记录。
 func AdbWirelessDisconnect(c *gin.Context) {
+	var req struct {
+		ClearRecord bool `json:"clear_record"`
+	}
+	_ = c.ShouldBindJSON(&req)
+
 	device := getDeviceByID(c)
 	if device == nil {
 		return
 	}
-	serial := device.WirelessAdbSerial
+	serial := wirelessAdbSerial(device)
 	if serial == "" && strings.Contains(device.Serial, ":") {
 		serial = device.Serial
 	}
 	if serial == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "设备未配置无线 ADB"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "设备未配置无线 ADB 端口"})
 		return
 	}
 	_ = getADB().Disconnect(serial)
-	_ = database.DB.Model(&models.Device{}).Where("id = ?", device.ID).Update("wireless_adb_serial", "").Error
+	clearAdbConnectingNote(serial)
+	if req.ClearRecord {
+		_ = database.DB.Model(&models.Device{}).Where("id = ?", device.ID).Updates(map[string]interface{}{
+			"wireless_adb_port":   0,
+			"wireless_adb_serial": "",
+		}).Error
+		logAudit(c, "ADB 无线断开", fmt.Sprintf("设备 %d disconnect %s（已清除端口记录）", device.ID, serial), &device.ID)
+		c.JSON(http.StatusOK, gin.H{"message": "已断开并清除记录", "serial": serial, "cleared": true})
+		return
+	}
 	logAudit(c, "ADB 无线断开", fmt.Sprintf("设备 %d disconnect %s", device.ID, serial), &device.ID)
-	c.JSON(http.StatusOK, gin.H{"message": "已断开", "serial": serial})
+	c.JSON(http.StatusOK, gin.H{"message": "已断开", "serial": serial, "cleared": false})
 }
 
 // AdbShellRun 通过 ADB 在设备上执行单条 shell 命令（优先 USB，其次无线）。
@@ -1084,8 +1177,8 @@ func AdbShellRun(c *gin.Context) {
 	adbSerial := ""
 	if serialUsableWithAdb(device.Serial) && !strings.Contains(device.Serial, ":") {
 		adbSerial = device.Serial
-	} else if device.WirelessAdbSerial != "" {
-		adbSerial = device.WirelessAdbSerial
+	} else if s := wirelessAdbSerial(device); s != "" {
+		adbSerial = s
 	} else if serialUsableWithAdb(device.Serial) {
 		adbSerial = device.Serial
 	}

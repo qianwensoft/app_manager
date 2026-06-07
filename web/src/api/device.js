@@ -132,6 +132,14 @@ export const renameRecording = (id, file_name) => http.patch(`/recordings/${id}`
 export const refreshAgentDeviceInfo = (id) =>
   http.post(`/devices/${id}/agent/refresh-info`, null, { timeout: 20000 })
 
+/** 通知 Agent 打开系统「无线调试」设置页 */
+export const openWirelessAdbOnAgent = (id) =>
+  http.post(`/devices/${id}/agent/open-wireless-adb`)
+
+/** 远程触发 Agent 菜单 intent_action（如无线 ADB 内置菜单） */
+export const triggerAgentMenu = (id, intentAction) =>
+  http.post(`/devices/${id}/agent/trigger-menu`, { intent_action: intentAction })
+
 /** 通过 ADB 为 Agent 授予 android.permission.READ_LOGS，授权后 Agent 可读取全量日志 */
 export const grantAgentReadLogs = (id) =>
   http.post(`/devices/${id}/adb/grant-read-logs`)
@@ -139,7 +147,7 @@ export const grantAgentReadLogs = (id) =>
 /** 用 Agent 上报的设备 IP + 端口，让服务器发起 adb connect（无线 ADB 快捷连接）
  *  ip 可选，传入时覆盖 DB 中的 device.IP（配对后直接用配对返回的 ip） */
 export const adbConnectByAgentIP = (id, port = 5555, ip = '') =>
-  http.post(`/devices/${id}/adb/connect-by-ip`, { port, ...(ip ? { ip } : {}) })
+  http.post(`/devices/${id}/adb/connect-by-ip`, { port, ...(ip ? { ip } : {}) }, { timeout: 20000 })
 
 /** 用 Agent 上报的 IP + 配对端口 + 配对码，让服务器发起 adb pair（Android 11+ 无线配对）
  *  ip 可选，传入时覆盖 DB 中的 device.IP（QR 码直接携带 IP 时使用） */
@@ -149,8 +157,9 @@ export const adbPairByAgentIP = (id, port, code, ip = '') =>
 /** 查询设备 USB 与无线 ADB 连接状态 */
 export const getAdbStatus = (id) => http.get(`/devices/${id}/adb/status`)
 
-/** 断开无线 ADB 并清除 DB 中记录的无线 Serial */
-export const adbWirelessDisconnect = (id) => http.post(`/devices/${id}/adb/disconnect`)
+/** 断开无线 ADB；clearRecord=true 时同时清除上次连接记录 */
+export const adbWirelessDisconnect = (id, clearRecord = false) =>
+  http.post(`/devices/${id}/adb/disconnect`, clearRecord ? { clear_record: true } : {})
 
 /** 通过 ADB 在设备上执行单条 shell 命令 */
 export const adbShellRun = (id, command) => http.post(`/devices/${id}/adb/shell`, { command })

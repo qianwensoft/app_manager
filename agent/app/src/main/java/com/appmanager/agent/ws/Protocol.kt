@@ -137,6 +137,10 @@ object CommandAction {
     const val EXPORT_INSTALLED_APK = "export_installed_apk"
     /** 立即采集并上报 device_info（含 Wi‑Fi SSID 等），供 Web 刷新 */
     const val PUSH_DEVICE_INFO = "push_device_info"
+    /** 打开系统「无线调试」设置页 */
+    const val OPEN_WIRELESS_ADB = "open_wireless_adb"
+    /** 远程触发 Agent 菜单 intent_action：data.intent_action */
+    const val TRIGGER_AGENT_MENU = "trigger_agent_menu"
 
     // ─── 文件管理（Agent 文件系统） ─────────────────────────────────────────
     /** 列目录：data: { request_id, path, include_hidden? } */
@@ -157,6 +161,11 @@ object CommandAction {
     const val START_CUSTOM_EVENT_LISTEN = "start_custom_event_listen"
     /** 停止自定义事件监听 */
     const val STOP_CUSTOM_EVENT_LISTEN = "stop_custom_event_listen"
+
+    /** 启动事件分析探针：data.session_id、data.actions */
+    const val START_CUSTOM_EVENT_PROBE = "start_custom_event_probe"
+    /** 停止事件分析探针 */
+    const val STOP_CUSTOM_EVENT_PROBE = "stop_custom_event_probe"
 
     /** 打开网页（ACTION_VIEW） */
     const val OPEN_URL = "open_url"

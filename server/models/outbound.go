@@ -62,9 +62,13 @@ type OutboundConnector struct {
 	// DebounceSameEventMS 相同事件码（同一 event_type）+ 同一设备 + 同一连接器，在此毫秒内的重复触发将被忽略（0 表示关闭）。
 	DebounceSameEventMS int `gorm:"column:debounce_same_event_ms;default:0" json:"debounce_same_event_ms"`
 	// DebounceDiffEventMS 切换到不同事件码后，若距上次执行不足此毫秒则忽略（0 表示关闭）。
-	DebounceDiffEventMS int       `gorm:"column:debounce_diff_event_ms;default:0" json:"debounce_diff_event_ms"`
+	DebounceDiffEventMS int `gorm:"column:debounce_diff_event_ms;default:0" json:"debounce_diff_event_ms"`
+	// DebounceSameScanMS 同一设备 + 连接器 + 相同扫码内容（event_data.value）在窗口内忽略（防连扫/回环，0 关闭）。
+	DebounceSameScanMS int `gorm:"column:debounce_same_scan_ms;default:0" json:"debounce_same_scan_ms"`
+	// LoopCooldownMS 本连接器下发 broadcast_intent 成功后，同设备在冷却期内不再触发（0 关闭）。
+	LoopCooldownMS int `gorm:"column:loop_cooldown_ms;default:0" json:"loop_cooldown_ms"`
 	Priority            int       `gorm:"column:priority;default:0;index" json:"priority"`
-	// TriggerType 触发方式：device_event | http_webhook | http_poll | websocket | stomp
+	// TriggerType 触发方式：device_event | http_webhook | http_poll | websocket | stomp | cron | system_event | ...
 	TriggerType string `gorm:"column:trigger_type;size:40;not null;default:device_event" json:"trigger_type"`
 	// TriggerConfigJSON 触发器配置 JSON，结构因 TriggerType 而异。
 	TriggerConfigJSON string `gorm:"column:trigger_config_json;type:text" json:"-"`

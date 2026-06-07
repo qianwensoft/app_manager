@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import type { CanvasElement, CanvasData, FormFieldRule, FormFieldReaction } from '@/types'
+import type { PointDataMap } from '@/hooks/useStompPointData'
 import { dataBindingApi } from '@/api/dataBinding'
+import { mergeAnimStyle } from '@/runtime/animationExecutor'
 
 // ── validation event ──────────────────────────────────────────────────────────
 
@@ -485,9 +487,10 @@ interface Props {
   isPreview: boolean
   canvas: CanvasData
   valuesRef: React.MutableRefObject<Record<string, string>>
+  pointData?: PointDataMap
 }
 
-export default function FormFieldWidget({ el, zoom, isPreview, canvas, valuesRef }: Props) {
+export default function FormFieldWidget({ el, zoom, isPreview, canvas, valuesRef, pointData = {} }: Props) {
   const [value, setValue] = useState<string>(() => valuesRef.current[el.id] ?? el.formFieldDefaultValue ?? '')
   const [error, setError] = useState<string>('')
   // watched values from sibling fields (keyed by formFieldKey) for reactions
@@ -553,7 +556,7 @@ export default function FormFieldWidget({ el, zoom, isPreview, canvas, valuesRef
   const hasError = !!error
   const effectiveRequired = rxRequired || !!el.formFieldRequired
 
-  const wrapStyle: React.CSSProperties = {
+  const wrapStyle: React.CSSProperties = mergeAnimStyle(el, pointData, {
     position: 'absolute',
     left: el.x * zoom, top: el.y * zoom,
     width: el.width * zoom, height: el.height * zoom,
@@ -564,7 +567,7 @@ export default function FormFieldWidget({ el, zoom, isPreview, canvas, valuesRef
     boxSizing: 'border-box', overflow: 'visible',
     transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
     pointerEvents: isPreview ? 'auto' : 'none',
-  }
+  })
 
   if (el.type === 'form-submit') {
     return (

@@ -1,4 +1,5 @@
 import type { CanvasElement, CanvasData } from '@/types'
+import type { DrawAnimState } from '@/runtime/animationExecutor'
 
 export function drawGrid(ctx: CanvasRenderingContext2D, canvas: CanvasData, zoom: number) {
   if (!canvas.showGrid) return
@@ -16,14 +17,21 @@ export function drawGrid(ctx: CanvasRenderingContext2D, canvas: CanvasData, zoom
   ctx.restore()
 }
 
-export function drawElement(ctx: CanvasRenderingContext2D, el: CanvasElement, zoom: number) {
+export function drawElement(
+  ctx: CanvasRenderingContext2D,
+  el: CanvasElement,
+  zoom: number,
+  anim?: DrawAnimState,
+) {
   if (!el.visible) return
   ctx.save()
-  ctx.globalAlpha = el.opacity ?? 1
+  const opacityMul = anim?.opacityMultiplier ?? 1
+  ctx.globalAlpha = (el.opacity ?? 1) * opacityMul
   const cx = (el.x + el.width / 2) * zoom
   const cy = (el.y + el.height / 2) * zoom
   ctx.translate(cx, cy)
-  if (el.rotation) ctx.rotate((el.rotation * Math.PI) / 180)
+  const rot = (el.rotation ?? 0) + (anim?.extraRotation ?? 0)
+  if (rot) ctx.rotate((rot * Math.PI) / 180)
   ctx.translate(-cx, -cy)
 
   const x = el.x * zoom
@@ -47,6 +55,13 @@ export function drawElement(ctx: CanvasRenderingContext2D, el: CanvasElement, zo
     case 'rect':
       if (el.fill) { ctx.fillRect(x, y, w, h) }
       if (el.stroke) { ctx.strokeRect(x, y, w, h) }
+      if (anim?.flowPulse != null && anim.flowPulse > 0.2) {
+        ctx.save()
+        ctx.strokeStyle = `rgba(34,197,94,${0.25 + anim.flowPulse * 0.55})`
+        ctx.lineWidth = (2 + anim.flowPulse * 2) * zoom
+        ctx.strokeRect(x, y, w, h)
+        ctx.restore()
+      }
       break
     case 'circle':
     case 'ellipse': {
@@ -54,6 +69,15 @@ export function drawElement(ctx: CanvasRenderingContext2D, el: CanvasElement, zo
       ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2)
       if (el.fill) ctx.fill()
       if (el.stroke) ctx.stroke()
+      if (anim?.flowPulse != null && anim.flowPulse > 0.2) {
+        ctx.save()
+        ctx.strokeStyle = `rgba(34,197,94,${0.25 + anim.flowPulse * 0.55})`
+        ctx.lineWidth = (2 + anim.flowPulse * 2) * zoom
+        ctx.beginPath()
+        ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2)
+        ctx.stroke()
+        ctx.restore()
+      }
       break
     }
     case 'line':

@@ -78,6 +78,18 @@ type menuExecutionReportBody struct {
 	BundleRevision uint   `json:"bundle_revision"`
 }
 
+func bumpAgentMenuRevisionForDevices(deviceIDs []uint) {
+	for _, did := range deviceIDs {
+		var dev models.Device
+		if err := database.DB.First(&dev, did).Error; err != nil {
+			continue
+		}
+		dev.AgentMenuRevision++
+		database.DB.Model(&dev).Update("agent_menu_revision", dev.AgentMenuRevision)
+		pushAgentMenuSync(did, dev.AgentMenuRevision)
+	}
+}
+
 // DeployAgentMenus 绑定菜单到设备并递增 revision、推送 WS
 func DeployAgentMenus(c *gin.Context) {
 	var body deployMenusBody
@@ -86,19 +98,13 @@ func DeployAgentMenus(c *gin.Context) {
 		return
 	}
 	for _, did := range body.DeviceIDs {
-		var dev models.Device
-		if err := database.DB.First(&dev, did).Error; err != nil {
-			continue
-		}
 		// 清除旧绑定（简化：每次全量替换这些 menu_ids）
 		database.DB.Where("device_id = ?", did).Delete(&models.AgentMenuAssignment{})
 		for _, mid := range body.MenuIDs {
 			database.DB.Create(&models.AgentMenuAssignment{MenuID: mid, DeviceID: did})
 		}
-		dev.AgentMenuRevision++
-		database.DB.Model(&dev).Update("agent_menu_revision", dev.AgentMenuRevision)
-		pushAgentMenuSync(did, dev.AgentMenuRevision)
 	}
+	bumpAgentMenuRevisionForDevices(body.DeviceIDs)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
@@ -227,7 +233,7 @@ func buildMenuPayloadForDevice(deviceID uint) []map[string]interface{} {
 				}
 			}
 		}
-		if (m.TargetType == "form_app" || m.TargetType == "form_app_preview" || m.TargetType == "form_app_scan_entry") && m.TargetRef != "" {
+		if (m.TargetType == "form_app" || m.TargetType == "form_app_preview" || m.TargetType == "form_app_scan_entry" || m.TargetType == "form_app_entry") && m.TargetRef != "" {
 			if err := database.DB.Where("code = ?", m.TargetRef).First(&formApp).Error; err == nil {
 				contentVer = formApp.ContentVersion
 				if formApp.PublishStatus == 1 && formApp.ShareToken != "" {
@@ -235,7 +241,15 @@ func buildMenuPayloadForDevice(deviceID uint) []map[string]interface{} {
 				}
 			}
 		}
-		out = append(out, map[string]interface{}{
+		formCode := strings.TrimSpace(m.FormAppCode)
+		if formCode == "" {
+			formCode = strings.TrimSpace(m.TargetRef)
+		}
+		pageKey := strings.TrimSpace(m.FormAppPageKey)
+		if pageKey == "" {
+			pageKey = "form"
+		}
+		entry := map[string]interface{}{
 			"id":                  m.ID,
 			"title":               m.Title,
 			"icon":                m.Icon,
@@ -250,7 +264,12 @@ func buildMenuPayloadForDevice(deviceID uint) []map[string]interface{} {
 			"required_caps_json":  m.RequiredCapsJSON,
 			"preview_path":        previewPath,
 			"content_version":     contentVer,
-		})
+		}
+		if m.TargetType == "form_app_entry" || formCode != "" {
+			entry["form_app_code"] = formCode
+			entry["form_app_page_key"] = pageKey
+		}
+		out = append(out, entry)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		ii, _ := out[i]["id"].(uint)

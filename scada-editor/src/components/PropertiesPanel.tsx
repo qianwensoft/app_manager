@@ -1,9 +1,12 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useEditorStore } from '@/store/editorStore'
 import { pushHistory } from '@/hooks/useHistory'
 import { scadaApi } from '@/api/scada'
 import { getChartSchema, type StyleFieldDef } from '@/schema/chartSchema'
-import type { CanvasElement, TableColumn, ElementEvent, FormFieldRule, FormFieldReaction } from '@/types'
+import type {
+  CanvasElement, TableColumn, ElementEvent, FormFieldRule, FormFieldReaction,
+  ElementAnimation, PointBinding, DataBindingMode,
+} from '@/types'
 
 /* ── Shared input ── */
 const Inp = ({ val, onChange, type = 'text', placeholder = '' }: {
@@ -763,6 +766,69 @@ function LayoutConfigSection({ el, onUpdate }: {
     )
   }
 
+  if (el.type === 'layout-tabs') {
+    const labels = el.layoutTabLabels ?? ['Tab 1', 'Tab 2', 'Tab 3']
+    const tabCanvases = el.layoutTabCanvases ?? []
+
+    const setTabLabel = (i: number, label: string) => {
+      const next = [...labels]
+      next[i] = label
+      onUpdate('layoutTabLabels', next)
+    }
+    const setTabCanvas = (i: number, canvasId: number) => {
+      const next = [...tabCanvases]
+      next[i] = canvasId
+      onUpdate('layoutTabCanvases', next)
+    }
+    const addTab = () => onUpdate('layoutTabLabels', [...labels, `Tab ${labels.length + 1}`])
+    const removeTab = (i: number) => {
+      onUpdate('layoutTabLabels', labels.filter((_, idx) => idx !== i))
+      onUpdate('layoutTabCanvases', tabCanvases.filter((_, idx) => idx !== i))
+    }
+
+    return (
+      <Section title="标签页配置">
+        {labels.map((label, i) => (
+          <div key={i} style={{ marginBottom: 6 }}>
+            <div style={{ display: 'flex', gap: 4, marginBottom: 4 }}>
+              <Inp val={label} onChange={(v) => setTabLabel(i, v)} placeholder={`Tab ${i + 1}`} />
+              <button type="button" onClick={() => removeTab(i)} style={{ fontSize: 10, padding: '2px 6px' }}>删</button>
+            </div>
+            <select value={tabCanvases[i] ?? ''} onChange={(e) => setTabCanvas(i, Number(e.target.value))} style={selectStyle}>
+              <option value="">— 不绑定 —</option>
+              {canvasList.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+        ))}
+        <button type="button" onClick={addTab} style={{ fontSize: 10, marginTop: 4 }}>+ 添加标签</button>
+      </Section>
+    )
+  }
+
+  if (el.type === 'layout-collapse') {
+    return (
+      <Section title="折叠面板配置">
+        <Row label="标题">
+          <Inp val={el.layoutCollapseTitle ?? ''} onChange={(v) => onUpdate('layoutCollapseTitle', v)} placeholder="折叠标题" />
+        </Row>
+        <Row label="默认展开">
+          <Toggle checked={el.layoutCollapseExpanded !== false} onChange={(v) => onUpdate('layoutCollapseExpanded', v)} label={el.layoutCollapseExpanded !== false ? '展开' : '折叠'} />
+        </Row>
+        <div style={{ marginTop: 6 }}>
+          <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 4 }}>绑定画布</div>
+          <select
+            value={el.layoutCollapseCanvasId ?? ''}
+            onChange={(e) => onUpdate('layoutCollapseCanvasId', e.target.value ? Number(e.target.value) : undefined)}
+            style={selectStyle}
+          >
+            <option value="">— 不绑定 —</option>
+            {canvasList.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
+      </Section>
+    )
+  }
+
   if (el.type === 'layout-modal') {
     return (
       <Section title="弹窗配置">
@@ -865,7 +931,7 @@ function EventEditorSection({ el, onUpdate }: {
   }
 
   return (
-    <Section title="交互事件" defaultOpen={events.length > 0}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       {events.map((ev, i) => (
         <div key={i} style={{
           background: 'var(--bg-base)', border: '1px solid var(--border)',
@@ -882,6 +948,7 @@ function EventEditorSection({ el, onUpdate }: {
                 <option value="click">点击</option>
                 <option value="dblclick">双击</option>
                 <option value="hover">悬停</option>
+                <option value="condition">条件满足</option>
               </select>
             </div>
             <div style={{ flex: 2 }}>
@@ -893,9 +960,21 @@ function EventEditorSection({ el, onUpdate }: {
               </select>
             </div>
           </div>
-          <div>
+          <div style={{ marginBottom: 4 }}>
             <div style={labelStyle}>目标</div>
             {targetInput(ev, i)}
+          </div>
+          <div>
+            <div style={labelStyle}>
+              条件 <span style={{ opacity: 0.6 }}>
+                {ev.trigger === 'condition' ? '(v，空=始终触发)' : '(可选，v)'}
+              </span>
+            </div>
+            <Inp
+              val={ev.condition ?? ''}
+              onChange={(v) => setEvent(i, { condition: v || undefined })}
+              placeholder={ev.trigger === 'condition' ? 'v > 80' : '留空=无条件'}
+            />
           </div>
         </div>
       ))}
@@ -907,7 +986,440 @@ function EventEditorSection({ el, onUpdate }: {
       }}>
         + 添加事件
       </button>
-    </Section>
+    </div>
+  )
+}
+
+// ── 4-Tab 属性面板 ────────────────────────────────────────────────────────────
+
+type PropTab = 'basic' | 'data' | 'events' | 'animation'
+
+const PROP_TABS: { id: PropTab; label: string }[] = [
+  { id: 'basic', label: '基础' },
+  { id: 'data', label: '数据' },
+  { id: 'events', label: '事件' },
+  { id: 'animation', label: '动画' },
+]
+
+function TabBar({ active, onChange }: { active: PropTab; onChange: (t: PropTab) => void }) {
+  return (
+    <div style={{
+      display: 'flex', borderBottom: '1px solid var(--border)',
+      background: 'var(--bg-surface)', flexShrink: 0,
+    }}>
+      {PROP_TABS.map((tab) => {
+        const on = active === tab.id
+        return (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => onChange(tab.id)}
+            style={{
+              flex: 1, padding: '7px 4px', border: 'none', cursor: 'pointer',
+              fontSize: 10, fontWeight: on ? 700 : 500,
+              letterSpacing: '0.04em',
+              color: on ? 'var(--accent)' : 'var(--text-muted)',
+              background: on ? 'var(--bg-panel)' : 'transparent',
+              borderBottom: on ? '2px solid var(--accent)' : '2px solid transparent',
+              transition: 'color var(--duration-fast), border-color var(--duration-fast)',
+            }}
+          >
+            {tab.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function patchPointBinding(
+  el: CanvasElement,
+  onUpdate: (key: string, value: unknown) => void,
+  patch: Partial<PointBinding>,
+) {
+  const mode = patch.mode ?? el.pointBinding?.mode ?? 'point'
+  onUpdate('pointBinding', { ...el.pointBinding, mode, ...patch })
+}
+
+function DataBindingTabContent({ el, onUpdate }: {
+  el: CanvasElement
+  onUpdate: (key: string, value: unknown) => void
+}) {
+  const mode = (el.pointBinding?.mode ?? 'point') as DataBindingMode
+
+  if (el.type === 'table') {
+    return (
+      <div style={{ padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 2 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>
+            <input type="checkbox" checked={!!el.tableStriped}
+              onChange={(e) => onUpdate('tableStriped', e.target.checked)} style={{ width: 12, height: 12 }} />
+            斑马纹
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>
+            <input type="checkbox" checked={el.tableBordered !== false}
+              onChange={(e) => onUpdate('tableBordered', e.target.checked)} style={{ width: 12, height: 12 }} />
+            边框
+          </label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1 }}>
+            <span style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>每页</span>
+            <Inp val={el.tablePageSize ?? 0} type="number"
+              onChange={(v) => onUpdate('tablePageSize', Number(v))} placeholder="0=不分页" />
+          </div>
+        </div>
+        <TableConfigSection el={el} onUpdate={onUpdate} />
+        <Row label="数据来源">
+          <select
+            value={el.tableDataBinding?.mode ?? 'static'}
+            onChange={(e) => onUpdate('tableDataBinding', { ...el.tableDataBinding, mode: e.target.value })}
+            style={selectStyle}
+          >
+            <option value="static">静态数据</option>
+            <option value="interface">数据接口</option>
+          </select>
+        </Row>
+        {(el.tableDataBinding?.mode ?? 'static') === 'interface' && (
+          <>
+            <Row label="接口ID">
+              <Inp
+                val={el.tableDataBinding?.interfaceId ?? ''}
+                type="number"
+                onChange={(v) => onUpdate('tableDataBinding', { ...el.tableDataBinding, interfaceId: Number(v) })}
+                placeholder="DataInterface.id"
+              />
+            </Row>
+            <Row label="参数JSON">
+              <Inp
+                val={el.tableDataBinding?.paramJson ?? ''}
+                onChange={(v) => onUpdate('tableDataBinding', { ...el.tableDataBinding, paramJson: v })}
+                placeholder='{"key":"val"}'
+              />
+            </Row>
+            <div style={{ fontSize: 9, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+              接口返回数组自动填充行；对象取 <code style={{ fontFamily: 'var(--font-mono)' }}>data</code> 字段
+            </div>
+          </>
+        )}
+        {(el.tableDataBinding?.mode ?? 'static') === 'static' && (
+          <>
+            <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 4 }}>
+              JSON 数组，键对应列字段
+            </div>
+            <textarea
+              value={JSON.stringify(el.tableData ?? [], null, 2)}
+              onChange={(e) => {
+                try { onUpdate('tableData', JSON.parse(e.target.value)) } catch { /* ignore */ }
+              }}
+              rows={6}
+              style={{
+                width: '100%', background: 'var(--bg-base)', border: '1px solid var(--border)',
+                color: 'var(--text-primary)', borderRadius: 'var(--radius-sm)',
+                fontSize: 10, fontFamily: 'var(--font-mono)', padding: '5px 7px',
+                resize: 'vertical', outline: 'none', boxSizing: 'border-box',
+              }}
+            />
+          </>
+        )}
+      </div>
+    )
+  }
+
+  const modeOptions: { value: DataBindingMode; label: string }[] = [
+    { value: 'point', label: '数据点 (STOMP)' },
+    { value: 'static', label: '静态值' },
+    { value: 'simulation', label: '模拟点位' },
+    { value: 'interface', label: '数据接口' },
+    { value: 'trend', label: '趋势图' },
+  ]
+  return (
+    <div style={{ padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+      <Row label="绑定模式">
+        <select
+          value={mode}
+          onChange={(e) => patchPointBinding(el, onUpdate, { mode: e.target.value as DataBindingMode })}
+          style={selectStyle}
+        >
+          {modeOptions.filter((o, i, arr) => arr.findIndex((x) => x.value === o.value) === i).map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+      </Row>
+
+      {mode === 'point' && (
+        <Row label="点位键">
+          <Inp
+            val={el.pointBinding?.pointKey ?? el.pointBinding?.linkName ?? ''}
+            placeholder="pump1.speed"
+            onChange={(v) => patchPointBinding(el, onUpdate, { pointKey: v, linkName: v })}
+          />
+        </Row>
+      )}
+
+      {mode === 'simulation' && (
+        <>
+          <Row label="模拟键">
+            <Inp
+              val={el.pointBinding?.simLinkName ?? ''}
+              placeholder="pump1.speed"
+              onChange={(v) => patchPointBinding(el, onUpdate, { simLinkName: v })}
+            />
+          </Row>
+          <Row label="设备码">
+            <Inp
+              val={el.pointBinding?.simDeviceCode ?? ''}
+              placeholder="可选"
+              onChange={(v) => patchPointBinding(el, onUpdate, { simDeviceCode: v })}
+            />
+          </Row>
+        </>
+      )}
+
+      {mode === 'static' && (
+        <div className="prop-row">
+          <span className="prop-label">静态 JSON</span>
+          <textarea
+            value={JSON.stringify(el.pointBinding?.staticData ?? {}, null, 2)}
+            onChange={(e) => {
+              try {
+                patchPointBinding(el, onUpdate, { staticData: JSON.parse(e.target.value) })
+              } catch { /* ignore */ }
+            }}
+            rows={4}
+            style={{
+              width: '100%', background: 'var(--bg-base)', border: '1px solid var(--border)',
+              color: 'var(--text-primary)', borderRadius: 'var(--radius-sm)',
+              fontSize: 10, fontFamily: 'var(--font-mono)', padding: '5px 7px',
+              resize: 'vertical', outline: 'none', boxSizing: 'border-box',
+            }}
+          />
+        </div>
+      )}
+
+      {mode === 'interface' && (
+        <>
+          <Row label="接口编码">
+            <Inp
+              val={el.pointBinding?.ifaceCode ?? ''}
+              placeholder="sensor-data"
+              onChange={(v) => patchPointBinding(el, onUpdate, { ifaceCode: v })}
+            />
+          </Row>
+          <Row label="轮询(ms)">
+            <Inp
+              val={el.pointBinding?.ifaceRefreshMs ?? 0}
+              type="number"
+              onChange={(v) => patchPointBinding(el, onUpdate, { ifaceRefreshMs: Number(v) })}
+              placeholder="0=不轮询"
+            />
+          </Row>
+        </>
+      )}
+
+      {mode === 'trend' && (
+        <>
+          <Row label="趋势键">
+            <Inp
+              val={(el.pointBinding?.trendKeys ?? []).join(', ')}
+              placeholder="tag1, tag2"
+              onChange={(v) => patchPointBinding(el, onUpdate, {
+                trendKeys: v.split(',').map((s) => s.trim()).filter(Boolean),
+              })}
+            />
+          </Row>
+          <Row label="保留点数">
+            <Inp
+              val={el.pointBinding?.trendMaxPoints ?? 200}
+              type="number"
+              onChange={(v) => patchPointBinding(el, onUpdate, { trendMaxPoints: Number(v) })}
+            />
+          </Row>
+        </>
+      )}
+
+      <Row label="转换式">
+        <Inp
+          val={el.pointBinding?.transform ?? ''}
+          placeholder="v * 0.01"
+          onChange={(v) => patchPointBinding(el, onUpdate, { transform: v })}
+        />
+      </Row>
+
+      <div style={{
+        fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.6,
+        background: 'var(--bg-base)', border: '1px solid var(--border)',
+        borderRadius: 'var(--radius-sm)', padding: '6px 8px',
+      }}>
+        图表多系列绑定、接口字段映射等高级配置请使用画布<strong>右键 → 数据绑定</strong>抽屉。
+      </div>
+    </div>
+  )
+}
+
+function AnimationEditorSection({ el, onUpdate }: {
+  el: CanvasElement
+  onUpdate: (key: string, value: unknown) => void
+}) {
+  const anim: ElementAnimation = el.animation ?? { type: 'none' }
+
+  const setAnim = (patch: Partial<ElementAnimation>) => {
+    onUpdate('animation', { ...anim, ...patch })
+  }
+
+  return (
+    <div style={{ padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+      <Row label="动画类型">
+        <select
+          value={anim.type}
+          onChange={(e) => setAnim({ type: e.target.value as ElementAnimation['type'] })}
+          style={selectStyle}
+        >
+          <option value="none">无</option>
+          <option value="rotate">旋转</option>
+          <option value="blink">闪烁</option>
+          <option value="flow">流动</option>
+        </select>
+      </Row>
+      {anim.type !== 'none' && (
+        <>
+          <Row label="时长(ms)">
+            <Inp
+              val={anim.duration ?? 1000}
+              type="number"
+              onChange={(v) => setAnim({ duration: Number(v) })}
+            />
+          </Row>
+          <Row label="触发条件">
+            <Inp
+              val={anim.condition ?? ''}
+              placeholder="例如 v > 80"
+              onChange={(v) => setAnim({ condition: v })}
+            />
+          </Row>
+        </>
+      )}
+      <div style={{ fontSize: 9, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+        预览/发布页按条件表达式（v）与绑定点位驱动 rotate / blink / flow 动画。
+      </div>
+    </div>
+  )
+}
+
+function ElementBasicTabContent({ el, onUpdate, onUngroup }: {
+  el: CanvasElement
+  onUpdate: (key: string, value: unknown) => void
+  onUngroup: () => void
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      {el.type === 'group' && (
+        <Section title="组合" accent>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
+            包含 {el.children?.length ?? 0} 个子元素
+          </div>
+          <button
+            onClick={onUngroup}
+            style={{
+              width: '100%', padding: '5px 0', cursor: 'pointer',
+              background: 'var(--warning-muted)', color: 'var(--warning)',
+              border: '1px solid rgba(245,158,11,0.3)',
+              borderRadius: 'var(--radius-sm)', fontSize: 11,
+            }}
+          >
+            解组 (Ctrl+Shift+G)
+          </button>
+        </Section>
+      )}
+
+      <Section title="位置 / 尺寸">
+        <PairRow l1="X" v1={el.x} l2="Y" v2={el.y}
+          on1={(v) => onUpdate('x', Number(v))}
+          on2={(v) => onUpdate('y', Number(v))} />
+        <PairRow l1="宽度" v1={el.width} l2="高度" v2={el.height}
+          on1={(v) => onUpdate('width', Number(v))}
+          on2={(v) => onUpdate('height', Number(v))} />
+        <PairRow l1="旋转°" v1={el.rotation} l2="透明度" v2={el.opacity ?? 1}
+          on1={(v) => onUpdate('rotation', Number(v))}
+          on2={(v) => onUpdate('opacity', Number(v))} />
+        <Row label="禁止选中">
+          <Toggle
+            checked={el.selectable === false}
+            onChange={(v) => onUpdate('selectable', v ? false : true)}
+            label={el.selectable === false ? '已禁止' : '可选中'}
+          />
+        </Row>
+      </Section>
+
+      <Section title="样式">
+        <Row label="名称"><Inp val={el.name} onChange={(v) => onUpdate('name', v)} /></Row>
+        <Row label="填充">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <ColorPicker val={el.fill && el.fill !== 'transparent' ? el.fill : '#1a2a3a'} onChange={(v) => onUpdate('fill', v)} />
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={!el.fill || el.fill === 'transparent' || el.fill === ''}
+                onChange={(e) => onUpdate('fill', e.target.checked ? '' : '#1a2a3a')}
+                style={{ width: 12, height: 12 }}
+              />
+              透明
+            </label>
+          </div>
+        </Row>
+        <Row label="描边"><ColorPicker val={el.stroke || '#000000'} onChange={(v) => onUpdate('stroke', v)} /></Row>
+      </Section>
+
+      {el.type.startsWith('echarts-') && (
+        <ChartConfigSection el={el} onUpdate={onUpdate} />
+      )}
+
+      {(el.type === 'layout-carousel' || el.type === 'layout-modal' || el.type === 'layout-tabs' || el.type === 'layout-collapse') && (
+        <LayoutConfigSection el={el} onUpdate={onUpdate} />
+      )}
+
+      {el.type === 'alarm-light' && (
+        <Section title="报警灯">
+          <Row label="正常色"><ColorPicker val={el.alarmNormalColor || '#22c55e'} onChange={(v) => onUpdate('alarmNormalColor', v)} /></Row>
+          <Row label="预警色"><ColorPicker val={el.alarmWarningColor || '#f59e0b'} onChange={(v) => onUpdate('alarmWarningColor', v)} /></Row>
+          <Row label="报警色"><ColorPicker val={el.alarmDangerColor || '#ef4444'} onChange={(v) => onUpdate('alarmDangerColor', v)} /></Row>
+          <PairRow
+            l1="预警阈值" v1={el.alarmThresholdWarning ?? 70} l2="报警阈值" v2={el.alarmThresholdDanger ?? 90}
+            on1={(v) => onUpdate('alarmThresholdWarning', Number(v))} on2={(v) => onUpdate('alarmThresholdDanger', Number(v))}
+          />
+          <Row label="闪烁(ms)"><Inp val={el.alarmBlinkMs ?? 500} type="number" onChange={(v) => onUpdate('alarmBlinkMs', Number(v))} /></Row>
+          <Row label="声音报警">
+            <Toggle checked={!!el.alarmSoundEnabled} onChange={(v) => onUpdate('alarmSoundEnabled', v)} label={el.alarmSoundEnabled ? '开启' : '关闭'} />
+          </Row>
+          <Row label="标签"><Inp val={el.text || ''} onChange={(v) => onUpdate('text', v)} placeholder="报警" /></Row>
+        </Section>
+      )}
+
+      {(el.type === 'text' || el.type === 'button') && (
+        <Section title="文本">
+          <Row label="内容"><Inp val={el.text || ''} onChange={(v) => onUpdate('text', v)} placeholder="输入文字" /></Row>
+          <PairRow
+            l1="字号" v1={el.fontSize ?? 14} l2="行高" v2={el.lineHeight ?? 1.5}
+            on1={(v) => onUpdate('fontSize', Number(v))} on2={(v) => onUpdate('lineHeight', Number(v))} />
+          <Row label="字色"><ColorPicker val={el.fontColor || '#ffffff'} onChange={(v) => onUpdate('fontColor', v)} /></Row>
+          <Row label="粗体">
+            <Toggle
+              checked={el.fontWeight === 'bold'}
+              onChange={(v) => onUpdate('fontWeight', v ? 'bold' : 'normal')}
+              label={el.fontWeight === 'bold' ? '粗体' : '常规'} />
+          </Row>
+        </Section>
+      )}
+
+      {(el.type === 'image-bg' || el.type === 'image-widget' ||
+        el.type === 'image-decoration' || el.type === 'image-border-box') && (
+        <ImageResourceSection imageUrl={el.imageUrl} onUpdate={(v) => onUpdate('imageUrl', v)} />
+      )}
+
+      {el.type.startsWith('form-') && (
+        <Section title="表单配置" defaultOpen>
+          <FormFieldConfigSection el={el} onUpdate={onUpdate} />
+        </Section>
+      )}
+    </div>
   )
 }
 
@@ -932,10 +1444,15 @@ export default function PropertiesPanel() {
   const store = useEditorStore()
   const canvas = store.activeCanvas()
   const selectedIds = store.selectedIds
+  const [activeTab, setActiveTab] = useState<PropTab>('basic')
 
   // multi-select: show batch panel when 2+ selected
   const isMulti = selectedIds.length >= 2
   const selectedEl = !isMulti ? canvas?.elements.find((e) => selectedIds.includes(e.id)) : undefined
+
+  useEffect(() => {
+    setActiveTab('basic')
+  }, [selectedEl?.id])
 
   const update = (key: string, value: unknown) => {
     if (selectedEl) store.updateElement(selectedEl.id, { [key]: value })
@@ -1026,7 +1543,6 @@ export default function PropertiesPanel() {
 
       ) : selectedEl ? (
         <>
-          {/* Header */}
           <div style={{
             padding: '7px 10px', borderBottom: '1px solid var(--border)',
             background: 'var(--bg-surface)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6,
@@ -1043,229 +1559,28 @@ export default function PropertiesPanel() {
             </span>
           </div>
 
-          {/* Group: ungroup button */}
-          {selectedEl.type === 'group' && (
-            <Section title="组合" accent>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
-                包含 {selectedEl.children?.length ?? 0} 个子元素
-              </div>
-              <button
-                onClick={() => { pushHistory(store.project); store.ungroup(selectedEl.id) }}
-                style={{
-                  width: '100%', padding: '5px 0', cursor: 'pointer',
-                  background: 'var(--warning-muted)', color: 'var(--warning)',
-                  border: '1px solid rgba(245,158,11,0.3)',
-                  borderRadius: 'var(--radius-sm)', fontSize: 11,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                }}
-              >
-                解组 (Ctrl+Shift+G)
-              </button>
-            </Section>
-          )}
+          <TabBar active={activeTab} onChange={setActiveTab} />
 
-          <Section title="位置 / 尺寸">
-            <PairRow l1="X" v1={selectedEl.x} l2="Y" v2={selectedEl.y}
-              on1={(v) => update('x', Number(v))}
-              on2={(v) => update('y', Number(v))} />
-            <PairRow l1="宽度" v1={selectedEl.width} l2="高度" v2={selectedEl.height}
-              on1={(v) => update('width', Number(v))}
-              on2={(v) => update('height', Number(v))} />
-            <PairRow l1="旋转°" v1={selectedEl.rotation} l2="透明度" v2={selectedEl.opacity ?? 1}
-              on1={(v) => update('rotation', Number(v))}
-              on2={(v) => update('opacity', Number(v))} />
-            <Row label="禁止选中">
-              <Toggle
-                checked={selectedEl.selectable === false}
-                onChange={(v) => update('selectable', v ? false : true)}
-                label={selectedEl.selectable === false ? '已禁止' : '可选中'}
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {activeTab === 'basic' && (
+              <ElementBasicTabContent
+                el={selectedEl}
+                onUpdate={update}
+                onUngroup={() => { pushHistory(store.project); store.ungroup(selectedEl.id) }}
               />
-            </Row>
-          </Section>
-
-          <Section title="样式">
-            <Row label="名称"><Inp val={selectedEl.name} onChange={(v) => update('name', v)} /></Row>
-            <Row label="填充">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <ColorPicker val={selectedEl.fill && selectedEl.fill !== 'transparent' ? selectedEl.fill : '#1a2a3a'} onChange={(v) => update('fill', v)} />
-                <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={!selectedEl.fill || selectedEl.fill === 'transparent' || selectedEl.fill === ''}
-                    onChange={(e) => update('fill', e.target.checked ? '' : '#1a2a3a')}
-                    style={{ width: 12, height: 12 }}
-                  />
-                  透明
-                </label>
+            )}
+            {activeTab === 'data' && (
+              <DataBindingTabContent el={selectedEl} onUpdate={update} />
+            )}
+            {activeTab === 'events' && (
+              <div style={{ padding: '8px 10px' }}>
+                <EventEditorSection el={selectedEl} onUpdate={update} />
               </div>
-            </Row>
-            <Row label="描边"><ColorPicker val={selectedEl.stroke || '#000000'} onChange={(v) => update('stroke', v)} /></Row>
-          </Section>
-
-          {/* 图表配置 — 仅 echarts-* 元素显示 */}
-          {selectedEl.type.startsWith('echarts-') && (
-            <ChartConfigSection el={selectedEl} onUpdate={update} />
-          )}
-
-          {/* Layout 容器配置 */}
-          {(selectedEl.type === 'layout-carousel' || selectedEl.type === 'layout-modal') && (
-            <LayoutConfigSection el={selectedEl} onUpdate={update} />
-          )}
-
-          {(selectedEl.type === 'text' || selectedEl.type === 'button') && (
-            <Section title="文本">
-              <Row label="内容"><Inp val={selectedEl.text || ''} onChange={(v) => update('text', v)} placeholder="输入文字" /></Row>
-              <PairRow
-                l1="字号" v1={selectedEl.fontSize ?? 14} l2="行高" v2={selectedEl.lineHeight ?? 1.5}
-                on1={(v) => update('fontSize', Number(v))} on2={(v) => update('lineHeight', Number(v))} />
-              <Row label="字色"><ColorPicker val={selectedEl.fontColor || '#ffffff'} onChange={(v) => update('fontColor', v)} /></Row>
-              <Row label="粗体">
-                <Toggle
-                  checked={selectedEl.fontWeight === 'bold'}
-                  onChange={(v) => update('fontWeight', v ? 'bold' : 'normal')}
-                  label={selectedEl.fontWeight === 'bold' ? '粗体' : '常规'} />
-              </Row>
-            </Section>
-          )}
-
-          {(selectedEl.type === 'image-bg' || selectedEl.type === 'image-widget' ||
-            selectedEl.type === 'image-decoration' || selectedEl.type === 'image-border-box') && (
-            <ImageResourceSection imageUrl={selectedEl.imageUrl} onUpdate={(v) => update('imageUrl', v)} />
-          )}
-
-          {/* 交互事件 — 按钮/文本/矩形等可交互元素 */}
-          {(selectedEl.type === 'button' || selectedEl.type === 'text' ||
-            selectedEl.type === 'rect' || selectedEl.type === 'image-widget') && (
-            <EventEditorSection el={selectedEl} onUpdate={update} />
-          )}
-
-          {/* 表单控件配置 */}
-          {selectedEl.type.startsWith('form-') && (
-            <Section title="表单配置" defaultOpen>
-              <FormFieldConfigSection el={selectedEl} onUpdate={update} />
-            </Section>
-          )}
-
-          {/* 数据绑定 */}
-          {selectedEl.type === 'table' ? (            <Section title="数据绑定" defaultOpen>
-              {/* Table style */}
-              <div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={!!selectedEl.tableStriped}
-                    onChange={(e) => update('tableStriped', e.target.checked)} style={{ width: 12, height: 12 }} />
-                  斑马纹
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={selectedEl.tableBordered !== false}
-                    onChange={(e) => update('tableBordered', e.target.checked)} style={{ width: 12, height: 12 }} />
-                  边框
-                </label>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1 }}>
-                  <span style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>每页</span>
-                  <Inp val={selectedEl.tablePageSize ?? 0} type="number"
-                    onChange={(v) => update('tablePageSize', Number(v))} placeholder="0=不分页" />
-                </div>
-              </div>
-
-              {/* Column editor */}
-              <TableConfigSection el={selectedEl} onUpdate={update} />
-
-              {/* Data source */}
-              <Row label="数据来源">
-                <select
-                  value={selectedEl.tableDataBinding?.mode ?? 'static'}
-                  onChange={(e) => update('tableDataBinding', { ...selectedEl.tableDataBinding, mode: e.target.value })}
-                  style={selectStyle}
-                >
-                  <option value="static">静态数据</option>
-                  <option value="interface">数据接口</option>
-                </select>
-              </Row>
-              {(selectedEl.tableDataBinding?.mode ?? 'static') === 'interface' && (
-                <>
-                  <Row label="接口ID">
-                    <Inp
-                      val={selectedEl.tableDataBinding?.interfaceId ?? ''}
-                      type="number"
-                      onChange={(v) => update('tableDataBinding', { ...selectedEl.tableDataBinding, interfaceId: Number(v) })}
-                      placeholder="DataInterface.id"
-                    />
-                  </Row>
-                  <Row label="参数JSON">
-                    <Inp
-                      val={selectedEl.tableDataBinding?.paramJson ?? ''}
-                      onChange={(v) => update('tableDataBinding', { ...selectedEl.tableDataBinding, paramJson: v })}
-                      placeholder='{"key":"val"}'
-                    />
-                  </Row>
-                  <div style={{ fontSize: 9, color: 'var(--text-muted)', lineHeight: 1.6, marginTop: 2 }}>
-                    接口返回数组时自动填充行；返回对象时取 <code style={{ fontFamily: 'var(--font-mono)' }}>data</code> 字段
-                  </div>
-                  <div style={{ marginTop: 6 }}>
-                    <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 4 }}>列字段映射（接口字段 → 列key）</div>
-                    {(selectedEl.tableColumns ?? []).map((col, i) => (
-                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 3 }}>
-                        <span style={{ fontSize: 10, color: 'var(--text-secondary)', width: 60, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{col.title}</span>
-                        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>→</span>
-                        <Inp
-                          val={col.key}
-                          onChange={(v) => {
-                            const next = (selectedEl.tableColumns ?? []).map((c, ci) => ci === i ? { ...c, key: v } : c)
-                            update('tableColumns', next)
-                          }}
-                          placeholder="接口字段名"
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </>
-              )}
-              {(selectedEl.tableDataBinding?.mode ?? 'static') === 'static' && (
-                <>
-                  <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 4 }}>
-                    JSON 数组，每行一个对象，键对应列字段键
-                  </div>
-                  <textarea
-                    value={JSON.stringify(selectedEl.tableData ?? [], null, 2)}
-                    onChange={(e) => {
-                      try { update('tableData', JSON.parse(e.target.value)) } catch { /* ignore */ }
-                    }}
-                    rows={6}
-                    style={{
-                      width: '100%', background: 'var(--bg-base)', border: '1px solid var(--border)',
-                      color: 'var(--text-primary)', borderRadius: 'var(--radius-sm)',
-                      fontSize: 10, fontFamily: 'var(--font-mono)', padding: '5px 7px',
-                      resize: 'vertical', outline: 'none', boxSizing: 'border-box',
-                    }}
-                  />
-                </>
-              )}
-            </Section>
-          ) : (
-            <Section title="数据绑定" defaultOpen={false}>
-              <Row label="点位键">
-                <Inp
-                  val={selectedEl.pointBinding?.pointKey || ''}
-                  placeholder="device.tag"
-                  onChange={(v) => update('pointBinding', { ...selectedEl.pointBinding, pointKey: v })}
-                />
-              </Row>
-              <Row label="转换式">
-                <Inp
-                  val={selectedEl.pointBinding?.transform || ''}
-                  placeholder="v * 0.01"
-                  onChange={(v) => update('pointBinding', { ...selectedEl.pointBinding, transform: v })}
-                />
-              </Row>
-              <div style={{
-                fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.6,
-                background: 'var(--bg-base)', border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-sm)', padding: '5px 7px', marginTop: 2,
-              }}>
-                转换式示例：<code style={{ fontFamily: 'var(--font-mono)', color: 'var(--info)' }}>v * 0.01</code>
-              </div>
-            </Section>
-          )}
+            )}
+            {activeTab === 'animation' && (
+              <AnimationEditorSection el={selectedEl} onUpdate={update} />
+            )}
+          </div>
 
           {/* Delete */}
           <div style={{ padding: '10px 10px', marginTop: 'auto' }}>

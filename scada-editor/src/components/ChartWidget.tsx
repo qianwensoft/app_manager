@@ -2,6 +2,7 @@ import { useRef, useEffect } from 'react'
 import * as echarts from 'echarts'
 import type { CanvasElement, PointBinding } from '@/types'
 import type { PointDataMap } from '@/hooks/useStompPointData'
+import { mergeAnimStyle } from '@/runtime/animationExecutor'
 import { getStyleValue, type StyleFieldDef, chartSchema } from '@/schema/chartSchema'
 import { applyFormatter } from '@/hooks/useInterfaceBindingData'
 
@@ -357,6 +358,125 @@ function buildOption(el: CanvasElement, rawPointData: PointDataMap): echarts.ECh
       }
     }
 
+    case 'echarts-stacked-bar': {
+      const colors = parseColors(sv(cfg, 'seriesColors', '#4a9eff,#27ae60,#e67e22'))
+      const categories = categoryKey
+        ? (pointData[categoryKey] as unknown as string[] | undefined) ?? ['A', 'B', 'C', 'D']
+        : ['A', 'B', 'C', 'D']
+      const series: echarts.SeriesOption[] = (seriesKeys.length > 0 ? seriesKeys : [[]]).map((keys, i) => ({
+        type: 'bar',
+        stack: 'total',
+        data: keys.length ? keys.map((k) => applyTransform(pointData[k] ?? 0, transform)) : [20, 30, 25, 15],
+        itemStyle: { color: colors[i % colors.length] },
+      }))
+      return {
+        ...base,
+        grid: { top: sv(cfg, 'gridTop', 30), bottom: sv(cfg, 'gridBottom', 30), left: sv(cfg, 'gridLeft', 40), right: sv(cfg, 'gridRight', 10) },
+        xAxis: { type: 'category', data: categories },
+        yAxis: { type: 'value' },
+        series,
+      }
+    }
+
+    case 'echarts-horizontal-bar': {
+      const colors = parseColors(sv(cfg, 'seriesColors', '#4a9eff'))
+      const categories = categoryKey
+        ? (pointData[categoryKey] as unknown as string[] | undefined) ?? ['A', 'B', 'C', 'D']
+        : ['A', 'B', 'C', 'D']
+      const keys = seriesKeys[0] ?? []
+      return {
+        ...base,
+        grid: { top: sv(cfg, 'gridTop', 30), bottom: sv(cfg, 'gridBottom', 30), left: sv(cfg, 'gridLeft', 50), right: sv(cfg, 'gridRight', 10) },
+        xAxis: { type: 'value' },
+        yAxis: { type: 'category', data: categories },
+        series: [{
+          type: 'bar',
+          data: keys.length ? keys.map((k) => applyTransform(pointData[k] ?? 0, transform)) : [42, 68, 35, 80],
+          itemStyle: { color: colors[0] },
+        }],
+      }
+    }
+
+    case 'echarts-area': {
+      const colors = parseColors(sv(cfg, 'seriesColors', '#4a9eff,#27ae60'))
+      const smooth = sv(cfg, 'smooth', true)
+      const lineWidth = sv(cfg, 'lineWidth', 2)
+      const categories = categoryKey
+        ? (pointData[categoryKey] as unknown as string[] | undefined) ?? ['1', '2', '3', '4', '5']
+        : ['1', '2', '3', '4', '5']
+      const series: echarts.SeriesOption[] = (seriesKeys.length > 0 ? seriesKeys : [[]]).map((keys, i) => {
+        const color = colors[i % colors.length]
+        return {
+          type: 'line',
+          data: keys.length ? keys.map((k) => applyTransform(pointData[k] ?? 0, transform)) : [30, 55, 40, 70, 50],
+          smooth,
+          lineStyle: { width: lineWidth, color },
+          itemStyle: { color },
+          areaStyle: { color: color + '44' },
+        }
+      })
+      return {
+        ...base,
+        grid: { top: sv(cfg, 'gridTop', 30), bottom: sv(cfg, 'gridBottom', 30), left: sv(cfg, 'gridLeft', 40), right: sv(cfg, 'gridRight', 10) },
+        xAxis: { type: 'category', data: categories },
+        yAxis: { type: 'value' },
+        series,
+      }
+    }
+
+    case 'echarts-radar': {
+      const color = parseColors(sv(cfg, 'seriesColors', '#4a9eff'))[0]
+      const showArea = sv(cfg, 'showArea', true)
+      const keys = seriesKeys[0] ?? []
+      const nameArr = categoryKey ? (pointData[categoryKey] as unknown as string[] | undefined) : undefined
+      const indicators = keys.length
+        ? keys.map((k, i) => ({ name: nameArr?.[i] ?? k, max: 100 }))
+        : [{ name: 'A', max: 100 }, { name: 'B', max: 100 }, { name: 'C', max: 100 }]
+      const values = keys.length
+        ? keys.map((k) => applyTransform(pointData[k] ?? 0, transform))
+        : [60, 75, 45]
+      return {
+        ...base,
+        radar: { indicator: indicators, splitArea: { show: true } },
+        series: [{
+          type: 'radar',
+          data: [{ value: values, name: titleText || 'Series' }],
+          areaStyle: showArea ? { color: color + '33' } : undefined,
+          lineStyle: { color },
+          itemStyle: { color },
+        }],
+      }
+    }
+
+    case 'echarts-funnel': {
+      const colors = parseColors(sv(cfg, 'colors', '#4a9eff,#27ae60,#e67e22,#8e44ad'))
+      const sort = sv(cfg, 'sort', 'descending') as 'ascending' | 'descending'
+      const keys = seriesKeys[0] ?? []
+      const nameArr = categoryKey ? (pointData[categoryKey] as unknown as string[] | undefined) : undefined
+      const funnelData = keys.length
+        ? keys.map((k, i) => ({
+            value: applyTransform(pointData[k] ?? 0, transform),
+            name: nameArr?.[i] ?? k,
+            itemStyle: { color: colors[i % colors.length] },
+          }))
+        : [
+            { value: 100, name: '访问', itemStyle: { color: colors[0] } },
+            { value: 80, name: '咨询', itemStyle: { color: colors[1] } },
+            { value: 60, name: '下单', itemStyle: { color: colors[2] } },
+            { value: 40, name: '成交', itemStyle: { color: colors[3] } },
+          ]
+      return {
+        ...base,
+        series: [{
+          type: 'funnel',
+          sort,
+          gap: 2,
+          label: { show: true, color: '#ccc', fontSize: 10 },
+          data: funnelData,
+        }],
+      }
+    }
+
     case 'echarts-heatmap': {
       const colorLow = sv(cfg, 'colorLow', '#313695')
       const colorHigh = sv(cfg, 'colorHigh', '#a50026')
@@ -462,7 +582,7 @@ export default function ChartWidget({ el, zoom, pointData = {} }: Props) {
   return (
     <div
       ref={divRef}
-      style={{
+      style={mergeAnimStyle(el, pointData, {
         position: 'absolute',
         left: el.x * zoom,
         top: el.y * zoom,
@@ -471,7 +591,7 @@ export default function ChartWidget({ el, zoom, pointData = {} }: Props) {
         zIndex: el.zIndex,
         opacity: el.opacity ?? 1,
         pointerEvents: 'none',
-      }}
+      })}
     />
   )
 }

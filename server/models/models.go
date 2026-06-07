@@ -52,8 +52,10 @@ type Device struct {
 	// Agent 上报的手机硬件序列号（Build.SERIAL 等）：设备接入的物理唯一键，与 agent_token 变更时仍按此串号合并同一台设备。
 	// 库级唯一由 database.MigrateDeviceAndroidSerialUnique 的部分索引保证（排除空 / unknown）。
 	AndroidSerial string `gorm:"column:android_serial;size:64;index" json:"android_serial"`
-	// 无线 ADB 连接地址（ip:port），独立于 USB serial，每次 connect-by-ip 成功后更新
-	WirelessAdbSerial string `gorm:"column:wireless_adb_serial;size:64" json:"wireless_adb_serial"`
+	// 无线 ADB 上次成功连接的端口；IP 每次连接时取 Agent 心跳上报的 device.IP
+	WirelessAdbPort int `gorm:"column:wireless_adb_port" json:"wireless_adb_port"`
+	// 已废弃：仅迁移期读取旧 ip:port，新数据不再写入
+	WirelessAdbSerial string `gorm:"column:wireless_adb_serial;size:64" json:"wireless_adb_serial,omitempty"`
 	// 指针：MySQL 在 NO_ZERO_DATE 下禁止 '0000-00-00'，未上线/未心跳时为 NULL
 	LastSeenAt *time.Time `json:"last_seen_at"`
 	// Agent 菜单下发 revision（单调递增，与 agent_menu 分配变更同步）

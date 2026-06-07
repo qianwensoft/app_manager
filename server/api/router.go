@@ -6,6 +6,7 @@ import (
 	"app-manager/database"
 	"app-manager/datastack"
 	"app-manager/mcp"
+	"app-manager/ratelimit"
 	"os"
 
 	"github.com/gin-gonic/gin"
@@ -44,6 +45,9 @@ func SetupRouter() *gin.Engine {
 		formAppDir = "../form-app/dist"
 	}
 	r.Static("/form-app", formAppDir)
+
+	// Prometheus（内网抓取；生产请用防火墙或反向代理限制访问）
+	r.GET("/metrics", PrometheusMetrics)
 
 	// 安装状态检查（正常模式）
 	r.GET("/api/setup/status", GetSetupStatus)
@@ -85,11 +89,16 @@ func SetupRouter() *gin.Engine {
 	r.GET("/api/agent-updates/latest", GetLatestAgentUpdate)
 	r.GET("/api/agent-updates/:id/download", DownloadAgentAPK)
 
+	rl := config.C.RateLimit
+
 	// 认证
 	a := r.Group("/api/auth")
 	{
 		a.POST("/register", Register)
-		a.POST("/login", Login)
+		a.POST("/login",
+			ratelimit.Middleware(ratelimit.KeyByClientIP, rl.LoginRPM(), rl.LoginBurstSize()),
+			Login,
+		)
 		a.GET("/me", auth.AuthMiddleware(), Me)
 		a.GET("/scope-catalog", auth.AuthMiddleware(), ScopeCatalog)
 		a.POST("/apikey", auth.AuthMiddleware(), CreateAPIKey)
@@ -113,6 +122,8 @@ func SetupRouter() *gin.Engine {
 		d.POST("/:id/apps/refresh", RefreshDeviceAppsFromAgent)
 		d.POST("/:id/apps/pull-apk", auth.RequireRole("admin", "operator"), PullInstalledApkFromAgent)
 		d.POST("/:id/agent/refresh-info", RefreshAgentDeviceInfoFromAgent)
+		d.POST("/:id/agent/open-wireless-adb", auth.RequireRole("admin", "operator"), OpenWirelessAdbOnAgent)
+		d.POST("/:id/agent/trigger-menu", auth.RequireRole("admin", "operator"), TriggerAgentMenuOnAgent)
 		d.POST("/:id/speed-test", auth.RequireRole("admin", "operator"), DeviceSpeedTest)
 		d.GET("/:id/file-hub", ListDeviceFileHub)
 		d.POST("/:id/audio-recording/start", auth.RequireRole("admin", "operator"), StartAudioRecording)
@@ -178,6 +189,8 @@ func SetupRouter() *gin.Engine {
 		settings.PUT("/heartbeat", UpdateHeartbeatSettings)
 		settings.GET("/register", GetRegisterSetting)
 		settings.PUT("/register", UpdateRegisterSetting)
+		settings.GET("/cluster", ClusterStatus)
+		settings.GET("/cluster/agent-route/:deviceKey", ClusterAgentRoute)
 	}
 
 	// 用户管理（仅 admin）
@@ -241,6 +254,9 @@ func SetupRouter() *gin.Engine {
 		ce.DELETE("/listen-state/device/:device_id", auth.RequireRole("admin", "operator"), DeleteDeviceCustomListenState)
 		ce.POST("/listen/start", auth.RequireRole("admin", "operator"), BatchStartCustomEventListen)
 		ce.POST("/listen/stop", auth.RequireRole("admin", "operator"), BatchStopCustomEventListen)
+		ce.POST("/analyze/start", auth.RequireRole("admin", "operator"), StartCustomEventAnalyze)
+		ce.POST("/analyze/stop", auth.RequireRole("admin", "operator"), StopCustomEventAnalyze)
+		ce.GET("/analyze/session/:device_id", auth.RequireRole("admin", "operator", "viewer"), GetCustomEventAnalyzeSession)
 	}
 	ceg := r.Group("/api/custom-event-groups", auth.AuthMiddleware())
 	{
@@ -430,6 +446,9 @@ func SetupRouter() *gin.Engine {
 		fapp.POST("/infos/:id/deploy-to-devices", auth.RequireRole("admin", "operator"), DeployFormAppToDevices)
 		fapp.POST("/runtime/query", auth.RequireRole("admin", "operator"), FormRuntimeQuery)
 		fapp.POST("/runtime/submit", auth.RequireRole("admin", "operator"), FormRuntimeSubmit)
+		fapp.GET("/runtime/draft", FormRuntimeGetDraft)
+		fapp.PUT("/runtime/draft", FormRuntimePutDraft)
+		fapp.DELETE("/runtime/draft", FormRuntimeDeleteDraft)
 
 		fapp.GET("/infos/:id/pages", GetFormAppPages)
 		fapp.POST("/infos/:id/pages", auth.RequireRole("admin", "operator"), CreateFormAppPage)
@@ -452,6 +471,15 @@ func SetupRouter() *gin.Engine {
 		fapp.PUT("/event-routes/:route_id", auth.RequireRole("admin", "operator"), UpdateFormAppEventRoute)
 		fapp.DELETE("/event-routes/:route_id", auth.RequireRole("admin", "operator"), DeleteFormAppEventRoute)
 		fapp.POST("/infos/:id/test-event", auth.RequireRole("admin", "operator"), TestFormAppEvent)
+	}
+
+	// Form App Agent 运行时（JWT 或 X-Device-Token）
+	agentFapp := r.Group("/api/form-app/agent-runtime", auth.FormRuntimeAuthMiddleware())
+	{
+		agentFapp.GET("/:code/bootstrap", FormRuntimeBootstrap)
+		agentFapp.POST("/query", FormRuntimeQuery)
+		agentFapp.POST("/submit", FormRuntimeSubmit)
+		agentFapp.POST("/match-event", FormRuntimeMatchEvent)
 	}
 
 	// 组织架构
@@ -537,7 +565,10 @@ func SetupRouter() *gin.Engine {
 	r.Any("/api/open/v1/outbound/webhooks/receive/:app_code/:token", ReceiveOutboundWebhook)
 
 	// 对外开放 API
-	open := r.Group("/api/open/v1", auth.APIKeyMiddleware())
+	open := r.Group("/api/open/v1",
+		auth.APIKeyMiddleware(),
+		ratelimit.Middleware(ratelimit.KeyByAPIKey, rl.OpenAPIRPM(), rl.OpenAPIBurstSize()),
+	)
 	{
 		open.GET("/data/:code", OpenDataInterfaceInvoke)
 		open.POST("/data/:code", OpenDataInterfaceInvoke)
@@ -551,7 +582,10 @@ func SetupRouter() *gin.Engine {
 	}
 
 	// MCP — Model Context Protocol (X-API-Key auth)
-	mcpGroup := r.Group("/mcp/v1", auth.APIKeyMiddleware())
+	mcpGroup := r.Group("/mcp/v1",
+		auth.APIKeyMiddleware(),
+		ratelimit.Middleware(ratelimit.KeyByAPIKey, rl.MCPRPM(), rl.MCPBurstSize()),
+	)
 	{
 		mcpGroup.POST("/", mcp.Handle)
 	}

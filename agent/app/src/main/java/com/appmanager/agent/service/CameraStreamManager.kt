@@ -1,9 +1,12 @@
 package com.appmanager.agent.service
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.hardware.camera2.CameraManager
 import android.os.Build
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.appmanager.agent.ws.AgentWebSocket
 import com.google.gson.Gson
 import org.webrtc.*
@@ -68,6 +71,17 @@ class CameraStreamManager(
 
     fun startCamera(cameraId: String) {
         executor.execute {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                Log.w(TAG, "CAMERA permission not granted")
+                webSocket.send(mapOf(
+                    "type" to "camera_error",
+                    "camera" to cameraId,
+                    "message" to "未授予相机权限，请在 Agent「权限」页开启相机后重试"
+                ))
+                return@execute
+            }
             synchronized(sessionsLock) {
                 if (sessions.containsKey(cameraId)) {
                     Log.d(TAG, "camera $cameraId already running")
@@ -206,8 +220,9 @@ class CameraStreamManager(
         videoTrack.setEnabled(true)
         session.videoTrack = videoTrack
 
-        // 4. PeerConnection — no STUN needed for LAN
-        val rtcConfig = PeerConnection.RTCConfiguration(emptyList()).apply {
+        val rtcConfig = PeerConnection.RTCConfiguration(
+            listOf(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer())
+        ).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
         }

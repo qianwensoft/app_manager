@@ -4,6 +4,8 @@ import (
 	"app-manager/agent"
 	"app-manager/database"
 	"app-manager/models"
+	"app-manager/outbound"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -42,7 +44,8 @@ func BatchStartCustomEventListen(c *gin.Context) {
 		return
 	}
 	data := map[string]interface{}{
-		"rules": rules,
+		"rules":      rules,
+		"loop_guard": outbound.OutboundLoopGuardPayload(),
 	}
 	results := dispatchCustomEventListen(req.DeviceIDs, "start_custom_event_listen", data)
 	persistListenStateAfterStart(defs, results)
@@ -74,27 +77,25 @@ type customEventListenResult struct {
 
 func dispatchCustomEventListen(deviceIDs []uint, action string, data map[string]interface{}) []customEventListenResult {
 	out := make([]customEventListenResult, 0, len(deviceIDs))
+	msg := map[string]interface{}{
+		"type":   "command",
+		"action": action,
+	}
+	if data != nil {
+		msg["data"] = data
+	}
 	for _, id := range deviceIDs {
 		r := customEventListenResult{DeviceID: id}
-		key, err := agent.AgentConnectionKey(strconv.FormatUint(uint64(id), 10))
-		if err != nil {
+		if _, err := agent.AgentConnectionKeyCandidates(strconv.FormatUint(uint64(id), 10)); err != nil {
 			r.Error = err.Error()
 			out = append(out, r)
 			continue
 		}
-		if !agent.AgentHub.IsConnected(key) {
+		if !agent.AgentHub.SendToDevice(id, msg) {
 			r.Error = "agent offline"
 			out = append(out, r)
 			continue
 		}
-		msg := map[string]interface{}{
-			"type":   "command",
-			"action": action,
-		}
-		if data != nil {
-			msg["data"] = data
-		}
-		_ = agent.AgentHub.Send(key, msg)
 		r.OK = true
 		out = append(out, r)
 	}
@@ -163,4 +164,62 @@ func buildAgentRules(defs []models.CustomEventDefinition) []agentCustomEventRule
 		})
 	}
 	return rules
+}
+
+func loadDefinitionsByIDs(ids []uint) ([]models.CustomEventDefinition, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var rows []models.CustomEventDefinition
+	if err := database.DB.Where("id IN ? AND enabled = ?", ids, true).Order("id ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func agentListenRulesPayload(defs []models.CustomEventDefinition) map[string]interface{} {
+	rules := buildAgentRules(defs)
+	if len(rules) == 0 {
+		return nil
+	}
+	return map[string]interface{}{
+		"rules":      rules,
+		"loop_guard": outbound.OutboundLoopGuardPayload(),
+	}
+}
+
+// RestoreDeviceCustomEventListenForDeviceID Agent 重连后按库中 active 快照重新下发 start_custom_event_listen。
+func RestoreDeviceCustomEventListenForDeviceID(deviceID uint) {
+	if deviceID == 0 {
+		return
+	}
+	var st models.DeviceCustomListenState
+	if err := database.DB.Where("device_id = ? AND active = ?", deviceID, true).First(&st).Error; err != nil {
+		return
+	}
+	defs, err := loadDefinitionsByIDs(st.DefinitionIDs())
+	if err != nil || len(defs) == 0 {
+		return
+	}
+	data := agentListenRulesPayload(defs)
+	if data == nil {
+		return
+	}
+	msg := map[string]interface{}{
+		"type":   "command",
+		"action": "start_custom_event_listen",
+		"data":   data,
+	}
+	if agent.AgentHub.SendToDevice(deviceID, msg) {
+		log.Printf("[custom-event] restored listen for device %d (%d rules)", deviceID, len(defs))
+	}
+}
+
+// RestoreDeviceCustomEventListenForAgentKey 根据 WS 连接键解析设备 ID 并恢复监听。
+func RestoreDeviceCustomEventListenForAgentKey(agentKey string) {
+	devID, ok := agent.ResolveDeviceID(agentKey)
+	if !ok {
+		return
+	}
+	RestoreDeviceCustomEventListenForDeviceID(devID)
 }

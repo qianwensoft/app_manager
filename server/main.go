@@ -3,6 +3,7 @@ package main
 import (
 	"app-manager/api"
 	"app-manager/channel"
+	"app-manager/cluster"
 	"app-manager/config"
 	"app-manager/database"
 	"app-manager/datastack"
@@ -45,6 +46,10 @@ func main() {
 	if err := config.Load(cfgPath); err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
+	if err := cluster.Init(config.C.Cluster); err != nil {
+		log.Fatalf("Failed to init cluster: %v", err)
+	}
+	defer cluster.Close()
 
 	// 创建必要目录
 	os.MkdirAll(config.C.Storage.Path, 0755)

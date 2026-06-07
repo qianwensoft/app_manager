@@ -20,6 +20,8 @@ export interface Device {
   /** Unique token used for agent WebSocket auth and QR onboarding */
   agent_token: string
   agent_version: string
+  /** JSON array of capability strings reported by Agent */
+  agent_capabilities_json: string
   battery: number
   cpu_usage: number
   memory_used: number

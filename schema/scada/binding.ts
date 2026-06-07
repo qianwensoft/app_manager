@@ -23,10 +23,12 @@ export interface ElementAnimation {
 
 /** Interaction event wired to a canvas element */
 export interface ElementEvent {
-  trigger: 'click' | 'dblclick' | 'hover'
-  action: 'navigate' | 'popup' | 'script'
-  /** For action="navigate": target URL or canvas id; for action="popup": popup panel id */
+  trigger: 'click' | 'dblclick' | 'hover' | 'condition'
+  action: 'navigate' | 'popup' | 'script' | 'open-modal' | 'close-modal' | 'navigate-canvas'
+  /** open-modal/close-modal: modal id; navigate-canvas: canvas id; navigate/popup: URL */
   target?: string
-  /** For action="script": JS expression to execute */
+  /** For action="script": JS expression to execute (vars: v, el) */
   script?: string
+  /** JS expression using bound point value v; empty = always run */
+  condition?: string
 }

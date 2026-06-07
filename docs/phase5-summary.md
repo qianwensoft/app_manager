@@ -203,17 +203,19 @@ curl -X POST "http://127.0.0.1:8080/api/form-app/infos/2/deploy-to-devices" \
 
 ## 待完成功能
 
+> **状态同步（2026-06-05）**：剩余项归入 `docs/plan.md` Phase A2。
+
 ### Android 端
-- [ ] 集成扫码库（ZXing/ML Kit）
-- [ ] 实现 scanBarcode() 方法
-- [ ] 添加权限请求（CAMERA）
-- [ ] 添加 FormAppActivity 到 AndroidManifest.xml
-- [ ] 测试 WebView 与 Bridge 通信
+- [x] 集成扫码库（ZXing Android Embedded，复用 `SettingsActivity` 同款 `ScanContract`）
+- [x] 实现 `scanBarcode()` → `launchBarcodeScan()`（`FormAppActivity.kt`）
+- [x] 添加权限请求（CAMERA，`ActivityResultContracts.RequestPermission`）
+- [x] 添加 `FormAppActivity` 到 `AndroidManifest.xml`
+- [ ] 真机 E2E：WebView 加载 → 扫码 → `eventManager` 跳转
 
 ### 前端集成
-- [ ] 暴露 eventManager 到 window
-- [ ] 实现 AndroidBridge 调用逻辑
-- [ ] 处理设备信息（getDeviceInfo）
+- [x] 暴露 `eventManager` 到 `window`（`form-app/src/runtime/EventHandler.ts`）
+- [ ] 运行时页面调用 `AndroidBridge` / `getDeviceInfo` 的完整联调
+- [x] `getDeviceInfo()` Bridge 已实现（Agent 端）
 - [ ] 优化移动端样式
 
 ### 测试

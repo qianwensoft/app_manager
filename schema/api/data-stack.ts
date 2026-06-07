@@ -112,7 +112,7 @@ export interface DataInterfaceGroup {
 
 // DataInterface
 
-export type DataInterfaceKind = 'query' | 'transaction'
+export type DataInterfaceKind = 'query' | 'queryOne' | 'transaction'
 
 export interface DataInterface {
   id: number

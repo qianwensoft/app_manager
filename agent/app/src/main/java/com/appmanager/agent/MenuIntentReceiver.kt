@@ -7,6 +7,7 @@ import android.content.IntentFilter
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.appmanager.agent.ui.ScadaWebViewActivity
+import com.appmanager.agent.util.WirelessAdbHelper
 
 /**
  * 动态广播接收器，响应菜单项的自定义 intent_action。
@@ -47,18 +48,31 @@ object MenuIntentReceiver {
                 val eventType = intent.getStringExtra("event_type") ?: "intent_scan"
 
                 val menuItem = AgentMenuStore.getMenuByIntent(ctx, action)
+                if (menuItem != null && WirelessAdbHelper.isNativeMenuTarget(menuItem.targetType, menuItem.targetRef)) {
+                    WirelessAdbHelper.openWirelessDebugSettings(ctx)
+                    AgentMenuExecutionReporter.report(
+                        ctx,
+                        intentAction = action,
+                        eventType = eventType,
+                        scanValue = scanValue,
+                        targetUrl = "agent_native:wireless_adb",
+                        status = "success"
+                    )
+                    return
+                }
                 if (menuItem != null && menuItem.targetType == "form_app_entry") {
                     val formAppCode = menuItem.formAppCode ?: menuItem.targetRef
                     val pageKey = menuItem.formAppPageKey ?: "form"
-                    val serverUrl = AgentMenuStore.getServerUrl(ctx)
-
                     Log.i(TAG, "launching FormAppActivity: code=$formAppCode, page=$pageKey")
-                    ctx.startActivity(
-                        Intent(ctx, FormAppActivity::class.java)
-                            .putExtra("form_app_code", formAppCode)
-                            .putExtra("page_key", pageKey)
-                            .putExtra("server_url", serverUrl)
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    AgentMenuStore.launchFormAppEntry(
+                        ctx,
+                        mapOf(
+                            "target_type" to "form_app_entry",
+                            "target_ref" to formAppCode,
+                            "form_app_code" to formAppCode,
+                            "form_app_page_key" to pageKey,
+                        ),
+                        newTask = true,
                     )
                     return
                 }

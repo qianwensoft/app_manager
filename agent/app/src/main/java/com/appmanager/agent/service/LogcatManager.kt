@@ -17,15 +17,15 @@ class LogcatManager(
     private var logcatProcess: Process? = null
     private var readJob: Job? = null
 
-    fun start(filter: String = "") {
+    fun start(filters: List<String> = emptyList()) {
         try {
-            val cmd = if (filter.isEmpty()) {
-                arrayOf("logcat", "-v", "time")
-            } else {
-                arrayOf("logcat", "-v", "time", filter)
-            }
+            val cmd = ArrayList<String>()
+            cmd.add("logcat")
+            cmd.add("-v")
+            cmd.add("time")
+            filters.map { it.trim() }.filter { it.isNotEmpty() }.forEach { cmd.add(it) }
 
-            logcatProcess = Runtime.getRuntime().exec(cmd)
+            logcatProcess = Runtime.getRuntime().exec(cmd.toTypedArray())
 
             readJob = CoroutineScope(Dispatchers.IO).launch {
                 try {

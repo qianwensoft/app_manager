@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// StartAdbKeepalive 启动后台 goroutine，每 30 秒对所有有 wireless_adb_serial 的设备
-// 执行 adb connect，确保 adb server 重启后连接自动恢复，直到手动断开或设备离线。
+// StartAdbKeepalive 启动后台 goroutine，每 30 秒对所有已保存无线 ADB 端口的设备
+// 用当前 IP + 端口执行 adb connect，确保 adb server 重启后连接自动恢复。
 func StartAdbKeepalive() {
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
@@ -23,7 +23,7 @@ func StartAdbKeepalive() {
 
 func keepaliveOnce() {
 	var devices []models.Device
-	if err := database.DB.Where("wireless_adb_serial != ''").Find(&devices).Error; err != nil {
+	if err := database.DB.Where("wireless_adb_port > 0 OR wireless_adb_serial != ''").Find(&devices).Error; err != nil {
 		return
 	}
 	if len(devices) == 0 {
@@ -31,23 +31,32 @@ func keepaliveOnce() {
 	}
 	cli := getADB()
 	for _, d := range devices {
-		serial := d.WirelessAdbSerial
-		parts := strings.SplitN(serial, ":", 2)
-		if len(parts) != 2 {
+		port := wirelessAdbPort(&d)
+		ip := strings.TrimSpace(d.IP)
+		if port <= 0 || ip == "" {
 			continue
 		}
-		port, err := strconv.Atoi(parts[1])
-		if err != nil {
+		serial := ip + ":" + strconv.Itoa(port)
+		st := resolveAdbSerialState(cli, serial)
+		if st == "device" {
 			continue
 		}
-		out, err := cli.ConnectTCP(parts[0], port)
+		if st == "connecting" {
+			continue
+		}
+		noteAdbConnectAttempt(serial)
+		out, err := cli.ConnectTCP(ip, port)
 		if err != nil {
+			_ = cli.Disconnect(serial)
+			clearAdbConnectingNote(serial)
 			log.Printf("[adb-keepalive] device %d %s connect error: %v", d.ID, serial, err)
 			continue
 		}
 		outLow := strings.ToLower(out)
-		// 连接失败（设备真的离线）时更新状态
+		// 连接失败（设备真的离线）时更新状态，并断开避免 adb 长期停留在 connecting
 		if strings.Contains(outLow, "failed") || strings.Contains(outLow, "cannot") || strings.Contains(outLow, "refused") {
+			_ = cli.Disconnect(serial)
+			clearAdbConnectingNote(serial)
 			database.DB.Model(&models.Device{}).Where("id = ?", d.ID).Update("status", "offline")
 			log.Printf("[adb-keepalive] device %d %s offline: %s", d.ID, serial, out)
 		}

@@ -378,10 +378,12 @@ form-app/
 
 ## 待完成功能（可选）
 
+> **状态同步（2026-06-05）**：见 `docs/plan.md` Phase A2。
+
 ### 高优先级
 - [ ] Android 扫码库集成（ZXing/ML Kit）
-- [ ] AndroidManifest.xml 配置
-- [ ] 端到端测试
+- [ ] `FormAppActivity` 注册到 `AndroidManifest.xml`
+- [ ] 端到端测试（菜单下发 → 扫码跳转）
 
 ### 中优先级
 - [ ] 条件渲染（字段联动）

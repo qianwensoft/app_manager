@@ -120,10 +120,36 @@ const LAYOUT_ITEMS: WidgetDef[] = [
     defaults: { width: 400, height: 300, fill: 'rgba(20,30,50,0.8)', stroke: '#4a9eff', strokeWidth: 1, layoutSlides: 3, layoutInterval: 3000 },
   },
   {
+    type: 'layout-tabs',
+    label: '标签页',
+    iconPath: 'M3 4h18v4H3V4ZM3 10h6v10H3V10ZM11 10h10v10H11V10',
+    defaults: { width: 400, height: 280, fill: 'rgba(20,30,50,0.8)', stroke: '#4a9eff', strokeWidth: 1, layoutTabLabels: ['Tab 1', 'Tab 2', 'Tab 3'], layoutActiveTab: 0 },
+  },
+  {
+    type: 'layout-collapse',
+    label: '折叠面板',
+    iconPath: 'M4 6h16M4 12h16M4 18h10',
+    defaults: { width: 360, height: 240, fill: 'rgba(20,30,50,0.8)', stroke: '#4a9eff', strokeWidth: 1, layoutCollapseTitle: '折叠面板', layoutCollapseExpanded: true },
+  },
+  {
     type: 'layout-modal',
     label: '弹窗容器',
     iconPath: 'M4 4h16v16H4V4ZM4 10h16M9 4v6',
     defaults: { width: 360, height: 240, fill: '', stroke: '#4a9eff', strokeWidth: 1, layoutModalTitle: '弹窗标题', layoutShowClose: true },
+  },
+]
+
+const NAV_ITEMS: WidgetDef[] = [
+  {
+    type: 'alarm-light',
+    label: '报警灯',
+    iconPath: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20ZM12 8v4M12 16h.01',
+    defaults: {
+      width: 80, height: 100, fill: 'transparent', text: '报警',
+      fontSize: 11, fontColor: '#ccc',
+      alarmNormalColor: '#22c55e', alarmWarningColor: '#f59e0b', alarmDangerColor: '#ef4444',
+      alarmThresholdWarning: 70, alarmThresholdDanger: 90, alarmBlinkMs: 500, alarmSoundEnabled: false,
+    },
   },
 ]
 
@@ -238,6 +264,11 @@ const groups: { name: string; icon: string; items: WidgetDef[] }[] = [
       { type: 'echarts-scatter', label: '散点图', iconPath: 'M3 3v18h18M7 7h.01M12 11h.01M17 8h.01M9 15h.01M15 14h.01', defaults: { width: 300, height: 200 } },
       { type: 'echarts-heatmap', label: '热力图', iconPath: 'M3 3h4v4H3zM9 3h4v4H9zM15 3h4v4h-4zM3 9h4v4H3zM9 9h4v4H9zM15 9h4v4h-4z', defaults: { width: 300, height: 200 } },
       { type: 'echarts-trend',   label: '趋势图', iconPath: 'M3 3v18h18M3 15l4-6 4 3 4-8 4 5', defaults: { width: 360, height: 220 } },
+      { type: 'echarts-stacked-bar', label: '堆叠柱', iconPath: 'M3 3v18h18M7 16v-8M12 16V6M17 16v-4', defaults: { width: 300, height: 200 } },
+      { type: 'echarts-horizontal-bar', label: '横向柱', iconPath: 'M3 3v18h18M7 7h10M7 12h7M7 17h12', defaults: { width: 300, height: 200 } },
+      { type: 'echarts-area', label: '面积图', iconPath: 'M3 3v18h18M3 17l5-8 4 4 5-10 5 8', defaults: { width: 300, height: 200 } },
+      { type: 'echarts-radar', label: '雷达图', iconPath: 'M12 2l8 4.5v7L12 22l-8-8.5v-7L12 2z', defaults: { width: 240, height: 220 } },
+      { type: 'echarts-funnel', label: '漏斗图', iconPath: 'M4 4h16l-4 6h-8L4 4Zm0 14l4-6h8l4 6H4z', defaults: { width: 260, height: 240 } },
     ],
   },
   {
@@ -259,6 +290,10 @@ const groups: { name: string; icon: string; items: WidgetDef[] }[] = [
   {
     name: 'Layout 容器', icon: 'M3 3h18v18H3V3ZM3 9h18',
     items: LAYOUT_ITEMS,
+  },
+  {
+    name: '导航/报警', icon: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20ZM12 8v4',
+    items: NAV_ITEMS,
   },
 ]
 

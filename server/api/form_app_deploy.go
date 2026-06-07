@@ -50,29 +50,46 @@ func DeployFormAppToDevices(c *gin.Context) {
 		}
 	}
 
-	menuItem := models.AgentMenuItem{
-		Title:           menuTitle,
-		Icon:            req.MenuIcon,
-		TargetType:      "form_app_entry",
-		TargetRef:       app.Code,
-		FormAppCode:     app.Code,
-		FormAppPageKey:  entryPageKey,
-		ShowOnAgentHome: req.ShowOnHome,
-		OpenMode:        "replace",
-	}
+	// 幂等：复用同一 form_app_code 的已有菜单项（避免重复点击下发产生多条）
+	var menuItem models.AgentMenuItem
+	database.DB.Where("form_app_code = ? AND target_type = 'form_app_entry'", app.Code).First(&menuItem)
 
-	if err := database.DB.Create(&menuItem).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	for _, deviceID := range req.DeviceIDs {
-		assignment := models.AgentMenuAssignment{
-			MenuID:   menuItem.ID,
-			DeviceID: deviceID,
+	if menuItem.ID == 0 {
+		menuItem = models.AgentMenuItem{
+			TargetType: "form_app_entry",
+			TargetRef:  app.Code,
+			FormAppCode: app.Code,
+			OpenMode:   "replace",
 		}
-		database.DB.Create(&assignment)
 	}
+	menuItem.Title = menuTitle
+	menuItem.Icon = req.MenuIcon
+	menuItem.FormAppPageKey = entryPageKey
+	menuItem.ShowOnAgentHome = req.ShowOnHome
+
+	if menuItem.ID == 0 {
+		if err := database.DB.Create(&menuItem).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	} else {
+		database.DB.Save(&menuItem)
+	}
+
+	// 清除旧的重复菜单项（同 form_app_code 下 ID 不等于当前保留项的）
+	var oldItems []models.AgentMenuItem
+	database.DB.Where("form_app_code = ? AND target_type = 'form_app_entry' AND id <> ?", app.Code, menuItem.ID).Find(&oldItems)
+	for _, old := range oldItems {
+		database.DB.Where("menu_id = ?", old.ID).Delete(&models.AgentMenuAssignment{})
+		database.DB.Delete(&old)
+	}
+
+	// 对目标设备：先清除该菜单在本设备的旧分配，再重新分配
+	for _, deviceID := range req.DeviceIDs {
+		database.DB.Where("menu_id = ? AND device_id = ?", menuItem.ID, deviceID).Delete(&models.AgentMenuAssignment{})
+		database.DB.Create(&models.AgentMenuAssignment{MenuID: menuItem.ID, DeviceID: deviceID})
+	}
+	bumpAgentMenuRevisionForDevices(req.DeviceIDs)
 
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{
 		"menu_id":      menuItem.ID,

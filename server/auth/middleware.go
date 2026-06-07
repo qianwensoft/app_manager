@@ -37,6 +37,39 @@ func AuthMiddleware() gin.HandlerFunc {
 	}
 }
 
+// FormRuntimeAuthMiddleware accepts JWT Bearer or X-Device-Token (Agent WebView).
+func FormRuntimeAuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if token := strings.TrimSpace(c.GetHeader("Authorization")); token != "" {
+			token = strings.TrimPrefix(token, "Bearer ")
+			if claims, err := ParseToken(token); err == nil {
+				c.Set("user_id", claims.UserID)
+				c.Set("username", claims.Username)
+				c.Set("role", claims.Role)
+				c.Set("auth_kind", "jwt")
+				c.Next()
+				return
+			}
+		}
+		devTok := strings.TrimSpace(c.GetHeader("X-Device-Token"))
+		if devTok == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+			c.Abort()
+			return
+		}
+		var dev models.Device
+		if err := database.DB.Where("agent_token = ?", devTok).First(&dev).Error; err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid device token"})
+			c.Abort()
+			return
+		}
+		c.Set("device_id", dev.ID)
+		c.Set("auth_kind", "device")
+		c.Set("role", "viewer")
+		c.Next()
+	}
+}
+
 func RequireRole(roles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		role := c.GetString("role")

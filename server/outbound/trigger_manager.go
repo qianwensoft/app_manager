@@ -102,6 +102,10 @@ func sessionKey(triggerType string, cfg TriggerConfig) string {
 		return "data_poll:" + cfg.DataInterfaceCode
 	case "channel":
 		return "channel:" + cfg.ChannelType + ":" + cfg.ChannelTopic
+	case "cron":
+		return "cron:" + cfg.CronExpression + ":" + cfg.CronTimezone
+	case "system_event":
+		return "system_event:bus"
 	default:
 		return triggerType + ":" + cfg.URL
 	}
@@ -146,6 +150,10 @@ func (m *TriggerManager) startConnector(c models.OutboundConnector) {
 		// webhook 由 HTTP handler 主动推送，无需 goroutine；注册到 webhookRegistry 即可
 		webhookRegistry.register(cfg.Token, key)
 		log.Printf("trigger: webhook session %q registered (connector %d)", key, c.ID)
+	case "cron":
+		go runCronTrigger(ctx, m.db, sess)
+	case "system_event":
+		log.Printf("trigger: system_event connector %d registered (passive)", c.ID)
 	default:
 		log.Printf("trigger: unknown trigger_type %q for connector %d", tt, c.ID)
 		cancel()
@@ -203,11 +211,15 @@ func (m *TriggerManager) SessionStatus(connectorID uint) map[string]interface{} 
 	for _, sess := range m.sessions {
 		for _, cid := range sess.listConnectors() {
 			if cid == connectorID {
+				st := "running"
+				if sess.typ == "system_event" {
+					st = "listening"
+				}
 				return map[string]interface{}{
 					"session_key":   sess.key,
 					"trigger_type":  sess.typ,
 					"connector_ids": sess.listConnectors(),
-					"status":        "running",
+					"status":        st,
 				}
 			}
 		}

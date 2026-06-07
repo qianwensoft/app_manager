@@ -14,8 +14,9 @@ type debounceKey struct {
 }
 
 type debounceEntry struct {
-	lastExec time.Time
-	lastKey  string
+	lastExec      time.Time
+	lastKey       string
+	lastScanValue string
 }
 
 var (
@@ -23,16 +24,20 @@ var (
 	debounceLast = map[debounceKey]debounceEntry{}
 )
 
-// ConnectorDebouncePass 在即将执行连接器前调用：若应跳过返回 false（不更新防抖状态）。
-// 相同码：同一设备 + 同一连接器 + 同一事件类型（event_type）在 debounce_same_event_ms 内忽略。
-// 不同码：距上次执行不足 debounce_diff_event_ms 且本次事件类型与上次不同则忽略。
+// ConnectorDebouncePass 兼容旧调用（不含扫码值）。
 func ConnectorDebouncePass(c models.OutboundConnector, deviceID uint, eventType string) bool {
+	return connectorDebouncePass(c, deviceID, eventType, "")
+}
+
+func connectorDebouncePass(c models.OutboundConnector, deviceID uint, eventType, eventData string) bool {
 	sameMS := c.DebounceSameEventMS
 	diffMS := c.DebounceDiffEventMS
-	if sameMS <= 0 && diffMS <= 0 {
+	sameScanMS := c.DebounceSameScanMS
+	if sameMS <= 0 && diffMS <= 0 && sameScanMS <= 0 {
 		return true
 	}
 	eventType = strings.TrimSpace(eventType)
+	scanVal := ScanValueFromEventData(eventData)
 	key := debounceKey{DeviceID: deviceID, ConnectorID: c.ID}
 	now := time.Now()
 
@@ -48,7 +53,10 @@ func ConnectorDebouncePass(c models.OutboundConnector, deviceID uint, eventType 
 		if diffMS > 0 && st.lastKey != "" && st.lastKey != eventType && dt < time.Duration(diffMS)*time.Millisecond {
 			return false
 		}
+		if sameScanMS > 0 && scanVal != "" && st.lastScanValue == scanVal && dt < time.Duration(sameScanMS)*time.Millisecond {
+			return false
+		}
 	}
-	debounceLast[key] = debounceEntry{lastExec: now, lastKey: eventType}
+	debounceLast[key] = debounceEntry{lastExec: now, lastKey: eventType, lastScanValue: scanVal}
 	return true
 }

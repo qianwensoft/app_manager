@@ -27,13 +27,24 @@ func requireAgentDevice(c *gin.Context) (*models.Device, bool) {
 }
 
 // AgentListCustomEventDefinitions GET /api/agent/custom-event-definitions
-// 供 Agent App 只读展示：仅返回已启用的定义（与下发监听时可选集合一致）。
+// 供 Agent App 只读展示：仅返回本机当前激活监听快照中的已启用定义（无快照或未激活时为空）。
 func AgentListCustomEventDefinitions(c *gin.Context) {
-	if _, ok := requireAgentDevice(c); !ok {
+	dev, ok := requireAgentDevice(c)
+	if !ok {
+		return
+	}
+	var st models.DeviceCustomListenState
+	if err := database.DB.Where("device_id = ? AND active = ?", dev.ID, true).First(&st).Error; err != nil {
+		c.JSON(http.StatusOK, gin.H{"data": []customEventDefinitionOut{}})
+		return
+	}
+	defIDs := st.DefinitionIDs()
+	if len(defIDs) == 0 {
+		c.JSON(http.StatusOK, gin.H{"data": []customEventDefinitionOut{}})
 		return
 	}
 	var rows []models.CustomEventDefinition
-	if err := database.DB.Model(&models.CustomEventDefinition{}).Preload("Group").Where("enabled = ?", true).Order("group_id ASC, id ASC").Find(&rows).Error; err != nil {
+	if err := database.DB.Model(&models.CustomEventDefinition{}).Preload("Group").Where("id IN ? AND enabled = ?", defIDs, true).Order("group_id ASC, id ASC").Find(&rows).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -90,6 +101,8 @@ func AgentListOutboundConnectors(c *gin.Context) {
 			"default_retry_max":      co.DefaultRetryMax,
 			"debounce_same_event_ms": co.DebounceSameEventMS,
 			"debounce_diff_event_ms": co.DebounceDiffEventMS,
+			"debounce_same_scan_ms":  co.DebounceSameScanMS,
+			"loop_cooldown_ms":       co.LoopCooldownMS,
 			"priority":               co.Priority,
 			"enabled":                co.Enabled,
 			"event_keys":             eventKeys,
@@ -111,16 +124,23 @@ func AgentGetCustomEventListenState(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"data": nil})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"data": gin.H{
-			"device_id":          st.DeviceID,
-			"active":             st.Active,
-			"updated_at":         st.UpdatedAt,
-			"definition_ids":     st.DefinitionIDs(),
-			"event_keys":         st.EventKeys(),
-			"definition_names":   st.DefinitionNames(),
-		},
-	})
+	payload := gin.H{
+		"device_id":        st.DeviceID,
+		"active":           st.Active,
+		"updated_at":       st.UpdatedAt,
+		"definition_ids":   st.DefinitionIDs(),
+		"event_keys":       st.EventKeys(),
+		"definition_names": st.DefinitionNames(),
+	}
+	if st.Active {
+		if defs, err := loadDefinitionsByIDs(st.DefinitionIDs()); err == nil && len(defs) > 0 {
+			if rules := buildAgentRules(defs); len(rules) > 0 {
+				payload["rules"] = rules
+				payload["loop_guard"] = outbound.OutboundLoopGuardPayload()
+			}
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"data": payload})
 }
 
 // AgentPauseCustomEventListen POST /api/agent/custom-events/listen/pause

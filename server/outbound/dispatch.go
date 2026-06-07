@@ -55,7 +55,7 @@ func processDeviceEvent(rec models.DeviceEvent, dev *models.Device) {
 		if DeviceOutboundConnectorPaused(db, c.ID, rec.DeviceID) {
 			continue
 		}
-		if !ConnectorDebouncePass(c, rec.DeviceID, rec.EventType) {
+		if !ConnectorEventPass(c, rec.DeviceID, rec.EventType, rec.EventData) {
 			continue
 		}
 		RunConnectorOutbound(c, rec, dev, &def)

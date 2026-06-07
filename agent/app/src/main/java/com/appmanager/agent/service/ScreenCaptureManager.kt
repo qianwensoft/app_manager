@@ -312,6 +312,15 @@ class ScreenCaptureManager(
         }
     }
 
+    /** WebSocket 重连或 Web 再次请求投屏时，补发 screen_meta 便于浏览器恢复画面。 */
+    fun notifyLinkReady() {
+        if (jpegStopped.get() || captureReleased) return
+        mainHandler.post {
+            if (jpegStopped.get() || captureReleased) return@post
+            sendScreenMeta()
+        }
+    }
+
     /** 兼容旧版 WebRTC 信令（已无浏览器 answer）；可忽略。 */
     @Suppress("UNUSED_PARAMETER")
     fun handleSignal(data: Map<String, Any>) {
