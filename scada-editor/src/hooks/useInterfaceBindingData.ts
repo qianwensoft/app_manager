@@ -116,7 +116,7 @@ async function fetchIfaceData(binding: PointBinding): Promise<PointDataMap> {
 
   try {
     const token = localStorage.getItem('token') ?? ''
-    const url = `/api/data/interfaces/${binding.ifaceId}/debug`
+    const url = `/api/data/interfaces/${binding.ifaceId}/invoke`
     const params = binding.ifaceParamValues ?? {}
 
     const res = await fetch(url, {
@@ -129,8 +129,8 @@ async function fetchIfaceData(binding: PointBinding): Promise<PointDataMap> {
     })
     if (!res.ok) return {}
     const json = await res.json()
-    // debug endpoint returns { data: [...] } or { rows: [...] } or { result: ... }
-    const payload = json.data ?? json.rows ?? json.result ?? json
+    // invoke endpoint returns { data: [...] } (objects) or { row: {...} }; tolerate legacy shapes too
+    const payload = json.data ?? json.rows ?? json.row ?? json.result ?? json
 
     return extractMappedData(
       typeof payload === 'string' ? JSON.parse(payload) : payload,

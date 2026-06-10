@@ -46,9 +46,28 @@ func InvokeDataInterfaceByCode(code string, params map[string]interface{}) ([]ma
 	}
 	defer sqlDB.Close()
 
-	limit := 1000
-	if iface.Kind == "queryOne" {
-		limit = 1
+	// 声明式整形：参数契约校验 + 附加过滤/排序/分页 + 投影。
+	sh, err := ParseIfaceShaping(&iface)
+	if err != nil {
+		return nil, fmt.Errorf("data_poll: shaping: %w", err)
 	}
-	return dbdriver.QuerySQL(sqlDB, dsSrc.Type, ds.Definition, params, limit)
+	if err := ValidateParams(sh.Params, params); err != nil {
+		return nil, fmt.Errorf("data_poll: %w", err)
+	}
+	ApplyParamDefaultsFromContract(sh.Params, params)
+
+	kindDefault := 1000
+	if iface.Kind == "queryOne" {
+		kindDefault = 1
+	}
+	limit, offset := ResolveLimit(sh, 0, 0, kindDefault)
+	if iface.Kind == "queryOne" {
+		limit, offset = 1, 0
+	}
+	shaped := BuildShapedSQL(dsSrc.Type, ds.Definition, sh, params, limit, offset)
+	rows, err := dbdriver.QuerySQL(sqlDB, dsSrc.Type, shaped, params, limit)
+	if err != nil {
+		return nil, err
+	}
+	return ApplyProjection(rows, sh.Projection), nil
 }

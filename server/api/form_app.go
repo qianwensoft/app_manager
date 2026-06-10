@@ -789,137 +789,39 @@ func executeFormRuntimeInterface(interfaceCode string, paramValues map[string]in
 	if code == "" {
 		return nil, fmt.Errorf("interface_code required")
 	}
-	if paramValues == nil {
-		paramValues = map[string]interface{}{}
-	}
-	ifacePtr, err := firstEnabledDataInterfaceByOpenKey(code)
+	res, err := Execute(InvokeRequest{
+		Code:           code,
+		ParamValues:    paramValues,
+		DynamicFilters: queryFilters,
+		EnabledOnly:    true,
+		LimitOverride:  200,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("interface not found")
+		return nil, err
 	}
-	iface := *ifacePtr
-	applyDataInterfaceParamDefaults(&iface, paramValues)
-	crudOp := normalizeStaticCrudOp(iface.StaticCrudOp)
-	if crudOp != "" {
-		return nil, fmt.Errorf("static crud interface is not supported in runtime bridge")
-	}
-	if iface.Kind == "query" || iface.Kind == "queryOne" {
-		var ds models.Dataset
-		if err := database.DB.First(&ds, iface.DatasetID).Error; err != nil {
-			return nil, fmt.Errorf("dataset not found")
-		}
-		ds.Kind = normalizeDatasetKind(ds.Kind)
-		if ds.Kind == "static" {
-			out, err := staticDatasetRows(ds.Definition, 200)
-			if err != nil {
-				return nil, err
-			}
-			if iface.Kind == "queryOne" {
-				if len(out) > 0 {
-					return map[string]interface{}{"ok": true, "data": out[0]}, nil
-				}
-				return map[string]interface{}{"ok": true, "data": nil}, nil
-			}
-			return map[string]interface{}{"ok": true, "data": out, "rows": out}, nil
-		}
-		if ds.DataSourceID == nil {
-			return nil, fmt.Errorf("dataset missing data source")
-		}
-		var src models.DataSource
-		if err := database.DB.First(&src, *ds.DataSourceID).Error; err != nil {
-			return nil, fmt.Errorf("data source missing")
-		}
-		db, err := openSQLDataSource(&src)
-		if err != nil {
-			return nil, err
-		}
-		defer db.Close()
-		limit := 200
-		if iface.Kind == "queryOne" {
-			limit = 1
-		}
-		sqlText := applyDynamicFiltersToSQL(src.Type, ds.Definition, queryFilters, paramValues)
-		rows, _, _, err := QueryDatasetSQL(db, src.Type, sqlText, paramValues, limit)
-		if err != nil {
-			return nil, err
-		}
-		if iface.Kind == "queryOne" {
-			if len(rows) > 0 {
-				return map[string]interface{}{"ok": true, "data": rows[0]}, nil
-			}
-			return map[string]interface{}{"ok": true, "data": nil}, nil
+	switch res.Kind {
+	case InvokeKindQuery, InvokeKindStaticList:
+		rows := res.Rows
+		if rows == nil {
+			rows = []map[string]interface{}{}
 		}
 		return map[string]interface{}{"ok": true, "data": rows, "rows": rows}, nil
-	}
-	if iface.Kind == "transaction" {
-		var ds models.Dataset
-		if err := database.DB.First(&ds, iface.DatasetID).Error; err != nil {
-			return nil, fmt.Errorf("dataset not found")
+	case InvokeKindQueryOne:
+		if res.HasRow {
+			return map[string]interface{}{"ok": true, "data": res.Row}, nil
 		}
-		if ds.DataSourceID == nil {
-			return nil, fmt.Errorf("dataset missing data source")
-		}
-		var src models.DataSource
-		if err := database.DB.First(&src, *ds.DataSourceID).Error; err != nil {
-			return nil, fmt.Errorf("data source missing")
-		}
-		if src.IsReadOnly() {
-			return nil, fmt.Errorf("data source is read-only")
-		}
-		db, err := openSQLDataSource(&src)
-		if err != nil {
-			return nil, err
-		}
-		defer db.Close()
-		effectiveSteps := strings.TrimSpace(iface.StepsJSON)
-		if effectiveSteps == "" {
-			effectiveSteps = strings.TrimSpace(ds.StepsJSON)
-		}
-		var steps []string
-		if err := json.Unmarshal([]byte(effectiveSteps), &steps); err != nil || len(steps) == 0 {
-			return nil, fmt.Errorf("invalid steps_json")
-		}
-		tx, err := db.Begin()
-		if err != nil {
-			return nil, err
-		}
-		var lastInsertID int64
-		for _, s := range steps {
-			s = stripMissingInsertParams(s, paramValues)
-			used, args, err := RewriteNamedSQLParams(src.Type, s, paramValues)
-			if err != nil {
-				_ = tx.Rollback()
-				return nil, err
-			}
-			var res interface{ LastInsertId() (int64, error) }
-			if len(args) > 0 {
-				r, err := tx.Exec(used, args...)
-				if err != nil {
-					_ = tx.Rollback()
-					return nil, err
-				}
-				res = r
-			} else {
-				r, err := tx.Exec(used)
-				if err != nil {
-					_ = tx.Rollback()
-					return nil, err
-				}
-				res = r
-			}
-			if id, e := res.LastInsertId(); e == nil && id > 0 {
-				lastInsertID = id
-			}
-		}
-		if err := tx.Commit(); err != nil {
-			return nil, err
-		}
+		return map[string]interface{}{"ok": true, "data": nil}, nil
+	case InvokeKindTransaction:
 		return map[string]interface{}{
 			"ok":             true,
-			"record_id":      lastInsertID,
-			"last_insert_id": lastInsertID,
+			"record_id":      res.LastInsertID,
+			"last_insert_id": res.LastInsertID,
 		}, nil
+	case InvokeKindStaticCrud:
+		return nil, fmt.Errorf("static crud interface is not supported in runtime bridge")
+	default:
+		return nil, fmt.Errorf("unsupported interface kind: %s", res.IfaceKind)
 	}
-	return nil, fmt.Errorf("unsupported interface kind: %s", iface.Kind)
 }
 
 func FormRuntimeQuery(c *gin.Context) {

@@ -1016,6 +1016,9 @@ func UpdateDataInterface(c *gin.Context) {
 		"required_scopes": body.RequiredScopes, "static_crud_op": body.StaticCrudOp,
 		"data_structure_id": body.DataStructureID, "param_defaults_json": body.ParamDefaultsJSON,
 		"schema_json": body.SchemaJSON, "steps_json": body.StepsJSON,
+		"param_contract_json": body.ParamContractJSON, "field_mapping_json": body.FieldMappingJSON,
+		"extra_filters_json": body.ExtraFiltersJSON, "sort_json": body.SortJSON,
+		"pagination_json": body.PaginationJSON,
 	}).Error; err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -1105,155 +1108,47 @@ func OpenDataInterfaceInvoke(c *gin.Context) {
 		openStaticCrudInvoke(c, crudOp, iface.DatasetID)
 		return
 	}
-	if iface.Kind == "query" {
-		previewDatasetByID(c, iface.DatasetID, 1000, paramVals)
-		return
-	}
-	// queryOne: run the same SQL as query but return only the first row as a JSON object (or null).
-	if iface.Kind == "queryOne" {
-		queryOneDatasetByID(c, iface.DatasetID, paramVals)
-		return
-	}
-	// transaction: simplified — run steps in tx
-	var ds models.Dataset
-	if err := database.DB.First(&ds, iface.DatasetID).Error; err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "dataset missing"})
-		return
-	}
-	if ds.Kind != "transaction" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "dataset not transaction"})
-		return
-	}
-	var dsSrc models.DataSource
-	if ds.DataSourceID == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "no data source"})
-		return
-	}
-	if err := database.DB.First(&dsSrc, *ds.DataSourceID).Error; err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "data source missing"})
-		return
-	}
-	if dsSrc.IsReadOnly() {
-		c.JSON(http.StatusForbidden, gin.H{"error": "read-only data source"})
-		return
-	}
-	db, err := openSQLDataSource(&dsSrc)
+	// 委托至统一执行器；保持开放 API 既有响应格式（query/queryOne 的 data 为 JSON 字符串）。
+	res, err := Execute(InvokeRequest{
+		Code:        openKey,
+		ParamValues: paramVals,
+		EnabledOnly: true,
+	})
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	defer db.Close()
-	effectiveSteps := iface.StepsJSON
-	if effectiveSteps == "" {
-		effectiveSteps = ds.StepsJSON
-	}
-	var steps []string
-	if effectiveSteps == "" || effectiveSteps == "[]" {
-		// existing-table mode: dynamically build INSERT from live table columns
-		var uiMeta struct {
-			UI struct {
-				TableMode string `json:"table_mode"`
-				TableName string `json:"table_name"`
-			} `json:"_ui"`
+	switch res.Kind {
+	case InvokeKindQuery, InvokeKindStaticList:
+		rows := res.Rows
+		if rows == nil {
+			rows = []map[string]interface{}{}
 		}
-		metaStr := ds.MetaJSON
-		if metaStr == "" {
-			metaStr = "{}"
+		b, _ := json.Marshal(rows)
+		c.JSON(http.StatusOK, gin.H{"data": string(b)})
+		return
+	case InvokeKindQueryOne:
+		var row interface{}
+		if res.HasRow {
+			row = res.Row
 		}
-		if err := json.Unmarshal([]byte(metaStr), &uiMeta); err != nil || uiMeta.UI.TableMode != "existing" || uiMeta.UI.TableName == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid steps_json and no table binding in meta_json"})
-			return
-		}
-		cols, err := dbdriver.ListColumns(db, dsSrc.Type, uiMeta.UI.TableName)
-		if err != nil || len(cols) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to read table columns: " + func() string {
-				if err != nil {
-					return err.Error()
-				}
-				return "empty"
-			}()})
-			return
-		}
-		// build INSERT: skip auto-increment columns; include non-auto-increment PKs only if param provided
-		// for regular columns: include if param provided; skip if nullable or has default; error if not null and no default
-		var colNames, placeholders []string
-		for _, col := range cols {
-			if col.AutoIncrement {
-				continue
+		b, _ := json.Marshal(row)
+		c.JSON(http.StatusOK, gin.H{"data": string(b)})
+		return
+	case InvokeKindTransaction:
+		resp := gin.H{"ok": true}
+		if res.LastInsertID > 0 {
+			resp["last_insert_id"] = res.LastInsertID
+			if res.InsertedRow != nil {
+				resp["data"] = res.InsertedRow
 			}
-			v, provided := paramVals[col.Name]
-			hasVal := provided && v != nil && fmt.Sprintf("%v", v) != ""
-			if col.PrimaryKey {
-				if !hasVal {
-					continue
-				}
-			} else {
-				if !hasVal {
-					if col.Nullable || col.DefaultExpr != "" {
-						continue
-					}
-					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("column %q is required (not null, no default)", col.Name)})
-					return
-				}
-			}
-			colNames = append(colNames, dbdriver.QuoteColumnIdent(dsSrc.Type, col.Name))
-			placeholders = append(placeholders, ":"+col.Name)
 		}
-		if len(colNames) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "table has no writable columns"})
-			return
-		}
-		insertSQL := "INSERT INTO " + dbdriver.QuoteTableIdent(dsSrc.Type, uiMeta.UI.TableName) +
-			" (" + strings.Join(colNames, ", ") + ") VALUES (" + strings.Join(placeholders, ", ") + ")"
-		steps = []string{insertSQL}
-	} else {
-		if err := json.Unmarshal([]byte(effectiveSteps), &steps); err != nil || len(steps) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid steps_json"})
-			return
-		}
-	}
-	tx, err := db.Begin()
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusOK, resp)
+		return
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported interface kind"})
 		return
 	}
-	var lastInsertID int64
-	for _, s := range steps {
-		s = stripMissingInsertParams(s, paramVals)
-		used, args, err := RewriteNamedSQLParams(dsSrc.Type, s, paramVals)
-		if err != nil {
-			_ = tx.Rollback()
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		var res sql.Result
-		if len(args) > 0 {
-			res, err = tx.Exec(used, args...)
-		} else {
-			res, err = tx.Exec(used)
-		}
-		if err != nil {
-			_ = tx.Rollback()
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		if id, e := res.LastInsertId(); e == nil && id > 0 {
-			lastInsertID = id
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-	resp := gin.H{"ok": true}
-	if lastInsertID > 0 {
-		resp["last_insert_id"] = lastInsertID
-		// try to fetch the inserted row using the table from steps
-		if row, fetchErr := fetchInsertedRow(db, dsSrc.Type, steps, lastInsertID); fetchErr == nil && row != nil {
-			resp["data"] = row
-		}
-	}
-	c.JSON(http.StatusOK, resp)
 }
 
 func previewDatasetByID(c *gin.Context, datasetID uint, limit int, params map[string]interface{}) {
