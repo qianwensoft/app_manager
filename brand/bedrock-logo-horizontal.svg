@@ -1,0 +1,37 @@
+<svg width="520" height="160" viewBox="0 0 520 160" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="磐石 Bedrock horizontal logo">
+  <defs>
+    <linearGradient id="hStoneTop" x1="80" y1="24" x2="80" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3BE0C8"/>
+      <stop offset="1" stop-color="#19B8A6"/>
+    </linearGradient>
+    <linearGradient id="hStoneMid" x1="80" y1="58" x2="80" y2="100" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5C7491"/>
+      <stop offset="1" stop-color="#3E5168"/>
+    </linearGradient>
+    <linearGradient id="hStoneBot" x1="80" y1="92" x2="80" y2="138" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#41556E"/>
+      <stop offset="1" stop-color="#28384C"/>
+    </linearGradient>
+    <radialGradient id="hGlow" cx="80" cy="44" r="42" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3BE0C8" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#3BE0C8" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- mark -->
+  <circle cx="80" cy="44" r="40" fill="url(#hGlow)"/>
+
+  <path d="M80 92 L132 122 L80 152 L28 122 Z" fill="url(#hStoneBot)"/>
+  <path d="M80 92 L132 122 L80 152 Z" fill="#000000" opacity="0.16"/>
+
+  <path d="M80 60 L118 81 L80 102 L42 81 Z" fill="url(#hStoneMid)"/>
+  <path d="M80 60 L118 81 L80 102 Z" fill="#000000" opacity="0.16"/>
+
+  <path d="M80 24 L104 38 L80 52 L56 38 Z" fill="url(#hStoneTop)"/>
+  <path d="M80 24 L104 38 L80 52 Z" fill="#ffffff" opacity="0.20"/>
+  <line x1="80" y1="52" x2="80" y2="60" stroke="#3BE0C8" stroke-width="2.5" stroke-linecap="round"/>
+
+  <!-- wordmark -->
+  <text x="172" y="78" font-family="'PingFang SC','Microsoft YaHei',sans-serif" font-size="56" font-weight="700" fill="#E8EDF4" letter-spacing="4">磐石</text>
+  <text x="172" y="112" font-family="'Segoe UI',Arial,sans-serif" font-size="22" font-weight="600" fill="#3BE0C8" letter-spacing="6">B E D R O C K</text>
+</svg>

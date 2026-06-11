@@ -1,6 +1,7 @@
 package main
 
 import (
+	"app-manager/agent"
 	"app-manager/api"
 	"app-manager/channel"
 	"app-manager/cluster"
@@ -72,6 +73,7 @@ func main() {
 		scada.StartSimEngine()
 		scada.StartBatcher()
 		go scada.StartUDPIngress(9000)
+		agent.StartStaleDeviceReaper()
 		go func() {
 			ticker := time.NewTicker(30 * time.Minute)
 			defer ticker.Stop()
@@ -109,7 +111,7 @@ func main() {
 	// 启动 HTTP 服务
 	r := api.SetupRouter()
 	addr := fmt.Sprintf("%s:%d", config.C.Server.Host, config.C.Server.Port)
-	log.Printf("AppManager Server starting on http://%s", addr)
+	log.Printf("磐石 Bedrock Server starting on http://%s", addr)
 	if err := r.Run(addr); err != nil {
 		log.Fatalf("Server error: %v", err)
 	}

@@ -1,0 +1,10 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="磐石 Bedrock monochrome mark">
+  <!-- Single-color version for stamps, watermarks, dark/light flips.
+       Use currentColor: set `color` on the parent to recolor. -->
+  <g fill="currentColor">
+    <path d="M128 150 L210 196 L128 242 L46 196 Z" opacity="0.55"/>
+    <path d="M128 100 L186 132 L128 164 L70 132 Z" opacity="0.78"/>
+    <path d="M128 46 L164 67 L128 88 L92 67 Z" opacity="1"/>
+  </g>
+  <line x1="128" y1="88" x2="128" y2="104" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+</svg>

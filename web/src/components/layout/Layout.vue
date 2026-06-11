@@ -1,7 +1,13 @@
 <template>
   <el-container class="layout">
     <el-aside width="200px">
-      <div class="logo">AppManager</div>
+      <div class="logo">
+        <img src="@/assets/bedrock-icon.svg" alt="磐石" class="logo-mark" />
+        <div class="logo-text">
+          <span class="logo-cn">磐石</span>
+          <span class="logo-en">BEDROCK</span>
+        </div>
+      </div>
       <el-menu :router="true" :default-active="menuActive" background-color="#1d2935" text-color="#aaa" active-text-color="#fff">
         <el-menu-item index="/">
           <el-icon><Monitor /></el-icon><span>总览</span>
@@ -175,7 +181,11 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
 }
-.logo { color: #fff; font-size: 18px; font-weight: bold; padding: 20px; background: #1d2935; }
+.logo { display: flex; align-items: center; gap: 10px; padding: 16px 20px; background: #1d2935; }
+.logo-mark { width: 34px; height: 34px; border-radius: 8px; flex-shrink: 0; }
+.logo-text { display: flex; flex-direction: column; line-height: 1.15; }
+.logo-cn { color: #fff; font-size: 17px; font-weight: bold; letter-spacing: 2px; }
+.logo-en { color: #3BE0C8; font-size: 10px; font-weight: 600; letter-spacing: 3px; }
 .el-aside { background: #1d2935; overflow-x: hidden; }
 .el-header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #eee; flex-shrink: 0; }
 .route-title { font-size: 16px; font-weight: bold; }

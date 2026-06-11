@@ -4,18 +4,18 @@
       <template #header>
         <div class="card-header">
           <el-icon :size="24"><InfoFilled /></el-icon>
-          <span>关于 AppManager</span>
+          <span>关于 磐石 Bedrock</span>
         </div>
       </template>
 
       <div class="about-content">
         <div class="info-section">
           <div class="app-logo">
-            <el-icon :size="80" color="#409EFF"><Phone /></el-icon>
+            <img src="@/assets/bedrock-icon.svg" alt="磐石" style="width:80px;height:80px;border-radius:18px;" />
           </div>
-          <h2>AppManager</h2>
+          <h2>磐石 Bedrock</h2>
           <p class="version">版本 {{ systemInfo.version || 'v1.0.0' }}</p>
-          <p class="description">Android 远程设备管理平台</p>
+          <p class="description">设备管控 · 组态可视化 · 数据连接中枢平台</p>
         </div>
 
         <el-divider />

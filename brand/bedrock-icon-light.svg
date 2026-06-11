@@ -1,0 +1,33 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="磐石 Bedrock app icon (light)">
+  <defs>
+    <linearGradient id="lbg" x1="0" y1="0" x2="0" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F4F7FB"/>
+      <stop offset="1" stop-color="#E2E8F0"/>
+    </linearGradient>
+    <linearGradient id="lTop" x1="128" y1="40" x2="128" y2="104" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#14B8A6"/>
+      <stop offset="1" stop-color="#0E9384"/>
+    </linearGradient>
+    <linearGradient id="lMid" x1="128" y1="96" x2="128" y2="160" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#64748B"/>
+      <stop offset="1" stop-color="#475569"/>
+    </linearGradient>
+    <linearGradient id="lBot" x1="128" y1="150" x2="128" y2="220" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#475569"/>
+      <stop offset="1" stop-color="#334155"/>
+    </linearGradient>
+    <radialGradient id="lGlow" cx="128" cy="72" r="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#14B8A6" stop-opacity="0.30"/>
+      <stop offset="1" stop-color="#14B8A6" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#lbg)"/>
+  <circle cx="128" cy="72" r="58" fill="url(#lGlow)"/>
+  <path d="M128 150 L210 196 L128 242 L46 196 Z" fill="url(#lBot)"/>
+  <path d="M128 150 L210 196 L128 242 Z" fill="#000000" opacity="0.18"/>
+  <path d="M128 100 L186 132 L128 164 L70 132 Z" fill="url(#lMid)"/>
+  <path d="M128 100 L186 132 L128 164 Z" fill="#000000" opacity="0.16"/>
+  <path d="M128 46 L164 67 L128 88 L92 67 Z" fill="url(#lTop)"/>
+  <path d="M128 46 L164 67 L128 88 Z" fill="#ffffff" opacity="0.20"/>
+  <line x1="128" y1="88" x2="128" y2="104" stroke="#0E9384" stroke-width="3" stroke-linecap="round"/>
+</svg>

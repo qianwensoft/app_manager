@@ -3,23 +3,24 @@
     <div class="register-left">
       <div class="brand">
         <div class="brand-icon">
-          <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <rect width="48" height="48" rx="12" fill="rgba(255,255,255,0.15)" />
-            <path d="M14 16a2 2 0 012-2h16a2 2 0 012 2v2H14v-2z" fill="white" />
-            <rect x="14" y="20" width="20" height="14" rx="1" fill="white" fill-opacity="0.9" />
-            <rect x="12" y="34" width="24" height="2" rx="1" fill="white" fill-opacity="0.7" />
-            <circle cx="24" cy="27" r="3" fill="#409EFF" />
+          <svg viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="磐石">
+            <g fill="currentColor">
+              <path d="M128 150 L210 196 L128 242 L46 196 Z" opacity="0.55"/>
+              <path d="M128 100 L186 132 L128 164 L70 132 Z" opacity="0.78"/>
+            </g>
+            <path d="M128 46 L164 67 L128 88 L92 67 Z" fill="#3BE0C8"/>
+            <line x1="128" y1="88" x2="128" y2="104" stroke="#3BE0C8" stroke-width="4" stroke-linecap="round"/>
           </svg>
         </div>
-        <div class="brand-name">AppManager</div>
-        <div class="brand-tag">Android 设备远程管理平台</div>
+        <div class="brand-name">磐石 <span class="brand-en">BEDROCK</span></div>
+        <div class="brand-tag">设备管控 · 组态可视化 · 数据连接中枢</div>
       </div>
       <div class="intro-text">
         <p>注册后您将获得 <strong>查看者</strong> 权限，管理员可后续为您分配更多权限。</p>
-        <p>通过 AppManager，您可以在任意浏览器内实时查看设备状态、屏幕投影及应用信息。</p>
+        <p>通过磐石平台，您可以在任意浏览器内实时查看设备状态、屏幕投影及应用信息。</p>
       </div>
       <div class="left-footer">
-        © 2025 AppManager · 企业级 Android 设备管理解决方案
+        © 2025 磐石 Bedrock · 设备管控与数据连接中枢平台
       </div>
     </div>
 
@@ -27,7 +28,7 @@
       <div class="register-box">
         <div class="form-header">
           <h2>创建账号</h2>
-          <p>加入 AppManager 设备管理平台</p>
+          <p>加入磐石 Bedrock 中枢平台</p>
         </div>
 
         <el-form :model="form" :rules="rules" ref="formRef" label-position="top" @submit.prevent="handleRegister">
@@ -162,7 +163,7 @@ const handleRegister = async () => {
   flex-direction: column;
   justify-content: center;
   padding: 60px 64px;
-  background: linear-gradient(135deg, #1a6fc4 0%, #2563eb 40%, #4f46e5 100%);
+  background: linear-gradient(135deg, #16202E 0%, #1F3147 45%, #0E9384 100%);
   color: white;
   position: relative;
   overflow: hidden;
@@ -180,7 +181,8 @@ const handleRegister = async () => {
 }
 .brand-icon { width: 64px; height: 64px; margin-bottom: 16px; }
 .brand-icon svg { width: 100%; height: 100%; }
-.brand-name { font-size: 32px; font-weight: 700; letter-spacing: 1px; }
+.brand-name { font-size: 32px; font-weight: 700; letter-spacing: 2px; }
+.brand-en { font-size: 15px; font-weight: 600; letter-spacing: 4px; color: #3BE0C8; margin-left: 6px; vertical-align: 4px; }
 .brand-tag { margin-top: 8px; font-size: 14px; opacity: 0.75; }
 
 .intro-text p {
