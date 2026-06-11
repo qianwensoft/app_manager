@@ -3030,6 +3030,36 @@ function buildPhasesArray(opts = {}) {
           delay_before_ms: st.delay_before_ms ?? 0,
           delay_after_ms: st.delay_after_ms ?? 0
         })
+      } else if (typ === 'keyboard_hid') {
+        const method = (st.config?.input_method || 'text').trim() || 'text'
+        const text = (st.config?.text || '').trim()
+        const keys = Array.isArray(st.config?.keys) ? st.config.keys.filter(k => String(k).trim()) : []
+        if (forSave) {
+          if ((method === 'text' || method === 'mixed') && !text && !keys.length) {
+            return { error: '「键盘输入」步骤的文本与按键不能同时为空' }
+          }
+          if (method === 'keys' && !keys.length) {
+            return { error: '「键盘输入」按键序列模式下需至少选择一个按键' }
+          }
+        }
+        let delayMs = st.config?.delay_ms != null ? Number(st.config.delay_ms) : 50
+        if (!Number.isFinite(delayMs) || delayMs < 0) delayMs = 50
+        if (delayMs > 5000) delayMs = 5000
+        const cfg = {
+          input_method: method,
+          text: st.config?.text || '',
+          keys,
+          delay_ms: delayMs,
+          target_app: (st.config?.target_app || '').trim(),
+          ...stepContextMergePayload(st)
+        }
+        if (!attachStepTemplateParamsToConfig(st, cfg)) return { error: '__handled' }
+        steps.push({
+          step_type: 'keyboard_hid',
+          config: cfg,
+          delay_before_ms: st.delay_before_ms ?? 0,
+          delay_after_ms: st.delay_after_ms ?? 0
+        })
       } else {
         const action = (st._action || '').trim()
         if (forSave && !action) {

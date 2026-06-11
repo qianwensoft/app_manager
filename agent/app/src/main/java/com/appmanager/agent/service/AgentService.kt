@@ -15,6 +15,8 @@ import android.os.PowerManager
 import android.util.Log
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
+import android.content.pm.ServiceInfo
 import androidx.lifecycle.LifecycleService
 import com.appmanager.agent.MainActivity
 import com.appmanager.agent.R
@@ -162,7 +164,7 @@ class AgentService : LifecycleService() {
             return START_STICKY
         }
 
-        startForeground(NOTIF_ID, buildNotification("连接中..."))
+        startForegroundSafely("连接中...")
 
         val config = AgentRegistration.ensureMachineCodeConfig(this)
         val url = config.serverUrl.trim()
@@ -315,6 +317,8 @@ class AgentService : LifecycleService() {
 
     // ─── 屏幕采集 ────────────────────────────────────────────────────────────
     fun startScreenCapture(resultCode: Int, data: Intent, deviceToken: String) {
+        // Android 14：必须先把 FGS 类型升级为 mediaProjection，再开始采集，否则系统拒绝。
+        promoteToProjectionForeground()
         screenCaptureManager = ScreenCaptureManager(this, webSocket, deviceToken)
         screenCaptureManager?.start(resultCode, data)
     }
@@ -322,6 +326,7 @@ class AgentService : LifecycleService() {
     fun stopScreenCapture() {
         screenCaptureManager?.stop()
         screenCaptureManager = null
+        demoteFromProjectionForeground()
     }
 
     fun startCamera(cameraId: String) {
@@ -728,6 +733,57 @@ class AgentService : LifecycleService() {
     private fun updateNotification(status: String) {
         val manager = getSystemService(NotificationManager::class.java)
         manager.notify(NOTIF_ID, buildNotification(status))
+    }
+
+    /** 当前前台服务是否已包含 mediaProjection 类型（投屏中）。 */
+    @Volatile
+    private var projectionForegroundActive = false
+
+    /**
+     * 以「数据同步」类型进入前台。Android 14 起 mediaProjection 型 FGS 必须先有投屏授权，
+     * 因此平时连接后端只用 DATA_SYNC，避免无授权时 startForeground 抛异常导致服务崩溃、连不上后端。
+     */
+    private fun startForegroundSafely(status: String) {
+        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+        } else {
+            0
+        }
+        try {
+            ServiceCompat.startForeground(this, NOTIF_ID, buildNotification(status), type)
+        } catch (e: Exception) {
+            // 极端情况下（厂商 ROM 限制）退回无类型调用，至少保证服务存活
+            Log.e(TAG, "startForeground(dataSync) failed: ${e.message}", e)
+            try {
+                ServiceCompat.startForeground(this, NOTIF_ID, buildNotification(status), 0)
+            } catch (e2: Exception) {
+                Log.e(TAG, "startForeground(fallback) failed: ${e2.message}", e2)
+            }
+        }
+    }
+
+    /**
+     * 投屏授权拿到后，把前台服务类型升级为 dataSync|mediaProjection。
+     * 必须在 [android.media.projection.MediaProjectionManager.getMediaProjection] 之后、
+     * 真正开始采集之前调用，否则 Android 14 会拒绝 mediaProjection 采集。
+     */
+    fun promoteToProjectionForeground() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        val type = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+        try {
+            ServiceCompat.startForeground(this, NOTIF_ID, buildNotification("投屏中"), type)
+            projectionForegroundActive = true
+        } catch (e: Exception) {
+            Log.e(TAG, "promoteToProjectionForeground failed: ${e.message}", e)
+        }
+    }
+
+    /** 投屏结束后回退到仅 dataSync 类型，释放 mediaProjection 占用。 */
+    fun demoteFromProjectionForeground() {
+        if (!projectionForegroundActive) return
+        projectionForegroundActive = false
+        startForegroundSafely("已连接")
     }
 
     /**
