@@ -118,7 +118,7 @@ func Execute(req InvokeRequest) (*InvokeResult, error) {
 		// list 等价于 query：读取静态数据集行
 		var ds models.Dataset
 		if err := database.DB.First(&ds, iface.DatasetID).Error; err != nil {
-			return nil, fmt.Errorf("dataset missing")
+			return nil, fmt.Errorf("接口 %q 绑定的数据集(id=%d)不存在，可能已被删除", iface.Code, iface.DatasetID)
 		}
 		if normalizeDatasetKind(ds.Kind) != "static" {
 			return nil, fmt.Errorf("static_crud list 须绑定 kind=static 的数据集")
@@ -136,7 +136,7 @@ func Execute(req InvokeRequest) (*InvokeResult, error) {
 	// 6) 加载数据集
 	var ds models.Dataset
 	if err := database.DB.First(&ds, iface.DatasetID).Error; err != nil {
-		return nil, fmt.Errorf("dataset missing")
+		return nil, fmt.Errorf("接口 %q 绑定的数据集(id=%d)不存在，可能已被删除", iface.Code, iface.DatasetID)
 	}
 	ds.Kind = normalizeDatasetKind(ds.Kind)
 

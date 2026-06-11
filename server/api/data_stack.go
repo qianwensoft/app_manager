@@ -391,6 +391,26 @@ func DeleteDataset(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		return
 	}
+	// 防止删除后接口悬空：存在引用该数据集的接口时拒绝删除
+	var refIfaces []models.DataInterface
+	database.DB.Select("code,name").Where("dataset_id = ?", ex.ID).Limit(10).Find(&refIfaces)
+	if len(refIfaces) > 0 {
+		names := make([]string, 0, len(refIfaces))
+		for _, f := range refIfaces {
+			label := strings.TrimSpace(f.Code)
+			if label == "" {
+				label = strings.TrimSpace(f.Name)
+			}
+			if label != "" {
+				names = append(names, label)
+			}
+		}
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":      fmt.Sprintf("该数据集仍被 %d 个数据接口引用，请先删除或改绑这些接口后再删除数据集", len(refIfaces)),
+			"interfaces": names,
+		})
+		return
+	}
 	database.DB.Delete(&models.Dataset{}, ex.ID)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
