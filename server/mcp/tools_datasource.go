@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"app-manager/database"
+	"app-manager/dbdriver"
 	"app-manager/models"
 )
 
@@ -85,21 +86,12 @@ func execDatasetQuery(ds models.Dataset, params map[string]any, limit int) ([]ma
 	if sqlStr == "" {
 		return nil, fmt.Errorf("empty dataset definition")
 	}
-	// simple :name → ? rewrite
-	args := []any{}
-	for k, v := range params {
-		placeholder := ":" + k
-		count := 0
-		for i := 0; i < len(sqlStr); i++ {
-			if i+len(placeholder) <= len(sqlStr) && sqlStr[i:i+len(placeholder)] == placeholder {
-				count++
-			}
-		}
-		for j := 0; j < count; j++ {
-			sqlStr = replaceFirst(sqlStr, placeholder, "?")
-			args = append(args, v)
-		}
+	// {{name}} → 方言占位符（缺失参数所在子句自动剔除），与数据接口执行保持一致
+	used, args, err := dbdriver.RewriteNamedSQLParams(ds.DataSource.Type, sqlStr, params)
+	if err != nil {
+		return nil, err
 	}
+	sqlStr = used
 	if limit > 0 {
 		sqlStr = fmt.Sprintf("SELECT * FROM (%s) _q LIMIT %d", sqlStr, limit)
 	}
@@ -124,20 +116,6 @@ func execDatasetQuery(ds models.Dataset, params map[string]any, limit int) ([]ma
 		result = append(result, row)
 	}
 	return result, nil
-}
-
-func replaceFirst(s, old, new string) string {
-	idx := -1
-	for i := 0; i+len(old) <= len(s); i++ {
-		if s[i:i+len(old)] == old {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
-		return s
-	}
-	return s[:idx] + new + s[idx+len(old):]
 }
 
 // ── list_data_interfaces ──────────────────────────────────────────────────────

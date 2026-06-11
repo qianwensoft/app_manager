@@ -726,25 +726,25 @@ func applyDynamicFiltersToSQL(dsType, sqlText string, filters []runtimeQueryFilt
 		switch op {
 		case "contains":
 			paramValues[paramKey] = "%" + raw + "%"
-			clauses = append(clauses, fmt.Sprintf("%s LIKE :%s", col, paramKey))
+			clauses = append(clauses, fmt.Sprintf("%s LIKE {{%s}}", col, paramKey))
 		case "starts_with":
 			paramValues[paramKey] = raw + "%"
-			clauses = append(clauses, fmt.Sprintf("%s LIKE :%s", col, paramKey))
+			clauses = append(clauses, fmt.Sprintf("%s LIKE {{%s}}", col, paramKey))
 		case "ends_with":
 			paramValues[paramKey] = "%" + raw
-			clauses = append(clauses, fmt.Sprintf("%s LIKE :%s", col, paramKey))
+			clauses = append(clauses, fmt.Sprintf("%s LIKE {{%s}}", col, paramKey))
 		case "gt":
 			paramValues[paramKey] = typed
-			clauses = append(clauses, fmt.Sprintf("%s > :%s", col, paramKey))
+			clauses = append(clauses, fmt.Sprintf("%s > {{%s}}", col, paramKey))
 		case "gte":
 			paramValues[paramKey] = typed
-			clauses = append(clauses, fmt.Sprintf("%s >= :%s", col, paramKey))
+			clauses = append(clauses, fmt.Sprintf("%s >= {{%s}}", col, paramKey))
 		case "lt":
 			paramValues[paramKey] = typed
-			clauses = append(clauses, fmt.Sprintf("%s < :%s", col, paramKey))
+			clauses = append(clauses, fmt.Sprintf("%s < {{%s}}", col, paramKey))
 		case "lte":
 			paramValues[paramKey] = typed
-			clauses = append(clauses, fmt.Sprintf("%s <= :%s", col, paramKey))
+			clauses = append(clauses, fmt.Sprintf("%s <= {{%s}}", col, paramKey))
 		case "between":
 			parts := strings.Split(raw, ",")
 			if len(parts) >= 2 {
@@ -752,7 +752,7 @@ func applyDynamicFiltersToSQL(dsType, sqlText string, filters []runtimeQueryFilt
 				p2 := paramKey + "_to"
 				paramValues[p1] = parseTypedValue(strings.TrimSpace(parts[0]))
 				paramValues[p2] = parseTypedValue(strings.TrimSpace(parts[1]))
-				clauses = append(clauses, fmt.Sprintf("(%s >= :%s AND %s <= :%s)", col, p1, col, p2))
+				clauses = append(clauses, fmt.Sprintf("(%s >= {{%s}} AND %s <= {{%s}})", col, p1, col, p2))
 			}
 		case "in":
 			items := strings.Split(raw, ",")
@@ -764,18 +764,18 @@ func applyDynamicFiltersToSQL(dsType, sqlText string, filters []runtimeQueryFilt
 				}
 				pk := fmt.Sprintf("%s_%d", paramKey, i)
 				paramValues[pk] = parseTypedValue(it)
-				holders = append(holders, ":"+pk)
+				holders = append(holders, fmt.Sprintf("{{%s}}", pk))
 			}
 			if len(holders) > 0 {
 				clauses = append(clauses, fmt.Sprintf("%s IN (%s)", col, strings.Join(holders, ", ")))
 			}
 		case "eq", "":
 			paramValues[paramKey] = typed
-			clauses = append(clauses, fmt.Sprintf("%s = :%s", col, paramKey))
+			clauses = append(clauses, fmt.Sprintf("%s = {{%s}}", col, paramKey))
 		default:
 			// 未识别操作符降级为等于，避免动态表单筛选失效
 			paramValues[paramKey] = typed
-			clauses = append(clauses, fmt.Sprintf("%s = :%s", col, paramKey))
+			clauses = append(clauses, fmt.Sprintf("%s = {{%s}}", col, paramKey))
 		}
 	}
 	if len(clauses) == 0 {
@@ -1080,8 +1080,8 @@ func GenerateFormAppPagesFromTable(c *gin.Context) {
 	detailCode := fmt.Sprintf("%s_detail_%s", base, suffix)
 	submitCode := fmt.Sprintf("%s_submit_%s", base, suffix)
 
-	listSQL := fmt.Sprintf("SELECT * FROM %s LIMIT :limit OFFSET :offset", quotedTable)
-	detailSQL := fmt.Sprintf("SELECT * FROM %s WHERE %s = :id LIMIT 1", quotedTable, pkCol)
+	listSQL := fmt.Sprintf("SELECT * FROM %s LIMIT {{limit}} OFFSET {{offset}}", quotedTable)
+	detailSQL := fmt.Sprintf("SELECT * FROM %s WHERE %s = {{id}} LIMIT 1", quotedTable, pkCol)
 
 	var insertCols []string
 	var insertParams []string
@@ -1090,11 +1090,11 @@ func GenerateFormAppPagesFromTable(c *gin.Context) {
 			continue
 		}
 		insertCols = append(insertCols, quoteSQLTableIdent(src.Type, c.Name))
-		insertParams = append(insertParams, ":"+c.Name)
+		insertParams = append(insertParams, fmt.Sprintf("{{%s}}", c.Name))
 	}
 	insertSQL := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedTable, strings.Join(insertCols, ", "), strings.Join(insertParams, ", "))
 	if len(insertCols) == 0 {
-		insertSQL = fmt.Sprintf("INSERT INTO %s (%s) VALUES (:%s)", quotedTable, pkCol, pk)
+		insertSQL = fmt.Sprintf("INSERT INTO %s (%s) VALUES ({{%s}})", quotedTable, pkCol, pk)
 	}
 
 	ifaceMeta := map[string]interface{}{
@@ -1455,14 +1455,14 @@ func RegenerateSinglePage(c *gin.Context) {
 					continue
 				}
 				insertCols = append(insertCols, quoteSQLTableIdent(src.Type, c.Name))
-				insertParams = append(insertParams, ":"+c.Name)
+				insertParams = append(insertParams, fmt.Sprintf("{{%s}}", c.Name))
 			}
 		}
 		insertSQL := ""
 		if len(insertCols) > 0 {
 			insertSQL = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedTable, strings.Join(insertCols, ", "), strings.Join(insertParams, ", "))
 		} else {
-			insertSQL = fmt.Sprintf("INSERT INTO %s (%s) VALUES (:%s)", quotedTable, pkCol, pk)
+			insertSQL = fmt.Sprintf("INSERT INTO %s (%s) VALUES ({{%s}})", quotedTable, pkCol, pk)
 		}
 		if !allowWrite {
 			insertSQL = ""
@@ -1521,7 +1521,7 @@ func RegenerateSinglePage(c *gin.Context) {
 	case "list":
 		ifaceCode := fmt.Sprintf("%s_list_%s", base, suffix)
 		dsCode := fmt.Sprintf("%s_ds_%s", base, suffix)
-		listSQL := fmt.Sprintf("SELECT * FROM %s LIMIT :limit OFFSET :offset", quotedTable)
+		listSQL := fmt.Sprintf("SELECT * FROM %s LIMIT {{limit}} OFFSET {{offset}}", quotedTable)
 		ds := models.Dataset{
 			Code:         dsCode,
 			DataSourceID: &src.ID,
@@ -1586,7 +1586,7 @@ func RegenerateSinglePage(c *gin.Context) {
 	case "detail":
 		ifaceCode := fmt.Sprintf("%s_detail_%s", base, suffix)
 		dsCode := fmt.Sprintf("%s_ds_detail_%s", base, suffix)
-		detailSQL := fmt.Sprintf("SELECT * FROM %s WHERE %s = :id LIMIT 1", quotedTable, pkCol)
+		detailSQL := fmt.Sprintf("SELECT * FROM %s WHERE %s = {{id}} LIMIT 1", quotedTable, pkCol)
 		ds := models.Dataset{
 			Code:         dsCode,
 			DataSourceID: &src.ID,

@@ -23,12 +23,11 @@ type MultiPageRuntimeProps = {
 export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }: MultiPageRuntimeProps) {
   const [searchParams] = useSearchParams()
   const urlPageKey = searchParams.get('page')?.trim() || ''
-  const initialPageKey = urlPageKey || entryPageKey
 
   const [app, setApp] = useState<any>(null)
   const [pages, setPages] = useState<any[]>([])
   const [links, setLinks] = useState<any[]>([])
-  const [currentPageKey, setCurrentPageKey] = useState(initialPageKey)
+  const [currentPageKey, setCurrentPageKey] = useState('')
   const [params, setParams] = useState<Record<string, any>>({})
 
   const bindings = useMemo(
@@ -56,21 +55,42 @@ export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }:
   useEffect(() => {
     const load = async () => {
       try {
+        let loadedApp: any = null
+        let loadedPages: any[] = []
+
         if (isAgentRuntime()) {
           const boot = await authed(`/api/form-app/agent-runtime/${formAppCode}/bootstrap`, 'GET')
-          setApp(boot.data.app)
-          setPages(boot.data.pages || [])
+          loadedApp = boot.data.app
+          loadedPages = boot.data.pages || []
+          setApp(loadedApp)
+          setPages(loadedPages)
           setLinks(boot.data.links || [])
         } else {
           const appRes = await authed(`/api/form-app/infos/code/${formAppCode}`, 'GET')
-          setApp(appRes.data)
+          loadedApp = appRes.data
+          setApp(loadedApp)
           const [pagesRes, linksRes] = await Promise.all([
-            authed(`/api/form-app/infos/${appRes.data.id}/pages`, 'GET'),
-            authed(`/api/form-app/infos/${appRes.data.id}/links`, 'GET'),
+            authed(`/api/form-app/infos/${loadedApp.id}/pages`, 'GET'),
+            authed(`/api/form-app/infos/${loadedApp.id}/links`, 'GET'),
           ])
-          setPages(pagesRes.data || [])
+          loadedPages = pagesRes.data || []
+          setPages(loadedPages)
           setLinks(linksRes.data || [])
         }
+
+        // 确定初始页面：URL 参数 > 应用配置的 entry_page_key > 传入的 entryPageKey > 第一个页面
+        let initialPageKey = urlPageKey
+        if (!initialPageKey && loadedApp?.entry_page_key) {
+          initialPageKey = loadedApp.entry_page_key
+        }
+        if (!initialPageKey) {
+          initialPageKey = entryPageKey
+        }
+        // 如果指定的页面不存在，使用第一个可用页面
+        if (!loadedPages.find(p => p.page_key === initialPageKey) && loadedPages.length > 0) {
+          initialPageKey = loadedPages[0].page_key
+        }
+
         navigationManager.push(initialPageKey)
       } catch (e: any) {
         message.error(e.message)
@@ -87,7 +107,7 @@ export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }:
       unsubNav()
       navigationManager.clear()
     }
-  }, [formAppCode, initialPageKey])
+  }, [formAppCode, urlPageKey, entryPageKey])
 
   useEffect(() => {
     if (!app?.id) return
@@ -170,7 +190,26 @@ export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }:
           pageKey={currentPageKey}
           onQueryOptions={fetchOptions}
           scannerConfig={scannerConfig}
-          onScanInterface={async (interfaceCode, paramValues) => {
+          onScanInterface={async (interfaceCode, paramValues, type = 'internal', endpointId) => {
+            if (type === 'connector') {
+              // 调用连接器接口
+              const res = await authed('/api/outbound/connector-interfaces/call', 'POST', {
+                connector_code: interfaceCode,
+                params: paramValues,
+              })
+              return res.data || {}
+            }
+            if (type === 'third_party') {
+              // 调用外部应用接口（OutboundEndpoint）
+              if (!endpointId) {
+                throw new Error('endpoint_id is required for third_party interface')
+              }
+              const res = await authed(`/api/outbound/endpoints/${endpointId}/call`, 'POST', {
+                param_values: paramValues,
+              })
+              return res.data || {}
+            }
+            // 调用内部数据接口
             return authed(submitPath, 'POST', {
               interface_code: interfaceCode,
               form_code: formAppCode,

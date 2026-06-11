@@ -1686,12 +1686,12 @@ func GenerateCrudInterfaces(c *gin.Context) {
 			}
 		}
 		if len(cols) == 0 {
-			return fmt.Sprintf("INSERT INTO %s (col1, col2) VALUES (:col1, :col2)", q)
+			return fmt.Sprintf("INSERT INTO %s (col1, col2) VALUES ({{col1}}, {{col2}})", q)
 		}
 		var quoted, params []string
 		for _, name := range cols {
 			quoted = append(quoted, quoteSQLTableIdent(src.Type, name))
-			params = append(params, ":"+name)
+			params = append(params, fmt.Sprintf("{{%s}}", name))
 		}
 		return fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)",
 			q, strings.Join(quoted, ", "), strings.Join(params, ", "))
@@ -1703,12 +1703,12 @@ func GenerateCrudInterfaces(c *gin.Context) {
 			if c.PrimaryKey || c.Name == pk {
 				continue
 			}
-			sets = append(sets, fmt.Sprintf("%s = :%s", quoteSQLTableIdent(src.Type, c.Name), c.Name))
+			sets = append(sets, fmt.Sprintf("%s = {{%s}}", quoteSQLTableIdent(src.Type, c.Name), c.Name))
 		}
 		if len(sets) == 0 {
-			return fmt.Sprintf("UPDATE %s SET col1 = :col1 WHERE %s = :%s", q, pkCol, pk)
+			return fmt.Sprintf("UPDATE %s SET col1 = {{col1}} WHERE %s = {{%s}}", q, pkCol, pk)
 		}
-		return fmt.Sprintf("UPDATE %s SET %s WHERE %s = :%s",
+		return fmt.Sprintf("UPDATE %s SET %s WHERE %s = {{%s}}",
 			q, strings.Join(sets, ", "), pkCol, pk)
 	}
 
@@ -1726,7 +1726,7 @@ func GenerateCrudInterfaces(c *gin.Context) {
 		case "list":
 			return opSpec{"query", sqlSelectStarLimited(src.Type, q), "[]", "GET", "列表查询"}
 		case "get":
-			sql := fmt.Sprintf("SELECT * FROM %s WHERE %s = :%s", q, pkCol, pk)
+			sql := fmt.Sprintf("SELECT * FROM %s WHERE %s = {{%s}}", q, pkCol, pk)
 			return opSpec{"query", sql, "[]", "GET", "单条查询"}
 		case "create":
 			insertSQL := buildInsertSQL()
@@ -1741,7 +1741,7 @@ func GenerateCrudInterfaces(c *gin.Context) {
 			steps := fmt.Sprintf(`[{"sql":%s,"label":"修改"}]`, mustMarshalString(updateSQL))
 			return opSpec{"transaction", "", steps, "PUT", "修改"}
 		case "delete":
-			steps := fmt.Sprintf(`[{"sql":%s,"label":"删除"}]`, mustMarshalString(fmt.Sprintf("DELETE FROM %s WHERE %s = :%s", q, pkCol, pk)))
+			steps := fmt.Sprintf(`[{"sql":%s,"label":"删除"}]`, mustMarshalString(fmt.Sprintf("DELETE FROM %s WHERE %s = {{%s}}", q, pkCol, pk)))
 			return opSpec{"transaction", "", steps, "DELETE", "删除"}
 		}
 		return opSpec{}

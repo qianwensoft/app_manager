@@ -33,32 +33,174 @@
             <el-input-number v-model="form.default_retry_max" :min="0" :max="10" />
             <span class="hint">仅作用于 HTTP 步骤</span>
           </el-form-item>
-          <el-form-item label="优先级">
-            <el-input-number v-model="form.priority" :min="0" :max="9999" />
-            <span class="hint">数值越小越靠前</span>
+
+          <!-- 运行模式选择：接口模式 vs 触发模式 -->
+          <el-divider content-position="left">运行模式</el-divider>
+          <el-form-item label="运行模式" required>
+            <el-radio-group v-model="form.interface_mode" @change="onRunModeChange">
+              <el-radio :label="false">触发模式（被动触发）</el-radio>
+              <el-radio :label="true">接口模式（主动调用）</el-radio>
+            </el-radio-group>
+            <div class="hint" style="margin-top: 8px">
+              <span v-if="!form.interface_mode">触发模式：连接器被设备事件、Webhook、定时任务等触发执行</span>
+              <span v-else>接口模式：连接器作为接口供外部主动调用，无需配置触发器</span>
+            </div>
           </el-form-item>
-          <el-form-item label="相同事件码防抖 ms">
-            <el-input-number v-model="form.debounce_same_event_ms" :min="0" :max="600000" :step="100" />
-            <span class="hint">同一设备上同一事件类型重复触发时，间隔小于此值则跳过（0 关闭）</span>
-          </el-form-item>
-          <el-form-item label="不同事件码防抖 ms">
-            <el-input-number v-model="form.debounce_diff_event_ms" :min="0" :max="600000" :step="100" />
-            <span class="hint">事件类型切换后，距上次执行不足此值则跳过（0 关闭）</span>
-          </el-form-item>
-          <el-form-item label="相同扫码防抖 ms">
-            <el-input-number v-model="form.debounce_same_scan_ms" :min="0" :max="600000" :step="100" />
-            <span class="hint">同一设备、相同 event_data.value（条码）重复上报时跳过（0 关闭）</span>
-          </el-form-item>
-          <el-form-item label="广播后冷却 ms">
-            <el-input-number v-model="form.loop_cooldown_ms" :min="0" :max="600000" :step="100" />
-            <span class="hint">本连接器 broadcast_intent 成功后，同设备在冷却期内不再触发（建议 1500–3000；0 关闭）</span>
-          </el-form-item>
-          <el-alert type="info" :closable="false" show-icon class="loop-guard-alert" title="防扫码回环">
-            <template #description>
-              出站广播会自动带 extra <code>_appmanager_outbound</code>，Agent 监听会忽略该标记；若模拟广播仍被业务 App 转成扫码，请开启「相同扫码防抖」与「广播后冷却」。
-            </template>
-          </el-alert>
-          <el-form-item label="触发方式">
+
+          <!-- 接口模式配置 -->
+          <template v-if="form.interface_mode">
+            <el-form-item label="接口编码" required>
+              <el-input v-model="form.interface_code" placeholder="如：check_employee_status（全局唯一）" style="width: 400px" />
+              <span class="hint">用于调用此连接器接口，必须全局唯一</span>
+            </el-form-item>
+
+            <el-form-item label="输入参数">
+              <ParamSchemaEditor v-model="form.input_params_json" />
+            </el-form-item>
+
+            <el-form-item label="输出结构 Schema">
+              <el-input
+                v-model="form.output_schema_json"
+                type="textarea"
+                :rows="6"
+                placeholder='JSON Schema 格式，如：{"type":"object","properties":{"status":{"type":"string"},"name":{"type":"string"}}}'
+              />
+              <span class="hint">定义接口返回的数据结构（JSON Schema 格式）</span>
+            </el-form-item>
+
+            <el-form-item label="输出参数映射">
+              <p style="color: #606266; font-size: 13px; margin: 0 0 8px 0">
+                配置如何从连接器执行后的 context 映射到最终返回的 JSON 结构。留空则返回完整的 context。
+              </p>
+              <div v-for="(mp, mi) in form.output_mappings" :key="mi" class="param-mapping-row">
+                <el-input
+                  v-model="mp.output_key"
+                  placeholder="输出字段名（支持 a.b.c 点路径）"
+                  style="width: 180px"
+                  size="small"
+                />
+                <el-select v-model="mp.source" style="width: 110px" size="small">
+                  <el-option label="context" value="context" />
+                  <el-option label="var" value="var" />
+                  <el-option label="fixed" value="fixed" />
+                </el-select>
+                <el-autocomplete
+                  v-if="mp.source === 'context' || mp.source === 'var'"
+                  v-model="mp.value"
+                  :fetch-suggestions="(q, cb) => cb(availableContextKeys.filter(k => !q || k.toLowerCase().includes(q.toLowerCase())).map(k => ({ value: mp.source === 'var' ? '{{' + k + '}}' : k })))"
+                  :placeholder="mp.source === 'context' ? 'employee_name' : '{{context.employee_name}}'"
+                  style="flex: 1; min-width: 140px"
+                  size="small"
+                  clearable
+                />
+                <el-input
+                  v-else
+                  v-model="mp.value"
+                  placeholder="固定值"
+                  style="flex: 1; min-width: 140px"
+                  size="small"
+                />
+                <el-button link type="danger" size="small" @click="form.output_mappings.splice(mi, 1)">删</el-button>
+              </div>
+              <el-space style="margin-top: 4px">
+                <el-button size="small" plain @click="form.output_mappings.push({ output_key: '', source: 'context', value: '' })">+ 加字段</el-button>
+                <el-button size="small" type="primary" plain @click="autoMatchOutputParams" title="根据输出 Schema 自动补全映射">一键匹配</el-button>
+              </el-space>
+              <el-alert type="info" :closable="false" style="margin-top: 8px">
+                <template #default>
+                  <div style="font-size: 12px">
+                    <strong>示例：</strong>假设连接器执行后 context 包含 <code>employee_name: "张三"</code>，
+                    配置映射 <code>name</code> → <code>context</code> → <code>employee_name</code>，
+                    则最终返回 <code>{"name": "张三"}</code>
+                  </div>
+                </template>
+              </el-alert>
+            </el-form-item>
+
+            <el-divider content-position="left">可用占位符说明</el-divider>
+            <el-alert type="info" :closable="false" show-icon>
+              <template #title>接口模式下的 Context 占位符</template>
+              <template #description>
+                <div style="margin-bottom: 12px">
+                  接口入参会自动作为 context 的初始值，在步骤中可通过占位符引用。支持两种引用方式：
+                </div>
+                <table style="width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 12px">
+                  <thead>
+                    <tr style="background: #f5f7fa">
+                      <th style="padding: 6px; border: 1px solid #dcdfe6; text-align: left">类别</th>
+                      <th style="padding: 6px; border: 1px solid #dcdfe6; text-align: left">占位符</th>
+                      <th style="padding: 6px; border: 1px solid #dcdfe6; text-align: left">说明</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td style="padding: 6px; border: 1px solid #dcdfe6" rowspan="2"><strong>接口入参</strong></td>
+                      <td style="padding: 6px; border: 1px solid #dcdfe6"><code v-pre>{{param_name}}</code></td>
+                      <td style="padding: 6px; border: 1px solid #dcdfe6">直接引用参数名</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 6px; border: 1px solid #dcdfe6"><code v-pre>{{context.param_name}}</code></td>
+                      <td style="padding: 6px; border: 1px solid #dcdfe6">通过 context 命名空间引用</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 6px; border: 1px solid #dcdfe6" rowspan="3"><strong>HTTP 信息</strong></td>
+                      <td style="padding: 6px; border: 1px solid #dcdfe6"><code v-pre>{{http.method}}</code></td>
+                      <td style="padding: 6px; border: 1px solid #dcdfe6">HTTP 方法（GET/POST/PUT/DELETE）</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 6px; border: 1px solid #dcdfe6"><code v-pre>{{http.path}}</code></td>
+                      <td style="padding: 6px; border: 1px solid #dcdfe6">请求路径</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 6px; border: 1px solid #dcdfe6"><code v-pre>{{http.query}}</code></td>
+                      <td style="padding: 6px; border: 1px solid #dcdfe6">Query string 原始字符串</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 6px; border: 1px solid #dcdfe6" rowspan="2"><strong>系统变量</strong></td>
+                      <td style="padding: 6px; border: 1px solid #dcdfe6"><code v-pre>{{timestamp}}</code> / <code v-pre>{{timestamp_ms}}</code></td>
+                      <td style="padding: 6px; border: 1px solid #dcdfe6">Unix 时间戳（秒 / 毫秒）</td>
+                    </tr>
+                    <tr>
+                      <td style="padding: 6px; border: 1px solid #dcdfe6"><code v-pre>{{userid}}</code> / <code v-pre>{{deviceid}}</code></td>
+                      <td style="padding: 6px; border: 1px solid #dcdfe6">调用用户 ID / 设备 ID（可选）</td>
+                    </tr>
+                  </tbody>
+                </table>
+                <div style="color: #909399; font-size: 12px">
+                  💡 示例：假设接口入参为 <code>{"employee_id": "E001", "department": "IT"}</code>，则可在步骤中使用
+                  <code v-pre>{{employee_id}}</code> 或 <code v-pre>{{context.employee_id}}</code> 引用值 "E001"
+                </div>
+              </template>
+            </el-alert>
+
+            <el-divider content-position="left">接口调用方式</el-divider>
+            <el-alert type="success" :closable="false" show-icon title="接口调用方式">
+              <template #description>
+                <div style="margin-bottom: 8px"><strong>方式一：通用调用（推荐）</strong></div>
+                <div>支持 GET、POST、PUT、DELETE 等多种 HTTP 方法</div>
+                <div style="margin: 4px 0">
+                  API 端点：<code>GET/POST /api/outbound/connector-interfaces/{{ form.interface_code || '{code}' }}/invoke</code>
+                </div>
+                <div>URL 参数：<code>?param1=value1&amp;param2=value2</code>（GET 方法）</div>
+                <div>请求体：<code>{"param1": "value1", "param2": "value2"}</code>（POST/PUT 方法）</div>
+                <div style="margin-top: 8px"><strong>方式二：POST 调用</strong></div>
+                <div>API 端点：<code>POST /api/outbound/connector-interfaces/call</code></div>
+                <div>请求体：<code>{"connector_code": "{{ form.interface_code || 'your_code' }}", "params": {...}}</code></div>
+                <div style="margin-top: 8px"><strong>返回格式</strong></div>
+                <div><code>{"success": true, "data": {...}, "duration_ms": 100, "step_count": 5}</code></div>
+              </template>
+            </el-alert>
+
+            <el-form-item label="测试接口" v-if="!isNew && form.interface_code">
+              <el-button type="primary" @click="openInterfaceTest">测试调用与 Context 预览</el-button>
+              <span class="hint">保存后可测试接口调用，查看 context 占位符实际值</span>
+            </el-form-item>
+          </template>
+
+          <!-- 触发模式配置 -->
+          <template v-else>
+            <el-divider content-position="left">触发配置</el-divider>
+            <el-form-item label="触发方式">
             <el-select v-model="form.trigger_type" style="width: 220px" @change="onTriggerTypeChange">
               <el-option label="设备事件（内部）" value="device_event" />
               <el-option label="外部 Webhook（入站 HTTP）" value="http_webhook" />
@@ -323,6 +465,38 @@
               <el-option v-for="dv in devices" :key="dv.id" :label="`#${dv.id} ${dv.name || dv.serial || '-'}`" :value="dv.id" />
             </el-select>
           </el-form-item>
+
+          <!-- 触发高级设置 -->
+          <el-divider content-position="left">高级设置</el-divider>
+          <el-form-item label="优先级">
+            <el-input-number v-model="form.priority" :min="0" :max="9999" />
+            <span class="hint">数值越小越靠前</span>
+          </el-form-item>
+          <el-form-item label="相同事件码防抖 ms">
+            <el-input-number v-model="form.debounce_same_event_ms" :min="0" :max="600000" :step="100" />
+            <span class="hint">同一设备上同一事件类型重复触发时，间隔小于此值则跳过（0 关闭）</span>
+          </el-form-item>
+          <el-form-item label="不同事件码防抖 ms">
+            <el-input-number v-model="form.debounce_diff_event_ms" :min="0" :max="600000" :step="100" />
+            <span class="hint">事件类型切换后，距上次执行不足此值则跳过（0 关闭）</span>
+          </el-form-item>
+          <el-form-item label="相同扫码防抖 ms">
+            <el-input-number v-model="form.debounce_same_scan_ms" :min="0" :max="600000" :step="100" />
+            <span class="hint">同一设备、相同 event_data.value（条码）重复上报时跳过（0 关闭）</span>
+          </el-form-item>
+          <el-form-item label="广播后冷却 ms">
+            <el-input-number v-model="form.loop_cooldown_ms" :min="0" :max="600000" :step="100" />
+            <span class="hint">本连接器 broadcast_intent 成功后，同设备在冷却期内不再触发（建议 1500–3000；0 关闭）</span>
+          </el-form-item>
+          <el-alert type="info" :closable="false" show-icon class="loop-guard-alert" title="防扫码回环">
+            <template #description>
+              出站广播会自动带 extra <code>_appmanager_outbound</code>，Agent 监听会忽略该标记；若模拟广播仍被业务 App 转成扫码，请开启「相同扫码防抖」与「广播后冷却」。
+            </template>
+          </el-alert>
+          </template>
+          <!-- 触发模式配置结束 -->
+
+          <el-divider content-position="left">执行流程</el-divider>
           <el-form-item label="执行阶段">
             <div class="phases-wrap">
               <div v-for="(ph, pi) in form.phases" :key="pi" class="phase-block">
@@ -360,6 +534,7 @@
                     <el-option label="打开网页" value="view_url" />
                     <el-option label="广播 Intent" value="broadcast_intent" />
                     <el-option label="消息提醒" value="message" />
+                    <el-option label="键盘HID输出" value="keyboard_hid" />
                   </el-select>
                   <template v-if="st.step_type === 'http'">
                     <el-select v-model="st.endpoint_id" filterable placeholder="选择应用接口" style="flex: 1; min-width: 220px" @change="onEndpointSelect(st, pi, si)">
@@ -412,6 +587,64 @@
                       {{ broadcastExtrasSummary(st) }}
                     </span>
                   </template>
+                  <template v-else-if="st.step_type === 'keyboard_hid'">
+                    <el-select v-model="st.config.input_method" style="width: 140px" size="small">
+                      <el-option label="文本输入" value="text" />
+                      <el-option label="按键序列" value="keys" />
+                      <el-option label="混合模式" value="mixed" />
+                    </el-select>
+
+                    <template v-if="st.config.input_method === 'text' || st.config.input_method === 'mixed'">
+                      <el-input
+                        v-model="st.config.text"
+                        placeholder="输入文本，支持占位符 {{context.value}}"
+                        style="flex: 1; min-width: 200px"
+                        size="small"
+                      />
+                    </template>
+
+                    <template v-if="st.config.input_method === 'keys' || st.config.input_method === 'mixed'">
+                      <el-select
+                        v-model="st.config.keys"
+                        multiple
+                        filterable
+                        allow-create
+                        default-first-option
+                        placeholder="选择按键（如ENTER, TAB）"
+                        style="flex: 1; min-width: 180px"
+                        size="small"
+                      >
+                        <el-option label="ENTER（回车）" value="ENTER" />
+                        <el-option label="TAB（制表符）" value="TAB" />
+                        <el-option label="BACK（返回）" value="BACK" />
+                        <el-option label="DELETE（删除）" value="DELETE" />
+                        <el-option label="HOME（主页）" value="HOME" />
+                        <el-option label="SPACE（空格）" value="SPACE" />
+                        <el-option label="CLEAR（清空）" value="CLEAR" />
+                      </el-select>
+                    </template>
+
+                    <el-input-number
+                      v-model="st.config.delay_ms"
+                      :min="0"
+                      :max="5000"
+                      :step="10"
+                      controls-position="right"
+                      placeholder="间隔ms"
+                      style="width: 130px"
+                      size="small"
+                      title="按键/字符间延迟（毫秒），0表示无延迟"
+                    />
+
+                    <el-input
+                      v-model="st.config.target_app"
+                      placeholder="目标应用包名（可选）"
+                      style="width: 200px"
+                      size="small"
+                      clearable
+                      title="可选：验证前台应用包名，不匹配则跳过输入"
+                    />
+                  </template>
                   <div class="step-delays" title="本步骤执行前、执行完成后各自等待的毫秒数">
                     <span class="delay-lbl">前(ms)</span>
                     <el-input-number
@@ -439,15 +672,32 @@
                   <div class="step-cx-wrap">
                     <div class="step-cx-block">
                       <div class="step-cx-title">执行前 · 入参 / 模板</div>
-                      <p class="step-cx-desc">
-                        本步执行前，将占位符展开进 URL、HTTP Body、消息正文等。合并顺序为：<strong>阶段默认占位符</strong> → 可选的
-                        <strong>event_data→context</strong>（见上方下拉）→ <strong>本步专属占位符默认值</strong>；再与<strong>上阶段 HTTP 执行后</strong>已写入的 context、以及
+                      <p class="step-cx-desc" v-if="form.interface_mode">
+                        <strong>接口模式：</strong>接口入参自动作为 context 初始值。本步执行前，将占位符展开进 URL、HTTP Body、消息正文等。
+                        合并顺序为：<strong>接口入参（context.*）</strong> → <strong>阶段默认占位符</strong> → <strong>本步专属占位符默认值</strong>；
+                        再与<strong>上阶段 HTTP 执行后</strong>已写入的 context、以及 <code v-pre>{{http.last.*}}</code> 等一起作为本步入参。
+                        <br/>
+                        可用占位符示例：<code v-pre>{{context.employee_id}}</code>、<code v-pre>{{http.method}}</code>、<code v-pre>{{timestamp}}</code>
+                        <br/>
+                        <strong v-if="st.step_type === 'broadcast_intent' || st.step_type === 'message' || st.step_type === 'view_url'" style="color: #E6A23C">
+                          ⚠️ 注意：「{{ st.step_type === 'broadcast_intent' ? '广播 Intent' : st.step_type === 'message' ? '消息提醒' : '打开网页' }}」步骤需要指定目标设备。
+                          接口模式下没有设备事件上下文，请在上方选择目标设备。
+                        </strong>
+                      </p>
+                      <p class="step-cx-desc" v-else>
+                        <strong>触发模式：</strong>本步执行前，将占位符展开进 URL、HTTP Body、消息正文等。合并顺序为：<strong>阶段默认占位符</strong> → 可选的
+                        <strong>event_data→context</strong>（见下方下拉）→ <strong>本步专属占位符默认值</strong>；再与<strong>上阶段 HTTP 执行后</strong>已写入的 context、以及
                         <code v-pre>{{http.last.*}}</code> 等一起作为本步入参。
                       </p>
-                      <el-select v-model="st.config.context_merge_before" size="small" style="width: 100%; max-width: 420px">
+                      <el-select v-if="!form.interface_mode" v-model="st.config.context_merge_before" size="small" style="width: 100%; max-width: 420px">
                         <el-option label="不合并 event_data（仅用全局变量与上游已写入的 context / http.last）" value="off" />
                         <el-option label="合并 device_event.event_data → context（本步请求或展示前生效）" value="event_data_json" />
                       </el-select>
+                      <el-alert v-else type="info" :closable="false" style="margin-top: 8px">
+                        <template #default>
+                          接口模式下，event_data 不可用。Context 完全基于接口入参，无需配置合并选项。
+                        </template>
+                      </el-alert>
                     </div>
                     <div v-if="st.step_type === 'broadcast_intent'" class="step-cx-block">
                       <div class="step-cx-title">模拟数据标签 (extras)</div>
@@ -498,6 +748,158 @@
                         style="margin-top: 8px"
                         @blur="syncExtrasRowsFromJson(st)"
                       />
+                    </div>
+                    <div v-if="form.interface_mode && (st.step_type === 'broadcast_intent' || st.step_type === 'message' || st.step_type === 'view_url')" class="step-cx-block">
+                      <div class="step-cx-title">目标设备配置（接口模式）</div>
+                      <p class="step-cx-desc">
+                        接口模式下，「{{ st.step_type === 'broadcast_intent' ? '广播 Intent' : st.step_type === 'message' ? '消息提醒' : '打开网页' }}」步骤需要明确指定目标设备。
+                        支持三种方式：指定设备、条件筛选、占位符动态指定。
+                      </p>
+                      <el-radio-group v-model="st.config.target_device_mode" size="small" style="margin-bottom: 8px">
+                        <el-radio-button label="specific">指定设备</el-radio-button>
+                        <el-radio-button label="filter">条件筛选</el-radio-button>
+                        <el-radio-button label="placeholder">占位符</el-radio-button>
+                      </el-radio-group>
+
+                      <!-- 指定设备模式 -->
+                      <div v-if="st.config.target_device_mode === 'specific'">
+                        <el-select
+                          v-model="st.config.target_device_ids"
+                          multiple
+                          filterable
+                          placeholder="选择一个或多个设备"
+                          style="width: 100%"
+                          size="small">
+                          <el-option
+                            v-for="d in devices"
+                            :key="d.id"
+                            :label="`${d.name || d.id} (${d.serial || d.agent_alias})`"
+                            :value="d.id" />
+                        </el-select>
+                        <span class="hint" style="font-size: 12px; color: #909399">
+                          已选 {{ (st.config.target_device_ids || []).length }} 个设备
+                        </span>
+                      </div>
+
+                      <!-- 条件筛选模式 -->
+                      <div v-else-if="st.config.target_device_mode === 'filter'">
+                        <div style="margin-bottom: 8px">
+                          <el-input
+                            v-model="st.config.device_filter_serial"
+                            placeholder="设备序列号（支持 * 通配符，如 ABC*）"
+                            size="small"
+                            clearable
+                            style="width: 100%; margin-bottom: 4px" />
+                          <el-input
+                            v-model="st.config.device_filter_name"
+                            placeholder="设备名称（支持 * 通配符，如 *仓库*）"
+                            size="small"
+                            clearable
+                            style="width: 100%; margin-bottom: 4px" />
+                          <el-input
+                            v-model="st.config.device_filter_alias"
+                            placeholder="设备别名（支持 * 通配符）"
+                            size="small"
+                            clearable
+                            style="width: 100%" />
+                        </div>
+                        <el-alert type="info" :closable="false" style="font-size: 12px">
+                          <template #default>
+                            条件之间为 AND 关系。支持占位符，如 <code v-pre>{{context.warehouse_name}}*</code>
+                          </template>
+                        </el-alert>
+                      </div>
+
+                      <!-- 占位符模式 -->
+                      <div v-else-if="st.config.target_device_mode === 'placeholder'">
+                        <el-input
+                          v-model="st.config.device_placeholder"
+                          placeholder="如 {{context.device_id}} 或 {{device_serial}}"
+                          size="small"
+                          style="width: 100%; margin-bottom: 4px" />
+                        <el-alert type="info" :closable="false" style="font-size: 12px">
+                          <template #default>
+                            占位符值可以是：<strong>设备 ID</strong>（数字）、<strong>设备序列号</strong>、<strong>设备别名</strong>。
+                            支持多个设备（逗号分隔），如 <code v-pre>{{context.device_ids}}</code> = "1,2,3"
+                          </template>
+                        </el-alert>
+                      </div>
+                    </div>
+                    <div v-if="st.step_type === 'http'" class="step-cx-block">
+                      <div class="step-cx-title">参数映射（可选）</div>
+                      <p class="step-cx-desc">
+                        将 context / 占位符 / 固定值映射到 HTTP 接口参数（适用于接口模式或需要动态构建请求参数的场景）。
+                        Source：<code>context</code>（填路径如 <code>employee_id</code>）、<code>var</code>（填完整 <code v-pre>{{...}}</code>）、<code>fixed</code>（固定字符串）。
+                        映射的参数会作为查询参数或 Body 参数传递。
+                      </p>
+                      <div v-for="(mp, mi) in (st.config.param_mappings || [])" :key="mi" class="param-mapping-row">
+                        <el-select
+                          v-if="`${pi}-${si}` in stepParamSchemas"
+                          v-model="mp.param"
+                          filterable
+                          allow-create
+                          placeholder="参数名"
+                          style="width: 160px"
+                          size="small"
+                        >
+                          <el-option
+                            v-for="p in stepParamSchemas[`${pi}-${si}`]"
+                            :key="p.name"
+                            :label="p.required ? p.name + ' *' : p.name"
+                            :value="p.name"
+                          >
+                            <span>{{ p.name }}</span>
+                            <span v-if="p.required" style="color: #f56c6c; margin-left: 4px">*</span>
+                            <span v-if="p.type" style="color: #909399; margin-left: 6px; font-size: 11px">{{ p.type }}</span>
+                          </el-option>
+                        </el-select>
+                        <el-input v-else v-model="mp.param" placeholder="参数名" style="width: 140px" size="small" />
+                        <el-select v-model="mp.source" style="width: 110px" size="small">
+                          <el-option label="context" value="context" />
+                          <el-option label="var" value="var" />
+                          <el-option label="fixed" value="fixed" />
+                        </el-select>
+                        <el-autocomplete
+                          v-if="mp.source === 'context' || mp.source === 'var'"
+                          v-model="mp.value"
+                          :fetch-suggestions="(q, cb) => cb(availableContextKeys.filter(k => !q || k.toLowerCase().includes(q.toLowerCase())).map(k => ({ value: mp.source === 'var' ? '{{' + k + '}}' : k })))"
+                          :placeholder="mp.source === 'context' ? 'employee_id' : '{{context.employee_id}}'"
+                          style="flex: 1; min-width: 140px"
+                          size="small"
+                          clearable
+                        />
+                        <template v-else>
+                          <el-select
+                            v-if="stepParamSchemas[`${pi}-${si}`]?.find(p => p.name === mp.param)?.enum?.length"
+                            v-model="mp.value"
+                            filterable
+                            allow-create
+                            placeholder="选择固定值"
+                            style="flex: 1; min-width: 140px"
+                            size="small"
+                            clearable
+                          >
+                            <el-option
+                              v-for="ev in stepParamSchemas[`${pi}-${si}`].find(p => p.name === mp.param).enum"
+                              :key="ev"
+                              :label="ev"
+                              :value="ev"
+                            />
+                          </el-select>
+                          <el-input
+                            v-else
+                            v-model="mp.value"
+                            placeholder="固定值"
+                            style="flex: 1; min-width: 140px"
+                            size="small"
+                          />
+                        </template>
+                        <el-button link type="danger" size="small" @click="(st.config.param_mappings || []).splice(mi, 1)">删</el-button>
+                      </div>
+                      <el-space style="margin-top: 4px">
+                        <el-button size="small" plain @click="if (!st.config.param_mappings) st.config.param_mappings = []; st.config.param_mappings.push({ param: '', source: 'context', value: '' })">+ 加参数</el-button>
+                        <el-button size="small" type="primary" plain @click="autoMatchParams(st, pi, si)" title="按参数名自动匹配 context 键（有 schema 时自动补全所有参数行）">一键匹配</el-button>
+                      </el-space>
                     </div>
                     <div v-if="st.step_type === 'http'" class="step-cx-block">
                       <div class="step-cx-title">执行后 · 返回值 → 上下文</div>
@@ -943,6 +1345,84 @@
         </el-tab-pane>
       </el-tabs>
     </el-dialog>
+
+    <!-- 接口测试对话框 -->
+    <el-dialog
+      v-model="interfaceTestDlg.visible"
+      title="接口测试与 Context 预览"
+      width="min(920px, 96vw)"
+      destroy-on-close
+      class="interface-test-dlg"
+    >
+      <el-alert type="info" :closable="false" show-icon style="margin-bottom: 12px">
+        <template #title>
+          测试接口调用，查看接口入参如何映射到 context 占位符，并预览各步骤执行后的 context 变化
+        </template>
+      </el-alert>
+
+      <el-form label-width="100px" size="small">
+        <el-form-item label="HTTP 方法">
+          <el-select v-model="interfaceTestDlg.method" style="width: 150px">
+            <el-option label="GET" value="GET" />
+            <el-option label="POST" value="POST" />
+            <el-option label="PUT" value="PUT" />
+            <el-option label="DELETE" value="DELETE" />
+          </el-select>
+        </el-form-item>
+
+        <el-form-item label="接口入参">
+          <el-input
+            v-model="interfaceTestDlg.paramsJson"
+            type="textarea"
+            :rows="6"
+            placeholder='JSON 格式，如：{"employee_id": "E001", "department": "IT"}'
+            style="font-family: monospace"
+          />
+          <span class="hint">这些参数将自动映射到 context 占位符</span>
+        </el-form-item>
+
+        <el-form-item>
+          <el-button type="primary" :loading="interfaceTestDlg.loading" @click="runInterfaceTest">
+            执行测试
+          </el-button>
+          <el-button @click="fillInterfaceTestParams">填充示例参数</el-button>
+        </el-form-item>
+      </el-form>
+
+      <el-tabs v-model="interfaceTestDlg.innerTab" v-if="interfaceTestDlg.result">
+        <el-tab-pane label="Context 映射" name="context">
+          <p class="phase-test-tab-hint">
+            接口入参自动映射到 context 命名空间，可通过 <code v-pre>{{param_name}}</code> 或 <code v-pre>{{context.param_name}}</code> 引用
+          </p>
+          <el-table :data="interfaceTestDlg.contextRows" border size="small" max-height="360">
+            <el-table-column prop="key" label="占位符" min-width="220" show-overflow-tooltip />
+            <el-table-column prop="value" label="值" min-width="200" show-overflow-tooltip />
+            <el-table-column prop="source" label="来源" width="120" />
+          </el-table>
+        </el-tab-pane>
+
+        <el-tab-pane label="执行结果" name="result">
+          <el-descriptions :column="2" border size="small" style="margin-bottom: 12px">
+            <el-descriptions-item label="执行状态">
+              <el-tag :type="interfaceTestDlg.result.success ? 'success' : 'danger'">
+                {{ interfaceTestDlg.result.success ? '成功' : '失败' }}
+              </el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="耗时">{{ interfaceTestDlg.result.duration_ms }} ms</el-descriptions-item>
+            <el-descriptions-item label="步骤数">{{ interfaceTestDlg.result.step_count }}</el-descriptions-item>
+            <el-descriptions-item label="错误信息">{{ interfaceTestDlg.result.error || '—' }}</el-descriptions-item>
+          </el-descriptions>
+          <div class="step-cx-title">返回数据（data）</div>
+          <pre class="ctx-pre">{{ fmtJson(interfaceTestDlg.result.data) }}</pre>
+        </el-tab-pane>
+
+        <el-tab-pane label="完整响应" name="full">
+          <pre class="ctx-pre">{{ fmtJson(interfaceTestDlg.result) }}</pre>
+        </el-tab-pane>
+      </el-tabs>
+
+      <el-empty v-else description="填写参数后点击「执行测试」查看结果" />
+    </el-dialog>
   </div>
 </template>
 
@@ -961,6 +1441,7 @@ import { mergeOutboundTraceNodeTick, traceTickFiltersDevice } from '@/utils/outb
 import ConnectorFlowGraph from '@/components/outbound/ConnectorFlowGraph.vue'
 import JsonTemplateEditor from '@/components/JsonTemplateEditor.vue'
 import TemplateVarsPanel from '@/components/outbound/TemplateVarsPanel.vue'
+import ParamSchemaEditor from '@/components/ParamSchemaEditor.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -1009,6 +1490,17 @@ const phaseTestDlg = reactive({
   contextAddedKeys: [],
   beforeFull: null,
   afterFull: null
+})
+
+/** 接口测试对话框 */
+const interfaceTestDlg = reactive({
+  visible: false,
+  loading: false,
+  method: 'POST',
+  paramsJson: '',
+  innerTab: 'context',
+  result: null,
+  contextRows: []
 })
 
 const debugInnerTab = ref('flow')
@@ -1166,7 +1658,13 @@ const form = reactive({
   trigger_config: {},
   definition_ids: [],
   device_ids: [],
-  phases: []
+  phases: [],
+  // 接口模式相关字段
+  interface_mode: false,
+  interface_code: '',
+  input_params_json: '',
+  output_schema_json: '',
+  output_mappings: []
 })
 
 const routeId = computed(() => String(route.params.id || ''))
@@ -1608,7 +2106,15 @@ function defaultConnStep() {
     config: {
       context_merge_before: 'off',
       context_merge_after: 'http_response_json',
-      context_merge: 'http_response_json'
+      context_merge: 'http_response_json',
+      param_mappings: [],
+      // 接口模式设备配置
+      target_device_mode: 'specific',
+      target_device_ids: [],
+      device_filter_serial: '',
+      device_filter_name: '',
+      device_filter_alias: '',
+      device_placeholder: ''
     },
     _stepTemplateParamsText: '',
     _action: '',
@@ -1635,6 +2141,12 @@ function mapPhaseFromApi(ph) {
       _action: cfg.action || '',
       _pkg: cfg.package || '',
       _extrasJson: '{}'
+    }
+    if (s.step_type === 'http') {
+      // 确保 HTTP 步骤的 param_mappings 被正确初始化
+      if (!st.config.param_mappings) {
+        st.config.param_mappings = []
+      }
     }
     if (s.step_type === 'broadcast_intent') {
       st._extrasRows = parseExtrasToRows(cfg.extras || {})
@@ -1716,6 +2228,12 @@ function resetFormNew() {
   form.definition_ids = []
   form.device_ids = []
   form.phases = [defaultConnPhase()]
+  // 接口模式字段
+  form.interface_mode = false
+  form.interface_code = ''
+  form.input_params_json = ''
+  form.output_schema_json = ''
+  form.output_mappings = []
 }
 
 function applyRowToForm(row) {
@@ -1742,6 +2260,23 @@ function applyRowToForm(row) {
   form.definition_ids = [...(row.definition_ids || [])]
   form.device_ids = [...(row.device_ids || [])]
   form.phases = phases
+  // 接口模式字段
+  form.interface_mode = row.interface_mode || false
+  form.interface_code = row.interface_code || ''
+  form.input_params_json = row.input_params_json || ''
+  form.output_schema_json = row.output_schema_json || ''
+
+  // 解析输出映射
+  if (row.output_mappings_json) {
+    try {
+      form.output_mappings = JSON.parse(row.output_mappings_json)
+    } catch {
+      form.output_mappings = []
+    }
+  } else {
+    form.output_mappings = []
+  }
+
   preloadStepSchemas(phases)
 }
 
@@ -1813,6 +2348,22 @@ function onTriggerTypeChange(val) {
   }
 }
 
+function onRunModeChange(isInterfaceMode) {
+  if (isInterfaceMode) {
+    // 切换到接口模式：清空触发配置
+    form.trigger_type = 'device_event'
+    form.webhook_id = 0
+    form.trigger_config = {}
+    form.definition_ids = []
+    form.device_ids = []
+  } else {
+    // 切换到触发模式：清空接口配置
+    form.interface_code = ''
+    form.input_params_json = ''
+    form.output_schema_json = ''
+  }
+}
+
 async function loadAllEndpoints() {
   try {
     const r = await ob.listOutboundEndpoints({})
@@ -1866,11 +2417,51 @@ async function onEndpointSelect(st, pi, si) {
 
 /** 从 templateDemo.execution_template 提取所有可用占位符键（去掉双大括号） */
 const availableContextKeys = computed(() => {
-  const tpl = templateDemo.value?.execution_template
-  if (!tpl || typeof tpl !== 'object') return []
-  return Object.keys(tpl)
-    .map((k) => k.replace(/^\{\{|\}\}$/g, ''))
-    .sort()
+  let keys = []
+
+  // 接口模式下的特殊处理
+  if (form.interface_mode) {
+    // 1. 添加全局入参 schema 中定义的参数
+    if (form.input_params_json) {
+      try {
+        const schema = JSON.parse(form.input_params_json)
+        if (schema.properties) {
+          for (const paramName of Object.keys(schema.properties)) {
+            // 添加 context.xxx 格式
+            keys.push(`context.${paramName}`)
+            // 添加 xxx 格式（直接引用）
+            keys.push(paramName)
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to parse input_params_json:', e)
+      }
+    }
+
+    // 2. 添加 HTTP 系统变量
+    keys.push('http.method', 'http.path', 'http.query')
+    keys.push('http.last.body', 'http.last.status', 'http.last.headers')
+    keys.push('http.last.page.has_more', 'http.last.page.list_len')
+
+    // 3. 添加时间戳变量
+    keys.push('timestamp', 'timestamp_ms')
+
+    // 4. 添加用户和设备 ID（可选）
+    keys.push('userid', 'deviceid')
+
+    // 去重并排序
+    keys = Array.from(new Set(keys)).sort()
+  } else {
+    // 触发模式：从 templateDemo 获取
+    const tpl = templateDemo.value?.execution_template
+    if (tpl && typeof tpl === 'object') {
+      keys = Object.keys(tpl)
+        .map((k) => k.replace(/^\{\{|\}\}$/g, ''))
+        .sort()
+    }
+  }
+
+  return keys
 })
 
 /** 一键匹配：加载 schema（若未加载），把所有接口参数填入 param_mappings，并按名自动匹配 context 键 */
@@ -1923,6 +2514,70 @@ async function autoMatchParams(st, pi, si) {
     if (exact) { mp.source = 'context'; mp.value = exact; continue }
     const partial = keys.find((k) => k.toLowerCase().endsWith('.' + name))
     if (partial) { mp.source = 'context'; mp.value = partial }
+  }
+}
+
+/** 输出参数一键匹配：根据输出 Schema 自动补全映射 */
+function autoMatchOutputParams() {
+  if (!form.output_schema_json) {
+    ElMessage.warning('请先定义输出结构 Schema')
+    return
+  }
+
+  try {
+    const schema = JSON.parse(form.output_schema_json)
+    if (!schema.properties || typeof schema.properties !== 'object') {
+      ElMessage.warning('输出 Schema 必须包含 properties 字段')
+      return
+    }
+
+    const keys = availableContextKeys.value
+    const existing = new Map(form.output_mappings.map((m) => [m.output_key, m]))
+    const merged = []
+
+    // 遍历 schema 中的所有输出字段
+    for (const [fieldName, fieldSchema] of Object.entries(schema.properties)) {
+      const mp = existing.get(fieldName) || { output_key: fieldName, source: 'context', value: '' }
+
+      // 如果还没有配置值，尝试自动匹配
+      if (!mp.value) {
+        const name = fieldName.toLowerCase()
+        // 1. 精确匹配（不区分大小写）
+        const exact = keys.find((k) => k.toLowerCase() === name)
+        if (exact) {
+          mp.source = 'context'
+          mp.value = exact
+        } else {
+          // 2. 后缀匹配（如 employee_name 匹配 context.employee_name）
+          const partial = keys.find((k) => k.toLowerCase().endsWith('.' + name))
+          if (partial) {
+            mp.source = 'context'
+            mp.value = partial
+          } else {
+            // 3. 包含匹配（如 name 匹配 employee_name）
+            const contains = keys.find((k) => k.toLowerCase().includes(name))
+            if (contains) {
+              mp.source = 'context'
+              mp.value = contains
+            }
+          }
+        }
+      }
+
+      merged.push(mp)
+    }
+
+    // 保留手动添加的不在 schema 里的字段
+    for (const mp of form.output_mappings) {
+      if (!schema.properties[mp.output_key]) {
+        merged.push(mp)
+      }
+    }
+
+    form.output_mappings = merged
+    ElMessage.success(`已匹配 ${merged.length} 个输出字段`)
+  } catch (e) {
+    ElMessage.error('解析输出 Schema 失败：' + e.message)
   }
 }
 
@@ -2019,6 +2674,19 @@ function onConnStepTypeChange(ph, si) {
       context_merge_after: 'off',
       context_merge: off ? 'off' : 'event_data_json'
     }
+  } else if (st.step_type === 'keyboard_hid') {
+    st.endpoint_id = null
+    const off = prevLeg === 'off' && !prevBefore
+    st.config = {
+      input_method: st.config?.input_method || 'text',
+      text: st.config?.text || '',
+      keys: st.config?.keys || [],
+      delay_ms: st.config?.delay_ms != null ? Number(st.config.delay_ms) : 50,
+      target_app: st.config?.target_app || '',
+      context_merge_before: off ? 'off' : 'event_data_json',
+      context_merge_after: 'off',
+      context_merge: off ? 'off' : 'event_data_json'
+    }
   }
 }
 
@@ -2043,6 +2711,146 @@ function removeConnStep(pi, si) {
 
 function goBack() {
   router.push('/outbound')
+}
+
+/** 打开接口测试对话框 */
+function openInterfaceTest() {
+  interfaceTestDlg.visible = true
+  interfaceTestDlg.result = null
+  interfaceTestDlg.contextRows = []
+  interfaceTestDlg.innerTab = 'context'
+  interfaceTestDlg.method = 'POST'
+  // 尝试从 input_params_json 生成示例参数
+  if (!interfaceTestDlg.paramsJson) {
+    fillInterfaceTestParams()
+  }
+}
+
+/** 填充示例参数 */
+function fillInterfaceTestParams() {
+  try {
+    if (form.input_params_json) {
+      const schema = JSON.parse(form.input_params_json)
+      const example = {}
+      if (schema.properties) {
+        for (const [key, prop] of Object.entries(schema.properties)) {
+          if (prop.examples && prop.examples.length > 0) {
+            example[key] = prop.examples[0]
+          } else if (prop.default !== undefined) {
+            example[key] = prop.default
+          } else if (prop.type === 'string') {
+            example[key] = prop.description ? `示例_${key}` : 'example'
+          } else if (prop.type === 'number' || prop.type === 'integer') {
+            example[key] = 123
+          } else if (prop.type === 'boolean') {
+            example[key] = true
+          }
+        }
+      }
+      interfaceTestDlg.paramsJson = JSON.stringify(example, null, 2)
+    } else {
+      interfaceTestDlg.paramsJson = JSON.stringify({ param1: 'value1', param2: 'value2' }, null, 2)
+    }
+  } catch {
+    interfaceTestDlg.paramsJson = JSON.stringify({ param1: 'value1', param2: 'value2' }, null, 2)
+  }
+}
+
+/** 执行接口测试 */
+async function runInterfaceTest() {
+  if (!form.interface_code) {
+    ElMessage.warning('请先设置接口编码')
+    return
+  }
+
+  let params = {}
+  try {
+    params = JSON.parse(interfaceTestDlg.paramsJson || '{}')
+  } catch {
+    ElMessage.error('参数 JSON 格式错误')
+    return
+  }
+
+  interfaceTestDlg.loading = true
+  interfaceTestDlg.result = null
+  interfaceTestDlg.contextRows = []
+
+  try {
+    const res = await ob.callConnectorInterface({
+      connector_code: form.interface_code,
+      params: params
+    })
+
+    interfaceTestDlg.result = res
+
+    // 构建 context 映射表
+    const contextRows = []
+
+    // 1. 接口入参
+    for (const [key, value] of Object.entries(params)) {
+      contextRows.push({
+        key: `{{${key}}}`,
+        value: String(value ?? ''),
+        source: '接口入参'
+      })
+      contextRows.push({
+        key: `{{context.${key}}}`,
+        value: String(value ?? ''),
+        source: '接口入参'
+      })
+    }
+
+    // 2. HTTP 变量
+    contextRows.push({
+      key: '{{http.method}}',
+      value: interfaceTestDlg.method,
+      source: 'HTTP 信息'
+    })
+
+    // 3. 系统变量
+    contextRows.push({
+      key: '{{timestamp}}',
+      value: String(Math.floor(Date.now() / 1000)),
+      source: '系统变量'
+    })
+    contextRows.push({
+      key: '{{timestamp_ms}}',
+      value: String(Date.now()),
+      source: '系统变量'
+    })
+
+    // 4. 返回结果中的数据
+    if (res.data && typeof res.data === 'object') {
+      for (const [key, value] of Object.entries(res.data)) {
+        if (!params.hasOwnProperty(key)) {
+          contextRows.push({
+            key: `{{context.${key}}}`,
+            value: String(value ?? ''),
+            source: '执行结果'
+          })
+        }
+      }
+    }
+
+    interfaceTestDlg.contextRows = contextRows
+    interfaceTestDlg.innerTab = 'context'
+
+    if (res.success) {
+      ElMessage.success('接口调用成功')
+    } else {
+      ElMessage.warning('接口调用失败：' + (res.error || '未知错误'))
+    }
+  } catch (e) {
+    ElMessage.error('调用失败：' + (e.message || e))
+    interfaceTestDlg.result = {
+      success: false,
+      error: e.message || String(e),
+      duration_ms: 0,
+      step_count: 0
+    }
+  } finally {
+    interfaceTestDlg.loading = false
+  }
 }
 
 /** 将步骤表单中的 template_params 文本合并进即将提交的 config；失败时返回 false 并已提示。 */
@@ -2101,7 +2909,11 @@ function buildPhasesArray(opts = {}) {
         if (forSave && !st.endpoint_id) {
           return { error: '每个 HTTP 步骤需选择应用接口' }
         }
-        const cfg = { ...stepContextMergePayload(st) }
+        const mappings = (st.config?.param_mappings || []).filter((m) => m.param?.trim())
+        const cfg = {
+          ...stepContextMergePayload(st),
+          param_mappings: mappings
+        }
         if (!attachStepTemplateParamsToConfig(st, cfg)) return { error: '__handled' }
         steps.push({
           step_type: 'http',
@@ -2151,7 +2963,29 @@ function buildPhasesArray(opts = {}) {
         if (forSave && !url.trim()) {
           return { error: '「打开网页」步骤需填写 URL' }
         }
-        const cfg = { url: url.trim(), ...stepContextMergePayload(st) }
+        // 接口模式下需要配置目标设备
+        if (forSave && form.interface_mode) {
+          const mode = st.config?.target_device_mode || 'specific'
+          if (mode === 'specific' && (!st.config?.target_device_ids || !st.config.target_device_ids.length)) {
+            return { error: '接口模式下「打开网页」步骤需选择至少一个目标设备' }
+          }
+          if (mode === 'filter' && !st.config?.device_filter_serial && !st.config?.device_filter_name && !st.config?.device_filter_alias) {
+            return { error: '接口模式下「打开网页」步骤需配置至少一个设备筛选条件' }
+          }
+          if (mode === 'placeholder' && !st.config?.device_placeholder?.trim()) {
+            return { error: '接口模式下「打开网页」步骤需填写设备占位符' }
+          }
+        }
+        const cfg = {
+          url: url.trim(),
+          target_device_mode: st.config?.target_device_mode || null,
+          target_device_ids: st.config?.target_device_ids || [],
+          device_filter_serial: st.config?.device_filter_serial || '',
+          device_filter_name: st.config?.device_filter_name || '',
+          device_filter_alias: st.config?.device_filter_alias || '',
+          device_placeholder: st.config?.device_placeholder || '',
+          ...stepContextMergePayload(st)
+        }
         if (!attachStepTemplateParamsToConfig(st, cfg)) return { error: '__handled' }
         steps.push({
           step_type: 'view_url',
@@ -2164,10 +2998,29 @@ function buildPhasesArray(opts = {}) {
         if (forSave && !body) {
           return { error: '「消息提醒」步骤需填写正文' }
         }
+        // 接口模式下需要配置目标设备
+        if (forSave && form.interface_mode) {
+          const mode = st.config?.target_device_mode || 'specific'
+          if (mode === 'specific' && (!st.config?.target_device_ids || !st.config.target_device_ids.length)) {
+            return { error: '接口模式下「消息提醒」步骤需选择至少一个目标设备' }
+          }
+          if (mode === 'filter' && !st.config?.device_filter_serial && !st.config?.device_filter_name && !st.config?.device_filter_alias) {
+            return { error: '接口模式下「消息提醒」步骤需配置至少一个设备筛选条件' }
+          }
+          if (mode === 'placeholder' && !st.config?.device_placeholder?.trim()) {
+            return { error: '接口模式下「消息提醒」步骤需填写设备占位符' }
+          }
+        }
         const cfg = {
           title: ((st.config && st.config.title) || '').trim(),
           body: body || '',
           duration_ms: st.config?.duration_ms != null ? Number(st.config.duration_ms) : 8000,
+          target_device_mode: st.config?.target_device_mode || null,
+          target_device_ids: st.config?.target_device_ids || [],
+          device_filter_serial: st.config?.device_filter_serial || '',
+          device_filter_name: st.config?.device_filter_name || '',
+          device_filter_alias: st.config?.device_filter_alias || '',
+          device_placeholder: st.config?.device_placeholder || '',
           ...stepContextMergePayload(st)
         }
         if (!attachStepTemplateParamsToConfig(st, cfg)) return { error: '__handled' }
@@ -2181,6 +3034,19 @@ function buildPhasesArray(opts = {}) {
         const action = (st._action || '').trim()
         if (forSave && !action) {
           return { error: '「广播 Intent」步骤需填写 action' }
+        }
+        // 接口模式下需要配置目标设备
+        if (forSave && form.interface_mode) {
+          const mode = st.config?.target_device_mode || 'specific'
+          if (mode === 'specific' && (!st.config?.target_device_ids || !st.config.target_device_ids.length)) {
+            return { error: '接口模式下「广播 Intent」步骤需选择至少一个目标设备' }
+          }
+          if (mode === 'filter' && !st.config?.device_filter_serial && !st.config?.device_filter_name && !st.config?.device_filter_alias) {
+            return { error: '接口模式下「广播 Intent」步骤需配置至少一个设备筛选条件' }
+          }
+          if (mode === 'placeholder' && !st.config?.device_placeholder?.trim()) {
+            return { error: '接口模式下「广播 Intent」步骤需填写设备占位符' }
+          }
         }
         ensureBroadcastExtrasRows(st)
         if (st._extrasAdvanced) syncExtrasRowsFromJson(st)
@@ -2199,7 +3065,17 @@ function buildPhasesArray(opts = {}) {
         if (forSave && !Object.keys(extras).length) {
           return { error: '「广播 Intent」请至少配置一个模拟数据标签（extras 键值）' }
         }
-        const cfg = { action: action || '', extras: extras || {}, ...stepContextMergePayload(st) }
+        const cfg = {
+          action: action || '',
+          extras: extras || {},
+          target_device_mode: st.config?.target_device_mode || null,
+          target_device_ids: st.config?.target_device_ids || [],
+          device_filter_serial: st.config?.device_filter_serial || '',
+          device_filter_name: st.config?.device_filter_name || '',
+          device_filter_alias: st.config?.device_filter_alias || '',
+          device_placeholder: st.config?.device_placeholder || '',
+          ...stepContextMergePayload(st)
+        }
         const pkg = (st._pkg || '').trim()
         if (pkg) cfg.package = pkg
         if (!attachStepTemplateParamsToConfig(st, cfg)) return { error: '__handled' }
@@ -2237,11 +3113,47 @@ async function openPhaseTest(pi) {
   phaseTestDlg.contextAddedKeys = []
   phaseTestDlg.beforeFull = null
   phaseTestDlg.afterFull = null
+
+  // 准备 overrides：接口模式下从 input_params_json 提取示例参数作为初始 context
+  const overrides = {}
+  if (form.interface_mode && form.input_params_json) {
+    try {
+      const schema = JSON.parse(form.input_params_json)
+      if (schema.properties) {
+        for (const [key, prop] of Object.entries(schema.properties)) {
+          let exampleValue = ''
+          if (prop.examples && prop.examples.length > 0) {
+            exampleValue = prop.examples[0]
+          } else if (prop.default !== undefined) {
+            exampleValue = prop.default
+          } else if (prop.type === 'string') {
+            exampleValue = `示例_${key}`
+          } else if (prop.type === 'number' || prop.type === 'integer') {
+            exampleValue = 123
+          } else if (prop.type === 'boolean') {
+            exampleValue = true
+          }
+          // 同时支持 {{param}} 和 {{context.param}}
+          overrides[`{{${key}}}`] = String(exampleValue)
+          overrides[`{{context.${key}}}`] = String(exampleValue)
+        }
+      }
+      // 添加 HTTP 和系统变量
+      overrides['{{http.method}}'] = 'POST'
+      overrides['{{http.path}}'] = `/api/outbound/connector-interfaces/${form.interface_code || 'test'}/invoke`
+      overrides['{{http.query}}'] = ''
+      overrides['{{timestamp}}'] = String(Math.floor(Date.now() / 1000))
+      overrides['{{timestamp_ms}}'] = String(Date.now())
+    } catch (e) {
+      console.warn('Failed to parse input_params_json:', e)
+    }
+  }
+
   try {
     const r = await ob.postOutboundPhasePreview({
       phase_index: pi,
       phases: built.phases,
-      overrides: {},
+      overrides: overrides,
       connector_id: Number(numericConnectorId.value) || 0,
       execute_live_http: true
     })
@@ -2290,7 +3202,15 @@ async function saveConn() {
     trigger_config: form.trigger_config || {},
     definition_ids: form.definition_ids,
     device_ids: form.device_ids,
-    phases
+    phases,
+    // 接口模式字段
+    interface_mode: form.interface_mode || false,
+    interface_code: form.interface_mode ? (form.interface_code || '') : '',
+    input_params_json: form.interface_mode ? (form.input_params_json || '') : '',
+    output_schema_json: form.interface_mode ? (form.output_schema_json || '') : '',
+    output_mappings_json: form.interface_mode && form.output_mappings.length > 0
+      ? JSON.stringify(form.output_mappings)
+      : ''
   }
   saving.value = true
   try {

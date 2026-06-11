@@ -9,10 +9,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/shogo82148/androidbinary/apk"
 )
 
 // AgentUpdateCheckResponse 更新检查响应
@@ -79,16 +79,7 @@ func UploadAgentAPK(c *gin.Context) {
 	}
 
 	version := c.PostForm("version")
-	versionCode := c.PostForm("version_code")
-	packageName := c.PostForm("package_name")
 	changelog := c.PostForm("changelog")
-
-	if version == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少版本号"})
-		return
-	}
-
-	versionCodeInt, _ := strconv.Atoi(versionCode)
 
 	// 保存文件
 	storagePath := config.C.Storage.Path
@@ -121,10 +112,28 @@ func UploadAgentAPK(c *gin.Context) {
 		return
 	}
 
+	// 解析 APK 获取包名和版本信息
+	pkg, err := apk.OpenFile(destPath)
+	if err != nil {
+		os.Remove(destPath)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无法解析 APK 文件"})
+		return
+	}
+	defer pkg.Close()
+
+	packageName := pkg.PackageName()
+	versionName := pkg.Manifest().VersionName.MustString()
+	versionCode := int(pkg.Manifest().VersionCode.MustInt32())
+
+	// 如果前端传了 version，使用前端的；否则使用 APK 解析的
+	if version == "" {
+		version = versionName
+	}
+
 	// 创建记录
 	update := models.AgentUpdate{
 		Version:     version,
-		VersionCode: versionCodeInt,
+		VersionCode: versionCode,
 		PackageName: packageName,
 		FileName:    file.Filename,
 		FilePath:    destPath,
@@ -138,7 +147,7 @@ func UploadAgentAPK(c *gin.Context) {
 		return
 	}
 
-	logAudit(c, "Agent 更新", fmt.Sprintf("上传 Agent APK %s", version), nil)
+	logAudit(c, "Agent 更新", fmt.Sprintf("上传 Agent APK %s (code: %d)", version, versionCode), nil)
 	c.JSON(http.StatusOK, gin.H{"data": update})
 }
 

@@ -48,7 +48,7 @@ type FormRendererProps = {
   pageKey?: string
   onQueryOptions?: (interfaceCode: string, paramValues: Record<string, any>) => Promise<FieldOption[]>
   scannerConfig?: ScannerConfig
-  onScanInterface?: (interfaceCode: string, paramValues: Record<string, any>) => Promise<any>
+  onScanInterface?: (interfaceCode: string, paramValues: Record<string, any>, type?: 'internal' | 'third_party' | 'connector', endpointId?: number) => Promise<any>
 }
 
 export default function FormRenderer({
@@ -123,7 +123,11 @@ export default function FormRenderer({
 
       // 调用接口
       const ifaceCode = scannerConfig.action?.interface_code
-      if (ifaceCode && onScanInterface) {
+      const thirdPartyEndpointId = scannerConfig.action?.third_party_endpoint_id
+      const connectorInterfaceCode = scannerConfig.action?.connector_interface_code
+      const interfaceType = scannerConfig.action?.interface_type || 'internal'
+
+      if ((ifaceCode || thirdPartyEndpointId || connectorInterfaceCode) && onScanInterface) {
         try {
           const scanParam = scannerConfig.action?.scan_param || 'code'
           const paramValues: Record<string, any> = { [scanParam]: scanValue }
@@ -140,7 +144,11 @@ export default function FormRenderer({
             }
           }
 
-          const res = await onScanInterface(ifaceCode, paramValues)
+          const res = interfaceType === 'connector' && connectorInterfaceCode
+            ? await onScanInterface(connectorInterfaceCode, paramValues, 'connector')
+            : interfaceType === 'third_party' && thirdPartyEndpointId
+            ? await onScanInterface('', paramValues, 'third_party', thirdPartyEndpointId)
+            : await onScanInterface(ifaceCode!, paramValues)
 
           // 回填结果映射
           const rmap = scannerConfig.action?.result_map || []

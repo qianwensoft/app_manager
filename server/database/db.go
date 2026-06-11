@@ -101,6 +101,7 @@ var migrateGroups = [][]interface{}{
 		&models.OAuthAuthCode{},
 		&models.ThirdPartyProvider{},
 		&models.ThirdPartyToken{},
+		&models.ThirdPartyApiEndpoint{},
 		&models.AuditLog{},
 		&models.AgentUpdate{},
 		&models.AgentMenuItem{},

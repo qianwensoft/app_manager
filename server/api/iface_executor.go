@@ -401,7 +401,7 @@ func resolveTransactionSteps(iface *models.DataInterface, ds *models.Dataset, ds
 			}
 		}
 		colNames = append(colNames, dbdriver.QuoteColumnIdent(dsSrc.Type, col.Name))
-		placeholders = append(placeholders, ":"+col.Name)
+		placeholders = append(placeholders, fmt.Sprintf("{{%s}}", col.Name))
 	}
 	if len(colNames) == 0 {
 		return nil, fmt.Errorf("table has no writable columns")

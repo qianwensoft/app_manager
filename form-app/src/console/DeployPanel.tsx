@@ -20,7 +20,17 @@ export default function DeployPanel({ app, pages, reload }: Props) {
   const published = app.publish_status === 1
 
   useEffect(() => {
-    authed('/api/devices', 'GET').then(res => setDevices(res?.data || [])).catch(() => {})
+    let cancelled = false
+    authed('/api/devices', 'GET')
+      .then(res => {
+        if (!cancelled) {
+          setDevices(res?.data || [])
+        }
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   const togglePublish = async () => {

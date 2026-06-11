@@ -178,7 +178,7 @@ func TestBuildShapedSQL_DynamicWhereMarker(t *testing.T) {
 	if strings.Contains(out, "/*__DYNAMIC_WHERE__*/") {
 		t.Errorf("marker not replaced: %s", out)
 	}
-	if !strings.Contains(out, ":__shape_filter_0") {
+	if !strings.Contains(out, "{{__shape_filter_0}}") {
 		t.Errorf("expected filter clause spliced at marker, got %s", out)
 	}
 }

@@ -217,7 +217,7 @@ func ResolveLimit(sh IfaceShaping, requestLimit, requestOffset, kindDefault int)
 }
 
 // BuildShapedSQL 在 baseSQL 之上织入声明式过滤、排序、分页（LIMIT/OFFSET）。
-// 过滤参数写入 params（键名 __shape_filter_N），由 RewriteNamedSQLParams 消费。
+// 过滤参数写入 params（键名 __shape_filter_N），由 RewriteNamedSQLParams（{{name}} 占位符）消费。
 // limit<=0 表示不追加 LIMIT/OFFSET（由调用方的扫描层裁剪）。
 func BuildShapedSQL(dsType, baseSQL string, sh IfaceShaping, params map[string]interface{}, limit, offset int) string {
 	out := strings.TrimSpace(baseSQL)
@@ -310,28 +310,28 @@ func buildShapeWhere(dsType string, filters []ShapeFilter, params map[string]int
 		switch op {
 		case "contains":
 			params[pk] = "%" + raw + "%"
-			clauses = append(clauses, fmt.Sprintf("%s LIKE :%s", col, pk))
+			clauses = append(clauses, fmt.Sprintf("%s LIKE {{%s}}", col, pk))
 		case "starts_with":
 			params[pk] = raw + "%"
-			clauses = append(clauses, fmt.Sprintf("%s LIKE :%s", col, pk))
+			clauses = append(clauses, fmt.Sprintf("%s LIKE {{%s}}", col, pk))
 		case "ends_with":
 			params[pk] = "%" + raw
-			clauses = append(clauses, fmt.Sprintf("%s LIKE :%s", col, pk))
+			clauses = append(clauses, fmt.Sprintf("%s LIKE {{%s}}", col, pk))
 		case "gt":
 			params[pk] = val
-			clauses = append(clauses, fmt.Sprintf("%s > :%s", col, pk))
+			clauses = append(clauses, fmt.Sprintf("%s > {{%s}}", col, pk))
 		case "gte":
 			params[pk] = val
-			clauses = append(clauses, fmt.Sprintf("%s >= :%s", col, pk))
+			clauses = append(clauses, fmt.Sprintf("%s >= {{%s}}", col, pk))
 		case "lt":
 			params[pk] = val
-			clauses = append(clauses, fmt.Sprintf("%s < :%s", col, pk))
+			clauses = append(clauses, fmt.Sprintf("%s < {{%s}}", col, pk))
 		case "lte":
 			params[pk] = val
-			clauses = append(clauses, fmt.Sprintf("%s <= :%s", col, pk))
+			clauses = append(clauses, fmt.Sprintf("%s <= {{%s}}", col, pk))
 		case "ne":
 			params[pk] = val
-			clauses = append(clauses, fmt.Sprintf("%s <> :%s", col, pk))
+			clauses = append(clauses, fmt.Sprintf("%s <> {{%s}}", col, pk))
 		case "in":
 			items := strings.Split(raw, ",")
 			var holders []string
@@ -342,14 +342,14 @@ func buildShapeWhere(dsType string, filters []ShapeFilter, params map[string]int
 				}
 				k := fmt.Sprintf("%s_%d", pk, i)
 				params[k] = it
-				holders = append(holders, ":"+k)
+				holders = append(holders, fmt.Sprintf("{{%s}}", k))
 			}
 			if len(holders) > 0 {
 				clauses = append(clauses, fmt.Sprintf("%s IN (%s)", col, strings.Join(holders, ", ")))
 			}
 		default: // eq
 			params[pk] = val
-			clauses = append(clauses, fmt.Sprintf("%s = :%s", col, pk))
+			clauses = append(clauses, fmt.Sprintf("%s = {{%s}}", col, pk))
 		}
 	}
 	return strings.Join(clauses, " AND ")

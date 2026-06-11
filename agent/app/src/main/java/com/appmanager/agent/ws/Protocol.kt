@@ -177,4 +177,7 @@ object CommandAction {
 
     /** 出站连接器「消息」步骤：data.title、data.body（或 text/message）、data.duration_ms */
     const val SHOW_DEVICE_MESSAGE = "show_device_message"
+
+    /** 键盘HID输出：data.input_method、data.text、data.keys、data.delay_ms、data.target_app */
+    const val KEYBOARD_INPUT = "keyboard_input"
 }

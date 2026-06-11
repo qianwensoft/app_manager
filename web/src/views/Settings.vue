@@ -226,8 +226,12 @@
           <el-button type="primary" size="small" @click="openUploadDialog">上传新版本</el-button>
         </div>
         <el-table :data="updates" border>
-          <el-table-column prop="version" label="版本号" width="110" />
-          <el-table-column prop="version_code" label="版本码" width="90" />
+          <el-table-column prop="version" label="版本名称" width="130" />
+          <el-table-column prop="version_code" label="版本号" width="100">
+            <template #default="{ row }">
+              <el-tag size="small" type="info">{{ row.version_code }}</el-tag>
+            </template>
+          </el-table-column>
           <el-table-column prop="package_name" label="包名" min-width="180" show-overflow-tooltip />
           <el-table-column prop="file_name" label="文件名" min-width="160" show-overflow-tooltip />
           <el-table-column prop="changelog" label="更新说明" min-width="160" show-overflow-tooltip />
@@ -266,27 +270,30 @@
             已选择：{{ uploadForm.fileName }}
           </div>
         </el-form-item>
-        <el-form-item label="版本号">
+        <el-form-item label="版本名称">
           <el-input
             v-model="uploadForm.version"
-            placeholder="留空则自动从 APK 解析"
+            placeholder="留空则使用 APK 中的 versionName"
             clearable
           />
-          <div class="form-tip">上传后服务器将自动解析包名与版本，版本号可不填</div>
+          <div class="form-tip">服务器会自动解析 APK 的包名、versionName 和 versionCode</div>
         </el-form-item>
         <el-form-item label="更新说明">
           <el-input v-model="uploadForm.changelog" type="textarea" :rows="3" placeholder="本次更新内容..." />
         </el-form-item>
+        <el-form-item v-if="uploading" label="上传进度">
+          <el-progress :percentage="uploadProgress" :status="uploadProgress >= 100 ? 'success' : undefined" />
+        </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="uploadDialogVisible = false">取消</el-button>
+        <el-button @click="uploadDialogVisible = false" :disabled="uploading">取消</el-button>
         <el-button
           type="primary"
           :loading="uploading"
           :disabled="!uploadForm.file"
           @click="submitUpload"
         >
-          {{ uploading ? '上传中...' : '上传' }}
+          {{ uploading ? `上传中 ${uploadProgress}%` : '上传' }}
         </el-button>
       </template>
     </el-dialog>
@@ -315,6 +322,7 @@ const allowRegister = ref(false)
 const updates = ref([])
 const uploadDialogVisible = ref(false)
 const uploading = ref(false)
+const uploadProgress = ref(0)
 const uploadRef = ref(null)
 const uploadForm = ref({ version: '', changelog: '', file: null, fileName: '' })
 
@@ -586,11 +594,12 @@ const formatUptime = (seconds) => {
 
 const loadUpdates = async () => {
   const res = await listAgentUpdates()
-  updates.value = res.data || []
+  updates.value = res.items || []
 }
 
 const openUploadDialog = () => {
   uploadForm.value = { version: '', changelog: '', file: null, fileName: '' }
+  uploadProgress.value = 0
   uploadDialogVisible.value = true
 }
 
@@ -610,15 +619,22 @@ const submitUpload = async () => {
     return
   }
   uploading.value = true
+  uploadProgress.value = 0
   try {
     const fd = new FormData()
     fd.append('file', uploadForm.value.file)
     fd.append('version', uploadForm.value.version)
     fd.append('changelog', uploadForm.value.changelog)
-    await uploadAgentAPK(fd)
+    await uploadAgentAPK(fd, (progressEvent) => {
+      // 计算上传进度
+      if (progressEvent.total) {
+        uploadProgress.value = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+      }
+    })
     ElMessage.success('上传成功，包名和版本已自动解析')
     uploadDialogVisible.value = false
     uploadForm.value = { version: '', changelog: '', file: null, fileName: '' }
+    uploadProgress.value = 0
     loadUpdates()
   } catch (e) {
     ElMessage.error('上传失败: ' + (e?.response?.data?.error || e.message || '未知错误'))

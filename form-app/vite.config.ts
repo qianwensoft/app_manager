@@ -27,6 +27,7 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: 'dist',
       sourcemap: false,
+      target: ['es2015', 'chrome67'],
     },
     css: {
       preprocessorOptions: {
