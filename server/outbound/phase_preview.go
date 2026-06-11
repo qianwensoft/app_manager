@@ -127,7 +127,7 @@ func buildStepPreviewResult(st models.OutboundConnectorStep, phaseIdx, stepIdx i
 			parts = append(parts, "执行前：event_data→context 已按配置处理")
 		}
 		parts = append(parts, "预览不执行设备端脚本；无 HTTP 响应可写入 context")
-	case "view_url", "message", "broadcast_intent":
+	case "view_url", "message", "broadcast_intent", "keyboard_hid":
 		if before == ContextMergeEventDataJSON {
 			parts = append(parts, "执行前：event_data→context 已按配置处理")
 		} else {

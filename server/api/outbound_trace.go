@@ -288,6 +288,8 @@ func buildStepLabelMap(h gin.H) map[uint]string {
 				m[sid] = "广播 Intent"
 			case "message":
 				m[sid] = "消息提醒"
+			case "keyboard_hid":
+				m[sid] = "键盘输入"
 			case "app_script":
 				cfg, _ := st["config"].(map[string]interface{})
 				var appID uint
@@ -332,6 +334,8 @@ func labelForTraceRow(r traceAggRow, byStep map[uint]string) string {
 		return "广播 Intent"
 	case "message":
 		return "消息提醒"
+	case "keyboard_hid":
+		return "键盘输入"
 	case "app_script":
 		return "应用脚本"
 	default:

@@ -917,6 +917,35 @@ func validateConnectorIn(req *outboundConnectorIn) error {
 				if body == "" {
 					return fmt.Errorf("阶段 %d 步骤 %d：message 须在 config 中提供 body、text 或 message 之一", pi, si)
 				}
+			case "keyboard_hid":
+				if st.Config == nil {
+					return fmt.Errorf("阶段 %d 步骤 %d：keyboard_hid 须在 config 中提供 text 或 keys", pi, si)
+				}
+				method := strings.TrimSpace(strings.ToLower(fmt.Sprint(st.Config["input_method"])))
+				if method == "" || method == "<nil>" {
+					method = "text"
+				}
+				text := strings.TrimSpace(fmt.Sprint(st.Config["text"]))
+				if text == "<nil>" {
+					text = ""
+				}
+				keysArr, _ := st.Config["keys"].([]interface{})
+				hasKeys := false
+				for _, k := range keysArr {
+					if strings.TrimSpace(fmt.Sprint(k)) != "" {
+						hasKeys = true
+						break
+					}
+				}
+				if method == "keys" {
+					if !hasKeys {
+						return fmt.Errorf("阶段 %d 步骤 %d：keyboard_hid 按键序列模式下须提供 keys", pi, si)
+					}
+				} else {
+					if text == "" && !hasKeys {
+						return fmt.Errorf("阶段 %d 步骤 %d：keyboard_hid 的 text 与 keys 不能同时为空", pi, si)
+					}
+				}
 			case "app_script":
 				if st.Config == nil {
 					return fmt.Errorf("阶段 %d 步骤 %d：app_script 须在 config 中提供 app_id", pi, si)
