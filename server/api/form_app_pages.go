@@ -85,7 +85,28 @@ func UpdateFormAppPage(c *gin.Context) {
 		return
 	}
 
-	if err := database.DB.Model(&page).Updates(updates).Error; err != nil {
+	// 只更新前端显式传入的字段，使用 map 避免 GORM 跳过零值
+	updateMap := map[string]any{}
+	if updates.Title != "" {
+		updateMap["title"] = updates.Title
+	}
+	if updates.PageType != "" {
+		updateMap["page_type"] = updates.PageType
+	}
+	if updates.InterfaceCode != "" {
+		updateMap["interface_code"] = updates.InterfaceCode
+	}
+	if updates.ConfigJSON != "" {
+		updateMap["config_json"] = updates.ConfigJSON
+	}
+	if updates.DesignSchema != "" {
+		updateMap["design_schema"] = updates.DesignSchema
+	}
+	if updates.SortOrder != 0 {
+		updateMap["sort_order"] = updates.SortOrder
+	}
+
+	if err := database.DB.Model(&page).Updates(updateMap).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

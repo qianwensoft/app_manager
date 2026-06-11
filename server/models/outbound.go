@@ -68,12 +68,22 @@ type OutboundConnector struct {
 	// LoopCooldownMS 本连接器下发 broadcast_intent 成功后，同设备在冷却期内不再触发（0 关闭）。
 	LoopCooldownMS int `gorm:"column:loop_cooldown_ms;default:0" json:"loop_cooldown_ms"`
 	Priority            int       `gorm:"column:priority;default:0;index" json:"priority"`
-	// TriggerType 触发方式：device_event | http_webhook | http_poll | websocket | stomp | cron | system_event | ...
+	// TriggerType 触发方式：device_event | http_webhook | http_poll | websocket | stomp | cron | system_event | api_call（接口模式）
 	TriggerType string `gorm:"column:trigger_type;size:40;not null;default:device_event" json:"trigger_type"`
 	// TriggerConfigJSON 触发器配置 JSON，结构因 TriggerType 而异。
 	TriggerConfigJSON string `gorm:"column:trigger_config_json;type:text" json:"-"`
 	// WebhookID 当 trigger_type=http_webhook 时，关联到 outbound_webhooks.id（0 表示未绑定）。
 	WebhookID           uint      `gorm:"column:webhook_id;index;default:0" json:"webhook_id"`
+	// InterfaceMode 接口模式：当为 true 时，此连接器可作为接口被调用（支持入参和返回值）
+	InterfaceMode bool `gorm:"column:interface_mode;default:false" json:"interface_mode"`
+	// InterfaceCode 接口编码，当 interface_mode=true 时必填，用于唯一标识此连接器接口
+	InterfaceCode string `gorm:"column:interface_code;size:80;uniqueIndex:idx_interface_code,where:interface_mode=true" json:"interface_code"`
+	// InputParamsJSON 输入参数定义（JSON Schema 格式），描述接口接受的参数
+	InputParamsJSON string `gorm:"column:input_params_json;type:text" json:"input_params_json"`
+	// OutputSchemaJSON 输出结构定义（JSON Schema 格式），描述接口返回的数据结构
+	OutputSchemaJSON string `gorm:"column:output_schema_json;type:text" json:"output_schema_json"`
+	// OutputMappingsJSON 输出参数映射配置（JSON 数组），定义如何从 context 映射到返回结构
+	OutputMappingsJSON string `gorm:"column:output_mappings_json;type:text" json:"output_mappings_json"`
 	Enabled             bool      `gorm:"default:true" json:"enabled"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
@@ -136,11 +146,21 @@ type OutboundConnectorStep struct {
 	ID            uint      `gorm:"primaryKey" json:"id"`
 	PhaseID       uint      `gorm:"column:phase_id;index;not null" json:"phase_id"`
 	SortOrder     int       `gorm:"column:sort_order;default:0" json:"sort_order"`
-	StepType      string    `gorm:"column:step_type;size:40;not null" json:"step_type"`      // http | app_script | broadcast_intent | view_url | message
+	StepType      string    `gorm:"column:step_type;size:40;not null" json:"step_type"`      // http | app_script | broadcast_intent | view_url | message | condition | call_connector
 	EndpointID    uint      `gorm:"column:endpoint_id;index" json:"endpoint_id"`             // 仅 http；其它为 0
 	DelayBeforeMS int       `gorm:"column:delay_before_ms;default:0" json:"delay_before_ms"` // 本步执行前等待
 	DelayAfterMS  int       `gorm:"column:delay_after_ms;default:0" json:"delay_after_ms"`   // 本步执行完成后等待
 	ConfigJSON    string    `gorm:"column:config_json;type:text" json:"-"`
+	// ConditionExpr 条件表达式（仅当 step_type=condition 时使用），JavaScript 表达式，返回布尔值
+	ConditionExpr string `gorm:"column:condition_expr;type:text" json:"condition_expr"`
+	// TrueBranchPhaseID 条件为真时跳转到的阶段 ID（0 表示继续当前流程）
+	TrueBranchPhaseID uint `gorm:"column:true_branch_phase_id;default:0" json:"true_branch_phase_id"`
+	// FalseBranchPhaseID 条件为假时跳转到的阶段 ID（0 表示继续当前流程）
+	FalseBranchPhaseID uint `gorm:"column:false_branch_phase_id;default:0" json:"false_branch_phase_id"`
+	// CallConnectorCode 调用其他连接器的接口编码（仅当 step_type=call_connector 时使用）
+	CallConnectorCode string `gorm:"column:call_connector_code;size:80" json:"call_connector_code"`
+	// CallParamsJSON 调用连接器时的参数映射（JSON 对象），支持 {{placeholder}} 占位符
+	CallParamsJSON string `gorm:"column:call_params_json;type:text" json:"call_params_json"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }

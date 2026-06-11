@@ -294,6 +294,21 @@ func SetupRouter() *gin.Engine {
 	{
 		obBase.GET("/connectors/:id/device-states", auth.RequireRole("admin", "operator", "viewer"), GetOutboundConnectorDeviceStates)
 		obBase.GET("/connectors", auth.RequireRole("admin", "operator", "viewer"), ListOutboundConnectors)
+
+		// 连接器接口模式（所有认证用户可调用）
+		obBase.GET("/connector-interfaces", ListConnectorInterfaces)
+		obBase.GET("/connector-interfaces/:code", GetConnectorInterface)
+		obBase.POST("/connector-interfaces/call", CallConnectorInterface)
+		// 通用调用入口（支持 GET、POST、PUT、DELETE）
+		obBase.GET("/connector-interfaces/:code/invoke", CallConnectorInterfaceByCode)
+		obBase.POST("/connector-interfaces/:code/invoke", CallConnectorInterfaceByCode)
+		obBase.PUT("/connector-interfaces/:code/invoke", CallConnectorInterfaceByCode)
+		obBase.DELETE("/connector-interfaces/:code/invoke", CallConnectorInterfaceByCode)
+		obBase.PATCH("/connector-interfaces/:code/invoke", CallConnectorInterfaceByCode)
+
+		// 外部应用接口调用（所有认证用户可调用，用于 form-app 等场景）
+		obBase.POST("/endpoints/:id/call", CallOutboundEndpoint)
+
 		ob := obBase.Group("", auth.RequireRole("admin", "operator"))
 		{
 			ob.GET("/apps", ListOutboundApps)
@@ -420,6 +435,7 @@ func SetupRouter() *gin.Engine {
 		dstack.PUT("/datasets/:id/structures/:sid", auth.RequireRole("admin", "operator"), UpdateDataStructure)
 		dstack.DELETE("/datasets/:id/structures/:sid", auth.RequireRole("admin", "operator"), DeleteDataStructure)
 		dstack.POST("/interfaces/:id/debug", auth.RequireRole("admin", "operator"), DebugDataInterface)
+		dstack.POST("/interfaces/:id/invoke", auth.RequireRole("admin", "operator", "viewer"), InvokeDataInterfaceForClient)
 		dstack.GET("/interfaces/:id/mock-params", auth.RequireRole("admin", "operator"), MockParamsInterface)
 		dstack.GET("/interfaces/:id/param-schema", auth.RequireRole("admin", "operator"), GetInterfaceParamSchema)
 		dstack.POST("/datasets/:id/generate-static-crud-interfaces", auth.RequireRole("admin", "operator"), GenerateStaticCrudInterfaces)
@@ -554,7 +570,17 @@ func SetupRouter() *gin.Engine {
 		tp.GET("/:id/wechat/callback", WechatCallback)
 		tp.POST("/:id/wechat/refresh", WechatRefresh)
 		tp.POST("/:id/wechat/ticket", WechatTicket)
+
+		// API Endpoints
+		tp.GET("/endpoints", ListThirdPartyApiEndpoints)
+		tp.POST("/endpoints", CreateThirdPartyApiEndpoint)
+		tp.GET("/endpoints/:id", GetThirdPartyApiEndpoint)
+		tp.PUT("/endpoints/:id", UpdateThirdPartyApiEndpoint)
+		tp.DELETE("/endpoints/:id", DeleteThirdPartyApiEndpoint)
 	}
+
+	// Third party API call (accessible to operators for form-app scanner)
+	r.POST("/api/thirdparty/call", auth.AuthMiddleware(), CallThirdPartyApi)
 
 	// WebSocket
 	r.GET("/ws/stomp", StompWSAuth, StompWS)
@@ -612,7 +638,7 @@ func SetupRouter() *gin.Engine {
 			return
 		}
 		if len(path) >= 10 && path[:10] == "/form-app/" {
-			c.File("./web/dist/form-app/index.html")
+			c.File(formAppDir + "/index.html")
 			return
 		}
 		c.File("./web/dist/index.html")

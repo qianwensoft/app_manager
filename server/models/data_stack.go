@@ -100,7 +100,13 @@ type DataInterface struct {
 	// SchemaJSON 接口关联的字段 schema（JSON Schema 格式），用于模拟数据生成与文档。
 	// 自动生成的接口由 GenerateCrudInterfaces 写入；手动接口可自由编辑。
 	StepsJSON   string `gorm:"type:text" json:"steps_json"`   // 事务接口：SQL 步骤数组 JSON
-		SchemaJSON string `gorm:"type:text" json:"schema_json"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	SchemaJSON  string `gorm:"type:text" json:"schema_json"`
+	// 声明式整形（数据集深度定制）：空值=关闭，向后兼容。仅作用于 query/queryOne（部分作用于 static）。
+	ParamContractJSON string    `gorm:"type:text" json:"param_contract_json"` // []ParamSpec：参数契约（类型/必填/枚举/范围/正则/默认）
+	FieldMappingJSON  string    `gorm:"type:text" json:"field_mapping_json"`  // ProjectionSpec：输出字段投影/重命名
+	ExtraFiltersJSON  string    `gorm:"type:text" json:"extra_filters_json"`  // []ShapeFilter：附加过滤条件
+	SortJSON          string    `gorm:"type:text" json:"sort_json"`           // []SortSpec：排序
+	PaginationJSON    string    `gorm:"type:text" json:"pagination_json"`     // PaginationSpec：分页默认值+上限
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }

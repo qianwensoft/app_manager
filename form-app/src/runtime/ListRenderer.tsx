@@ -37,8 +37,19 @@ export default function ListRenderer({
     setLoading(true)
     try {
       const res = await onQuery({ ...queryParams, page: p, page_size: pageSize })
-      setData(res.data || [])
+      const resultData = res.data || []
+      setData(resultData)
       setTotal(res.total || 0)
+
+      // 调试信息：如果有数据但没有列，提示用户
+      if (resultData.length > 0 && fields.length === 0) {
+        console.warn('ListRenderer: 数据已加载但未配置字段定义', {
+          dataCount: resultData.length,
+          sampleRow: resultData[0],
+          availableKeys: Object.keys(resultData[0] || {})
+        })
+        message.warning('列表数据已加载，但未配置显示字段，请在页面编辑器中添加字段定义')
+      }
     } catch (e: any) {
       message.error(e.message || '加载失败')
     } finally {
@@ -138,25 +149,47 @@ export default function ListRenderer({
           )}
         </div>
       </div>
-      <Table
-        dataSource={data}
-        columns={columns}
-        loading={loading}
-        rowKey="id"
-        pagination={{
-          current: page,
-          pageSize,
-          total,
-          onChange: p => {
-            setPage(p)
-            loadData(p)
-          },
-        }}
-        onRow={record => ({
-          onClick: () => onRowClick?.(record),
-          style: { cursor: onRowClick ? 'pointer' : 'default' },
-        })}
-      />
+
+      {fields.length === 0 && !loading ? (
+        <div style={{
+          padding: 60,
+          textAlign: 'center',
+          background: '#fafafa',
+          border: '1px dashed #d9d9d9',
+          borderRadius: 8,
+        }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>📋</div>
+          <div style={{ fontSize: 16, color: '#595959', marginBottom: 8 }}>未配置列表字段</div>
+          <div style={{ fontSize: 14, color: '#8c8c8c' }}>
+            请在页面编辑器中添加字段定义来显示数据列
+          </div>
+          {data.length > 0 && (
+            <div style={{ fontSize: 12, color: '#1890ff', marginTop: 12 }}>
+              已加载 {data.length} 条数据，但缺少字段配置
+            </div>
+          )}
+        </div>
+      ) : (
+        <Table
+          dataSource={data}
+          columns={columns}
+          loading={loading}
+          rowKey="id"
+          pagination={{
+            current: page,
+            pageSize,
+            total,
+            onChange: p => {
+              setPage(p)
+              loadData(p)
+            },
+          }}
+          onRow={record => ({
+            onClick: () => onRowClick?.(record),
+            style: { cursor: onRowClick ? 'pointer' : 'default' },
+          })}
+        />
+      )}
     </div>
   )
 }

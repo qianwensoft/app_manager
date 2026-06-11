@@ -262,6 +262,7 @@ object CommandDispatcher {
                             }
                         }
                     }
+                    CommandAction.KEYBOARD_INPUT -> SystemCommandHandler.keyboardInput(msg, service)
                     else -> Log.w(TAG, "Unknown command action: ${msg.action}")
                 }
             }

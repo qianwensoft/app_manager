@@ -140,6 +140,17 @@ export interface DataInterface {
   steps_json: string
   /** JSON Schema for documentation and mock data generation */
   schema_json: string
+  /** Declarative shaping (deep customization over the dataset). Empty = off. */
+  /** Param contract: []ParamSpec (type/required/enum/min/max/pattern/default) */
+  param_contract_json: string
+  /** Output field projection/rename: ProjectionSpec */
+  field_mapping_json: string
+  /** Extra declarative filter conditions: []ShapeFilter */
+  extra_filters_json: string
+  /** Sort spec: []SortSpec */
+  sort_json: string
+  /** Pagination defaults + caps: PaginationSpec */
+  pagination_json: string
   created_at: string
   updated_at: string
 }

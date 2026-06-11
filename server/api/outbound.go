@@ -754,6 +754,11 @@ type outboundConnectorIn struct {
 	TriggerType         string                 `json:"trigger_type"`
 	TriggerConfig       map[string]interface{} `json:"trigger_config"`
 	WebhookID           uint                   `json:"webhook_id"`
+	InterfaceMode       bool                   `json:"interface_mode"`
+	InterfaceCode       string                 `json:"interface_code"`
+	InputParamsJSON     string                 `json:"input_params_json"`
+	OutputSchemaJSON    string                 `json:"output_schema_json"`
+	OutputMappingsJSON  string                 `json:"output_mappings_json"`
 }
 
 func validateStepContextMerge(pi, si int, stepType string, cfg map[string]interface{}) error {
@@ -1423,6 +1428,11 @@ func UpdateOutboundConnector(c *gin.Context) {
 	if req.TriggerConfig != nil {
 		co.TriggerConfigJSON = marshalTriggerConfig(req.TriggerConfig)
 	}
+	co.InterfaceMode = req.InterfaceMode
+	co.InterfaceCode = req.InterfaceCode
+	co.InputParamsJSON = req.InputParamsJSON
+	co.OutputSchemaJSON = req.OutputSchemaJSON
+	co.OutputMappingsJSON = req.OutputMappingsJSON
 
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(&co).Error; err != nil {

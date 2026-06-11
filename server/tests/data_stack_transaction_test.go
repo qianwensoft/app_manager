@@ -143,14 +143,14 @@ func setupTransactionFixture(t *testing.T) txFixture {
 		t.Fatal(err)
 	}
 
-	steps := `["INSERT INTO tx_demo (name, qty) VALUES (:name, :qty)"]`
+	steps := `["INSERT INTO tx_demo (name, qty) VALUES ({{name}}, {{qty}})"]`
 	ds := models.Dataset{
 		Code:         dsCode,
 		DataSourceID: &src.ID,
 		Name:         "TX E2E Dataset",
 		Kind:         "transaction",
 		StepsJSON:    steps,
-		Definition:   `SELECT * FROM tx_demo WHERE name = :name`,
+		Definition:   `SELECT * FROM tx_demo WHERE name = {{name}}`,
 	}
 	if err := database.DB.Create(&ds).Error; err != nil {
 		t.Fatal(err)

@@ -7,6 +7,7 @@ import {
 } from 'antd'
 import FieldRenderer from '@/runtime/FieldRenderer'
 import type { FieldDef } from '@/runtime/types'
+import { fieldDefsToSchema } from './schemaConverter'
 
 // ── 扫码模块类型 ──────────────────────────────────────────────────────
 
@@ -25,7 +26,10 @@ interface ScanResultMap {
 }
 
 interface ScanAction {
+  interface_type?: 'internal' | 'third_party' | 'connector'  // 接口类型
   interface_code?: string
+  third_party_endpoint_id?: number  // 第三方接口端点 ID（OutboundEndpoint）
+  connector_interface_code?: string   // 连接器接口编码
   scan_param?: string
   extra_params?: Array<{ param_key: string; src: string }>
   result_map?: ScanResultMap[]
@@ -69,6 +73,10 @@ export default function PageEditorPage() {
 
   // 接口下拉
   const [interfaceOptions, setInterfaceOptions] = useState<{ value: string; label: string }[]>([])
+  // 第三方接口端点下拉
+  const [thirdPartyEndpointOptions, setThirdPartyEndpointOptions] = useState<{ value: string; label: string }[]>([])
+  // 连接器接口下拉
+  const [connectorInterfaceOptions, setConnectorInterfaceOptions] = useState<{ value: string; label: string }[]>([])
 
   // 预览抽屉
   const [previewOpen, setPreviewOpen] = useState(false)
@@ -79,6 +87,8 @@ export default function PageEditorPage() {
   useEffect(() => {
     loadPage()
     loadInterfaces()
+    loadThirdPartyEndpoints()
+    loadConnectorInterfaces()
   }, [pageId])
 
   const loadInterfaces = async () => {
@@ -88,6 +98,29 @@ export default function PageEditorPage() {
       setInterfaceOptions(list.map((it: any) => ({
         value: it.code,
         label: `${it.code}${it.name ? `（${it.name}）` : ''}`,
+      })))
+    } catch { /* 静默 */ }
+  }
+
+  const loadThirdPartyEndpoints = async () => {
+    try {
+      // 加载外部应用的接口（OutboundEndpoint）
+      const res = await authed('/api/outbound/endpoints?page_size=500', 'GET')
+      const list: any[] = Array.isArray(res.data) ? res.data : []
+      setThirdPartyEndpointOptions(list.map((it: any) => ({
+        value: String(it.id),
+        label: `${it.name}${it.app?.name ? ` [${it.app.name}]` : ''}`,
+      })))
+    } catch { /* 静默 */ }
+  }
+
+  const loadConnectorInterfaces = async () => {
+    try {
+      const res = await authed('/api/outbound/connector-interfaces', 'GET')
+      const list: any[] = Array.isArray(res.data) ? res.data : []
+      setConnectorInterfaceOptions(list.map((it: any) => ({
+        value: it.interface_code,
+        label: `${it.interface_code}${it.name ? ` - ${it.name}` : ''}`,
       })))
     } catch { /* 静默 */ }
   }
@@ -112,13 +145,18 @@ export default function PageEditorPage() {
     setSaving(true)
     try {
       const config = { field_definitions: fields, scanner: scannerConfig }
+
+      // 同时生成并保存 design_schema
+      const designSchema = fieldDefsToSchema(fields)
+
       await authed(`/api/form-app/pages/${pageId}`, 'PUT', {
         title,
         interface_code: interfaceCode,
         page_type: pageType,
         config_json: JSON.stringify(config),
+        design_schema: JSON.stringify(designSchema),
       })
-      message.success('保存成功')
+      message.success('保存成功，设计器布局已同步')
     } catch (e: any) {
       message.error(e.message)
     } finally {
@@ -281,6 +319,8 @@ export default function PageEditorPage() {
             onChange={setScannerConfig}
             fields={fields}
             interfaceOptions={interfaceOptions}
+            thirdPartyEndpointOptions={thirdPartyEndpointOptions}
+            connectorInterfaceOptions={connectorInterfaceOptions}
           />
 
           <div style={{ marginTop: 20, display: 'flex', gap: 8 }}>
@@ -329,11 +369,15 @@ function ScannerConfigSection({
   onChange,
   fields,
   interfaceOptions,
+  thirdPartyEndpointOptions,
+  connectorInterfaceOptions,
 }: {
   scannerConfig: ScannerConfig
   onChange: (cfg: ScannerConfig) => void
   fields: FieldDef[]
   interfaceOptions: { value: string; label: string }[]
+  thirdPartyEndpointOptions: { value: string; label: string }[]
+  connectorInterfaceOptions: { value: string; label: string }[]
 }) {
   const fieldOptions = fields.map(f => ({ value: f.field, label: f.label || f.field }))
 
@@ -472,23 +516,72 @@ function ScannerConfigSection({
             <Collapse.Panel key="action" header={<span style={{ fontSize: 12, color: '#374151' }}>触发动作（调用接口）</span>}>
               <div>
                 <div style={rowStyle}>
-                  <label style={labelStyle}>调用接口编码</label>
-                  <AutoComplete
+                  <label style={labelStyle}>接口类型</label>
+                  <Select
                     size="small"
                     style={{ width: '100%' }}
-                    value={scannerConfig.action?.interface_code}
-                    onChange={v => updAction({ interface_code: v })}
-                    options={interfaceOptions.filter(o =>
-                      !scannerConfig.action?.interface_code ||
-                      o.value.includes(scannerConfig.action.interface_code) ||
-                      o.label.includes(scannerConfig.action.interface_code)
-                    )}
-                    placeholder="接口 code（留空则不调用接口）"
-                    allowClear
-                  />
+                    value={scannerConfig.action?.interface_type || 'internal'}
+                    onChange={v => updAction({ interface_type: v, interface_code: undefined, third_party_endpoint_id: undefined, connector_interface_code: undefined })}
+                  >
+                    <Select.Option value="internal">内部数据接口</Select.Option>
+                    <Select.Option value="third_party">第三方应用接口</Select.Option>
+                    <Select.Option value="connector">连接器接口</Select.Option>
+                  </Select>
                 </div>
 
-                {scannerConfig.action?.interface_code && (
+                {scannerConfig.action?.interface_type === 'connector' ? (
+                  <div style={rowStyle}>
+                    <label style={labelStyle}>连接器接口</label>
+                    <AutoComplete
+                      size="small"
+                      style={{ width: '100%' }}
+                      value={scannerConfig.action?.connector_interface_code}
+                      onChange={v => updAction({ connector_interface_code: v })}
+                      options={connectorInterfaceOptions.filter(o =>
+                        !scannerConfig.action?.connector_interface_code ||
+                        o.value.includes(scannerConfig.action.connector_interface_code) ||
+                        o.label.includes(scannerConfig.action.connector_interface_code)
+                      )}
+                      placeholder="选择连接器接口（留空则不调用）"
+                      allowClear
+                    />
+                  </div>
+                ) : scannerConfig.action?.interface_type === 'third_party' ? (
+                  <div style={rowStyle}>
+                    <label style={labelStyle}>第三方接口端点</label>
+                    <AutoComplete
+                      size="small"
+                      style={{ width: '100%' }}
+                      value={scannerConfig.action?.third_party_endpoint_id ? String(scannerConfig.action.third_party_endpoint_id) : undefined}
+                      onChange={v => updAction({ third_party_endpoint_id: v ? Number(v) : undefined })}
+                      options={thirdPartyEndpointOptions.filter(o => {
+                        const searchValue = scannerConfig.action?.third_party_endpoint_id ? String(scannerConfig.action.third_party_endpoint_id) : ''
+                        return !searchValue || o.value.includes(searchValue) || o.label.includes(searchValue)
+                      })}
+                      placeholder="选择第三方接口端点（留空则不调用）"
+                      allowClear
+                    />
+                  </div>
+                ) : (
+                  <div style={rowStyle}>
+                    <label style={labelStyle}>调用接口编码</label>
+                    <AutoComplete
+                      size="small"
+                      style={{ width: '100%' }}
+                      value={scannerConfig.action?.interface_code}
+                      onChange={v => updAction({ interface_code: v })}
+                      options={interfaceOptions.filter(o =>
+                        !scannerConfig.action?.interface_code ||
+                        o.value.includes(scannerConfig.action.interface_code) ||
+                        o.label.includes(scannerConfig.action.interface_code)
+                      )}
+                      placeholder="接口 code（留空则不调用接口）"
+                      allowClear
+                    />
+                  </div>
+                )}
+
+                {(scannerConfig.action?.interface_code || scannerConfig.action?.third_party_endpoint_id || scannerConfig.action?.connector_interface_code) && (
                   <>
                     <div style={rowStyle}>
                       <Tooltip title="扫码值传入接口的参数名，默认 code">

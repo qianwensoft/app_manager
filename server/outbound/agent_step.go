@@ -198,6 +198,75 @@ func ExecuteAgentOutboundStep(db *gorm.DB, connector models.OutboundConnector, s
 		d.DetailJSON = MarshalAgentDeliveryDetail(st, rawCfg, cmdID, msg, "")
 		_ = db.Create(&d).Error
 		return d
+	case "keyboard_hid":
+		var m struct {
+			Text        string   `json:"text"`
+			Keys        []string `json:"keys"`
+			DelayMs     int      `json:"delay_ms"`
+			TargetApp   string   `json:"target_app"`
+			InputMethod string   `json:"input_method"`
+		}
+		if err := json.Unmarshal([]byte(rawCfg), &m); err != nil {
+			d.Error = "config_json: " + err.Error()
+			d.DurationMS = time.Since(t0).Milliseconds()
+			d.DetailJSON = MarshalAgentDeliveryDetail(st, rawCfg, "", nil, d.Error)
+			_ = db.Create(&d).Error
+			return d
+		}
+		method := strings.TrimSpace(m.InputMethod)
+		if method == "" {
+			method = "text"
+		}
+		if method == "text" || method == "mixed" {
+			if strings.TrimSpace(m.Text) == "" && len(m.Keys) == 0 {
+				d.Error = "text 和 keys 不能同时为空"
+				d.DurationMS = time.Since(t0).Milliseconds()
+				d.DetailJSON = MarshalAgentDeliveryDetail(st, rawCfg, "", nil, d.Error)
+				_ = db.Create(&d).Error
+				return d
+			}
+		} else if method == "keys" {
+			if len(m.Keys) == 0 {
+				d.Error = "keys 模式下必须提供按键序列"
+				d.DurationMS = time.Since(t0).Milliseconds()
+				d.DetailJSON = MarshalAgentDeliveryDetail(st, rawCfg, "", nil, d.Error)
+				_ = db.Create(&d).Error
+				return d
+			}
+		}
+		delayMs := m.DelayMs
+		if delayMs < 0 {
+			delayMs = 50
+		}
+		if delayMs > 5000 {
+			delayMs = 5000
+		}
+		data := map[string]interface{}{
+			"input_method": method,
+			"delay_ms":     delayMs,
+		}
+		if m.Text != "" {
+			data["text"] = m.Text
+		}
+		if len(m.Keys) > 0 {
+			data["keys"] = m.Keys
+		}
+		if m.TargetApp != "" {
+			data["target_app"] = strings.TrimSpace(m.TargetApp)
+		}
+		msg := map[string]interface{}{
+			"type":       "command",
+			"action":     "keyboard_input",
+			"command_id": cmdID,
+			"data":       data,
+		}
+		_ = agent.AgentHub.Send(key, msg)
+		d.Status = "success"
+		d.Error = ""
+		d.DurationMS = time.Since(t0).Milliseconds()
+		d.DetailJSON = MarshalAgentDeliveryDetail(st, rawCfg, cmdID, msg, "")
+		_ = db.Create(&d).Error
+		return d
 	default:
 		d.Error = "未知 step_type: " + st
 		d.DurationMS = time.Since(t0).Milliseconds()

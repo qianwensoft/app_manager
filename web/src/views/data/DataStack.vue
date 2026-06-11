@@ -83,64 +83,11 @@
     </el-tab-pane>
   </el-tabs>
 
-  <el-dialog v-model="dlgSrc" :title="srcForm.id ? '数据源' : '新建数据源'" width="720px">
-    <el-form label-width="108px">
-      <el-form-item label="编码" required>
-        <el-input v-model="srcForm.code" placeholder="字母开头，如 main_db、src_orders" />
-        <div class="field-tip">管理端 API 与文档链接优先使用编码；留空则保存时由名称自动生成。</div>
-      </el-form-item>
-      <el-form-item label="名称"><el-input v-model="srcForm.name" /></el-form-item>
-      <el-form-item label="类型">
-        <el-select v-model="srcForm.type" style="width: 100%" @change="onSrcTypeChange">
-          <el-option label="sqlite" value="sqlite" />
-          <el-option label="mysql" value="mysql" />
-          <el-option label="postgres" value="postgres" />
-          <el-option label="sqlserver" value="sqlserver" />
-        </el-select>
-      </el-form-item>
-      <el-collapse>
-        <el-collapse-item title="常用连接字段（生成 DSN）" name="conn">
-          <template v-if="srcForm.type === 'sqlite'">
-            <el-form-item label="文件路径">
-              <el-input v-model="srcConn.sqlite_path" placeholder="./data/my.db 或 file:..." />
-            </el-form-item>
-          </template>
-          <template v-else>
-            <el-form-item label="主机"><el-input v-model="srcConn.host" placeholder="127.0.0.1" /></el-form-item>
-            <el-form-item label="端口">
-              <el-input-number v-model="srcConn.port" :min="1" :max="65535" controls-position="right" style="width: 160px" />
-            </el-form-item>
-            <el-form-item label="用户"><el-input v-model="srcConn.user" /></el-form-item>
-            <el-form-item label="密码"><el-input v-model="srcConn.password" type="password" show-password /></el-form-item>
-            <el-form-item label="数据库"><el-input v-model="srcConn.database" /></el-form-item>
-          </template>
-          <el-button type="primary" plain size="small" @click="applyBuildDsnFromForm">用上方字段生成 DSN</el-button>
-        </el-collapse-item>
-        <el-collapse-item title="连接池（写入 config_json，打开连接时生效）" name="pool">
-          <el-form-item label="MaxOpen">
-            <el-input-number v-model="srcPool.max_open" :min="0" :max="5000" controls-position="right" style="width: 160px" />
-            <span class="field-tip" style="margin-left: 8px">0 表示不设置</span>
-          </el-form-item>
-          <el-form-item label="MaxIdle">
-            <el-input-number v-model="srcPool.max_idle" :min="0" :max="5000" controls-position="right" style="width: 160px" />
-          </el-form-item>
-          <el-form-item label="连接最长存活秒">
-            <el-input-number v-model="srcPool.conn_max_lifetime_sec" :min="0" :max="86400" controls-position="right" style="width: 160px" />
-            <span class="field-tip" style="margin-left: 8px">0 表示不限制</span>
-          </el-form-item>
-        </el-collapse-item>
-      </el-collapse>
-      <el-form-item label="DSN">
-        <el-input v-model="srcForm.dsn" type="textarea" :rows="3" />
-        <div class="field-tip">可直接编辑；也可用上方「生成 DSN」填充。连接池参数保存在 config_json。</div>
-      </el-form-item>
-      <el-form-item label="只读"><el-switch v-model="srcForm.read_only" /></el-form-item>
-    </el-form>
-    <template #footer>
-      <el-button @click="dlgSrc = false">取消</el-button>
-      <el-button type="primary" @click="saveSrc">保存</el-button>
-    </template>
-  </el-dialog>
+  <DataSourceForm
+    v-model="dlgSrc"
+    :form="srcForm"
+    @saved="onDataSourceSaved"
+  />
 
   <el-dialog
     v-model="dlgStructures"
@@ -333,116 +280,21 @@
     @gen-crud="onGenCrudFromDataset"
   />
 
-  <el-dialog v-model="dlgIface" :title="ifaceForm.id ? '数据接口' : '新建接口'" width="640px">
-    <el-form label-width="100px">
-      <el-form-item label="名称"><el-input v-model="ifaceForm.name" /></el-form-item>
-      <el-form-item label="编码" required>
-        <el-input v-model="ifaceForm.code" placeholder="开放路径 /api/open/v1/data/{编码}" />
-        <div class="field-tip">第三方调用以编码为准；留空保存时将沿用 slug。</div>
-      </el-form-item>
-      <el-form-item label="slug">
-        <el-input v-model="ifaceForm.slug" placeholder="可与编码相同；须字母开头 2–50 位" />
-      </el-form-item>
-      <el-form-item label="分类"><el-input v-model="ifaceForm.category" placeholder="接口侧分类" /></el-form-item>
-      <el-form-item label="类型">
-        <el-select v-model="ifaceForm.kind" style="width: 100%" @change="onIfaceKindChange">
-          <el-option label="query" value="query" />
-          <el-option label="queryOne" value="queryOne" />
-          <el-option label="transaction" value="transaction" />
-        </el-select>
-        <div class="field-tip">query 返回列表；queryOne 返回单条记录；transaction 仅可选「事务」类数据集。</div>
-      </el-form-item>
-      <el-form-item label="数据集" required>
-        <el-select
-          v-model="ifaceForm.dataset_id"
-          placeholder="请选择数据集"
-          filterable
-          style="width: 100%"
-          @change="onIfaceDatasetChange"
-        >
-          <el-option
-            v-for="d in datasetsForIfaceKind(ifaceForm.kind)"
-            :key="d.id"
-            :label="`${d.name} (${d.code || d.id}) · ${datasetRowShapeLabel(d)}`"
-            :value="d.id"
-          />
-        </el-select>
-      </el-form-item>
-      <el-form-item v-if="ifaceForm.kind === 'query' || ifaceForm.kind === 'queryOne'" label="数据结构">
-        <el-select
-          v-model="ifaceForm.data_structure_id"
-          clearable
-          filterable
-          placeholder="可选：绑定列契约与默认参数"
-          style="width: 100%"
-        >
-          <el-option v-for="s in ifaceStructureList" :key="s.id" :label="`${s.name} (${s.code})`" :value="s.id" />
-        </el-select>
-      </el-form-item>
-      <el-form-item v-if="ifaceForm.kind === 'query' || ifaceForm.kind === 'queryOne'" label="接口默认参数">
-        <el-input v-model="ifaceForm.param_defaults_json" type="textarea" :rows="3" placeholder='{"limit":200} — 仅补充请求未传的键' />
-      </el-form-item>
-      <template v-if="(ifaceForm.kind === 'query' || ifaceForm.kind === 'queryOne') && !ifaceForm.static_crud_op && ifaceSqlParamCandidates.length">
-        <el-form-item label="接口参数化">
-          <el-switch v-model="ifaceParamSyncEnabled" active-text="保存时写入数据集 param_schema" inactive-text="不同步" />
-          <div class="field-tip">
-            从当前数据集 SQL 的 <code>:name</code> 占位符中<strong>勾选</strong>要纳入参数说明的项；保存接口成功后写入绑定数据集的
-            <code>param_schema</code>（JSON Schema），供开放调试、补全与文档。多接口共用同一数据集时以<strong>最后一次保存</strong>为准。
-          </div>
-        </el-form-item>
-        <el-form-item v-if="ifaceParamSyncEnabled" label="暴露的参数">
-          <div class="row-flex iface-param-toolbar">
-            <el-button link type="primary" size="small" @click="ifaceSelectAllSqlParams">全选</el-button>
-            <el-button link size="small" @click="ifaceClearSqlParams">全不选</el-button>
-            <el-button link size="small" @click="syncIfaceParamSelectionFromDataset">按 SQL 重置候选</el-button>
-          </div>
-          <el-checkbox-group v-model="ifaceSelectedSqlParams" class="iface-param-checks">
-            <el-checkbox v-for="k in ifaceSqlParamCandidates" :key="k" :label="k">
-              <code>:{{ k }}</code>
-            </el-checkbox>
-          </el-checkbox-group>
-        </el-form-item>
-      </template>
-      <el-form-item v-if="ifaceForm.static_crud_op" label="静态CRUD">
-        <el-input :model-value="ifaceForm.static_crud_op" disabled />
-        <span class="field-tip">由「生成CRUD接口」自动写入；勿手改 slug 前缀以免与开放路由不一致。</span>
-      </el-form-item>
-      <el-form-item v-if="ifaceForm.kind === 'transaction'" label="执行步骤">
-        <el-input
-          v-model="ifaceForm.steps_json"
-          type="textarea"
-          :rows="5"
-          placeholder='[{"sql":"INSERT INTO `t` (`name`) VALUES (:name)","label":"新增"}]'
-        />
-        <div class="field-tip">JSON 数组，每项 {"sql":"...","label":"..."}；留空则使用数据集的 steps_json。</div>
-      </el-form-item>
-      <el-form-item label="字段 Schema">
-        <el-input
-          v-model="ifaceForm.schema_json"
-          type="textarea"
-          :rows="5"
-          :readonly="!!ifaceForm.static_crud_op"
-          placeholder='{"type":"object","properties":{"id":{"type":"number"},...}}'
-        />
-        <div class="row-flex" style="gap:8px;margin-top:4px">
-          <el-button
-            v-if="!ifaceForm.static_crud_op"
-            link
-            type="primary"
-            size="small"
-            @click="mergeIfaceSchemaFromDataset"
-          >补全（从数据集 param_schema 合并）</el-button>
-          <span class="field-tip" style="margin:0">
-            {{ ifaceForm.static_crud_op ? '由生成时自动写入，只读。' : '可选；用于一键生成模拟数据与接口文档。' }}
-          </span>
-        </div>
-      </el-form-item>
-    </el-form>
-    <template #footer>
-      <el-button @click="dlgIface = false">取消</el-button>
-      <el-button type="primary" @click="saveIface">保存</el-button>
-    </template>
-  </el-dialog>
+  <DataInterfaceForm
+    v-model="dlgIface"
+    :form="ifaceForm"
+    :datasets="datasets"
+    :structure-list="ifaceStructureList"
+    :sql-param-candidates="ifaceSqlParamCandidates"
+    :initial-param-sync-enabled="ifaceParamSyncEnabled"
+    :initial-selected-sql-params="ifaceSelectedSqlParams"
+    @save="saveIface"
+    @kind-change="onIfaceKindChange"
+    @dataset-change="onIfaceDatasetChange"
+    @merge-schema-from-dataset="mergeIfaceSchemaFromDataset"
+    @update:param-sync="ifaceParamSyncEnabled = $event"
+    @update:selected-params="ifaceSelectedSqlParams = $event"
+  />
 
   <el-dialog v-model="dlgIfaceMock" title="模拟数据" width="640px" destroy-on-close>
     <div v-if="ifaceMockJson" style="position:relative">
@@ -896,6 +748,8 @@ import SqlDialectEditor from '@/components/SqlDialectEditor.vue'
 import JsonParamValuesEditor from '@/components/JsonParamValuesEditor.vue'
 import CreateTableColumnDesigner from '@/components/CreateTableColumnDesigner.vue'
 import DatasetForm from './DatasetForm.vue'
+import DataSourceForm from './DataSourceForm.vue'
+import DataInterfaceForm from './DataInterfaceForm.vue'
 import { defaultCreateColumns, suggestedSqlTypes, normalizeDialectKey, quoteIdent } from '@/utils/createTableDdl.js'
 import { buildDsnFromFields, mergeDataSourceConfigJson } from '@/utils/sqlDsn.js'
 
@@ -1062,7 +916,12 @@ const ifaceForm = ref({
   param_defaults_json: '',
   static_crud_op: '',
   schema_json: '',
-  steps_json: ''
+  steps_json: '',
+  param_contract_json: '',
+  field_mapping_json: '',
+  extra_filters_json: '',
+  sort_json: '',
+  pagination_json: ''
 })
 
 /** 查询接口：是否将所选 SQL 参数写入绑定数据集的 param_schema */
@@ -1756,6 +1615,9 @@ const saveSrc = async () => {
   else await api.createDataSource(payload)
   dlgSrc.value = false
   ElMessage.success('已保存')
+  loadAll()
+}
+const onDataSourceSaved = () => {
   loadAll()
 }
 const testSrc = async row => {
@@ -3031,7 +2893,12 @@ const openIface = row => {
         data_structure_id: row.data_structure_id ?? null,
         param_defaults_json: row.param_defaults_json != null ? String(row.param_defaults_json) : '',
         schema_json: row.schema_json != null ? String(row.schema_json) : '',
-        steps_json: row.steps_json != null ? String(row.steps_json) : ''
+        steps_json: row.steps_json != null ? String(row.steps_json) : '',
+        param_contract_json: row.param_contract_json != null ? String(row.param_contract_json) : '',
+        field_mapping_json: row.field_mapping_json != null ? String(row.field_mapping_json) : '',
+        extra_filters_json: row.extra_filters_json != null ? String(row.extra_filters_json) : '',
+        sort_json: row.sort_json != null ? String(row.sort_json) : '',
+        pagination_json: row.pagination_json != null ? String(row.pagination_json) : ''
       }
     : {
         id: null,
@@ -3045,7 +2912,12 @@ const openIface = row => {
         param_defaults_json: '',
         static_crud_op: '',
         schema_json: '',
-        steps_json: ''
+        steps_json: '',
+        param_contract_json: '',
+        field_mapping_json: '',
+        extra_filters_json: '',
+        sort_json: '',
+        pagination_json: ''
       }
   ifaceParamSyncEnabled.value = false
   nextTick(async () => {
@@ -3145,7 +3017,12 @@ const saveIface = async () => {
     group_id: ifaceForm.value.group_id,
     static_crud_op: ifaceForm.value.static_crud_op || '',
     schema_json: ifaceForm.value.schema_json || '',
-    steps_json: ifaceForm.value.steps_json || ''
+    steps_json: ifaceForm.value.steps_json || '',
+    param_contract_json: ifaceForm.value.param_contract_json || '',
+    field_mapping_json: ifaceForm.value.field_mapping_json || '',
+    extra_filters_json: ifaceForm.value.extra_filters_json || '',
+    sort_json: ifaceForm.value.sort_json || '',
+    pagination_json: ifaceForm.value.pagination_json || ''
   }
   try {
     if (ifaceForm.value.id) await api.updateDataInterface(dataStackRouteKey(ifaceForm.value), ifacePayload)

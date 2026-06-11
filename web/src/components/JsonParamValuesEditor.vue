@@ -15,7 +15,7 @@ import { highlightActiveLine, placeholder as cmPlaceholder } from '@codemirror/v
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
-  /** SQL :name 与 param_schema 合并后的键名，用于补全 */
+  /** SQL {{name}} 与 param_schema 合并后的键名，用于补全 */
   suggestedKeys: { type: Array, default: () => [] },
   minHeight: { type: Number, default: 200 },
   placeholder: { type: String, default: '' },
