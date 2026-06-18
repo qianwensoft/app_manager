@@ -9,6 +9,11 @@ import ListRenderer from './ListRenderer'
 import DetailRenderer from './DetailRenderer'
 import { setupEventListener, setGlobalEventBlocked } from './EventHandler'
 import { navigationManager } from './NavigationManager'
+import { createAppState } from './appState'
+import { AppStateContext } from './AppStateContext'
+import { setupAppEvents, type ActivePageRef } from './setupAppEvents'
+import type { StateScope } from './pageState'
+import type { PageEvent } from './eventTypes'
 import { parseBindingsFromRuntimeSchema, rowsToOptions } from './fieldLogic'
 import { doPrintViaBridge } from './printBridge'
 import { isAgentRuntime, runtimeFetch } from './runtimeAuth'
@@ -56,6 +61,16 @@ export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }:
 
   const navigate = useCallback((pageKey: string, navParams: Record<string, any> = {}) => {
     navigationManager.push(pageKey, navParams)
+  }, [])
+
+  // 应用级共享状态：按 formAppCode 实例化（绝不模块单例，避免多 form-app 串状态）。
+  // 切换 form-app（code 变）会重建并 dispose 旧实例 → 天然隔离。
+  const appState = useMemo(() => createAppState(formAppCode), [formAppCode])
+  useEffect(() => () => appState.dispose(), [appState])
+  // 当前活动页 pageState 的间接持有者：活动页（SchemaFormRenderer）挂载时 set、卸载置 null
+  const activePageRef = useRef<ActivePageRef>({ current: null })
+  const registerActivePage = useCallback((s: StateScope | null) => {
+    activePageRef.current.current = s
   }, [])
 
   useEffect(() => {
@@ -142,6 +157,43 @@ export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }:
       navigate(pageKey, eventParams)
     })
   }, [app?.id, formAppCode, navigate])
+
+  // app 级常驻事件流：源自 FormAppInfo.global_config.events（scope==='app'），
+  // 在 form-app 加载后注册一次、跨页面存活，离开时清理。
+  useEffect(() => {
+    if (!app) return
+    let globalCfg: any = {}
+    try { globalCfg = app.global_config ? JSON.parse(app.global_config) : {} } catch { globalCfg = {} }
+    const appEvents: PageEvent[] = Array.isArray(globalCfg.events)
+      ? globalCfg.events.filter((e: PageEvent) => e?.scope === 'app')
+      : []
+    if (appEvents.length === 0) return
+
+    const onScanInterface = async (interfaceCode: string, paramValues: Record<string, any>, type: 'internal' | 'third_party' | 'connector' = 'internal', endpointId?: number) => {
+      if (type === 'connector') {
+        const res = await authed('/api/outbound/connector-interfaces/call', 'POST', { connector_code: interfaceCode, params: paramValues })
+        return res.data || {}
+      }
+      if (type === 'third_party') {
+        if (!endpointId) throw new Error('endpoint_id is required for third_party interface')
+        const res = await authed(`/api/outbound/endpoints/${endpointId}/call`, 'POST', { param_values: paramValues })
+        return res.data || {}
+      }
+      const submitPath = isAgentRuntime() ? '/api/form-app/agent-runtime/submit' : '/api/form-app/runtime/submit'
+      const res = await authed(submitPath, 'POST', { interface_code: interfaceCode, form_code: formAppCode, param_values: paramValues })
+      return res?.data ?? res?.rows ?? res ?? {}
+    }
+
+    const appPrinters = Array.isArray(globalCfg.printers) ? globalCfg.printers : []
+    return setupAppEvents(appEvents, {
+      appState,
+      activePageRef: activePageRef.current,
+      onScanInterface,
+      doPrint: async (templateId, values, extra) => doPrintViaBridge(appPrinters, templateId, values, extra),
+      navigate,
+      toast: (msg: string) => message.info(msg),
+    })
+  }, [app, formAppCode, appState, navigate])
 
   // 切换页面时根据 block_global_events 配置通知 Agent 屏蔽/恢复全局事件
   useEffect(() => {
@@ -281,6 +333,7 @@ export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }:
   }
 
   return (
+    <AppStateContext.Provider value={appState}>
     <div style={{ display: 'flex', height: '100%' }}>
       {sideNav}
       <div className="form-app-runtime" style={{ flex: 1, overflowY: 'auto' }}>
@@ -335,6 +388,7 @@ export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }:
             pageKey={currentPageKey}
             libraryKey={libraryKey}
             enableDraft={enableDraft}
+            onActivePageState={registerActivePage}
             showDefaultSubmit={!!config.show_default_submit}
             onQueryOptions={fetchOptions}
             scannerConfig={scannerConfig}
@@ -389,5 +443,6 @@ export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }:
       )}
       </div>
     </div>
+    </AppStateContext.Provider>
   )
 }

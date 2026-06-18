@@ -11,6 +11,8 @@ import type { ScannerConfig } from '@/pages/PageEditorPage'
 import type { PageEvent } from './eventTypes'
 import { setupPageEvents, resolvePageEvents, type ButtonTrigger } from './eventEngine'
 import { createFormilyPageState } from './formilyPageState'
+import { useAppState } from './AppStateContext'
+import type { StateScope } from './pageState'
 import { PrintButtonContext } from './PrintButtonContext'
 import {
   clearLocalDraft, clearServerDraft, draftStorageKey,
@@ -45,6 +47,8 @@ type SchemaFormRendererProps = {
   libraryKey?: LibraryKey
   /** 是否启用草稿自动保存（本地 + 服务端，需 formCode+pageKey）。默认关闭。 */
   enableDraft?: boolean
+  /** 把本页 pageState 注册为「当前活动页」，供 app 级常驻事件的 page 作用域动作转发。 */
+  onActivePageState?: (state: StateScope | null) => void
 }
 
 export default function SchemaFormRenderer({
@@ -64,6 +68,7 @@ export default function SchemaFormRenderer({
   formCode,
   pageKey,
   enableDraft = false,
+  onActivePageState,
 }: SchemaFormRendererProps) {
   const [loading, setLoading] = useState(false)
   const valuesRef = useRef<Record<string, any>>(initialValues)
@@ -148,14 +153,26 @@ export default function SchemaFormRenderer({
     () => createFormilyPageState(form, () => valuesRef.current),
     [form],
   )
+  // 应用级状态（来自 MultiPageRuntime 的 Provider；旧入口无 Provider 时为 null）
+  const appState = useAppState()
+
+  // 把本页 pageState 注册为「当前活动页」，供 app 级常驻事件的 page 作用域动作转发
   useEffect(() => {
-    const allEvents = events && events.length > 0
+    onActivePageState?.(pageState)
+    return () => { onActivePageState?.(null) }
+  }, [pageState, onActivePageState])
+
+  useEffect(() => {
+    // 页面渲染器只处理页面级事件流；scope==='app' 的常驻事件由 MultiPageRuntime 统一注册
+    const resolved = events && events.length > 0
       ? events
       : resolvePageEvents({ scanner: scannerConfig })
+    const allEvents = resolved.filter(e => e.scope !== 'app')
     if (allEvents.length === 0) return
 
     const { cleanup, triggerButton, triggerLifecycle } = setupPageEvents(allEvents, {
-      state: pageState,
+      pageState,
+      appState: appState ?? undefined,
       onScanInterface,
       doPrint,
       navigate: onNavigate,
@@ -172,7 +189,7 @@ export default function SchemaFormRenderer({
       triggerButtonRef.current = () => {}
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [events, scannerConfig, onScanInterface, doPrint, onNavigate, pageState])
+  }, [events, scannerConfig, onScanInterface, doPrint, onNavigate, pageState, appState])
 
   // ── 草稿自动保存（本地 + 服务端，从 FormRenderer 迁移而来）────────────
   const draftKey = enableDraft && formCode && pageKey ? draftStorageKey(formCode, pageKey) : ''

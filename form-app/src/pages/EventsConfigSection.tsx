@@ -179,6 +179,7 @@ function sourceLabel(s: EventSource): string {
     case 'custom_event': return `事件:${s.event_name || '?'}`
     case 'button': return `按钮:${s.button_id || '?'}`
     case 'field_change': return `字段变更:${s.field || '?'}`
+    case 'state_change': return `状态变更:${s.scope === 'app' ? '应用' : '页面'}.${s.field || '?'}`
     case 'page_enter': return '进入页面'
     case 'page_exit': return '退出页面'
   }

@@ -19,6 +19,7 @@ import type {
   ConditionExpr,
   ScanFilter,
   InterfaceType,
+  StateScopeKind,
 } from './eventTypes'
 
 // 点路径取值，如 data.employee.name
@@ -32,6 +33,7 @@ export function resolveSrc(src: string | undefined, ctx: EventContext): any {
   if (src === undefined || src === null) return undefined
   const s = String(src)
   if (s === '$scan') return ctx.scan
+  if (s.startsWith('$app.')) return resolveNestedField(ctx.app, s.slice(5))
   if (s.startsWith('$form.')) return resolveNestedField(ctx.form, s.slice(6))
   if (s.startsWith('$event.')) return resolveNestedField(ctx.event, s.slice(7))
   if (s === '$event') return ctx.event
@@ -73,8 +75,13 @@ export function evalCondition(cond: ConditionExpr | undefined, ctx: EventContext
 
 // ── 执行器依赖（由渲染器注入） ──────────────────────────────────────
 export interface EventEngineDeps {
-  /** 页面状态容器（表单页=FormilyPageState，非表单页=PlainPageState）。事件引擎不再认 Formily。 */
-  state: StateScope
+  /**
+   * 页面状态容器（页面作用域）。表单页=FormilyPageState；
+   * app 级常驻事件传入一个指向「当前活动页」的代理（无页面挂载时 page 作用域写入 no-op）。
+   */
+  pageState: StateScope
+  /** 应用级状态容器（AppState）。无 AppState 环境（如旧入口）时可缺省。 */
+  appState?: StateScope
   onScanInterface?: (
     interfaceCode: string,
     paramValues: Record<string, any>,
@@ -87,6 +94,31 @@ export interface EventEngineDeps {
   navigate?: (pageKey: string, params: Record<string, any>) => void
   /** 提示 */
   toast?: (msg: string) => void
+}
+
+/** 空状态容器：app 作用域被请求但无 AppState 时的安全兜底（全部 no-op）。 */
+const NULL_SCOPE: StateScope = {
+  getValues: () => ({}),
+  get: () => undefined,
+  set: () => {},
+  setProp: () => {},
+  subscribe: () => () => {},
+}
+
+/** 按作用域取状态容器：'app' → appState，'page'（默认）→ pageState。 */
+function scopeOf(deps: EventEngineDeps, scope?: StateScopeKind): StateScope {
+  if (scope === 'app') return deps.appState ?? NULL_SCOPE
+  return deps.pageState
+}
+
+/** 构造一次事件触发的上下文（含 page/app 双快照）。 */
+function makeCtx(deps: EventEngineDeps, base: Partial<EventContext>): EventContext {
+  return {
+    scan: base.scan,
+    form: deps.pageState.getValues(),
+    app: deps.appState?.getValues(),
+    event: base.event,
+  }
 }
 
 /**
@@ -123,26 +155,31 @@ export interface ScriptApi {
   speak: (text: string) => void
   /** 触发自定义事件 */
   emit: (eventName: string, data?: any) => void
+  /** 读取应用级状态字段（AppState） */
+  appGet: (field: string) => any
+  /** 写入应用级状态字段（AppState） */
+  appSet: (field: string, value: any) => void
 }
 
 /** 用运行时依赖与上下文构造脚本 API */
 function buildScriptApi(ctx: EventContext, deps: EventEngineDeps): ScriptApi {
+  const appScope = deps.appState ?? NULL_SCOPE
   return {
     scan: ctx.scan,
     event: ctx.event,
-    values: { ...deps.state.getValues() },
-    get: (field) => resolveNestedField(deps.state.getValues(), field),
-    set: (field, value) => { if (field) deps.state.set(field, value) },
+    values: { ...deps.pageState.getValues() },
+    get: (field) => resolveNestedField(deps.pageState.getValues(), field),
+    set: (field, value) => { if (field) deps.pageState.set(field, value) },
     setProp: (field, prop, value) => {
       if (!field || !prop) return
-      deps.state.setProp(field, prop as any, value)
+      deps.pageState.setProp(field, prop as any, value)
     },
     callInterface: async (interfaceCode, params = {}, type = 'internal', endpointId) => {
       if (!deps.onScanInterface) return undefined
       return deps.onScanInterface(interfaceCode, params, type, endpointId)
     },
     print: async (templateId, extra) => {
-      if (deps.doPrint && templateId) await deps.doPrint(templateId, deps.state.getValues(), extra)
+      if (deps.doPrint && templateId) await deps.doPrint(templateId, deps.pageState.getValues(), extra)
     },
     navigate: (pageKey, params = {}) => { if (deps.navigate && pageKey) deps.navigate(pageKey, params) },
     toast: (msg) => { if (deps.toast && msg != null) deps.toast(String(msg)) },
@@ -152,6 +189,8 @@ function buildScriptApi(ctx: EventContext, deps: EventEngineDeps): ScriptApi {
       const payload = data == null ? '' : (typeof data === 'object' ? JSON.stringify(data) : String(data))
       setTimeout(() => { try { eventManager.emit(eventName, payload) } catch { /* 忽略 */ } }, 0)
     },
+    appGet: (field) => appScope.get(field),
+    appSet: (field, value) => { if (field) appScope.set(field, value) },
   }
 }
 
@@ -165,7 +204,7 @@ export async function runEventAction(
     case 'set_field': {
       if (!action.field) return
       const val = resolveSrc(action.value_src, ctx)
-      if (val !== undefined) deps.state.set(action.field, val)
+      if (val !== undefined) scopeOf(deps, action.scope).set(action.field, val)
       return
     }
     case 'call_interface': {
@@ -189,7 +228,7 @@ export async function runEventAction(
       for (const { response_field, form_field } of action.result_map || []) {
         if (!form_field) continue
         const val = resolveNestedField(res, response_field)
-        if (val !== undefined && val !== null) deps.state.set(form_field, val)
+        if (val !== undefined && val !== null) scopeOf(deps, action.result_scope).set(form_field, val)
       }
       return
     }
@@ -200,7 +239,7 @@ export async function runEventAction(
         if (!d.placeholder) continue
         extra[d.placeholder] = resolveSrc(d.src, ctx)
       }
-      await deps.doPrint(action.printer_template_id, deps.state.getValues(), extra)
+      await deps.doPrint(action.printer_template_id, deps.pageState.getValues(), extra)
       return
     }
     case 'navigate': {
@@ -222,7 +261,8 @@ export async function runEventAction(
       if (!action.field || !action.prop) return
       const raw = resolveSrc(action.value_src, ctx)
       // truthy 归一化、visible→display、background/color→style 等语义已下沉到 PageState 适配器
-      deps.state.setProp(action.field, action.prop, raw)
+      // （app 作用域无 UI 字段，scopeOf 返回的 AppState.setProp 为 no-op）
+      scopeOf(deps, action.scope).setProp(action.field, action.prop, raw)
       return
     }
     case 'speak': {
@@ -313,11 +353,10 @@ export function setupPageEvents(
         // 自定义事件可能携带 JSON 对象
         let parsed: any = eventData
         try { parsed = JSON.parse(eventData) } catch { /* 保持字符串 */ }
-        const ctx: EventContext = {
+        const ctx = makeCtx(deps, {
           scan: typeof eventData === 'string' ? eventData : String(eventData),
-          form: deps.state.getValues(),
           event: parsed,
-        }
+        })
         if (!passScanFilter(ctx.scan || '', ev.filters)) return
         if (!evalCondition(ev.when, ctx)) return
         void runActions(ev, ctx, deps)
@@ -330,19 +369,35 @@ export function setupPageEvents(
     }
   }
 
-  // field_change：通过 PageState 订阅字段变化（不再直接依赖 Formily effects）
-  const fieldChangeEvents = events.filter(e => e.source.kind === 'field_change')
-  if (fieldChangeEvents.length > 0) {
-    const unsub = deps.state.subscribe((shortName: string, value: any) => {
-      for (const ev of fieldChangeEvents) {
-        if (ev.source.kind !== 'field_change') continue
-        if (ev.source.field !== shortName) continue
-        const ctx: EventContext = { scan: undefined, form: deps.state.getValues(), event: value }
-        if (!evalCondition(ev.when, ctx)) continue
-        void runActions(ev, ctx, deps)
-      }
-    })
-    disposers.push(unsub)
+  // field_change / state_change：通过 StateScope 订阅字段变化（不再直接依赖 Formily effects）
+  // - field_change：监听页面作用域（等价 state_change{scope:'page'}，保留作存量兼容）
+  // - state_change：按 source.scope 监听 page 或 app 作用域
+  type ChangeWatch = { field: string; scope: StateScopeKind; ev: PageEvent }
+  const changeWatches: ChangeWatch[] = []
+  for (const ev of events) {
+    if (ev.source.kind === 'field_change') {
+      changeWatches.push({ field: ev.source.field, scope: 'page', ev })
+    } else if (ev.source.kind === 'state_change') {
+      changeWatches.push({ field: ev.source.field, scope: ev.source.scope, ev })
+    }
+  }
+  if (changeWatches.length > 0) {
+    const subscribeScope = (scope: StateScopeKind) => {
+      const watches = changeWatches.filter(w => w.scope === scope)
+      if (watches.length === 0) return
+      const target = scopeOf(deps, scope)
+      const unsub = target.subscribe((shortName: string, value: any) => {
+        for (const w of watches) {
+          if (w.field !== shortName) continue
+          const ctx = makeCtx(deps, { event: value })
+          if (!evalCondition(w.ev.when, ctx)) continue
+          void runActions(w.ev, ctx, deps)
+        }
+      })
+      disposers.push(unsub)
+    }
+    subscribeScope('page')
+    subscribeScope('app')
   }
 
   // button：暴露触发器
@@ -350,7 +405,7 @@ export function setupPageEvents(
     for (const ev of events) {
       if (ev.source.kind !== 'button') continue
       if (ev.source.button_id !== buttonId) continue
-      const ctx: EventContext = { scan: undefined, form: deps.state.getValues(), event: undefined }
+      const ctx = makeCtx(deps, {})
       if (!evalCondition(ev.when, ctx)) continue
       void runActions(ev, ctx, deps)
     }
@@ -360,7 +415,7 @@ export function setupPageEvents(
   const triggerLifecycle: LifecycleTrigger = (kind) => {
     for (const ev of events) {
       if (ev.source.kind !== kind) continue
-      const ctx: EventContext = { scan: undefined, form: deps.state.getValues(), event: undefined }
+      const ctx = makeCtx(deps, {})
       if (!evalCondition(ev.when, ctx)) continue
       void runActions(ev, ctx, deps)
     }

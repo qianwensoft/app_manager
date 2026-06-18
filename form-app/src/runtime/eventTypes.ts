@@ -16,11 +16,16 @@ export type ValueSrc = string
 export interface EventContext {
   /** 触发值（扫码值 / 事件 data 字符串） */
   scan?: string
-  /** 当前表单值快照 */
+  /** 当前页面值快照（页面作用域 PageState） */
   form: Record<string, any>
+  /** 应用级状态快照（AppState）。供 $app.x 取值；无 AppState 时为空对象 */
+  app?: Record<string, any>
   /** 事件载荷（自定义事件可携带对象） */
   event?: any
 }
+
+/** 状态作用域：page=当前页面状态，app=应用级共享状态 */
+export type StateScopeKind = 'page' | 'app'
 
 // ── 触发条件 ────────────────────────────────────────────────────────
 export type ConditionOperator =
@@ -44,6 +49,8 @@ export interface SetFieldAction extends ActionBase {
   type: 'set_field'
   field: string
   value_src: ValueSrc
+  /** 写入的作用域，默认 'page'（存量零变化）；'app' 写应用级状态 */
+  scope?: StateScopeKind
 }
 
 export interface CallInterfaceAction extends ActionBase {
@@ -56,6 +63,8 @@ export interface CallInterfaceAction extends ActionBase {
   param_map?: Array<{ key: string; src: ValueSrc }>
   /** 结果回填：接口返回字段（点路径）→ 表单字段 */
   result_map?: Array<{ response_field: string; form_field: string }>
+  /** 结果回填的目标作用域，默认 'page' */
+  result_scope?: StateScopeKind
 }
 
 export interface PrintAction extends ActionBase {
@@ -88,6 +97,8 @@ export interface SetFieldPropAction extends ActionBase {
   prop: FieldPropName
   /** 属性值来源：visible/disabled/readOnly 取真假（true/1/yes/$form...），其余取字符串 */
   value_src: ValueSrc
+  /** 目标作用域，默认 'page'；'app' 因 AppState 无 UI 字段而被忽略 */
+  scope?: StateScopeKind
 }
 
 /** 语音播报：把文本（支持 $scan/$form.x/$event.x/字面量）念出来 */
@@ -133,6 +144,7 @@ export type EventSource =
   | { kind: 'custom_event'; event_name: string }
   | { kind: 'button'; button_id: string }
   | { kind: 'field_change'; field: string }
+  | { kind: 'state_change'; scope: StateScopeKind; field: string }
   | { kind: 'page_enter' }
   | { kind: 'page_exit' }
 
@@ -140,10 +152,15 @@ export type EventSource =
 export interface PageEvent {
   id: string
   name?: string
+  /**
+   * 事件流作用域，默认 'page'（页面级，随页面挂载/卸载）。
+   * 'app' = 应用级常驻事件，在 MultiPageRuntime 挂载时注册、跨页面存活。
+   */
+  scope?: StateScopeKind
   source: EventSource
   /** 前置过滤（针对扫码值的长度/前缀/正则等，沿用旧 scanner.filters 语义） */
   filters?: ScanFilter
-  /** 触发条件（基于 $scan / $form.字段 / $event） */
+  /** 触发条件（基于 $scan / $form.字段 / $app.字段 / $event） */
   when?: ConditionExpr
   /** 顺序执行的动作链 */
   actions: EventAction[]
