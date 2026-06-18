@@ -30,6 +30,7 @@ export type FormAppInfo = {
   description?: string
   data_source_id?: number
   entry_page_key?: string
+  global_config?: string
   publish_status?: number
   share_token?: string
 }

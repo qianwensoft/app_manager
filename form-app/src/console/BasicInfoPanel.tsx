@@ -1,11 +1,27 @@
 import { useEffect, useState } from 'react'
 import { Button, Input, Select, message } from 'antd'
 import { authed, type FormAppInfo, type FormAppPage } from './api'
+import EventsConfigSection from '../pages/EventsConfigSection'
+import { useInterfaceOptions } from '../pages/useInterfaceOptions'
+import type { PageEvent } from '../runtime/eventTypes'
+import type { PrinterTemplate } from '../runtime/printerTypes'
 
 type Props = {
   app: FormAppInfo
   pages: FormAppPage[]
   onSaved: () => void
+}
+
+/** 解析 global_config，返回 events / printers（缺省空） */
+function parseGlobalConfig(raw: string | undefined): { events: PageEvent[]; printers: PrinterTemplate[]; rest: Record<string, any> } {
+  let cfg: Record<string, any> = {}
+  try { cfg = raw ? JSON.parse(raw) : {} } catch { cfg = {} }
+  const { events, printers, ...rest } = cfg
+  return {
+    events: Array.isArray(events) ? events : [],
+    printers: Array.isArray(printers) ? printers : [],
+    rest,
+  }
 }
 
 export default function BasicInfoPanel({ app, pages, onSaved }: Props) {
@@ -16,6 +32,11 @@ export default function BasicInfoPanel({ app, pages, onSaved }: Props) {
   const [entryPageKey, setEntryPageKey] = useState(app.entry_page_key || 'form')
   const [dataSources, setDataSources] = useState<any[]>([])
   const [saving, setSaving] = useState(false)
+  // 应用级常驻事件（存于 global_config.events，运行时跨页面常驻）
+  const [appEvents, setAppEvents] = useState<PageEvent[]>([])
+  const [globalRest, setGlobalRest] = useState<Record<string, any>>({})
+  const [globalPrinters, setGlobalPrinters] = useState<PrinterTemplate[]>([])
+  const iface = useInterfaceOptions()
 
   useEffect(() => {
     setName(app.name || '')
@@ -23,6 +44,10 @@ export default function BasicInfoPanel({ app, pages, onSaved }: Props) {
     setDescription(app.description || '')
     setDataSourceID(app.data_source_id || undefined)
     setEntryPageKey(app.entry_page_key || 'form')
+    const g = parseGlobalConfig(app.global_config)
+    setAppEvents(g.events)
+    setGlobalPrinters(g.printers)
+    setGlobalRest(g.rest)
   }, [app])
 
   useEffect(() => {
@@ -38,6 +63,9 @@ export default function BasicInfoPanel({ app, pages, onSaved }: Props) {
     }
     setSaving(true)
     try {
+      // 应用级事件强制 scope:'app'（运行时据此常驻注册）
+      const normalizedEvents = appEvents.map(e => ({ ...e, scope: 'app' as const }))
+      const globalConfig = JSON.stringify({ ...globalRest, events: normalizedEvents, printers: globalPrinters })
       await authed(`/api/form-app/infos/${app.id}`, 'PUT', {
         ...app,
         name: name.trim(),
@@ -45,6 +73,7 @@ export default function BasicInfoPanel({ app, pages, onSaved }: Props) {
         description: description.trim(),
         data_source_id: dataSourceID || 0,
         entry_page_key: entryPageKey,
+        global_config: globalConfig,
       })
       message.success('已保存')
       onSaved()
@@ -94,6 +123,25 @@ export default function BasicInfoPanel({ app, pages, onSaved }: Props) {
             ))}
             {pages.length === 0 && <Select.Option value="form">form</Select.Option>}
           </Select>
+        </div>
+        <div>
+          <label style={{ display: 'block', marginBottom: 4 }}>应用级事件（常驻，跨页面）</label>
+          <p style={{ color: '#94a3b8', fontSize: 12, margin: '0 0 8px' }}>
+            在应用加载后注册、跨页面存活。适合全局扫码、应用级状态({'$'}app)监听等。
+            页面字段({'$'}form)在此不可用——跨页传值请写 {'$'}app，由目标页 page_enter 读取。
+          </p>
+          <EventsConfigSection
+            events={appEvents}
+            onChange={setAppEvents}
+            fields={[]}
+            printers={globalPrinters}
+            interfaceOptions={iface.interfaceOptions}
+            thirdPartyEndpointOptions={iface.thirdPartyEndpointOptions}
+            connectorInterfaceOptions={iface.connectorInterfaceOptions}
+            interfaceSchemas={iface.interfaceSchemas}
+            thirdPartySchemas={iface.thirdPartySchemas}
+            connectorSchemas={iface.connectorSchemas}
+          />
         </div>
         <div>
           <Button type="primary" loading={saving} onClick={save}>保存基本信息</Button>
