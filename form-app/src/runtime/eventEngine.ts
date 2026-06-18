@@ -11,6 +11,9 @@ import type { StateScope } from './pageState'
 import { eventManager } from './EventHandler'
 import { navigationManager } from './NavigationManager'
 import { speak } from './speakBridge'
+import { getTool } from './tools'
+import { withTimeout, withRetry, resolveDegrade } from './degrade'
+import { rootEmitScope, makeGuardedEmit, type EmitScope } from './emitScope'
 import type { ScannerConfig } from '@/pages/PageEditorPage'
 import type {
   PageEvent,
@@ -161,8 +164,12 @@ export interface ScriptApi {
   appSet: (field: string, value: any) => void
 }
 
-/** 用运行时依赖与上下文构造脚本 API */
-function buildScriptApi(ctx: EventContext, deps: EventEngineDeps): ScriptApi {
+/** 用运行时依赖与上下文构造脚本 API。guardedEmit 为带环路守卫的 emit。 */
+function buildScriptApi(
+  ctx: EventContext,
+  deps: EventEngineDeps,
+  guardedEmit: (eventName: string, data: string) => void,
+): ScriptApi {
   const appScope = deps.appState ?? NULL_SCOPE
   return {
     scan: ctx.scan,
@@ -187,119 +194,52 @@ function buildScriptApi(ctx: EventContext, deps: EventEngineDeps): ScriptApi {
     emit: (eventName, data) => {
       if (!eventName) return
       const payload = data == null ? '' : (typeof data === 'object' ? JSON.stringify(data) : String(data))
-      setTimeout(() => { try { eventManager.emit(eventName, payload) } catch { /* 忽略 */ } }, 0)
+      guardedEmit(eventName, payload)
     },
     appGet: (field) => appScope.get(field),
     appSet: (field, value) => { if (field) appScope.set(field, value) },
   }
 }
 
-/** 执行单个动作 */
+/** 执行一段用户脚本（async 函数体，注入 ScriptApi 的 ctx 变量） */
+async function execScript(
+  scriptBody: string,
+  ctx: EventContext,
+  deps: EventEngineDeps,
+  guardedEmit: (eventName: string, data: string) => void,
+): Promise<void> {
+  const api = buildScriptApi(ctx, deps, guardedEmit)
+  // eslint-disable-next-line @typescript-eslint/no-implied-eval
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as
+    new (...args: string[]) => (...a: any[]) => Promise<any>
+  const fn = new AsyncFunction('ctx', scriptBody)
+  await fn(api)
+}
+
+/**
+ * 执行单个动作：查工具注册表 → 套超时/重试 → execute。
+ * scope 为本次触发的事件链环路守卫上下文（供 emit_event / run_script 内的 emit 使用）。
+ */
 export async function runEventAction(
   action: EventAction,
   ctx: EventContext,
   deps: EventEngineDeps,
-): Promise<void> {
-  switch (action.type) {
-    case 'set_field': {
-      if (!action.field) return
-      const val = resolveSrc(action.value_src, ctx)
-      if (val !== undefined) scopeOf(deps, action.scope).set(action.field, val)
-      return
-    }
-    case 'call_interface': {
-      if (!deps.onScanInterface) return
-      const type: InterfaceType = action.interface_type || 'internal'
-      const paramValues: Record<string, any> = {}
-      for (const p of action.param_map || []) {
-        if (!p.key) continue
-        paramValues[p.key] = resolveSrc(p.src, ctx)
-      }
-      let res: any
-      if (type === 'connector' && action.connector_interface_code) {
-        res = await deps.onScanInterface(action.connector_interface_code, paramValues, 'connector')
-      } else if (type === 'third_party' && action.third_party_endpoint_id) {
-        res = await deps.onScanInterface('', paramValues, 'third_party', action.third_party_endpoint_id)
-      } else if (action.interface_code) {
-        res = await deps.onScanInterface(action.interface_code, paramValues, 'internal')
-      } else {
-        return
-      }
-      for (const { response_field, form_field } of action.result_map || []) {
-        if (!form_field) continue
-        const val = resolveNestedField(res, response_field)
-        if (val !== undefined && val !== null) scopeOf(deps, action.result_scope).set(form_field, val)
-      }
-      return
-    }
-    case 'print': {
-      if (!deps.doPrint || !action.printer_template_id) return
-      const extra: Record<string, any> = {}
-      for (const d of action.data_map || []) {
-        if (!d.placeholder) continue
-        extra[d.placeholder] = resolveSrc(d.src, ctx)
-      }
-      await deps.doPrint(action.printer_template_id, deps.pageState.getValues(), extra)
-      return
-    }
-    case 'navigate': {
-      if (!deps.navigate || !action.to_page_key) return
-      const params: Record<string, any> = {}
-      for (const p of action.param_map || []) {
-        if (!p.key) continue
-        params[p.key] = resolveSrc(p.src, ctx)
-      }
-      deps.navigate(action.to_page_key, params)
-      return
-    }
-    case 'toast': {
-      const msg = resolveSrc(action.message_src, ctx)
-      if (deps.toast && msg !== undefined && msg !== null) deps.toast(String(msg))
-      return
-    }
-    case 'set_field_prop': {
-      if (!action.field || !action.prop) return
-      const raw = resolveSrc(action.value_src, ctx)
-      // truthy 归一化、visible→display、background/color→style 等语义已下沉到 PageState 适配器
-      // （app 作用域无 UI 字段，scopeOf 返回的 AppState.setProp 为 no-op）
-      scopeOf(deps, action.scope).setProp(action.field, action.prop, raw)
-      return
-    }
-    case 'speak': {
-      const text = resolveSrc(action.text_src, ctx)
-      if (text !== undefined && text !== null && String(text).trim() !== '') {
-        const ok = speak(String(text))
-        if (!ok) deps.toast?.('当前环境不支持语音播报')
-      }
-      return
-    }
-    case 'emit_event': {
-      if (!action.event_name) return
-      // 解析载荷：对象/数组序列化为 JSON 字符串，与事件总线 emit(name, string) 约定一致；
-      // 监听端（custom_event 源）会尝试 JSON.parse 还原为 ctx.event。
-      let data = ''
-      if (action.data_src !== undefined && action.data_src !== '') {
-        const raw = resolveSrc(action.data_src, ctx)
-        data = raw == null ? '' : (typeof raw === 'object' ? JSON.stringify(raw) : String(raw))
-      }
-      // 异步派发，避免在当前动作链同步栈内递归触发导致的重入问题
-      setTimeout(() => {
-        try { eventManager.emit(action.event_name, data) } catch { /* 忽略 */ }
-      }, 0)
-      return
-    }
-    case 'run_script': {
-      if (!action.script || !action.script.trim()) return
-      const api = buildScriptApi(ctx, deps)
-      // 以 async 方式执行用户脚本，脚本体内可用 ctx 变量；可 await 异步能力
-      // eslint-disable-next-line @typescript-eslint/no-implied-eval
-      const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as
-        new (...args: string[]) => (...a: any[]) => Promise<any>
-      const fn = new AsyncFunction('ctx', action.script)
-      await fn(api)
-      return
-    }
+  emitScope: EmitScope = rootEmitScope(),
+): Promise<Record<string, any> | void> {
+  const tool = getTool(action.type)
+  if (!tool) { deps.toast?.(`未知工具：${(action as any).type}`); return }
+
+  const guardedEmit = makeGuardedEmit(emitScope, deps.toast)
+  const x = {
+    ctx,
+    deps,
+    resolve: (src?: string) => resolveSrc(src, ctx),
+    scopeFor: (scope?: StateScopeKind) => scopeOf(deps, scope),
+    emit: guardedEmit,
+    runScript: (body: string) => execScript(body, ctx, deps, guardedEmit),
   }
+  const { timeout, retry } = resolveDegrade(action as any, tool)
+  return withRetry(() => withTimeout(Promise.resolve(tool.execute(action, x)), timeout), retry)
 }
 
 /** 顺序执行动作链 */
@@ -307,15 +247,27 @@ async function runActions(
   ev: PageEvent,
   ctx: EventContext,
   deps: EventEngineDeps,
+  emitScope: EmitScope = rootEmitScope(),
 ): Promise<void> {
-  for (const action of ev.actions || []) {
+  const actions = ev.actions || []
+  for (let i = 0; i < actions.length; i++) {
+    const action = actions[i]
+    // 单动作执行条件：不满足则跳过该动作（不中断后续动作）
+    if (action.when && !evalCondition(action.when, ctx)) continue
     try {
-      // 单动作执行条件：不满足则跳过该动作（不中断后续动作）
-      if (action.when && !evalCondition(action.when, ctx)) continue
-      await runEventAction(action, ctx, deps)
+      await runEventAction(action, ctx, deps, emitScope)
     } catch (e: any) {
-      deps.toast?.(`事件「${ev.name || ev.id}」动作执行失败：${e?.message || e}`)
-      // 默认中断后续动作（避免基于失败结果继续）
+      const strategy = action.onError ?? 'abort'
+      deps.toast?.(`事件「${ev.name || ev.id}」动作${i + 1}失败：${e?.message || e}`)
+      if (strategy === 'continue') continue
+      if (strategy === 'fallback' && action.fallbackActionIndex != null) {
+        const fb = actions[action.fallbackActionIndex]
+        if (fb) {
+          try { await runEventAction(fb, ctx, deps, emitScope) } catch { /* 回退也失败则止于此 */ }
+        }
+        continue
+      }
+      // 'abort'（默认）：中断后续动作（避免基于失败结果继续），与改造前行为一致
       break
     }
   }
@@ -349,7 +301,7 @@ export function setupPageEvents(
       const names = ev.source.kind === 'scan'
         ? scanTypeToEventNames(ev.source.scan_type)
         : [ev.source.event_name]
-      const handler = (eventData: string) => {
+      const handler = (eventData: string, scope?: EmitScope) => {
         // 自定义事件可能携带 JSON 对象
         let parsed: any = eventData
         try { parsed = JSON.parse(eventData) } catch { /* 保持字符串 */ }
@@ -359,7 +311,8 @@ export function setupPageEvents(
         })
         if (!passScanFilter(ctx.scan || '', ev.filters)) return
         if (!evalCondition(ev.when, ctx)) return
-        void runActions(ev, ctx, deps)
+        // scope 由 makeGuardedEmit 透传（custom_event 链）；外部源（扫码）缺省 → root
+        void runActions(ev, ctx, deps, scope ?? rootEmitScope())
       }
       for (const name of names) {
         if (!name) continue

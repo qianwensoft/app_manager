@@ -1,6 +1,7 @@
 import { isAgentRuntime, runtimeFetch } from './runtimeAuth'
+import type { EmitScope } from './emitScope'
 
-type EventHandler = (eventData: string) => void
+type EventHandler = (eventData: string, scope?: EmitScope) => void
 
 class EventManager {
   private handlers: Map<string, EventHandler[]> = new Map()
@@ -20,10 +21,11 @@ class EventManager {
     }
   }
 
-  emit(eventType: string, eventData: string) {
+  /** 派发事件。scope 为事件链环路守卫上下文（由 makeGuardedEmit 透传；外部源缺省） */
+  emit(eventType: string, eventData: string, scope?: EmitScope) {
     const handlers = this.handlers.get(eventType)
     if (handlers) {
-      handlers.forEach(h => h(eventData))
+      handlers.forEach(h => h(eventData, scope))
     }
   }
 

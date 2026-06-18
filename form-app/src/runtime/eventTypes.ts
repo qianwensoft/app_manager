@@ -40,9 +40,27 @@ export interface ConditionExpr {
 // ── 动作 ────────────────────────────────────────────────────────────
 export type InterfaceType = 'internal' | 'third_party' | 'connector'
 
-/** 所有动作共享：可选的单动作执行条件（不满足则跳过该动作，继续后续动作） */
+/** 重试配置（与 runtime/degrade.ts 的 RetryConfig 一致） */
+export interface ActionRetryConfig {
+  maxAttempts: number
+  backoff: 'fixed' | 'linear' | 'exponential'
+  initialDelay: number
+  maxDelay?: number
+}
+
+/**
+ * 所有动作共享。
+ * - when：可选的单动作执行条件（不满足则跳过该动作，继续后续动作）
+ * - timeout/retry：可选降级配置（默认不填 = 不超时、不重试，行为同改造前）
+ * - onError：失败策略，默认 'abort'（中断后续，等价原 break）
+ * - fallbackActionIndex：onError='fallback' 时回退到动作链中该索引的动作
+ */
 export interface ActionBase {
   when?: ConditionExpr
+  timeout?: number
+  retry?: ActionRetryConfig
+  onError?: 'abort' | 'continue' | 'fallback'
+  fallbackActionIndex?: number
 }
 
 export interface SetFieldAction extends ActionBase {
