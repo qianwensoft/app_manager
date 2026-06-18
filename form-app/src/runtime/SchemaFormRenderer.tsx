@@ -10,6 +10,7 @@ import { bindingsTriggeredBy, buildBindingParamValues } from './fieldLogic'
 import type { ScannerConfig } from '@/pages/PageEditorPage'
 import type { PageEvent } from './eventTypes'
 import { setupPageEvents, resolvePageEvents, type ButtonTrigger } from './eventEngine'
+import { createFormilyPageState } from './formilyPageState'
 import { PrintButtonContext } from './PrintButtonContext'
 import {
   clearLocalDraft, clearServerDraft, draftStorageKey,
@@ -142,6 +143,11 @@ export default function SchemaFormRenderer({
 
   // 页面级统一事件系统：扫码 / 自定义事件 / 字段变更 / 按钮 → 条件 → 动作链
   const triggerButtonRef = useRef<ButtonTrigger>(() => {})
+  // 把 Formily form 适配成事件引擎认的 PageState（事件引擎已脱 Formily）
+  const pageState = useMemo(
+    () => createFormilyPageState(form, () => valuesRef.current),
+    [form],
+  )
   useEffect(() => {
     const allEvents = events && events.length > 0
       ? events
@@ -149,8 +155,7 @@ export default function SchemaFormRenderer({
     if (allEvents.length === 0) return
 
     const { cleanup, triggerButton, triggerLifecycle } = setupPageEvents(allEvents, {
-      form,
-      getFormValues: () => valuesRef.current,
+      state: pageState,
       onScanInterface,
       doPrint,
       navigate: onNavigate,
@@ -167,7 +172,7 @@ export default function SchemaFormRenderer({
       triggerButtonRef.current = () => {}
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [events, scannerConfig, onScanInterface, doPrint, onNavigate, form])
+  }, [events, scannerConfig, onScanInterface, doPrint, onNavigate, pageState])
 
   // ── 草稿自动保存（本地 + 服务端，从 FormRenderer 迁移而来）────────────
   const draftKey = enableDraft && formCode && pageKey ? draftStorageKey(formCode, pageKey) : ''

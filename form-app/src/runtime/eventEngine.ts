@@ -7,8 +7,7 @@
  * - setupPageEvents：为每个事件源注册监听，返回清理函数
  * - migrateScannerToEvents：把旧 ScannerConfig 适配成等价 PageEvent[]，保证存量页面零迁移
  */
-import type { Form as FormilyForm } from '@formily/core'
-import { onFieldValueChange } from '@formily/core'
+import type { StateScope } from './pageState'
 import { eventManager } from './EventHandler'
 import { navigationManager } from './NavigationManager'
 import { speak } from './speakBridge'
@@ -74,9 +73,8 @@ export function evalCondition(cond: ConditionExpr | undefined, ctx: EventContext
 
 // ── 执行器依赖（由渲染器注入） ──────────────────────────────────────
 export interface EventEngineDeps {
-  form: FormilyForm
-  /** 实时表单值快照（valuesRef.current） */
-  getFormValues: () => Record<string, any>
+  /** 页面状态容器（表单页=FormilyPageState，非表单页=PlainPageState）。事件引擎不再认 Formily。 */
+  state: StateScope
   onScanInterface?: (
     interfaceCode: string,
     paramValues: Record<string, any>,
@@ -132,38 +130,19 @@ function buildScriptApi(ctx: EventContext, deps: EventEngineDeps): ScriptApi {
   return {
     scan: ctx.scan,
     event: ctx.event,
-    values: { ...deps.getFormValues() },
-    get: (field) => resolveNestedField(deps.getFormValues(), field),
-    set: (field, value) => { if (field) deps.form.setValuesIn(field, value) },
+    values: { ...deps.state.getValues() },
+    get: (field) => resolveNestedField(deps.state.getValues(), field),
+    set: (field, value) => { if (field) deps.state.set(field, value) },
     setProp: (field, prop, value) => {
       if (!field || !prop) return
-      const truthy = (v: any) => {
-        if (typeof v === 'boolean') return v
-        const s = String(v ?? '').trim().toLowerCase()
-        return s === 'true' || s === '1' || s === 'yes' || s === 'y' || s === '是' || s === 'on'
-      }
-      deps.form.setFieldState(field, (state: any) => {
-        switch (prop) {
-          case 'visible': state.display = truthy(value) ? 'visible' : 'none'; break
-          case 'disabled': state.disabled = truthy(value); break
-          case 'readOnly': state.readOnly = truthy(value); break
-          case 'title': state.title = value == null ? '' : String(value); break
-          case 'background':
-          case 'color': {
-            const prevProps = state.componentProps || {}
-            const prevStyle = prevProps.style || {}
-            state.componentProps = { ...prevProps, style: { ...prevStyle, [prop]: value == null ? '' : String(value) } }
-            break
-          }
-        }
-      })
+      deps.state.setProp(field, prop as any, value)
     },
     callInterface: async (interfaceCode, params = {}, type = 'internal', endpointId) => {
       if (!deps.onScanInterface) return undefined
       return deps.onScanInterface(interfaceCode, params, type, endpointId)
     },
     print: async (templateId, extra) => {
-      if (deps.doPrint && templateId) await deps.doPrint(templateId, deps.getFormValues(), extra)
+      if (deps.doPrint && templateId) await deps.doPrint(templateId, deps.state.getValues(), extra)
     },
     navigate: (pageKey, params = {}) => { if (deps.navigate && pageKey) deps.navigate(pageKey, params) },
     toast: (msg) => { if (deps.toast && msg != null) deps.toast(String(msg)) },
@@ -186,7 +165,7 @@ export async function runEventAction(
     case 'set_field': {
       if (!action.field) return
       const val = resolveSrc(action.value_src, ctx)
-      if (val !== undefined) deps.form.setValuesIn(action.field, val)
+      if (val !== undefined) deps.state.set(action.field, val)
       return
     }
     case 'call_interface': {
@@ -210,7 +189,7 @@ export async function runEventAction(
       for (const { response_field, form_field } of action.result_map || []) {
         if (!form_field) continue
         const val = resolveNestedField(res, response_field)
-        if (val !== undefined && val !== null) deps.form.setValuesIn(form_field, val)
+        if (val !== undefined && val !== null) deps.state.set(form_field, val)
       }
       return
     }
@@ -221,7 +200,7 @@ export async function runEventAction(
         if (!d.placeholder) continue
         extra[d.placeholder] = resolveSrc(d.src, ctx)
       }
-      await deps.doPrint(action.printer_template_id, deps.getFormValues(), extra)
+      await deps.doPrint(action.printer_template_id, deps.state.getValues(), extra)
       return
     }
     case 'navigate': {
@@ -242,39 +221,8 @@ export async function runEventAction(
     case 'set_field_prop': {
       if (!action.field || !action.prop) return
       const raw = resolveSrc(action.value_src, ctx)
-      const truthy = (v: any) => {
-        if (typeof v === 'boolean') return v
-        const s = String(v ?? '').trim().toLowerCase()
-        return s === 'true' || s === '1' || s === 'yes' || s === 'y' || s === '是' || s === 'on'
-      }
-      deps.form.setFieldState(action.field, (state: any) => {
-        switch (action.prop) {
-          case 'visible':
-            state.display = truthy(raw) ? 'visible' : 'none'
-            break
-          case 'disabled':
-            state.disabled = truthy(raw)
-            break
-          case 'readOnly':
-            state.readOnly = truthy(raw)
-            break
-          case 'title':
-            state.title = raw == null ? '' : String(raw)
-            break
-          case 'background':
-          case 'color': {
-            // 写入组件 style，运行时反映到表单控件外观
-            const styleKey = action.prop === 'background' ? 'background' : 'color'
-            const prevProps = state.componentProps || {}
-            const prevStyle = prevProps.style || {}
-            state.componentProps = {
-              ...prevProps,
-              style: { ...prevStyle, [styleKey]: raw == null ? '' : String(raw) },
-            }
-            break
-          }
-        }
-      })
+      // truthy 归一化、visible→display、background/color→style 等语义已下沉到 PageState 适配器
+      deps.state.setProp(action.field, action.prop, raw)
       return
     }
     case 'speak': {
@@ -367,7 +315,7 @@ export function setupPageEvents(
         try { parsed = JSON.parse(eventData) } catch { /* 保持字符串 */ }
         const ctx: EventContext = {
           scan: typeof eventData === 'string' ? eventData : String(eventData),
-          form: deps.getFormValues(),
+          form: deps.state.getValues(),
           event: parsed,
         }
         if (!passScanFilter(ctx.scan || '', ev.filters)) return
@@ -382,24 +330,19 @@ export function setupPageEvents(
     }
   }
 
-  // field_change：在 Formily effects 中监听字段变化
+  // field_change：通过 PageState 订阅字段变化（不再直接依赖 Formily effects）
   const fieldChangeEvents = events.filter(e => e.source.kind === 'field_change')
   if (fieldChangeEvents.length > 0) {
-    const effectId = 'page-events-field-change'
-    deps.form.addEffects(effectId, () => {
-      onFieldValueChange('*', (field: any) => {
-        const addr: string = field?.address?.toString?.() || field?.path?.toString?.() || ''
-        const shortName = addr.split('.').pop() || addr
-        for (const ev of fieldChangeEvents) {
-          if (ev.source.kind !== 'field_change') continue
-          if (ev.source.field !== shortName) continue
-          const ctx: EventContext = { scan: undefined, form: deps.getFormValues(), event: field?.value }
-          if (!evalCondition(ev.when, ctx)) continue
-          void runActions(ev, ctx, deps)
-        }
-      })
+    const unsub = deps.state.subscribe((shortName: string, value: any) => {
+      for (const ev of fieldChangeEvents) {
+        if (ev.source.kind !== 'field_change') continue
+        if (ev.source.field !== shortName) continue
+        const ctx: EventContext = { scan: undefined, form: deps.state.getValues(), event: value }
+        if (!evalCondition(ev.when, ctx)) continue
+        void runActions(ev, ctx, deps)
+      }
     })
-    disposers.push(() => deps.form.removeEffects(effectId))
+    disposers.push(unsub)
   }
 
   // button：暴露触发器
@@ -407,7 +350,7 @@ export function setupPageEvents(
     for (const ev of events) {
       if (ev.source.kind !== 'button') continue
       if (ev.source.button_id !== buttonId) continue
-      const ctx: EventContext = { scan: undefined, form: deps.getFormValues(), event: undefined }
+      const ctx: EventContext = { scan: undefined, form: deps.state.getValues(), event: undefined }
       if (!evalCondition(ev.when, ctx)) continue
       void runActions(ev, ctx, deps)
     }
@@ -417,7 +360,7 @@ export function setupPageEvents(
   const triggerLifecycle: LifecycleTrigger = (kind) => {
     for (const ev of events) {
       if (ev.source.kind !== kind) continue
-      const ctx: EventContext = { scan: undefined, form: deps.getFormValues(), event: undefined }
+      const ctx: EventContext = { scan: undefined, form: deps.state.getValues(), event: undefined }
       if (!evalCondition(ev.when, ctx)) continue
       void runActions(ev, ctx, deps)
     }
