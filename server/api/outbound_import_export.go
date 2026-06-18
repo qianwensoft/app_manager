@@ -67,18 +67,18 @@ type OutboundConnectorExport struct {
 
 // OutboundWebhookExport Webhook 导出结构
 type OutboundWebhookExport struct {
-	Name                 string                 `json:"name"`
-	Description          string                 `json:"description"`
-	Method               string                 `json:"method"`
-	Path                 string                 `json:"path"`
-	AuthMethod           string                 `json:"auth_method"`
-	DecryptMethod        string                 `json:"decrypt_method"`
-	DecryptKeyPath       string                 `json:"decrypt_key_path"`
-	ResponseTransformJS  string                 `json:"response_transform_js"`
-	Config               map[string]interface{} `json:"config,omitempty"` // 可选：是否导出配置
-	ResponseSchema       string                 `json:"response_schema"`
-	ObservedEventTypes   []string               `json:"observed_event_types"`
-	Enabled              bool                   `json:"enabled"`
+	Name                string                 `json:"name"`
+	Description         string                 `json:"description"`
+	Method              string                 `json:"method"`
+	Path                string                 `json:"path"`
+	AuthMethod          string                 `json:"auth_method"`
+	DecryptMethod       string                 `json:"decrypt_method"`
+	DecryptKeyPath      string                 `json:"decrypt_key_path"`
+	ResponseTransformJS string                 `json:"response_transform_js"`
+	Config              map[string]interface{} `json:"config,omitempty"` // 可选：是否导出配置
+	ResponseSchema      string                 `json:"response_schema"`
+	ObservedEventTypes  []string               `json:"observed_event_types"`
+	Enabled             bool                   `json:"enabled"`
 }
 
 // DataInterfaceExport 数据接口导出结构
@@ -166,11 +166,11 @@ func ExportOutboundApp(c *gin.Context) {
 	// 导出访问令牌
 	// 注意：如果 OutboundAppToken 模型不存在，这部分功能暂时禁用
 	/*
-	var tokens []models.OutboundAppToken
-	database.DB.Where("app_id = ?", app.ID).Find(&tokens)
-	for _, token := range tokens {
-		exportData.Tokens = append(exportData.Tokens, exportToken(token, includeSecrets))
-	}
+		var tokens []models.OutboundAppToken
+		database.DB.Where("app_id = ?", app.ID).Find(&tokens)
+		for _, token := range tokens {
+			exportData.Tokens = append(exportData.Tokens, exportToken(token, includeSecrets))
+		}
 	*/
 
 	// 导出推送配置
@@ -192,9 +192,9 @@ func ImportOutboundApp(c *gin.Context) {
 	// 选项
 	type ImportOptions struct {
 		OverwriteExisting bool   `json:"overwrite_existing"` // 是否覆盖已存在的应用
-		GenerateNewCodes  bool   `json:"generate_new_codes"`  // 是否生成新的编码
-		ImportSecrets     bool   `json:"import_secrets"`      // 是否导入密钥
-		Prefix            string `json:"prefix"`              // 编码前缀（避免冲突）
+		GenerateNewCodes  bool   `json:"generate_new_codes"` // 是否生成新的编码
+		ImportSecrets     bool   `json:"import_secrets"`     // 是否导入密钥
+		Prefix            string `json:"prefix"`             // 编码前缀（避免冲突）
 	}
 
 	var options ImportOptions
@@ -333,28 +333,28 @@ func ImportOutboundApp(c *gin.Context) {
 	// 导入访问令牌
 	// 注意：如果 OutboundAppToken 模型不存在，这部分功能暂时禁用
 	/*
-	if isUpdate {
-		tx.Where("app_id = ?", app.ID).Delete(&models.OutboundAppToken{})
-	}
+		if isUpdate {
+			tx.Where("app_id = ?", app.ID).Delete(&models.OutboundAppToken{})
+		}
 
-	if options.ImportSecrets {
-		for _, tokenData := range importData.Tokens {
-			token := models.OutboundAppToken{
-				AppID:       app.ID,
-				TokenName:   tokenData.TokenName,
-				TokenValue:  tokenData.TokenValue,
-				ExpiresAt:   &tokenData.ExpiresAt,
-				ScopesJSON:  toJSONString(tokenData.Scopes),
-				Description: tokenData.Description,
-			}
+		if options.ImportSecrets {
+			for _, tokenData := range importData.Tokens {
+				token := models.OutboundAppToken{
+					AppID:       app.ID,
+					TokenName:   tokenData.TokenName,
+					TokenValue:  tokenData.TokenValue,
+					ExpiresAt:   &tokenData.ExpiresAt,
+					ScopesJSON:  toJSONString(tokenData.Scopes),
+					Description: tokenData.Description,
+				}
 
-			if err := tx.Create(&token).Error; err != nil {
-				tx.Rollback()
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "创建访问令牌失败: " + err.Error()})
-				return
+				if err := tx.Create(&token).Error; err != nil {
+					tx.Rollback()
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "创建访问令牌失败: " + err.Error()})
+					return
+				}
 			}
 		}
-	}
 	*/
 
 	// 提交事务
@@ -364,9 +364,9 @@ func ImportOutboundApp(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "导入成功",
-		"app_id":  app.ID,
-		"app_code": app.AppCode,
+		"message":   "导入成功",
+		"app_id":    app.ID,
+		"app_code":  app.AppCode,
 		"is_update": isUpdate,
 	})
 }

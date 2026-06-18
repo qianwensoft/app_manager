@@ -3,6 +3,22 @@
     xmlns:tools="http://schemas.android.com/tools"
     package="com.appmanager.agent">
 
+    <!-- 包可见性（Android 11+ / targetSdk 30+）：
+         语音播报用 TextToSpeech，需绑定独立的 TTS 引擎 Service。未声明该 query 时
+         系统会过滤掉引擎包，TTS 初始化回调返回非 SUCCESS，ttsReady 永远为 false，
+         文本一直堆在 pendingSpeak 里，表现为「不报错但完全没声音」。 -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
+
+    <!-- 包可见性：问题反馈「选择目标应用」需枚举设备上全部应用（含系统应用）。
+         Android 11+ 默认仅可见少量包，未声明则 getInstalledApplications 只返回自身相关包，
+         表现为「选不到大多数应用」。 -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+
     <!-- 网络 -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -12,8 +28,9 @@
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- 不加 neverForLocation：部分整机/定制 ROM 上经典蓝牙 startDiscovery 会因该标记被过滤为空，
+         导致搜索不到周边打印机。经典发现本就依赖位置，去掉该标记可保证扫描结果返回。 -->
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
-        android:usesPermissionFlags="neverForLocation"
         tools:targetApi="s" />
 
     <!-- 前台 Service -->
@@ -56,6 +73,11 @@
 
     <!-- Logcat 读取（signature/privileged 权限，需通过 adb pm grant 授权） -->
     <uses-permission android:name="android.permission.READ_LOGS" />
+
+    <!-- 安全设置写入（development 权限）：声明后可经 `adb shell pm grant` 授予，
+         用于「无障碍自助授权」——授予后无需用户手动进设置页开启无障碍服务 -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
 
     <!-- 悬浮窗 -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
@@ -126,9 +148,23 @@
             android:parentActivityName=".MainActivity" />
 
         <activity
+            android:name=".ui.LoginActivity"
+            android:exported="false"
+            android:label="@string/login_title"
+            android:theme="@style/Theme.AppManagerMain"
+            android:parentActivityName=".MainActivity" />
+
+        <activity
             android:name=".ui.SettingsActivity"
             android:exported="false"
             android:label="@string/settings_title"
+            android:theme="@style/Theme.AppManagerMain"
+            android:parentActivityName=".MainActivity" />
+
+        <activity
+            android:name=".ui.PrinterSettingsActivity"
+            android:exported="false"
+            android:label="@string/printer_settings_title"
             android:theme="@style/Theme.AppManagerMain"
             android:parentActivityName=".MainActivity" />
 
@@ -171,10 +207,35 @@
             android:theme="@style/Theme.AppManagerMain"
             android:configChanges="orientation|screenSize|keyboardHidden" />
 
+        <activity
+            android:name=".ui.FeedbackActivity"
+            android:exported="false"
+            android:label="@string/main_tile_feedback"
+            android:theme="@style/Theme.AppManagerMain"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
+
+        <activity
+            android:name=".ui.FeedbackDetailActivity"
+            android:exported="false"
+            android:label="工单详情"
+            android:theme="@style/Theme.AppManagerMain"
+            android:parentActivityName=".ui.FeedbackActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
+
         <service
             android:name=".service.AgentService"
             android:exported="false"
-            android:foregroundServiceType="dataSync|mediaProjection" />
+            android:foregroundServiceType="dataSync" />
+
+        <service
+            android:name=".service.ScreenProjectionForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
+        <service
+            android:name=".service.FeedbackScreenRecordService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
 
         <service
             android:name=".service.TouchAccessibilityService"

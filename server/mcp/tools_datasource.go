@@ -129,11 +129,11 @@ func listDataInterfaces(_ json.RawMessage) (any, *RPCError) {
 // ── bind_data_to_canvas ───────────────────────────────────────────────────────
 
 type bindingSpec struct {
-	ElementID   string `json:"element_id"`
-	PointKey    string `json:"point_key"`
-	DeviceCode  string `json:"device_code"`
-	DataMode    string `json:"data_mode"` // "stomp" | "http"
-	Transform   string `json:"transform"`
+	ElementID  string `json:"element_id"`
+	PointKey   string `json:"point_key"`
+	DeviceCode string `json:"device_code"`
+	DataMode   string `json:"data_mode"` // "stomp" | "http"
+	Transform  string `json:"transform"`
 }
 
 type bindDataParams struct {
@@ -202,7 +202,7 @@ func listSimPoints(raw json.RawMessage) (any, *RPCError) {
 type createSimPointParams struct {
 	ScadaCode  string `json:"scada_code"`
 	LinkName   string `json:"link_name"`
-	Mode       string `json:"mode"`        // random | random_walk | sine | ramp | constant
+	Mode       string `json:"mode"` // random | random_walk | sine | ramp | constant
 	IntervalMs int    `json:"interval_ms"`
 	ParamsJSON string `json:"params_json"`
 }

@@ -235,34 +235,8 @@
               </el-tab-pane>
             </el-tabs>
 
-            <!-- 自动推导参数列表（从 body_template 中的 {{...}}） -->
-            <div v-if="detectedParams.length" class="detected-params">
-              <div class="detected-params__header">
-                <span>检测到 <strong>{{ detectedParams.length }}</strong> 个模板参数</span>
-                <el-button size="small" @click="fillSampleVarsFromParams">一键填入调试变量</el-button>
-              </div>
-              <el-table :data="detectedParams" size="small" border style="width: 100%; margin-top: 6px">
-                <el-table-column prop="token" label="占位符" min-width="200" show-overflow-tooltip />
-                <el-table-column label="分类" width="120">
-                  <template #default="{ row }">
-                    <el-tag size="small" :type="row.category === 'app' ? 'success' : row.category === 'flow' ? 'warning' : 'info'">
-                      {{ row.category }}
-                    </el-tag>
-                  </template>
-                </el-table-column>
-                <el-table-column label="当前调试值" min-width="200">
-                  <template #default="{ row }">
-                    <el-input
-                      size="small"
-                      :placeholder="row.defaultVal || '（空）'"
-                      :model-value="getSampleVar(row.token)"
-                      @input="setSampleVar(row.token, $event)"
-                    />
-                  </template>
-                </el-table-column>
-              </el-table>
+            <!-- 自动推导参数列表（从 Path 与 body_template 中的 {{...}}；自动忽略服务端托管的 token） -->
             </div>
-          </div>
         </el-form-item>
 
         <el-form-item label="超时 ms">
@@ -276,25 +250,96 @@
         </el-form-item>
         <el-form-item label="模板变量覆盖">
           <el-input v-model="sampleVarsJson" type="textarea" :rows="6" :placeholder="sampleVarsPlaceholder" />
-          <p class="subhint">上方参数列表「一键填入」也会更新此处。</p>
+          <p class="subhint">上方参数列表「一键填入」也会更新此处。保存接口时该 demo 入参一并保存，下次进入自动回填，二次执行无需重填。</p>
         </el-form-item>
-        <el-form-item v-if="afterResponseScriptPickerRows.length" label="响应后脚本（调试）">
-          <el-select
-            v-model="afterResponseScriptDebugChoice"
-            filterable
-            placeholder="after_response 执行范围"
-            style="width: 100%; max-width: 520px"
-          >
-            <el-option label="全部（与线上一致）" value="all" />
-            <el-option
-              v-for="row in afterResponseScriptPickerRows"
-              :key="'ar-' + row.index"
-              :label="afterResponseScriptOptionLabel(row)"
-              :value="row.index"
-              :disabled="!row.enabled"
-            />
-          </el-select>
-          <p class="subhint">仅影响本次调试的 <code>after_response</code>：选「全部」时顺序执行所有已启用脚本；选单条时只跑该下标，便于排查对 <code v-pre>{{context.*}}</code> 的影响。与下方「响应后 context」内选择器同步。</p>
+        <el-form-item label="接口响应后脚本">
+          <EndpointAfterScriptsEditor v-model="endpointAfterScripts" :app-id="appId" />
+        </el-form-item>
+
+        <!-- 执行序列编辑区 -->
+        <el-form-item label="after_response 序列">
+          <div class="script-order-editor" style="width: 100%; max-width: 860px">
+            <div class="script-order-header">
+              <span class="script-order-hint">拖拽调整执行顺序；全局脚本只读，接口脚本可编辑。序列为空时退化为「全局全部 → 接口全部」。</span>
+              <div class="script-order-actions">
+                <el-dropdown v-if="appAfterScriptRows.length" trigger="click" @command="addAppScriptToOrder">
+                  <el-button size="small" type="primary" plain>+ 添加全局脚本</el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item
+                        v-for="r in appAfterScriptRows"
+                        :key="'add-app-' + r.index"
+                        :command="r"
+                      >全局 #{{ r.index }} {{ r.name }}{{ r.enabled ? '' : '（未启用）' }}</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+                <el-button size="small" type="success" plain style="margin-left: 6px" @click="addEndpointScriptToOrder">+ 添加接口脚本</el-button>
+                <el-button v-if="afterScriptOrder.length" size="small" plain style="margin-left: 6px" @click="afterScriptOrder = []">清空（退化默认顺序）</el-button>
+              </div>
+            </div>
+            <div v-if="!afterScriptOrder.length" class="script-order-empty">
+              序列为空 — 调试/线上将按「全局脚本全部 → 接口脚本全部」顺序执行
+            </div>
+            <div v-else class="script-order-list">
+              <div
+                v-for="(item, idx) in afterScriptOrder"
+                :key="item._key || (item.scope + '-' + item.index + '-' + idx)"
+                class="script-order-item"
+                :class="{ 'script-order-item--app': item.scope === 'app', 'script-order-item--ep': item.scope === 'endpoint' }"
+              >
+                <div class="script-order-item__drag">
+                  <el-icon style="cursor:grab"><svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M9 4h2v2H9zm0 4h2v2H9zm0 4h2v2H9zm0 4h2v2H9zm4-12h2v2h-2zm0 4h2v2h-2zm0 4h2v2h-2zm0 4h2v2h-2z"/></svg></el-icon>
+                </div>
+                <el-tag :type="item.scope === 'app' ? 'warning' : 'primary'" size="small" style="flex-shrink:0;min-width:56px;text-align:center">
+                  {{ item.scope === 'app' ? '全局' : '接口' }} #{{ item.index }}
+                </el-tag>
+                <span class="script-order-item__name">{{ item.name || '未命名' }}</span>
+                <el-tag v-if="!item.enabled" type="info" size="small">未启用</el-tag>
+                <div class="script-order-item__btns">
+                  <el-button size="small" :disabled="idx === 0" text @click="moveOrderItem(idx, idx - 1)">↑</el-button>
+                  <el-button size="small" :disabled="idx === afterScriptOrder.length - 1" text @click="moveOrderItem(idx, idx + 1)">↓</el-button>
+                  <el-button size="small" type="danger" text @click="removeOrderItem(idx)">移除</el-button>
+                </div>
+                <!-- 全局脚本代码只读展示 -->
+                <div v-if="item.scope === 'app' && getAppScriptCode(item.index)" class="script-order-item__code">
+                  <el-collapse>
+                    <el-collapse-item :title="`查看代码（只读）`" :name="'app-code-' + idx">
+                      <pre class="trace-pre trace-pre--light">{{ getAppScriptCode(item.index) }}</pre>
+                    </el-collapse-item>
+                  </el-collapse>
+                </div>
+              </div>
+            </div>
+          </div>
+        </el-form-item>
+        <el-form-item>
+          <div v-if="detectedParams.length" class="detected-params">
+            <div class="detected-params__header">
+              <span>检测到 <strong>{{ detectedParams.length }}</strong> 个模板参数</span>
+              <el-button size="small" @click="fillSampleVarsFromParams">一键填入调试变量</el-button>
+            </div>
+            <el-table :data="detectedParams" size="small" border style="width: 100%; margin-top: 6px">
+              <el-table-column prop="token" label="占位符" min-width="200" show-overflow-tooltip />
+              <el-table-column label="分类" width="120">
+                <template #default="{ row }">
+                  <el-tag size="small" :type="row.category === 'app' ? 'success' : row.category === 'flow' ? 'warning' : 'info'">
+                    {{ row.category }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="当前调试值" min-width="200">
+                <template #default="{ row }">
+                  <el-input
+                    size="small"
+                    :placeholder="row.defaultVal || '（空）'"
+                    :model-value="getSampleVar(row.token)"
+                    @input="setSampleVar(row.token, $event)"
+                  />
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
         </el-form-item>
         <el-form-item>
           <el-button type="primary" :loading="sending" @click="sendDebug">发送调试请求</el-button>
@@ -355,34 +400,36 @@
           <pre class="trace-pre trace-pre--light trace-pre--tall">{{ prettyJson(lastResult.meta) }}</pre>
         </el-collapse-item>
       </el-collapse>
+
+      <!-- 脚本执行日志 -->
+      <el-collapse
+        v-if="scriptLogs.length"
+        v-model="scriptLogsCollapse"
+        class="meta-block script-logs-collapse"
+      >
+        <el-collapse-item :title="`脚本执行日志（${scriptLogs.length} 条）`" name="scriptLogs">
+          <div class="script-logs-list">
+            <div v-for="(log, i) in scriptLogs" :key="i" class="script-log-row">
+              <el-tag :type="log.scope === 'app' ? 'warning' : 'primary'" size="small" style="flex-shrink:0;min-width:56px;text-align:center">
+                {{ log.scope === 'app' ? '全局' : '接口' }} #{{ log.index }}
+              </el-tag>
+              <span class="script-log-name">{{ log.name || '未命名' }}</span>
+              <el-tag :type="scriptLogLevelType(log.level)" size="small" style="flex-shrink:0;width:42px;text-align:center">{{ log.level }}</el-tag>
+              <code class="script-log-line">{{ log.line }}</code>
+            </div>
+          </div>
+        </el-collapse-item>
+      </el-collapse>
+
       <el-collapse
         v-if="lastResult.exchange"
         v-model="debugContextAfterCollapse"
         class="meta-block context-after-collapse"
       >
         <el-collapse-item title="响应后 context（占位符）" name="ctxAfter">
-          <div v-if="afterResponseScriptPickerRows.length" class="ctx-script-picker">
-            <span class="ctx-script-picker__label">after_response 脚本</span>
-            <el-select
-              v-model="afterResponseScriptDebugChoice"
-              filterable
-              placeholder="执行范围"
-              style="width: 100%; max-width: 420px"
-              size="small"
-            >
-              <el-option label="全部（与线上一致）" value="all" />
-              <el-option
-                v-for="row in afterResponseScriptPickerRows"
-                :key="'ar2-' + row.index"
-                :label="afterResponseScriptOptionLabel(row)"
-                :value="row.index"
-                :disabled="!row.enabled"
-              />
-            </el-select>
-          </div>
           <p class="subhint" style="margin-top: 0">
             在 HTTP <strong>2xx</strong> 且响应体可解析为 JSON 时，按连接器「执行后 · 将 HTTP 2xx JSON 写入
-            <code v-pre>{{context.*}}</code>」规则展平；随后执行 <code>after_response</code>（范围见上）。表中为当前返回前占位符表内所有
+            <code v-pre>{{context.*}}</code>」规则展平；随后执行 <code>after_response</code>（按上方序列）。表中为当前返回前占位符表内所有
             <code v-pre>{{context.*}}</code> 项（含脚本写入/修改）；非 2xx 或未解析 JSON 时通常为空。
           </p>
           <el-table v-if="contextAfterRows.length" :data="contextAfterRows" border size="small" max-height="360">
@@ -480,6 +527,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as ob from '@/api/outbound'
 import JsonTemplateEditor from '@/components/JsonTemplateEditor.vue'
+import EndpointAfterScriptsEditor from '@/components/EndpointAfterScriptsEditor.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -704,27 +752,53 @@ function onBodyTabChange(tab) {
 // ─── 检测模板参数 ─────────────────────────────────────────
 const RE_PLACEHOLDER = /\{\{([^}]+)\}\}/g
 
-const detectedParams = computed(() => {
-  const tpl = String(form.body_template || '')
-  const seen = new Set()
-  const result = []
+// autoInjectedNames 与后端 outbound.AutoInjectedBodyParamNames 对齐：
+// dynamic_bearer + token_in=json_body 时，token 字段及其值模板占位符由服务端自动注入，
+// 不应作为调用方入参展示/填写（自动忽略 token/key 类参数）。
+const autoInjectedNames = computed(() => {
+  const set = new Set()
+  if (appAuthType.value !== 'dynamic_bearer') return set
+  const p = appTokenProvider.value || {}
+  if (p.token_in !== 'json_body') return set
+  const key = String(p.token_body_key || '').trim() || 'access_token'
+  set.add(key)
+  const tpl = String(p.token_body_value_template || '{{access_token}}')
   let m
   RE_PLACEHOLDER.lastIndex = 0
   while ((m = RE_PLACEHOLDER.exec(tpl)) !== null) {
-    const inner = m[1].trim()
-    if (!inner || seen.has(inner)) continue
-    seen.add(inner)
-    // skip built-in $func() calls
-    if (inner.startsWith('$')) continue
-    const token = `{{${inner}}}`
-    const category = inner.startsWith('app.') ? 'app' : inner.startsWith('flow.') ? 'flow' : inner.startsWith('context.') ? 'context' : 'system'
-    // default sample values for well-known tokens
-    const defaults = {
-      'device_event.id': '999001', 'device.id': '123', 'device.name': '演示设备',
-      'device.serial': 'DEMO-SERIAL', 'device_event.event_type': 'debug.sample',
-      'device_event.event_data': '{"demo":true}', 'definition.key': 'sample_event'
+    const name = m[1].trim()
+    if (name) set.add(name)
+  }
+  return set
+})
+
+const detectedParams = computed(() => {
+  // 同时扫描 Path（URL 含 {{占位符}}）与 Body 模板
+  const sources = [String(form.path || ''), String(form.body_template || '')]
+  const seen = new Set()
+  const result = []
+  const ignored = autoInjectedNames.value
+  for (const tpl of sources) {
+    let m
+    RE_PLACEHOLDER.lastIndex = 0
+    while ((m = RE_PLACEHOLDER.exec(tpl)) !== null) {
+      const inner = m[1].trim()
+      if (!inner || seen.has(inner)) continue
+      seen.add(inner)
+      // skip built-in $func() calls
+      if (inner.startsWith('$')) continue
+      // 自动忽略服务端托管的 token/key 类参数
+      if (ignored.has(inner)) continue
+      const token = `{{${inner}}}`
+      const category = inner.startsWith('app.') ? 'app' : inner.startsWith('flow.') ? 'flow' : inner.startsWith('context.') ? 'context' : 'system'
+      // default sample values for well-known tokens
+      const defaults = {
+        'device_event.id': '999001', 'device.id': '123', 'device.name': '演示设备',
+        'device.serial': 'DEMO-SERIAL', 'device_event.event_type': 'debug.sample',
+        'device_event.event_data': '{"demo":true}', 'definition.key': 'sample_event'
+      }
+      result.push({ token, inner, category, defaultVal: defaults[inner] || '' })
     }
-    result.push({ token, inner, category, defaultVal: defaults[inner] || '' })
   }
   return result
 })
@@ -822,6 +896,7 @@ async function saveSchemaToEndpoint() {
       body_template: form.body_template,
       param_schema: paramSchema,
       response_schema: generatedResponseSchema.value,
+      demo_params: String(sampleVarsJson.value || '').trim(),
       content_type: form.content_type || '',
       timeout_ms: form.timeout_ms || 0,
       retry_max: form.retry_max ?? 0,
@@ -880,11 +955,15 @@ const sending = ref(false)
 const savingEp = ref(false)
 const appName = ref('')
 const appExtensionScripts = ref(null)
+// 接口级响应后脚本，结构 { after_response: [...] }
+const endpointAfterScripts = ref({ after_response: [] })
 const appCommonHeadersDisplay = ref('{}')
 const appParams = ref([])
 const endpointOptions = ref([])
 const headersJson = ref('{}')
 const sampleVarsJson = ref('')
+const appAuthType = ref('none')
+const appTokenProvider = ref({})
 const sampleVarsPlaceholder = '{"{{device.id}}":"99","{{flow.access_token}}":"","{{device_event.event_data}}":"{}"}'
 
 const form = reactive({
@@ -900,11 +979,14 @@ const form = reactive({
 })
 
 const lastResult = ref(null)
-const afterResponseScriptDebugChoice = ref('all')
+// 执行序列：[{scope:'app'|'endpoint', index:number, name:string, enabled:boolean}]
+const afterScriptOrder = ref([])
 const debugMetaCollapse = ref([])
 const debugContextAfterCollapse = ref([])
+const scriptLogsCollapse = ref([])
 
-const afterResponseScriptPickerRows = computed(() => {
+// 全局脚本列表（从 appExtensionScripts 提取）
+const appAfterScriptRows = computed(() => {
   const ext = appExtensionScripts.value
   if (!ext || typeof ext !== 'object') return []
   let raw = ext.after_response
@@ -913,19 +995,108 @@ const afterResponseScriptPickerRows = computed(() => {
   return raw.map((entry, index) => {
     const enabled = entry && entry.enabled !== false
     const name = entry && String(entry.name || '').trim() ? String(entry.name).trim() : '未命名'
-    return { index, name, enabled }
+    const code = entry && String(entry.code || '').trim()
+    return { index, name, enabled, code, scope: 'app' }
   })
 })
 
-function afterResponseScriptOptionLabel(row) {
-  return `#${row.index} ${row.name}${row.enabled ? '' : '（未启用）'}`
+// 接口脚本列表（从 endpointAfterScripts 提取）
+const endpointAfterScriptRows = computed(() => {
+  const scripts = endpointAfterScripts.value
+  if (!scripts || !Array.isArray(scripts.after_response)) return []
+  return scripts.after_response.map((entry, index) => {
+    const enabled = entry && entry.enabled !== false
+    const name = entry && String(entry.name || '').trim() ? String(entry.name).trim() : '未命名'
+    return { index, name, enabled, scope: 'endpoint' }
+  })
+})
+
+// 构建发送给后端的 after_script_order（过滤掉越界条目）
+function buildAfterScriptOrderPayload() {
+  if (!afterScriptOrder.value.length) return undefined
+  return afterScriptOrder.value.map(e => ({ scope: e.scope, index: e.index }))
 }
-function afterResponseScriptDebugPayloadIndex() {
-  const c = afterResponseScriptDebugChoice.value
-  if (c === 'all' || c === '' || c == null) return undefined
-  const n = typeof c === 'number' ? c : Number(c)
-  return Number.isNaN(n) ? undefined : n
+
+// 初始化执行序列：从接口数据或默认（全局→接口）
+function initAfterScriptOrder(savedOrder) {
+  if (Array.isArray(savedOrder) && savedOrder.length) {
+    afterScriptOrder.value = savedOrder.map(e => {
+      const row = e.scope === 'app'
+        ? appAfterScriptRows.value.find(r => r.index === e.index)
+        : endpointAfterScriptRows.value.find(r => r.index === e.index)
+      return {
+        scope: e.scope,
+        index: e.index,
+        name: row ? row.name : '未命名',
+        enabled: row ? row.enabled : true,
+        _key: `${e.scope}-${e.index}-${Date.now()}-${Math.random()}`
+      }
+    })
+    return
+  }
+  // 默认顺序：全局脚本全部 → 接口脚本全部
+  const order = []
+  for (const r of appAfterScriptRows.value) {
+    order.push({ scope: 'app', index: r.index, name: r.name, enabled: r.enabled, _key: `app-${r.index}-${Date.now()}` })
+  }
+  for (const r of endpointAfterScriptRows.value) {
+    order.push({ scope: 'endpoint', index: r.index, name: r.name, enabled: r.enabled, _key: `ep-${r.index}-${Date.now()}` })
+  }
+  afterScriptOrder.value = order
 }
+
+// 执行序列拖拽排序
+function moveOrderItem(from, to) {
+  const arr = [...afterScriptOrder.value]
+  const [item] = arr.splice(from, 1)
+  arr.splice(to, 0, item)
+  afterScriptOrder.value = arr
+}
+function removeOrderItem(index) {
+  afterScriptOrder.value = afterScriptOrder.value.filter((_, i) => i !== index)
+}
+function addAppScriptToOrder(row) {
+  const already = afterScriptOrder.value.some(e => e.scope === 'app' && e.index === row.index)
+  if (already) { ElMessage.warning('该全局脚本已在序列中'); return }
+  afterScriptOrder.value = [...afterScriptOrder.value, {
+    scope: 'app', index: row.index, name: row.name, enabled: row.enabled,
+    _key: `app-${row.index}-${Date.now()}`
+  }]
+}
+function addEndpointScriptToOrder() {
+  // 新建一条接口脚本并追加到序列
+  const scripts = endpointAfterScripts.value
+  if (!Array.isArray(scripts.after_response)) scripts.after_response = []
+  const newIdx = scripts.after_response.length
+  scripts.after_response.push({ name: '', enabled: true, default: false, code: 'function main(ctx) {\n  \n}', timeout_ms: 800 })
+  endpointAfterScripts.value = { ...scripts }
+  afterScriptOrder.value = [...afterScriptOrder.value, {
+    scope: 'endpoint', index: newIdx, name: '未命名', enabled: true,
+    _key: `ep-${newIdx}-${Date.now()}`
+  }]
+}
+
+// 全局脚本代码（只读展示用）
+function getAppScriptCode(index) {
+  const ext = appExtensionScripts.value
+  if (!ext || !Array.isArray(ext.after_response)) return ''
+  return String((ext.after_response[index] || {}).code || '').trim()
+}
+
+// 脚本日志 level 颜色
+function scriptLogLevelType(level) {
+  if (level === 'error') return 'danger'
+  if (level === 'warn') return 'warning'
+  if (level === 'info') return 'success'
+  return ''
+}
+
+// 用于展示的脚本日志（从 lastResult 读取）
+const scriptLogs = computed(() => {
+  const r = lastResult.value
+  if (!r || !Array.isArray(r.script_logs)) return []
+  return r.script_logs
+})
 
 const contextAfterRows = computed(() => {
   const r = lastResult.value
@@ -1052,6 +1223,8 @@ async function loadApp() {
       a?.common_headers && Object.keys(a.common_headers).length ? a.common_headers : {}, null, 2)
   } catch { appCommonHeadersDisplay.value = '{}' }
   appParams.value = Array.isArray(a?.app_params) ? a.app_params : []
+  appAuthType.value = a?.auth_type || 'none'
+  appTokenProvider.value = (a?.token_provider && typeof a.token_provider === 'object') ? a.token_provider : {}
 }
 
 function applyEndpointRow(e) {
@@ -1067,6 +1240,20 @@ function applyEndpointRow(e) {
   form.enabled = e.enabled !== false
   headersJson.value = e.headers && Object.keys(e.headers).length ? JSON.stringify(e.headers, null, 2) : '{}'
   generatedResponseSchema.value = e.response_schema || null
+  // 回填已保存的 demo 入参，供调试 / 二次执行直接复用
+  if (e.demo_params && String(e.demo_params).trim()) {
+    try {
+      const obj = JSON.parse(e.demo_params)
+      sampleVarsJson.value = (obj && typeof obj === 'object') ? JSON.stringify(obj, null, 2) : ''
+    } catch { sampleVarsJson.value = '' }
+  } else {
+    sampleVarsJson.value = ''
+  }
+  endpointAfterScripts.value = (e.after_scripts && Array.isArray(e.after_scripts.after_response))
+    ? JSON.parse(JSON.stringify(e.after_scripts))
+    : { after_response: [] }
+  // 加载执行序列（nextTick 等 computed 更新后初始化）
+  nextTick(() => initAfterScriptOrder(e.after_script_order || null))
 }
 function resetDraftForm() {
   form.endpoint_id = null; form.name = ''; form.method = 'POST'; form.path = ''
@@ -1074,6 +1261,9 @@ function resetDraftForm() {
   form.retry_max = 0; form.enabled = true
   headersJson.value = '{}'
   generatedResponseSchema.value = null
+  sampleVarsJson.value = ''
+  endpointAfterScripts.value = { after_response: [] }
+  afterScriptOrder.value = []
 }
 async function onEndpointPick(id) {
   if (!id) { resetDraftForm(); return }
@@ -1095,11 +1285,14 @@ async function saveEndpoint() {
     body_template: form.body_template,
     param_schema: paramSchema,
     response_schema: generatedResponseSchema.value || '',
+    demo_params: String(sampleVarsJson.value || '').trim(),
     content_type: form.content_type || '',
     timeout_ms: form.timeout_ms || 0,
     retry_max: form.retry_max ?? 0,
     enabled: form.enabled !== false,
-    headers
+    headers,
+    after_scripts: endpointAfterScripts.value || { after_response: [] },
+    after_script_order: afterScriptOrder.value.length ? afterScriptOrder.value.map(e => ({ scope: e.scope, index: e.index })) : []
   }
   savingEp.value = true
   try {
@@ -1117,7 +1310,7 @@ async function saveEndpoint() {
 }
 
 async function boot() {
-  loading.value = true; lastResult.value = null; afterResponseScriptDebugChoice.value = 'all'
+  loading.value = true; lastResult.value = null; afterScriptOrder.value = []
   try {
     await loadApp()
     loadFlowPlaceholders()
@@ -1165,8 +1358,13 @@ async function sendDebug() {
       sample_vars: sampleVars
     }
     if (appExtensionScripts.value != null) payload.extension_scripts = appExtensionScripts.value
-    const arIdx = afterResponseScriptDebugPayloadIndex()
-    if (arIdx !== undefined) payload.after_response_script_index = arIdx
+    // 接口级脚本草稿（未保存即可调试）
+    if (endpointAfterScripts.value && Array.isArray(endpointAfterScripts.value.after_response) && endpointAfterScripts.value.after_response.length) {
+      payload.endpoint_after_scripts = endpointAfterScripts.value
+    }
+    // 执行序列
+    const order = buildAfterScriptOrderPayload()
+    if (order !== undefined) payload.after_script_order = order
     const r = await ob.postOutboundEndpointDebug(payload)
     lastResult.value = r
     generatedResponseSchema.value = null
@@ -1211,6 +1409,26 @@ onMounted(() => boot())
 .assist-btn { margin-left: 8px; }
 .flow-ph-new { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; align-items: center; }
 .flow-ph-input { flex: 1; min-width: 200px; }
+/* 执行序列编辑区 */
+.script-order-editor { border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px; background: #f8fafc; }
+.script-order-header { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.script-order-hint { font-size: 12px; color: #64748b; line-height: 1.5; flex: 1; }
+.script-order-actions { display: flex; align-items: center; flex-shrink: 0; }
+.script-order-empty { font-size: 12px; color: #94a3b8; padding: 8px 0; text-align: center; }
+.script-order-list { display: flex; flex-direction: column; gap: 6px; }
+.script-order-item { display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid #e2e8f0; border-radius: 4px; padding: 6px 10px; flex-wrap: wrap; }
+.script-order-item--app { border-left: 3px solid #f59e0b; }
+.script-order-item--ep { border-left: 3px solid #3b82f6; }
+.script-order-item__drag { color: #94a3b8; display: flex; align-items: center; }
+.script-order-item__name { font-size: 13px; color: #334155; flex: 1; min-width: 80px; }
+.script-order-item__btns { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+.script-order-item__code { width: 100%; margin-top: 4px; }
+/* 脚本执行日志 */
+.script-logs-collapse :deep(.el-collapse-item__header) { font-weight: 600; color: #334155; }
+.script-logs-list { display: flex; flex-direction: column; gap: 4px; }
+.script-log-row { display: flex; align-items: flex-start; gap: 8px; padding: 4px 6px; background: #f8fafc; border-radius: 4px; font-size: 12px; }
+.script-log-name { color: #475569; font-size: 12px; flex-shrink: 0; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.script-log-line { font-family: monospace; color: #0f172a; word-break: break-all; flex: 1; background: transparent; font-size: 12px; }
 .flow-ph-fav { margin: 8px 0 4px; }
 .flow-ph-fav-label { font-size: 12px; color: #64748b; margin-right: 8px; }
 .body-editor-shell { width: 100%; }

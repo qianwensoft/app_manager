@@ -110,9 +110,9 @@ func TestPhaseD_FormAppAgentE2E(t *testing.T) {
 			t.Fatal(err)
 		}
 		body, _ := json.Marshal(map[string]any{
-			"device_ids":        []uint{deviceID},
-			"entry_page_key":    "form",
-			"menu_title":        "E2E 表单",
+			"device_ids":         []uint{deviceID},
+			"entry_page_key":     "form",
+			"menu_title":         "E2E 表单",
 			"show_on_agent_home": true,
 		})
 		req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/form-app/infos/%d/deploy-to-devices", app.ID), bytes.NewReader(body))

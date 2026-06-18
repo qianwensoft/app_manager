@@ -81,7 +81,9 @@ func runOneLoadedStep(db *gorm.DB, connector models.OutboundConnector, ph models
 		return ExecuteHTTPWebhook(db, connector, *ls.HTTP, ls.HTTP.App, rec, dev, def, vars, meta, mergeHTTPResponseIntoVars, ls.Step, nil)
 	case "app_script":
 		return ExecuteAppScriptStep(db, connector, ls.Step, rec, dev, def, vars, meta)
-	case "broadcast_intent", "view_url", "message", "keyboard_hid":
+	case "connector_script":
+		return ExecuteConnectorScriptStep(db, connector, ls.Step, rec, dev, def, vars, meta)
+	case "broadcast_intent", "view_url", "message", "keyboard_hid", "print":
 		return ExecuteAgentOutboundStep(db, connector, ls.Step, rec, dev, def, vars, meta)
 	case "data_interface":
 		return ExecuteDataInterfaceStep(db, connector, ls.Step, rec, dev, def, vars, meta)

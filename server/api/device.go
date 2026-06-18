@@ -233,24 +233,24 @@ func GetDeviceInfo(c *gin.Context) {
 	// 如果是 Agent 连接的设备，直接返回数据库信息（含 Agent 心跳上报的网络/Wi‑Fi）
 	if device.AgentConnected {
 		c.JSON(http.StatusOK, gin.H{"data": map[string]interface{}{
-			"model":               device.Model,
-			"brand":               device.Brand,
-			"os_version":          device.OSVersion,
-			"sdk_version":         device.SDKVersion,
-			"resolution":          device.Resolution,
-			"ip_address":          device.IP,
-			"battery":             device.Battery,
-			"cpu_usage":           device.CPUUsage,
-			"memory_used":         device.MemoryUsed,
-			"memory_total":        device.MemoryTotal,
-			"total_memory":        device.TotalMemory,
-			"total_storage":       device.TotalStorage,
-			"storage_used":        device.StorageUsed,
-			"network_type":        device.NetworkType,
-			"wifi_ssid":           device.WifiSSID,
-			"wifi_signal":         device.WifiSignal,
-			"wifi_speed":          device.WifiSpeed,
-			"network_connected":   device.NetworkConnected,
+			"model":             device.Model,
+			"brand":             device.Brand,
+			"os_version":        device.OSVersion,
+			"sdk_version":       device.SDKVersion,
+			"resolution":        device.Resolution,
+			"ip_address":        device.IP,
+			"battery":           device.Battery,
+			"cpu_usage":         device.CPUUsage,
+			"memory_used":       device.MemoryUsed,
+			"memory_total":      device.MemoryTotal,
+			"total_memory":      device.TotalMemory,
+			"total_storage":     device.TotalStorage,
+			"storage_used":      device.StorageUsed,
+			"network_type":      device.NetworkType,
+			"wifi_ssid":         device.WifiSSID,
+			"wifi_signal":       device.WifiSignal,
+			"wifi_speed":        device.WifiSpeed,
+			"network_connected": device.NetworkConnected,
 		}})
 		return
 	}
@@ -779,6 +779,42 @@ func AdbKeyEvent(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "ok"})
 }
 
+// AgentNavKey 通过 Agent WebSocket 触发无障碍 performGlobalAction
+// （back / home / recents / notifications / quick_settings / power_dialog / lock_screen），
+// 用于纯 Agent 设备无 ADB 时的虚拟按键。无 Agent 在线返回 503，便于前端回退到 ADB keyevent。
+func AgentNavKey(c *gin.Context) {
+	var req struct {
+		Key string `json:"key" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if getDeviceByID(c) == nil {
+		return
+	}
+	routeKey, err := agent.AgentConnectionKey(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !agent.AgentHub.IsConnected(routeKey) {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Agent 未在线"})
+		return
+	}
+	if sendErr := agent.AgentHub.Send(routeKey, map[string]interface{}{
+		"type":   "command",
+		"action": "nav_key",
+		"data": map[string]interface{}{
+			"key": req.Key,
+		},
+	}); sendErr != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "下发失败: " + sendErr.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "ok"})
+}
+
 func AdbInputText(c *gin.Context) {
 	var req struct {
 		Text string `json:"text" binding:"required"`
@@ -1138,44 +1174,13 @@ func GrantAgentReadLogs(c *gin.Context) {
 		return
 	}
 
+	serial, needDisconnect, herr := resolveDeviceAdbSerial(device)
+	if herr != nil {
+		c.JSON(herr.code, gin.H{"error": herr.msg, "output": herr.output})
+		return
+	}
+
 	adbCli := getADB()
-	dbSerial := strings.TrimSpace(device.Serial)
-	var serial string
-	var needDisconnect bool
-
-	// ── 策略1：DB serial 可用（USB 或 已配对的无线 ip:port）────────────────
-	if serialUsableWithAdb(dbSerial) {
-		s, nd, err := ensureADBConnected(dbSerial)
-		if err == nil {
-			serial = s
-			needDisconnect = nd
-			goto doGrant
-		}
-		log.Printf("GrantAgentReadLogs: serial %s not usable: %v", dbSerial, err)
-	}
-
-	// ── 策略2：用 Agent 上报 IP + 5555 临时连接 ─────────────────────────────
-	{
-		ip := strings.TrimSpace(device.IP)
-		if ip == "" {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"error": "设备 ADB 未在线，且 Agent 未上报 IP；请先在「无线 ADB ▾→第二步」完成连接后再授权",
-			})
-			return
-		}
-		s, nd, err := ensureADBConnected(fmt.Sprintf("%s:5555", ip))
-		if err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{
-				"error":  fmt.Sprintf("adb connect %s:5555 失败，请先在「无线 ADB ▾→第二步」输入端口并点连接", ip),
-				"output": err.Error(),
-			})
-			return
-		}
-		serial = s
-		needDisconnect = nd
-	}
-
-doGrant:
 	out, err := adbCli.Shell(serial, "pm", "grant", agentPkg, permission)
 	if needDisconnect {
 		_ = adbCli.Disconnect(serial)
@@ -1186,6 +1191,113 @@ doGrant:
 	}
 	logAudit(c, "授权 READ_LOGS", fmt.Sprintf("设备 %d adb pm grant %s %s (serial=%s)", device.ID, agentPkg, permission, serial), &device.ID)
 	c.JSON(http.StatusOK, gin.H{"message": "READ_LOGS 权限授权成功，重启 Agent 后生效", "output": out})
+}
+
+// adbGrantError 携带 HTTP 状态与提示，供 resolveDeviceAdbSerial 把连接失败原因透传给前端。
+type adbGrantError struct {
+	code   int
+	msg    string
+	output string
+}
+
+func (e *adbGrantError) Error() string { return e.msg }
+
+// resolveDeviceAdbSerial 复用 READ_LOGS 授权的连接策略，返回一个当前可用的 ADB serial：
+//  1. 设备已有真实 ADB serial 且在线 → 直接用
+//  2. 仅 Agent 连接 → 用 Agent 心跳上报的 IP 临时 adb connect <ip>:5555（needDisconnect=true）
+//
+// 调用方在 Shell 执行后，若 needDisconnect 为真须 Disconnect 释放临时连接。
+func resolveDeviceAdbSerial(device *models.Device) (serial string, needDisconnect bool, herr *adbGrantError) {
+	dbSerial := strings.TrimSpace(device.Serial)
+
+	if serialUsableWithAdb(dbSerial) {
+		s, nd, err := ensureADBConnected(dbSerial)
+		if err == nil {
+			return s, nd, nil
+		}
+		log.Printf("resolveDeviceAdbSerial: serial %s not usable: %v", dbSerial, err)
+	}
+
+	ip := strings.TrimSpace(device.IP)
+	if ip == "" {
+		return "", false, &adbGrantError{
+			code: http.StatusServiceUnavailable,
+			msg:  "设备 ADB 未在线，且 Agent 未上报 IP；请先在「无线 ADB ▾→第二步」完成连接后再授权",
+		}
+	}
+	s, nd, err := ensureADBConnected(fmt.Sprintf("%s:5555", ip))
+	if err != nil {
+		return "", false, &adbGrantError{
+			code:   http.StatusServiceUnavailable,
+			msg:    fmt.Sprintf("adb connect %s:5555 失败，请先在「无线 ADB ▾→第二步」输入端口并点连接", ip),
+			output: err.Error(),
+		}
+	}
+	return s, nd, nil
+}
+
+// GrantAgentAccessibility 经 ADB 自助开启 Agent 无障碍服务，免去用户手动进设置页：
+//  1. pm grant WRITE_SECURE_SETTINGS（development 权限，声明后可 grant）
+//  2. settings put secure enabled_accessibility_services <服务>
+//  3. settings put secure accessibility_enabled 1
+//
+// 授权后虚拟导航键（back/home/recents）即可经无障碍 performGlobalAction 执行。
+func GrantAgentAccessibility(c *gin.Context) {
+	const (
+		agentPkg    = "com.appmanager.agent"
+		secureSet   = "android.permission.WRITE_SECURE_SETTINGS"
+		a11yService = "com.appmanager.agent/com.appmanager.agent.service.TouchAccessibilityService"
+	)
+
+	device := getDeviceByID(c)
+	if device == nil {
+		return
+	}
+
+	serial, needDisconnect, herr := resolveDeviceAdbSerial(device)
+	if herr != nil {
+		c.JSON(herr.code, gin.H{"error": herr.msg, "output": herr.output})
+		return
+	}
+
+	adbCli := getADB()
+	defer func() {
+		if needDisconnect {
+			_ = adbCli.Disconnect(serial)
+		}
+	}()
+
+	// 1) 授予 WRITE_SECURE_SETTINGS
+	if out, err := adbCli.Shell(serial, "pm", "grant", agentPkg, secureSet); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "授予 WRITE_SECURE_SETTINGS 失败: " + err.Error(), "output": out})
+		return
+	}
+
+	// 2) 把本应用无障碍服务并入已启用列表（保留系统已有的其它无障碍服务）
+	existing, _ := adbCli.Shell(serial, "settings", "get", "secure", "enabled_accessibility_services")
+	existing = strings.TrimSpace(existing)
+	if existing == "null" {
+		existing = ""
+	}
+	merged := a11yService
+	if existing != "" && !strings.Contains(existing, a11yService) {
+		merged = existing + ":" + a11yService
+	} else if existing != "" {
+		merged = existing
+	}
+	if out, err := adbCli.Shell(serial, "settings", "put", "secure", "enabled_accessibility_services", merged); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "写入无障碍服务列表失败: " + err.Error(), "output": out})
+		return
+	}
+
+	// 3) 打开无障碍总开关
+	if out, err := adbCli.Shell(serial, "settings", "put", "secure", "accessibility_enabled", "1"); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "开启无障碍总开关失败: " + err.Error(), "output": out})
+		return
+	}
+
+	logAudit(c, "授权 无障碍", fmt.Sprintf("设备 %d 自助开启无障碍 (serial=%s)", device.ID, serial), &device.ID)
+	c.JSON(http.StatusOK, gin.H{"message": "无障碍已开启，虚拟按键可直接使用"})
 }
 
 // GetAdbStatus 查询设备 USB 与无线 ADB 连接状态（轻量探测，不执行 reconnect）。

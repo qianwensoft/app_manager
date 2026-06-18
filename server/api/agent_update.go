@@ -19,6 +19,7 @@ import (
 type AgentUpdateCheckResponse struct {
 	HasUpdate   bool   `json:"hasUpdate"`
 	Version     string `json:"version,omitempty"`
+	VersionCode int    `json:"versionCode,omitempty"`
 	DownloadURL string `json:"downloadUrl,omitempty"`
 	Changelog   string `json:"changelog,omitempty"`
 }
@@ -36,6 +37,7 @@ func AgentUpdateCheck(c *gin.Context) {
 	c.JSON(http.StatusOK, AgentUpdateCheckResponse{
 		HasUpdate:   true,
 		Version:     latest.Version,
+		VersionCode: latest.VersionCode,
 		DownloadURL: fmt.Sprintf("/api/agent-updates/%d/download", latest.ID),
 		Changelog:   latest.Changelog,
 	})

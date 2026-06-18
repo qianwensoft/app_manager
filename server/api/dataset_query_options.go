@@ -17,8 +17,8 @@ type QueryOptions struct {
 	Offset   int `json:"offset"`    // 直接偏移量（与分页互斥）
 
 	// 排序参数
-	OrderBy    string `json:"order_by"`    // 排序字段，如 "created_at"
-	OrderDir   string `json:"order_dir"`   // 排序方向：ASC 或 DESC
+	OrderBy    string `json:"order_by"`  // 排序字段，如 "created_at"
+	OrderDir   string `json:"order_dir"` // 排序方向：ASC 或 DESC
 	MultiOrder []struct {
 		Field string `json:"field"`
 		Dir   string `json:"dir"`

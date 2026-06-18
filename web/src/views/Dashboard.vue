@@ -4,7 +4,7 @@
       <el-button :icon="Refresh" :loading="loading" @click="refresh">刷新</el-button>
     </div>
     <el-row :gutter="16" style="margin-bottom:16px">
-      <el-col :span="6">
+      <el-col :span="5">
         <el-card>
           <div class="stat">
             <div class="stat-num">{{ stats.total }}</div>
@@ -12,7 +12,7 @@
           </div>
         </el-card>
       </el-col>
-      <el-col :span="6">
+      <el-col :span="5">
         <el-card>
           <div class="stat">
             <div class="stat-num" style="color:#67c23a">{{ stats.online }}</div>
@@ -20,7 +20,7 @@
           </div>
         </el-card>
       </el-col>
-      <el-col :span="6">
+      <el-col :span="5">
         <el-card>
           <div class="stat">
             <div class="stat-num" style="color:#409eff">{{ stats.apps }}</div>
@@ -28,11 +28,19 @@
           </div>
         </el-card>
       </el-col>
-      <el-col :span="6">
+      <el-col :span="5">
         <el-card>
           <div class="stat">
             <div class="stat-num" style="color:#e6a23c">{{ stats.tasks }}</div>
             <div class="stat-label">今日任务</div>
+          </div>
+        </el-card>
+      </el-col>
+      <el-col :span="4">
+        <el-card class="clickable" @click="$router.push('/work-orders?status=open')">
+          <div class="stat">
+            <div class="stat-num" style="color:#f56c6c">{{ pendingWorkOrders }}</div>
+            <div class="stat-label">待处理工单</div>
           </div>
         </el-card>
       </el-col>
@@ -80,12 +88,14 @@ import { Refresh } from '@element-plus/icons-vue'
 import * as deviceApi from '@/api/device'
 import * as appApi from '@/api/app'
 import { getTasks } from '@/api/misc'
+import { getWorkOrders } from '@/api/workOrder'
 import { useEventListenerStore } from '@/stores/eventListeners'
 import NetworkCell from '@/components/NetworkCell.vue'
 
 const devices = ref([])
 const apps = ref([])
 const tasks = ref([])
+const pendingWorkOrders = ref(0)
 const loading = ref(false)
 const selectedGroup = ref('')
 
@@ -126,6 +136,20 @@ const loadData = async () => {
   devices.value = d.data
   apps.value = a.data
   tasks.value = t.data
+  loadPendingWorkOrders()
+}
+
+// 待处理工单数 = open + reopened（仅取 total，limit=1 省带宽）。
+const loadPendingWorkOrders = async () => {
+  try {
+    const [open, reopened] = await Promise.all([
+      getWorkOrders({ status: 'open', limit: 1 }),
+      getWorkOrders({ status: 'reopened', limit: 1 })
+    ])
+    pendingWorkOrders.value = (open.total || 0) + (reopened.total || 0)
+  } catch {
+    pendingWorkOrders.value = 0
+  }
 }
 
 const refresh = async () => {
@@ -160,6 +184,8 @@ onUnmounted(() => {
 .stat { text-align: center; padding: 8px; }
 .stat-num { font-size: 36px; font-weight: bold; }
 .stat-label { color: #999; margin-top: 4px; }
+.clickable { cursor: pointer; transition: box-shadow .2s; }
+.clickable:hover { box-shadow: 0 2px 12px rgba(0,0,0,.12); }
 .online-header {
   display: flex;
   align-items: center;

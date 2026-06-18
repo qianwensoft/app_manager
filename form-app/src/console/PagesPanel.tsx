@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Input, Select, Switch, Table, Modal, message } from 'antd'
+import { Button, Input, Select, Switch, Table, Modal, Drawer, message } from 'antd'
 import { authed, type FormAppInfo, type FormAppPage } from './api'
+import AiChatPanel from '@/pages/AiChatPanel'
+import { fieldDefsToSchema } from '@/pages/schemaConverter'
+import type { FieldDef } from '@/runtime/types'
 
 type Props = {
   app: FormAppInfo
@@ -17,6 +20,7 @@ export default function PagesPanel({ app, pages, links, reload }: Props) {
   const [newPage, setNewPage] = useState({ page_key: '', page_type: 'custom', title: '' })
 
   const [showGenerator, setShowGenerator] = useState(false)
+  const [aiOpen, setAiOpen] = useState(false)
   const [dataSources, setDataSources] = useState<any[]>([])
   const [selectedDataSourceID, setSelectedDataSourceID] = useState('')
   const [sourceTables, setSourceTables] = useState<string[]>([])
@@ -78,6 +82,41 @@ export default function PagesPanel({ app, pages, links, reload }: Props) {
       reload()
       message.success('页面已删除')
     } catch (e: any) { message.error(e.message) }
+  }
+
+  // 当前选中页面已有字段（供 AI 参考）
+  const currentFields: FieldDef[] = (() => {
+    if (!selectedPage?.config_json) return []
+    try { return JSON.parse(selectedPage.config_json).field_definitions || [] } catch { return [] }
+  })()
+
+  // 当前选中页面已有事件（供 AI 参考）
+  const currentEvents = (() => {
+    if (!selectedPage?.config_json) return []
+    try { const e = JSON.parse(selectedPage.config_json).events; return Array.isArray(e) ? e : [] } catch { return [] }
+  })()
+
+  // 当前选中页面已有打印模板（供 AI 参考）
+  const currentPrinters = (() => {
+    if (!selectedPage?.config_json) return []
+    try { const p = JSON.parse(selectedPage.config_json).printers; return Array.isArray(p) ? p : [] } catch { return [] }
+  })()
+
+  // AI 生成的字段/事件/打印模板直接保存到当前页面
+  const saveFieldsToPage = async (f: FieldDef[], source?: string, events?: any[], printers?: any[]) => {
+    if (!selectedPage) return
+    let config: any = {}
+    try { config = JSON.parse(selectedPage.config_json || '{}') } catch { config = {} }
+    config.field_definitions = f
+    if (events !== undefined) config.events = events
+    if (printers !== undefined) config.printers = printers
+    const designSchema = fieldDefsToSchema(f)
+    await authed(`/api/form-app/pages/${selectedPage.id}/ai-save`, 'POST', {
+      config_json: JSON.stringify(config),
+      design_schema: JSON.stringify(designSchema),
+      source: source || '',
+    })
+    reload()
   }
 
   const doRegenerate = async () => {
@@ -173,6 +212,8 @@ export default function PagesPanel({ app, pages, links, reload }: Props) {
             <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
               <Button type="primary" onClick={() => navigate(`/page-editor/${selectedPage.id}`)}>字段配置</Button>
               <Button onClick={() => navigate(`/page-designer/${selectedPage.id}`)}>布局编辑</Button>
+              <Button onClick={() => navigate(`/page-events/${selectedPage.id}`)}>事件编排</Button>
+              <Button onClick={() => setAiOpen(true)}>AI 对话编辑</Button>
               <Button danger onClick={() => deletePage(selectedPage.id)}>删除页面</Button>
             </div>
 
@@ -232,11 +273,28 @@ export default function PagesPanel({ app, pages, links, reload }: Props) {
           <Input value={newPage.title} onChange={e => setNewPage({ ...newPage, title: e.target.value })} placeholder="如: 报表页" />
         </div>
       </Modal>
+      <Drawer
+        title={selectedPage ? `AI 对话编辑：${selectedPage.title}` : 'AI 对话编辑'}
+        visible={aiOpen}
+        onClose={() => setAiOpen(false)}
+        width={480}
+        bodyStyle={{ padding: 16, height: '100%' }}
+      >
+        {selectedPage && (
+          <AiChatPanel
+            currentFields={currentFields}
+            currentEvents={currentEvents}
+            currentPrinters={currentPrinters}
+            pageId={selectedPage.id}
+            onApplyFields={() => { /* 向导内无内嵌编辑器，直接走保存到页面 */ }}
+            onSaveToPage={saveFieldsToPage}
+            onAfterRollback={() => reload()}
+          />
+        )}
+      </Drawer>
     </div>
   )
 }
-
-/** list 页专属配置：新增按钮跳转 + 扫码阻塞全局事件开关 */
 function ListPageConfig({
   app,
   page,

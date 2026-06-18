@@ -117,7 +117,32 @@
               </el-alert>
             </el-form-item>
 
-            <el-divider content-position="left">可用占位符说明</el-divider>
+            <el-form-item label="返回值脚本">
+              <p style="color: #606266; font-size: 13px; margin: 0 0 8px 0">
+                在<strong>所有阶段步骤与输出参数映射之后</strong>执行，可对接口模式的<strong>整体返回值</strong>做最终加工。
+                脚本中 <code>ctx.getResponseBody()</code> 读到当前返回 JSON 字符串，<code>ctx.setResponseBody(JSON.stringify(obj))</code> 整体替换返回值；
+                也可用 <code>ctx.getContext/setContext</code> 读写 context。ES5，须定义 <code>function main(ctx)</code>。
+              </p>
+              <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px">
+                <el-switch v-model="form.custom_script.result.enabled" active-text="启用返回值脚本" />
+                <span style="font-size: 12px; color: #909399">超时 ms</span>
+                <el-input-number v-model="form.custom_script.result.timeout_ms" :min="100" :max="5000" :step="100" size="small" />
+              </div>
+              <template v-if="form.custom_script.result.enabled">
+                <ExtensionScriptEditor
+                  v-model="form.custom_script.result.code"
+                  phase="after"
+                  placeholder="function main(ctx) { var o = JSON.parse(ctx.getResponseBody()||'{}'); ctx.setResponseBody(JSON.stringify({code:0,data:o})); }"
+                  :min-height="180"
+                />
+                <ExtScriptAIAssistant
+                  phase="after"
+                  endpoint="/api/outbound/connectors/script-ai"
+                  :current-code="form.custom_script.result.code || ''"
+                  @apply="(code) => { form.custom_script.result.code = code }"
+                />
+              </template>
+            </el-form-item>
             <el-alert type="info" :closable="false" show-icon>
               <template #title>接口模式下的 Context 占位符</template>
               <template #description>
@@ -193,7 +218,12 @@
 
             <el-form-item label="测试接口" v-if="!isNew && form.interface_code">
               <el-button type="primary" @click="openInterfaceTest">测试调用与 Context 预览</el-button>
+              <el-button type="success" plain @click="openInterfaceDebug">全流程调试（逐步 Context）</el-button>
               <span class="hint">保存后可测试接口调用，查看 context 占位符实际值</span>
+            </el-form-item>
+            <el-form-item label="调试" v-else-if="form.interface_mode">
+              <el-button type="success" plain @click="openInterfaceDebug">全流程调试（逐步 Context）</el-button>
+              <span class="hint">无需保存，输入参数即可端到端执行并观察 context 演变</span>
             </el-form-item>
           </template>
 
@@ -531,10 +561,12 @@
                     <el-option label="HTTP 接口" value="http" />
                     <el-option label="数据接口" value="data_interface" />
                     <el-option label="应用脚本" value="app_script" />
+                    <el-option label="连接器脚本" value="connector_script" />
                     <el-option label="打开网页" value="view_url" />
                     <el-option label="广播 Intent" value="broadcast_intent" />
                     <el-option label="消息提醒" value="message" />
                     <el-option label="键盘HID输出" value="keyboard_hid" />
+                    <el-option label="蓝牙打印" value="print" />
                   </el-select>
                   <template v-if="st.step_type === 'http'">
                     <el-select v-model="st.endpoint_id" filterable placeholder="选择应用接口" style="flex: 1; min-width: 220px" @change="onEndpointSelect(st, pi, si)">
@@ -555,14 +587,21 @@
                     <el-switch v-model="st.config.merge_result_to_context" active-text="结果→context" style="margin-left: 8px" />
                   </template>
                   <template v-else-if="st.step_type === 'app_script'">
-                    <el-select v-model="st.config.app_id" filterable placeholder="外部应用" style="width: 200px">
-                      <el-option v-for="a in apps" :key="a.id" :label="`${a.name} (#${a.id})`" :value="a.id" />
-                    </el-select>
-                    <el-select v-model="st.config.hook" style="width: 200px; margin-left: 8px">
-                      <el-option label="请求前脚本" value="before_request" />
-                      <el-option label="响应后脚本" value="after_response" />
-                    </el-select>
-                    <span class="step-app-script-hint" title="执行该应用在详情页配置的对应扩展脚本，不发起 HTTP">仅脚本</span>
+                    <el-switch v-model="st.config.inline" active-text="内联代码" inactive-text="引用应用" style="margin-right: 8px" />
+                    <template v-if="!st.config.inline">
+                      <el-select v-model="st.config.app_id" filterable placeholder="外部应用" style="width: 200px">
+                        <el-option v-for="a in apps" :key="a.id" :label="`${a.name} (#${a.id})`" :value="a.id" />
+                      </el-select>
+                      <el-select v-model="st.config.hook" style="width: 200px; margin-left: 8px">
+                        <el-option label="请求前脚本" value="before_request" />
+                        <el-option label="响应后脚本" value="after_response" />
+                      </el-select>
+                      <span class="step-app-script-hint" title="执行该应用在详情页配置的对应扩展脚本，不发起 HTTP">仅脚本</span>
+                    </template>
+                    <span v-else class="step-app-script-hint" title="直接编写 ES5 脚本，下方编辑">内联脚本（见下方编辑器）</span>
+                  </template>
+                  <template v-else-if="st.step_type === 'connector_script'">
+                    <span class="step-app-script-hint" title="连接器内联 ES5 脚本，function main(ctx)，可读写 context">连接器脚本（见下方编辑器）</span>
                   </template>
                   <template v-else-if="st.step_type === 'view_url'">
                     <el-input v-model="st.config.url" placeholder="https://... 支持占位符" style="flex: 1" />
@@ -645,6 +684,30 @@
                       title="可选：验证前台应用包名，不匹配则跳过输入"
                     />
                   </template>
+                  <template v-else-if="st.step_type === 'print'">
+                    <el-select v-model="st.config.protocol" style="width: 140px" size="small" placeholder="协议">
+                      <el-option label="ESC/POS" value="escpos" />
+                      <el-option label="CPCL" value="cpcl" />
+                      <el-option label="TSPL" value="tspl" />
+                    </el-select>
+                    <el-select v-model="st.config.transport" style="width: 110px" size="small" placeholder="传输">
+                      <el-option label="SPP" value="spp" />
+                      <el-option label="BLE" value="ble" />
+                    </el-select>
+                    <el-input
+                      v-model="st.config.mac"
+                      placeholder="打印机MAC(留空=默认)"
+                      style="width: 180px"
+                      size="small"
+                      clearable
+                    />
+                    <JsonTemplateEditor
+                      v-model="st.config._content_json"
+                      placeholder='打印内容 JSON 数组，如 [{"op":"text","text":"{{context.name}}"},{"op":"cut"}]'
+                      :min-height="80"
+                      style="flex: 1; min-width: 220px"
+                    />
+                  </template>
                   <div class="step-delays" title="本步骤执行前、执行完成后各自等待的毫秒数">
                     <span class="delay-lbl">前(ms)</span>
                     <el-input-number
@@ -668,6 +731,24 @@
                     />
                   </div>
                   <el-button link type="danger" size="small" @click="removeConnStep(pi, si)">删步</el-button>
+                  </div>
+                  <div
+                    v-if="st.step_type === 'connector_script' || (st.step_type === 'app_script' && st.config.inline)"
+                    class="step-script-wrap"
+                  >
+                    <div class="step-cx-title">脚本代码（ES5，function main(ctx)）</div>
+                    <ExtensionScriptEditor
+                      v-model="st.config.code"
+                      phase="after"
+                      placeholder="function main(ctx) { /* ctx.getContext/setContext, ctx.getResponseBody/setResponseBody ... */ }"
+                      :min-height="160"
+                    />
+                    <ExtScriptAIAssistant
+                      phase="after"
+                      endpoint="/api/outbound/connectors/script-ai"
+                      :current-code="st.config.code || ''"
+                      @apply="(code) => { st.config.code = code }"
+                    />
                   </div>
                   <div class="step-cx-wrap">
                     <div class="step-cx-block">
@@ -1423,6 +1504,139 @@
 
       <el-empty v-else description="填写参数后点击「执行测试」查看结果" />
     </el-dialog>
+
+    <!-- 接口模式全流程调试对话框 -->
+    <el-dialog
+      v-model="interfaceDebugDlg.visible"
+      title="接口全流程调试 · 逐步 Context 演变"
+      width="min(960px, 96vw)"
+      destroy-on-close
+      class="interface-test-dlg"
+    >
+      <el-alert type="info" :closable="false" show-icon style="margin-bottom: 12px">
+        <template #title>
+          输入接口入参后端到端执行所有阶段步骤，逐步查看 <code>context.*</code> 的演变与最终输出。当前表单（含未保存改动）即时生效，无需先保存。
+        </template>
+      </el-alert>
+
+      <el-form label-width="100px" size="small">
+        <el-form-item label="接口入参">
+          <el-input
+            v-model="interfaceDebugDlg.paramsJson"
+            type="textarea"
+            :rows="5"
+            placeholder='JSON 格式，如：{"employee_id": "E001", "department": "IT"}'
+            style="font-family: monospace"
+          />
+          <span class="hint">这些参数将以 <code v-pre>{{param}}</code> 与 <code v-pre>{{context.param}}</code> 双写注入初始 context</span>
+        </el-form-item>
+        <el-form-item label="真实请求">
+          <el-switch v-model="interfaceDebugDlg.executeLiveHTTP" />
+          <span class="hint" style="margin-left: 8px">
+            开启后，已选接口的 HTTP 步骤将发起<strong>真实 HTTP 请求</strong>（不写投递日志）；关闭则全部使用固定模拟 2xx JSON。
+          </span>
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :loading="interfaceDebugDlg.loading" @click="runInterfaceDebug">
+            执行调试
+          </el-button>
+          <el-button @click="fillInterfaceDebugParams">填充示例参数</el-button>
+        </el-form-item>
+      </el-form>
+
+      <el-tabs v-model="interfaceDebugDlg.innerTab" v-if="interfaceDebugDlg.result">
+        <el-tab-pane label="逐步 Context 演变" name="steps">
+          <p class="phase-test-tab-hint">
+            按执行顺序列出每个步骤，<strong>新增/变化的 context 键</strong>高亮显示；点击行可展开该步执行后的完整 context。
+          </p>
+          <el-table
+            v-if="interfaceDebugDlg.result.steps && interfaceDebugDlg.result.steps.length"
+            :data="interfaceDebugDlg.result.steps"
+            border
+            size="small"
+            max-height="460"
+            row-key="rowKey"
+          >
+            <el-table-column type="expand">
+              <template #default="{ row }">
+                <div style="padding: 8px 16px">
+                  <div class="step-cx-title">该步执行后 context.*</div>
+                  <el-table :data="row.context_after" border size="small" max-height="260">
+                    <el-table-column prop="key" label="占位符" min-width="240" show-overflow-tooltip />
+                    <el-table-column prop="value" label="值" min-width="200" show-overflow-tooltip />
+                  </el-table>
+                  <div v-if="row.response_body" style="margin-top: 8px">
+                    <div class="step-cx-title">响应/摘要</div>
+                    <pre class="ctx-pre">{{ row.response_body }}</pre>
+                  </div>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="阶段" width="64" align="center">
+              <template #default="{ row }">{{ row.phase_index + 1 }}</template>
+            </el-table-column>
+            <el-table-column prop="step_index" label="步骤" width="64" align="center" />
+            <el-table-column prop="step_type" label="类型" width="118" show-overflow-tooltip />
+            <el-table-column label="HTTP" width="64" align="center">
+              <template #default="{ row }">
+                <el-tag v-if="row.live_http" type="warning" size="small">真实</el-tag>
+                <span v-else>—</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="状态" width="100" show-overflow-tooltip>
+              <template #default="{ row }">
+                <el-tag :type="row.status && row.status.includes('fail') ? 'danger' : 'success'" size="small">
+                  {{ row.status || '—' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="新增 context 键" min-width="240">
+              <template #default="{ row }">
+                <template v-if="row.added_keys && row.added_keys.length">
+                  <el-tag
+                    v-for="k in row.added_keys"
+                    :key="k"
+                    size="small"
+                    class="phase-test-tag"
+                    type="success"
+                  >{{ k }}</el-tag>
+                </template>
+                <span v-else style="color: #909399">—</span>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-else description="无步骤可执行（请确认已配置阶段与步骤）" />
+        </el-tab-pane>
+
+        <el-tab-pane label="最终输出" name="output">
+          <p class="phase-test-tab-hint">应用<strong>输出参数映射</strong>后的最终返回（未配置映射时为完整 context）。</p>
+          <pre class="ctx-pre">{{ fmtJson(interfaceDebugDlg.result.output) }}</pre>
+        </el-tab-pane>
+
+        <el-tab-pane label="初始 / 最终 Context" name="ctx">
+          <div class="step-cx-title">初始 context（入参 seed 后、执行前）</div>
+          <el-table :data="interfaceDebugDlg.result.initial_context" border size="small" max-height="240">
+            <el-table-column prop="key" label="占位符" min-width="240" show-overflow-tooltip />
+            <el-table-column prop="value" label="值" min-width="200" show-overflow-tooltip />
+          </el-table>
+          <div class="step-cx-title" style="margin-top: 12px">最终 context（全部执行后）</div>
+          <el-table :data="interfaceDebugDlg.result.final_context" border size="small" max-height="240">
+            <el-table-column prop="key" label="占位符" min-width="240" show-overflow-tooltip />
+            <el-table-column prop="value" label="值" min-width="200" show-overflow-tooltip />
+          </el-table>
+        </el-tab-pane>
+
+        <el-tab-pane label="说明" name="note">
+          <el-alert type="info" :closable="false">
+            <template #default>
+              <div style="font-size: 13px; line-height: 1.7">{{ interfaceDebugDlg.result.note }}</div>
+            </template>
+          </el-alert>
+        </el-tab-pane>
+      </el-tabs>
+
+      <el-empty v-else description="填写参数后点击「执行调试」查看逐步 context 演变" />
+    </el-dialog>
   </div>
 </template>
 
@@ -1440,6 +1654,8 @@ import { createOutboundConnectorTraceStomp } from '@/utils/outboundTraceStomp'
 import { mergeOutboundTraceNodeTick, traceTickFiltersDevice } from '@/utils/outboundTraceMerge'
 import ConnectorFlowGraph from '@/components/outbound/ConnectorFlowGraph.vue'
 import JsonTemplateEditor from '@/components/JsonTemplateEditor.vue'
+import ExtensionScriptEditor from '@/components/ExtensionScriptEditor.vue'
+import ExtScriptAIAssistant from '@/components/ExtScriptAIAssistant.vue'
 import TemplateVarsPanel from '@/components/outbound/TemplateVarsPanel.vue'
 import ParamSchemaEditor from '@/components/ParamSchemaEditor.vue'
 
@@ -1501,6 +1717,16 @@ const interfaceTestDlg = reactive({
   innerTab: 'context',
   result: null,
   contextRows: []
+})
+
+/** 接口模式全流程调试对话框 */
+const interfaceDebugDlg = reactive({
+  visible: false,
+  loading: false,
+  paramsJson: '',
+  executeLiveHTTP: true,
+  innerTab: 'steps',
+  result: null
 })
 
 const debugInnerTab = ref('flow')
@@ -1664,7 +1890,9 @@ const form = reactive({
   interface_code: '',
   input_params_json: '',
   output_schema_json: '',
-  output_mappings: []
+  output_mappings: [],
+  // 连接器全局自定义脚本：{ result: { enabled, code, timeout_ms } }
+  custom_script: { result: { enabled: false, code: '', timeout_ms: 800 } }
 })
 
 const routeId = computed(() => String(route.params.id || ''))
@@ -2181,6 +2409,19 @@ function mapPhaseFromApi(ph) {
         hook: cfg.hook || 'before_request'
       }
     }
+    if (s.step_type === 'print') {
+      let contentText = '[]'
+      try {
+        if (Array.isArray(cfg.content)) contentText = JSON.stringify(cfg.content, null, 2)
+      } catch { contentText = '[]' }
+      st.config = {
+        protocol: cfg.protocol || 'escpos',
+        transport: cfg.transport || 'spp',
+        mac: cfg.mac || '',
+        gen_side: cfg.gen_side || 'agent',
+        _content_json: contentText
+      }
+    }
     ensureStepContextMerge(st, s.config)
     const tp = (s.config || {}).template_params
     if (tp && typeof tp === 'object' && !Array.isArray(tp)) {
@@ -2234,6 +2475,7 @@ function resetFormNew() {
   form.input_params_json = ''
   form.output_schema_json = ''
   form.output_mappings = []
+  form.custom_script = { result: { enabled: false, code: '', timeout_ms: 800 } }
 }
 
 function applyRowToForm(row) {
@@ -2275,6 +2517,19 @@ function applyRowToForm(row) {
     }
   } else {
     form.output_mappings = []
+  }
+
+  // 连接器全局自定义脚本（含返回值 result 脚本）
+  {
+    const cs = (row.custom_script && typeof row.custom_script === 'object') ? row.custom_script : {}
+    const r = (cs.result && typeof cs.result === 'object') ? cs.result : {}
+    form.custom_script = {
+      result: {
+        enabled: !!r.enabled,
+        code: typeof r.code === 'string' ? r.code : '',
+        timeout_ms: r.timeout_ms != null ? Number(r.timeout_ms) || 800 : 800
+      }
+    }
   }
 
   preloadStepSchemas(phases)
@@ -2635,8 +2890,21 @@ function onConnStepTypeChange(ph, si) {
     st.endpoint_id = null
     const off = prevLeg === 'off' && !prevBefore
     st.config = {
+      inline: st.config?.inline || false,
+      code: st.config?.code || '',
+      timeout_ms: st.config?.timeout_ms != null ? Number(st.config.timeout_ms) : 800,
       app_id: st.config?.app_id || null,
       hook: st.config?.hook || 'before_request',
+      context_merge_before: off ? 'off' : 'event_data_json',
+      context_merge_after: 'off',
+      context_merge: off ? 'off' : 'event_data_json'
+    }
+  } else if (st.step_type === 'connector_script') {
+    st.endpoint_id = null
+    const off = prevLeg === 'off' && !prevBefore
+    st.config = {
+      code: st.config?.code || '',
+      timeout_ms: st.config?.timeout_ms != null ? Number(st.config.timeout_ms) : 800,
       context_merge_before: off ? 'off' : 'event_data_json',
       context_merge_after: 'off',
       context_merge: off ? 'off' : 'event_data_json'
@@ -2683,6 +2951,19 @@ function onConnStepTypeChange(ph, si) {
       keys: st.config?.keys || [],
       delay_ms: st.config?.delay_ms != null ? Number(st.config.delay_ms) : 50,
       target_app: st.config?.target_app || '',
+      context_merge_before: off ? 'off' : 'event_data_json',
+      context_merge_after: 'off',
+      context_merge: off ? 'off' : 'event_data_json'
+    }
+  } else if (st.step_type === 'print') {
+    st.endpoint_id = null
+    const off = prevLeg === 'off' && !prevBefore
+    st.config = {
+      protocol: st.config?.protocol || 'escpos',
+      transport: st.config?.transport || 'spp',
+      mac: st.config?.mac || '',
+      gen_side: st.config?.gen_side || 'agent',
+      _content_json: st.config?._content_json || '[]',
       context_merge_before: off ? 'off' : 'event_data_json',
       context_merge_after: 'off',
       context_merge: off ? 'off' : 'event_data_json'
@@ -2853,6 +3134,92 @@ async function runInterfaceTest() {
   }
 }
 
+/** 打开全流程调试对话框 */
+function openInterfaceDebug() {
+  interfaceDebugDlg.visible = true
+  interfaceDebugDlg.result = null
+  interfaceDebugDlg.innerTab = 'steps'
+  if (!interfaceDebugDlg.paramsJson) {
+    fillInterfaceDebugParams()
+  }
+}
+
+/** 依据 input_params_json 填充调试示例参数 */
+function fillInterfaceDebugParams() {
+  try {
+    if (form.input_params_json) {
+      const schema = JSON.parse(form.input_params_json)
+      const example = {}
+      if (schema.properties) {
+        for (const [key, prop] of Object.entries(schema.properties)) {
+          if (prop.examples && prop.examples.length > 0) {
+            example[key] = prop.examples[0]
+          } else if (prop.default !== undefined) {
+            example[key] = prop.default
+          } else if (prop.type === 'string') {
+            example[key] = prop.description ? `示例_${key}` : 'example'
+          } else if (prop.type === 'number' || prop.type === 'integer') {
+            example[key] = 123
+          } else if (prop.type === 'boolean') {
+            example[key] = true
+          }
+        }
+      }
+      interfaceDebugDlg.paramsJson = JSON.stringify(example, null, 2)
+    } else {
+      interfaceDebugDlg.paramsJson = JSON.stringify({ param1: 'value1', param2: 'value2' }, null, 2)
+    }
+  } catch {
+    interfaceDebugDlg.paramsJson = JSON.stringify({ param1: 'value1', param2: 'value2' }, null, 2)
+  }
+}
+
+/** 执行全流程调试：端到端跑当前表单各阶段，返回逐步 context 演变 */
+async function runInterfaceDebug() {
+  const built = buildPhasesArray({ forSave: false })
+  if (built.error) {
+    if (built.error !== '__handled') ElMessage.warning(built.error)
+    return
+  }
+
+  let params = {}
+  try {
+    params = JSON.parse(interfaceDebugDlg.paramsJson || '{}')
+  } catch {
+    ElMessage.error('参数 JSON 格式错误')
+    return
+  }
+
+  interfaceDebugDlg.loading = true
+  interfaceDebugDlg.result = null
+  try {
+    const r = await ob.postOutboundInterfaceDebug({
+      connector_id: Number(numericConnectorId.value) || 0,
+      interface_code: form.interface_code || '',
+      phases: built.phases,
+      output_mappings: (form.output_mappings || []).filter((m) => m.output_key?.trim()),
+      input_params_json: form.input_params_json || '',
+      custom_script: form.custom_script || {},
+      params,
+      execute_live_http: interfaceDebugDlg.executeLiveHTTP
+    })
+    const d = r.data || {}
+    // 为可展开行补一个稳定 rowKey
+    if (Array.isArray(d.steps)) {
+      d.steps.forEach((s, i) => {
+        s.rowKey = `${s.phase_index}-${s.step_index}-${i}`
+      })
+    }
+    interfaceDebugDlg.result = d
+    interfaceDebugDlg.innerTab = 'steps'
+    ElMessage.success('调试执行完成')
+  } catch (e) {
+    ElMessage.error('调试失败：' + (e.message || e))
+  } finally {
+    interfaceDebugDlg.loading = false
+  }
+}
+
 /** 将步骤表单中的 template_params 文本合并进即将提交的 config；失败时返回 false 并已提示。 */
 function attachStepTemplateParamsToConfig(st, cfg) {
   const raw = (st._stepTemplateParamsText || '').trim()
@@ -2881,7 +3248,7 @@ function attachStepTemplateParamsToConfig(st, cfg) {
  */
 function buildPhasesArray(opts = {}) {
   const forSave = opts.forSave !== false
-  if (forSave && form.trigger_type === 'device_event' && !form.definition_ids?.length) {
+  if (forSave && !form.interface_mode && form.trigger_type === 'device_event' && !form.definition_ids?.length) {
     return { error: '请至少选择一个事件定义' }
   }
   const phases = []
@@ -2923,15 +3290,35 @@ function buildPhasesArray(opts = {}) {
           config: cfg
         })
       } else if (typ === 'app_script') {
+        const inline = !!st.config?.inline
         const appId = st.config?.app_id != null ? Number(st.config.app_id) : 0
-        if (forSave && !appId) {
-          return { error: '「应用脚本」步骤需选择外部应用' }
+        const code = (st.config?.code || '').trim()
+        if (forSave && inline && !code) {
+          return { error: '「应用脚本」内联模式需填写脚本代码' }
+        }
+        if (forSave && !inline && !appId) {
+          return { error: '「应用脚本」步骤需选择外部应用，或切换为内联代码' }
         }
         const hook = String(st.config?.hook || 'before_request').trim() || 'before_request'
-        const cfg = { app_id: appId || null, hook, ...stepContextMergePayload(st) }
+        const cfg = inline
+          ? { code, timeout_ms: Number(st.config?.timeout_ms) || 800, ...stepContextMergePayload(st) }
+          : { app_id: appId || null, hook, ...stepContextMergePayload(st) }
         if (!attachStepTemplateParamsToConfig(st, cfg)) return { error: '__handled' }
         steps.push({
           step_type: 'app_script',
+          config: cfg,
+          delay_before_ms: st.delay_before_ms ?? 0,
+          delay_after_ms: st.delay_after_ms ?? 0
+        })
+      } else if (typ === 'connector_script') {
+        const code = (st.config?.code || '').trim()
+        if (forSave && !code) {
+          return { error: '「连接器脚本」步骤需填写脚本代码' }
+        }
+        const cfg = { code, timeout_ms: Number(st.config?.timeout_ms) || 800, ...stepContextMergePayload(st) }
+        if (!attachStepTemplateParamsToConfig(st, cfg)) return { error: '__handled' }
+        steps.push({
+          step_type: 'connector_script',
           config: cfg,
           delay_before_ms: st.delay_before_ms ?? 0,
           delay_after_ms: st.delay_after_ms ?? 0
@@ -3056,6 +3443,36 @@ function buildPhasesArray(opts = {}) {
         if (!attachStepTemplateParamsToConfig(st, cfg)) return { error: '__handled' }
         steps.push({
           step_type: 'keyboard_hid',
+          config: cfg,
+          delay_before_ms: st.delay_before_ms ?? 0,
+          delay_after_ms: st.delay_after_ms ?? 0
+        })
+      } else if (typ === 'print') {
+        let content = []
+        const rawContent = (st.config?._content_json || '').trim()
+        if (rawContent) {
+          try {
+            content = JSON.parse(rawContent)
+            if (!Array.isArray(content)) return { error: '「蓝牙打印」内容须为 JSON 数组' }
+          } catch {
+            return { error: '「蓝牙打印」内容须为合法 JSON 数组' }
+          }
+        }
+        if (forSave && !content.length) {
+          return { error: '「蓝牙打印」步骤需配置至少一条打印内容' }
+        }
+        const cfg = {
+          protocol: st.config?.protocol || 'escpos',
+          transport: st.config?.transport || 'spp',
+          gen_side: st.config?.gen_side || 'agent',
+          content,
+          ...stepContextMergePayload(st)
+        }
+        const mac = (st.config?.mac || '').trim()
+        if (mac) cfg.mac = mac
+        if (!attachStepTemplateParamsToConfig(st, cfg)) return { error: '__handled' }
+        steps.push({
+          step_type: 'print',
           config: cfg,
           delay_before_ms: st.delay_before_ms ?? 0,
           delay_after_ms: st.delay_after_ms ?? 0
@@ -3240,7 +3657,8 @@ async function saveConn() {
     output_schema_json: form.interface_mode ? (form.output_schema_json || '') : '',
     output_mappings_json: form.interface_mode && form.output_mappings.length > 0
       ? JSON.stringify(form.output_mappings)
-      : ''
+      : '',
+    custom_script: form.custom_script || { result: { enabled: false, code: '', timeout_ms: 800 } }
   }
   saving.value = true
   try {

@@ -3,6 +3,7 @@ import { Button } from 'antd'
 
 type AndroidBridge = {
   scanBarcode?: () => void
+  getScanMode?: () => string
   toast?: (msg: string) => void
 }
 
@@ -13,6 +14,8 @@ export default function RuntimeAgentBar() {
   }, [])
 
   if (!bridge?.scanBarcode) return null
+  // 硬件扫码模式：仅用扫码枪广播，隐藏摄像头扫码悬浮按钮
+  if (bridge.getScanMode?.() === 'hardware') return null
 
   return (
     <div className="runtime-agent-bar">

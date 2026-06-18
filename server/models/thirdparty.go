@@ -5,10 +5,10 @@ import "time"
 // ThirdPartyProvider 第三方平台配置。
 // type 取值：freepass | wechat
 type ThirdPartyProvider struct {
-	ID          uint      `gorm:"primaryKey" json:"id"`
-	Name        string    `gorm:"size:120;not null" json:"name"`
-	Type        string    `gorm:"size:32;not null;index" json:"type"` // freepass | wechat
-	Description string    `gorm:"type:text" json:"description"`
+	ID          uint   `gorm:"primaryKey" json:"id"`
+	Name        string `gorm:"size:120;not null" json:"name"`
+	Type        string `gorm:"size:32;not null;index" json:"type"` // freepass | wechat
+	Description string `gorm:"type:text" json:"description"`
 
 	// ── FreePass 字段 ──────────────────────────────────────────────
 	// OpenApiOrigin 如 https://xxx.freepass.com
@@ -33,8 +33,8 @@ type ThirdPartyProvider struct {
 // ThirdPartyToken 存储从第三方平台获取的 token。
 // 每个 provider 可能对应多个授权账号（微信场景），用 AuthorizerAppID 区分。
 type ThirdPartyToken struct {
-	ID         uint      `gorm:"primaryKey" json:"id"`
-	ProviderID uint      `gorm:"index;not null" json:"provider_id"`
+	ID         uint `gorm:"primaryKey" json:"id"`
+	ProviderID uint `gorm:"index;not null" json:"provider_id"`
 
 	// 微信场景：被授权方 appid；FreePass 场景留空
 	AuthorizerAppID string `gorm:"size:128;index" json:"authorizer_appid"`

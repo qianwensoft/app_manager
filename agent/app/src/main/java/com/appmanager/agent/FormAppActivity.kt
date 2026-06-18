@@ -15,6 +15,7 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import com.appmanager.agent.config.AgentConfig
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 
@@ -79,6 +80,11 @@ class FormAppActivity : AppCompatActivity() {
         val pageKey = intent.getStringExtra("page_key") ?: "form"
         val serverUrl = intent.getStringExtra("server_url") ?: ""
 
+        // 菜单下发的 form_app_base_url 优先于本地 formAppBaseUrl 配置
+        val menuFormBase = intent.getStringExtra("form_app_base_url")?.trim()?.trimEnd('/').orEmpty()
+        val localFormBase = AgentConfig.get(this).formAppBaseUrl.trim().trimEnd('/')
+        val base = menuFormBase.ifEmpty { localFormBase }.ifEmpty { serverUrl }
+
         bridge = FormAppBridge(this, this, webView)
 
         webView.settings.apply {
@@ -90,7 +96,7 @@ class FormAppActivity : AppCompatActivity() {
         webView.webViewClient = WebViewClient()
         webView.webChromeClient = WebChromeClient()
 
-        val url = "$serverUrl/form-app/runtime/$formAppCode?page=$pageKey"
+        val url = "$base/form-app/runtime/$formAppCode?page=$pageKey"
         webView.loadUrl(url)
     }
 
@@ -98,7 +104,11 @@ class FormAppActivity : AppCompatActivity() {
         super.onResume()
         val filter = IntentFilter()
         HARDWARE_SCAN_ACTIONS.forEach { filter.addAction(it) }
-        registerReceiver(hardwareScanReceiver, filter)
+        // Android 14（targetSdk 34）起，注册接收外部应用（扫码服务）广播的 receiver 必须显式声明导出标志，
+        // 否则 registerReceiver 抛 SecurityException 导致 PDA 头扫广播完全收不到（摄像头扫码走直连不受影响）。
+        ContextCompat.registerReceiver(
+            this, hardwareScanReceiver, filter, ContextCompat.RECEIVER_EXPORTED
+        )
     }
 
     override fun onPause() {
@@ -145,5 +155,10 @@ class FormAppActivity : AppCompatActivity() {
             @Suppress("DEPRECATION")
             super.onBackPressed()
         }
+    }
+
+    override fun onDestroy() {
+        if (::bridge.isInitialized) bridge.release()
+        super.onDestroy()
     }
 }

@@ -267,6 +267,61 @@ func ExecuteAgentOutboundStep(db *gorm.DB, connector models.OutboundConnector, s
 		d.DetailJSON = MarshalAgentDeliveryDetail(st, rawCfg, cmdID, msg, "")
 		_ = db.Create(&d).Error
 		return d
+	case "print":
+		var m struct {
+			Protocol  string        `json:"protocol"`
+			Transport string        `json:"transport"`
+			Mac       string        `json:"mac"`
+			GenSide   string        `json:"gen_side"`
+			Content   []interface{} `json:"content"`
+			RawBase64 string        `json:"raw_base64"`
+		}
+		if err := json.Unmarshal([]byte(rawCfg), &m); err != nil {
+			d.Error = "config_json: " + err.Error()
+			d.DurationMS = time.Since(t0).Milliseconds()
+			d.DetailJSON = MarshalAgentDeliveryDetail(st, rawCfg, "", nil, d.Error)
+			_ = db.Create(&d).Error
+			return d
+		}
+		if len(m.Content) == 0 && strings.TrimSpace(m.RawBase64) == "" {
+			d.Error = "缺少 content 或 raw_base64"
+			d.DurationMS = time.Since(t0).Milliseconds()
+			d.DetailJSON = MarshalAgentDeliveryDetail(st, rawCfg, "", nil, d.Error)
+			_ = db.Create(&d).Error
+			return d
+		}
+		data := map[string]interface{}{}
+		if p := strings.TrimSpace(m.Protocol); p != "" {
+			data["protocol"] = p
+		}
+		if t := strings.TrimSpace(m.Transport); t != "" {
+			data["transport"] = t
+		}
+		if mac := strings.TrimSpace(m.Mac); mac != "" {
+			data["mac"] = mac
+		}
+		if g := strings.TrimSpace(m.GenSide); g != "" {
+			data["gen_side"] = g
+		}
+		if len(m.Content) > 0 {
+			data["content"] = m.Content
+		}
+		if b := strings.TrimSpace(m.RawBase64); b != "" {
+			data["raw_base64"] = b
+		}
+		msg := map[string]interface{}{
+			"type":       "command",
+			"action":     "print",
+			"command_id": cmdID,
+			"data":       data,
+		}
+		_ = agent.AgentHub.Send(key, msg)
+		d.Status = "success"
+		d.Error = ""
+		d.DurationMS = time.Since(t0).Milliseconds()
+		d.DetailJSON = MarshalAgentDeliveryDetail(st, rawCfg, cmdID, msg, "")
+		_ = db.Create(&d).Error
+		return d
 	default:
 		d.Error = "未知 step_type: " + st
 		d.DurationMS = time.Since(t0).Milliseconds()

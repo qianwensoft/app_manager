@@ -9,13 +9,13 @@ import (
 // EventBindingMeta event_bound 数据集在 meta_json.event_binding 中存储的配置。
 // source_type 可为 "custom_event_def"（设备自定义事件）或 "webhook_push"（外部 Webhook 推送）。
 type EventBindingMeta struct {
-	SourceType        string   `json:"source_type"`         // "custom_event_def" | "webhook_push"
-	SourceID          uint     `json:"source_id"`           // custom_event_def: CustomEventDefinition.ID
-	SourceKey         string   `json:"source_key"`          // custom_event_def: 事件 key，冗余存储用于查询过滤
+	SourceType        string   `json:"source_type"`          // "custom_event_def" | "webhook_push"
+	SourceID          uint     `json:"source_id"`            // custom_event_def: CustomEventDefinition.ID
+	SourceKey         string   `json:"source_key"`           // custom_event_def: 事件 key，冗余存储用于查询过滤
 	WebhookID         *uint    `json:"webhook_id,omitempty"` // webhook_push: OutboundWebhook.ID
-	TableName         string   `json:"table_name"`          // 目标物理表名
-	SchemaInitialized bool     `json:"schema_initialized"`  // 首次事件后置 true
-	SchemaColumns     []string `json:"schema_columns"`      // 已建表列名列表（不含系统列）
+	TableName         string   `json:"table_name"`           // 目标物理表名
+	SchemaInitialized bool     `json:"schema_initialized"`   // 首次事件后置 true
+	SchemaColumns     []string `json:"schema_columns"`       // 已建表列名列表（不含系统列）
 }
 
 // eventBoundMetaEnvelope meta_json 顶层信封（event_bound 类型使用）。

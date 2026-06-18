@@ -1,52 +1,54 @@
-# 本地零依赖启动：SQLite + 内嵌存储，无需 MySQL
-# 用法（在项目根目录执行，见 README）：
-#   ./app-manager server/config.sqlite.yaml
-
 server:
-  port: 8080
-  host: 0.0.0.0
-  mode: release
-
+    port: 8080
+    host: 0.0.0.0
+    mode: release
+    allow_register: false
+    public_base_url: ""
+    trusted_proxies: []
 database:
-  type: sqlite
-  # 可省略；省略时默认 ./data/app-manager.db（相对当前工作目录）
-  dsn: ./data/app-manager.db
-
+    type: sqlite
+    dsn: ./data/app-manager.db
 storage:
-  path: ./uploads
-  max_size_mb: 500
-
+    path: ./uploads
+    max_size_mb: 500
 adb:
-  path: adb
-  timeout: 30
-
-# 录屏转 MP4 时填写；留空则在 PATH 中查找 ffmpeg
+    path: adb
+    timeout: 30
 ffmpeg:
-  path: ""
-
+    path: ""
 jwt:
-  secret: change-me-in-production
-  expire_hour: 24
-
-# API 限流（默认关闭；生产可按需开启）
-cluster:
-  enabled: false
-  node_id: ""
-  redis_url: "redis://127.0.0.1:6379/0"
-
-rate_limit:
-  enabled: false
-  login_per_minute: 20
-  login_burst: 5
-  open_api_per_minute: 120
-  open_api_burst: 30
-  mcp_per_minute: 60
-  mcp_burst: 15
-
+    secret: change-me-in-production
+    expire_hour: 24
+heartbeat:
+    interval: 0
+    timeout: 0
 mqtt:
-  enabled: false
-  broker: tcp://localhost:1883
-  username: ""
-  password: ""
-  client_id: app-manager
-  qos: 1
+    enabled: false
+    broker: tcp://localhost:1883
+    username: ""
+    password: ""
+    client_id: app-manager
+    qos: 1
+claude:
+    api_key: ***REMOVED***
+    model: claude-sonnet-4-6
+    base_url: ***REMOVED***
+channel:
+    kafka:
+        brokers: []
+        group_id: ""
+        topics: []
+        enabled: false
+    kafka_rest_proxy_url: ""
+rate_limit:
+    enabled: false
+    login_per_minute: 20
+    login_burst: 5
+    open_api_per_minute: 120
+    open_api_burst: 30
+    mcp_per_minute: 60
+    mcp_burst: 15
+cluster:
+    enabled: false
+    node_id: ""
+    redis_url: redis://127.0.0.1:6379/0

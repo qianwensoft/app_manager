@@ -7,16 +7,18 @@ import (
 
 // 开放 API（X-API-Key）授权范围
 const (
-	OpenDevicesList = "open:devices:list"
-	OpenDeviceInfo  = "open:devices:info"
-	OpenDeviceApps  = "open:devices:apps"
-	OpenAppsUpload  = "open:apps:upload"
-	OpenAppsInstall = "open:apps:install"
-	OpenTasksGet    = "open:tasks:get"
-	OpenEventsList  = "open:events:list"
+	OpenDevicesList        = "open:devices:list"
+	OpenDeviceInfo         = "open:devices:info"
+	OpenDeviceApps         = "open:devices:apps"
+	OpenAppsUpload         = "open:apps:upload"
+	OpenAppsInstall        = "open:apps:install"
+	OpenTasksGet           = "open:tasks:get"
+	OpenEventsList         = "open:events:list"
 	OpenDataInterfaceQuery = "open:dataiface:query"
 	OpenDataInterfaceWrite = "open:dataiface:write"
 	OpenStompSubscribe     = "open:stomp:subscribe"
+	OpenWorkOrderRead      = "open:workorder:read"
+	OpenWorkOrderWrite     = "open:workorder:write"
 )
 
 // 屏幕分享链接授权范围
@@ -41,6 +43,8 @@ var OpenScopeDescriptions = []struct {
 	{OpenDataInterfaceQuery, "数据接口查询（只读数据集）"},
 	{OpenDataInterfaceWrite, "数据接口事务（写操作）"},
 	{OpenStompSubscribe, "WebSocket/STOMP 实时订阅"},
+	{OpenWorkOrderRead, "工单查询"},
+	{OpenWorkOrderWrite, "工单处理/关闭（第三方）"},
 }
 
 // ScreenShareScopeDescriptions 屏幕分享可选能力

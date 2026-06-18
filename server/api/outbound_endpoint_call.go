@@ -1,15 +1,13 @@
 package api
 
 import (
-	"bytes"
 	"encoding/json"
-	"fmt"
-	"io"
 	"net/http"
 	"time"
 
 	"app-manager/database"
 	"app-manager/models"
+	"app-manager/outbound"
 
 	"github.com/gin-gonic/gin"
 )
@@ -18,14 +16,6 @@ import (
 // POST /api/outbound/endpoints/:id/call
 type callOutboundEndpointReq struct {
 	ParamValues map[string]interface{} `json:"param_values"`
-}
-
-type callOutboundEndpointResp struct {
-	Success    bool                   `json:"success"`
-	Data       interface{}            `json:"data,omitempty"`
-	Error      string                 `json:"error,omitempty"`
-	StatusCode int                    `json:"status_code"`
-	Duration   int64                  `json:"duration_ms"`
 }
 
 func CallOutboundEndpoint(c *gin.Context) {
@@ -41,7 +31,6 @@ func CallOutboundEndpoint(c *gin.Context) {
 		return
 	}
 
-	// 加载 endpoint 和 app
 	var endpoint models.OutboundEndpoint
 	if err := database.DB.Preload("App").First(&endpoint, endpointID).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "endpoint not found"})
@@ -58,173 +47,59 @@ func CallOutboundEndpoint(c *gin.Context) {
 		return
 	}
 
-	// 执行调用
+	// 将 param_values（map[string]interface{}）转为 sampleVars（map[string]string）。
+	// key 不加 {{}} 包装，由 DefaultDebugTemplateVars 统一处理（它直接存入 out[k]=v）。
+	// 这里直接用 {{key}} 格式，与调试接口 sample_vars 字段保持一致。
+	sampleVars := make(map[string]string, len(req.ParamValues))
+	for k, v := range req.ParamValues {
+		switch s := v.(type) {
+		case string:
+			sampleVars["{{"+k+"}}"] = s
+		default:
+			if b, err := json.Marshal(v); err == nil {
+				sampleVars["{{"+k+"}}"] = string(b)
+			}
+		}
+	}
+
 	start := time.Now()
-	result, err := executeOutboundEndpoint(&endpoint, endpoint.App, req.ParamValues)
+	tr, _, _, meta, _, err := outbound.DebugHTTPEndpoint(database.DB, endpoint.App, endpoint, sampleVars, endpoint.TimeoutMS, nil)
 	duration := time.Since(start).Milliseconds()
 
 	if err != nil {
-		c.JSON(http.StatusOK, callOutboundEndpointResp{
-			Success:  false,
-			Error:    err.Error(),
-			Duration: duration,
+		c.JSON(http.StatusOK, gin.H{
+			"success":     false,
+			"error":       err.Error(),
+			"duration_ms": duration,
 		})
 		return
 	}
 
-	c.JSON(http.StatusOK, callOutboundEndpointResp{
-		Success:    true,
-		Data:       result.Data,
-		StatusCode: result.StatusCode,
-		Duration:   duration,
-	})
-}
-
-type endpointCallResult struct {
-	Data       interface{}
-	StatusCode int
-}
-
-func executeOutboundEndpoint(endpoint *models.OutboundEndpoint, app *models.OutboundApp, paramValues map[string]interface{}) (*endpointCallResult, error) {
-	// 构建 URL
-	url := app.BaseURL + endpoint.Path
-
-	// 准备请求体
-	body := ""
-	if endpoint.BodyTemplate != "" {
-		// 使用占位符替换（简化版，TODO: 完整实现）
-		body = replacePlaceholders(endpoint.BodyTemplate, paramValues)
-	}
-
-	// 创建 HTTP 请求
-	var reqBody io.Reader
-	if body != "" {
-		reqBody = bytes.NewBufferString(body)
-	}
-
-	httpReq, err := http.NewRequest(endpoint.Method, url, reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	// 设置请求头
-	var headers map[string]interface{}
-	if endpoint.HeadersJSON != "" {
-		_ = json.Unmarshal([]byte(endpoint.HeadersJSON), &headers)
-	}
-	for k, v := range headers {
-		if strVal, ok := v.(string); ok {
-			httpReq.Header.Set(k, strVal)
-		}
-	}
-
-	// 设置 Content-Type
-	if endpoint.ContentType != "" {
-		httpReq.Header.Set("Content-Type", endpoint.ContentType)
-	} else if body != "" {
-		httpReq.Header.Set("Content-Type", "application/json")
-	}
-
-	// 处理应用级认证
-	if app.AuthType == "static_header" {
-		var authConfig map[string]interface{}
-		if app.AuthConfigJSON != "" {
-			_ = json.Unmarshal([]byte(app.AuthConfigJSON), &authConfig)
-		}
-		if headerName, ok := authConfig["header_name"].(string); ok {
-			if headerValue, ok := authConfig["header_value"].(string); ok {
-				httpReq.Header.Set(headerName, headerValue)
-			}
-		}
-	} else if app.AuthType == "dynamic_bearer" {
-		// 动态 Bearer Token（TODO: 实现完整的 token 管理）
-		// 临时实现：从 token_cache_json 读取 access_token
-		var tokenCache map[string]interface{}
-		if app.TokenCacheJSON != "" {
-			if err := json.Unmarshal([]byte(app.TokenCacheJSON), &tokenCache); err == nil {
-				if token, ok := tokenCache["access_token"].(string); ok && token != "" {
-					httpReq.Header.Set("Authorization", "Bearer "+token)
-				} else {
-					return nil, fmt.Errorf("dynamic_bearer auth enabled but no access_token in token_cache_json")
-				}
-			} else {
-				return nil, fmt.Errorf("failed to parse token_cache_json: %w", err)
-			}
-		} else {
-			return nil, fmt.Errorf("dynamic_bearer auth enabled but token_cache_json is empty")
-		}
-	}
-
-	// 设置超时
-	timeout := 30 * time.Second
-	if endpoint.TimeoutMS > 0 {
-		timeout = time.Duration(endpoint.TimeoutMS) * time.Millisecond
-	}
-
-	client := &http.Client{Timeout: timeout}
-
-	// 发送请求
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// 读取响应
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	// 解析响应
+	httpStatus := 0
 	var data interface{}
-	if len(respBody) > 0 {
-		if err := json.Unmarshal(respBody, &data); err != nil {
-			// 如果不是 JSON，返回原始字符串
-			data = string(respBody)
-		}
-	}
-
-	return &endpointCallResult{
-		Data:       data,
-		StatusCode: resp.StatusCode,
-	}, nil
-}
-
-// replacePlaceholders 简单的占位符替换（TODO: 使用完整的模板引擎）
-func replacePlaceholders(template string, values map[string]interface{}) string {
-	result := template
-	for k, v := range values {
-		placeholder := "{{" + k + "}}"
-		if strVal, ok := v.(string); ok {
-			result = replaceAll(result, placeholder, strVal)
-		} else {
-			// 转换为 JSON
-			if jsonVal, err := json.Marshal(v); err == nil {
-				result = replaceAll(result, placeholder, string(jsonVal))
+	if tr != nil {
+		httpStatus = tr.Response.Status
+		// 优先用脚本改写后的响应体（trace 已在 DebugHTTPEndpoint 中同步）
+		if tr.Response.Body != "" {
+			if jsonErr := json.Unmarshal([]byte(tr.Response.Body), &data); jsonErr != nil {
+				data = tr.Response.Body
 			}
 		}
 	}
-	return result
-}
 
-func replaceAll(s, old, new string) string {
-	// 简化版字符串替换
-	for {
-		idx := indexOf(s, old)
-		if idx < 0 {
-			break
-		}
-		s = s[:idx] + new + s[idx+len(old):]
-	}
-	return s
-}
+	ok := err == nil && httpStatus >= 200 && httpStatus < 300
 
-func indexOf(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
+	var ctxAfter interface{}
+	if meta != nil {
+		ctxAfter, _ = meta["context_after_response"]
 	}
-	return -1
+
+	// 与调试接口对齐：返回脚本改写后的最终状态码、响应体解析结果，以及 context 变量快照。
+	c.JSON(http.StatusOK, gin.H{
+		"success":                ok,
+		"data":                   data,
+		"status_code":            httpStatus,
+		"duration_ms":            duration,
+		"context_after_response": ctxAfter,
+	})
 }

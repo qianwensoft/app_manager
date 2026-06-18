@@ -310,7 +310,10 @@ export default function FormAppListPage() {
                         <button
                           type="button"
                           className="formapp-action-btn formapp-action-btn-success"
-                          onClick={() => window.open(`/form-app/runtime/${encodeURIComponent(r.code)}`, '_blank')}
+                          onClick={() => {
+                            const debugBase = localStorage.getItem('qr_form_app_base_url')?.trim().replace(/\/$/, '') || ''
+                            window.open(`${debugBase}/form-app/runtime/${encodeURIComponent(r.code)}`, '_blank')
+                          }}
                           title="运行应用"
                         >
                           <svg className="formapp-action-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">

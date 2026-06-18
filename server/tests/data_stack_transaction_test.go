@@ -25,11 +25,11 @@ const (
 )
 
 type txFixture struct {
-	DatasetCode   string
-	IFaceCode     string
-	TxDBPath      string
-	WriteAPIKey   string
-	QueryOnlyKey  string
+	DatasetCode  string
+	IFaceCode    string
+	TxDBPath     string
+	WriteAPIKey  string
+	QueryOnlyKey string
 }
 
 func dataStackDebugRouter() *gin.Engine {

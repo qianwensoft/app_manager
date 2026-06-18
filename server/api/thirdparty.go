@@ -87,8 +87,8 @@ func UpdateThirdPartyProvider(c *gin.Context) {
 		return
 	}
 	updates := map[string]interface{}{
-		"name":        req.Name,
-		"description": req.Description,
+		"name":         req.Name,
+		"description":  req.Description,
 		"callback_url": req.CallbackURL,
 	}
 	if req.OpenApiOrigin != "" {

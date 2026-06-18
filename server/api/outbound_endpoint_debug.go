@@ -14,16 +14,20 @@ import (
 )
 
 type endpointDebugIn struct {
-	AppID                    uint                   `json:"app_id" binding:"required"`
-	EndpointID               uint                   `json:"endpoint_id"`
-	Method                   string                 `json:"method"`
-	Path                     string                 `json:"path"`
-	Headers                  map[string]interface{} `json:"headers"`
-	BodyTemplate             string                 `json:"body_template"`
-	TimeoutMS                int                    `json:"timeout_ms"`
-	SampleVars               map[string]string      `json:"sample_vars"`
-	ExtensionScripts         json.RawMessage        `json:"extension_scripts"`           // 可选：本次调试临时覆盖应用扩展脚本（不入库）；不传则使用库中已保存配置
-	AfterResponseScriptIndex *int                   `json:"after_response_script_index"` // 可选：仅执行 after_response 数组中该下标的一条（须已启用）；不传则执行全部（与线上一致）
+	AppID        uint                   `json:"app_id" binding:"required"`
+	EndpointID   uint                   `json:"endpoint_id"`
+	Method       string                 `json:"method"`
+	Path         string                 `json:"path"`
+	Headers      map[string]interface{} `json:"headers"`
+	BodyTemplate string                 `json:"body_template"`
+	TimeoutMS    int                    `json:"timeout_ms"`
+	SampleVars   map[string]string      `json:"sample_vars"`
+	// 可选：本次调试临时覆盖应用扩展脚本（不入库）
+	ExtensionScripts json.RawMessage `json:"extension_scripts"`
+	// 可选：本次调试临时覆盖接口级 after_response 脚本（不入库），结构 {"after_response":[...]}
+	EndpointAfterScripts json.RawMessage `json:"endpoint_after_scripts"`
+	// 可选：本次调试的执行序列（优先级最高）；不传则用接口存储的序列，再空则退化旧行为
+	AfterScriptOrder []outbound.AfterScriptOrderEntry `json:"after_script_order"`
 }
 
 func PostOutboundEndpointDebug(c *gin.Context) {
@@ -76,6 +80,16 @@ func PostOutboundEndpointDebug(c *gin.Context) {
 	}
 	ep.BodyTemplate = req.BodyTemplate
 
+	// 接口级 after_response 脚本草稿覆盖
+	if s := strings.TrimSpace(string(req.EndpointAfterScripts)); s != "" && s != "null" {
+		epScriptsJSON, esErr := extensionScriptsJSONFromRequest(req.EndpointAfterScripts, ep.AfterScriptsJSON, false)
+		if esErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "endpoint_after_scripts: " + esErr.Error()})
+			return
+		}
+		ep.AfterScriptsJSON = epScriptsJSON
+	}
+
 	appWork := app
 	if s := strings.TrimSpace(string(req.ExtensionScripts)); s != "" && s != "null" {
 		extJSON, extErr := extensionScriptsJSONFromRequest(req.ExtensionScripts, app.ExtensionScriptsJSON, false)
@@ -86,14 +100,13 @@ func PostOutboundEndpointDebug(c *gin.Context) {
 		appWork.ExtensionScriptsJSON = extJSON
 	}
 
-	if req.AfterResponseScriptIndex != nil {
-		if err := outbound.ValidateAfterResponseScriptIndex(&appWork, *req.AfterResponseScriptIndex); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
+	// after_script_order：请求传入的优先，否则传 nil（DebugHTTPEndpoint 内部再读 ep.AfterScriptOrderJSON）
+	var order []outbound.AfterScriptOrderEntry
+	if len(req.AfterScriptOrder) > 0 {
+		order = req.AfterScriptOrder
 	}
 
-	tr, vars, breakdown, meta, err := outbound.DebugHTTPEndpoint(database.DB, &appWork, ep, req.SampleVars, req.TimeoutMS, req.AfterResponseScriptIndex)
+	tr, vars, breakdown, meta, scriptLogs, err := outbound.DebugHTTPEndpoint(database.DB, &appWork, ep, req.SampleVars, req.TimeoutMS, order)
 	if meta == nil {
 		meta = map[string]interface{}{}
 	}
@@ -127,5 +140,6 @@ func PostOutboundEndpointDebug(c *gin.Context) {
 		"header_breakdown":       breakdown,
 		"meta":                   meta,
 		"context_after_response": ctxAfter,
+		"script_logs":            scriptLogs,
 	})
 }

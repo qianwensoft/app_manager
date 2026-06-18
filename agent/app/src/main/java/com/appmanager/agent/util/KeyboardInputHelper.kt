@@ -2,8 +2,6 @@ package com.appmanager.agent.util
 
 import android.accessibilityservice.AccessibilityService
 import android.app.usage.UsageStatsManager
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.os.Build
 import android.os.Bundle
@@ -43,14 +41,10 @@ object KeyboardInputHelper {
                 Log.w(TAG, "AccessibilityService not available")
                 return false
             }
-
-            // 长文本使用剪贴板粘贴（快速但会修改剪贴板）
-            if (delayMs == 0L || text.length > 50) {
-                pasteText(service, accessibilityService, text)
-            } else {
-                // 短文本逐字符模拟输入（适用于需要精确控制的场景）
-                inputTextCharByChar(accessibilityService, text, delayMs)
-            }
+            // 统一走一次性 ACTION_SET_TEXT 整串写入：
+            // 不产生输入法 composing（组词）区间，因而不会触发联想/候选条与自动纠错替换。
+            // delayMs 在整串写入模式下不再用于字符间节奏，仅保留入参兼容。
+            setTextAtomically(accessibilityService, text)
         } catch (e: Exception) {
             Log.e(TAG, "inputText failed", e)
             false
@@ -128,90 +122,91 @@ object KeyboardInputHelper {
     }
 
     /**
-     * 使用剪贴板粘贴文本（快速方式）
+     * 一次性把整串文本写入聚焦输入框，并把光标移到末尾。
+     *
+     * 关闭输入法联想的核心思路：
+     *  - 用 ACTION_SET_TEXT 整串替换，而非逐字符 setText。逐字符会让输入法以为用户在敲字，
+     *    从而对当前词建立 composing（组词）区间，弹出候选/联想条并可能自动纠错替换文本。
+     *  - 写入后用 ACTION_SET_SELECTION 把选区折叠到文本末尾，进一步确保不留下 composing 区间。
+     * 在已有内容基础上追加（保留原文），符合“键盘输入”的累加语义。
      */
-    private fun pasteText(context: Context, service: AccessibilityService, text: String): Boolean {
-        return try {
-            // 保存原始剪贴板内容
-            val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-            if (clipboardManager == null) {
-                Log.w(TAG, "ClipboardManager not available")
-                return false
-            }
-
-            val originalClip = clipboardManager.primaryClip
-
-            // 设置新内容到剪贴板
-            val clip = ClipData.newPlainText("keyboard_input", text)
-            clipboardManager.setPrimaryClip(clip)
-
-            // 查找焦点输入框并设置文本
-            val focusedNode = service.rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-
-            val result = if (focusedNode != null) {
-                // 方式1：直接设置文本（推荐）
-                val args = Bundle()
-                args.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
-                focusedNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-            } else {
-                // 方式2：全局粘贴动作（作为备用）
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_ACCESSIBILITY_ALL_APPS)
-                    false
-                } else {
-                    false
-                }
-            }
-
-            // 尝试恢复原始剪贴板内容（可选，避免影响用户）
-            try {
-                if (originalClip != null) {
-                    clipboardManager.setPrimaryClip(originalClip)
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to restore clipboard", e)
-            }
-
-            result
-        } catch (e: Exception) {
-            Log.e(TAG, "pasteText failed", e)
-            false
+    private fun setTextAtomically(service: AccessibilityService, text: String): Boolean {
+        val node = findEditableFocus(service)
+        if (node == null) {
+            Log.w(TAG, "setTextAtomically: no editable focused node")
+            return false
         }
+        val base = node.text?.toString() ?: ""
+        val full = base + text
+        val setArgs = Bundle()
+        setArgs.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, full)
+        if (!node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, setArgs)) {
+            Log.w(TAG, "ACTION_SET_TEXT failed")
+            return false
+        }
+        // 光标移到末尾：折叠选区，清掉可能残留的 composing 区间
+        try {
+            node.refresh()
+            val end = (node.text?.length ?: full.length)
+            val selArgs = Bundle()
+            selArgs.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, end)
+            selArgs.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, end)
+            node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, selArgs)
+        } catch (e: Exception) {
+            Log.w(TAG, "set selection to end failed", e)
+        }
+        return true
     }
 
     /**
-     * 逐字符输入文本
+     * 查找“当前真正聚焦”的可编辑节点。
+     *
+     * 关键：绝不能退化为“树中第一个可编辑节点”——多输入框场景下第一个往往是上一个框，
+     * 会把内容写进错误的输入框（正是本次问题现象）。优先级：
+     *  1) 无障碍输入焦点 findFocus(FOCUS_INPUT)，且节点可编辑；
+     *  2) 跨窗口在“聚焦窗口”里找 isFocused && isEditable 的节点；
+     *  3) 活动窗口树里找 isFocused && isEditable 的节点；
+     * 都找不到则返回 null（由上层报“请先点选输入框”），不做任意兜底。
      */
-    private fun inputTextCharByChar(service: AccessibilityService, text: String, delayMs: Long): Boolean {
-        return try {
-            val focusedNode = service.rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-            if (focusedNode == null) {
-                Log.w(TAG, "No focused input node found")
-                return false
-            }
+    private fun findEditableFocus(service: AccessibilityService): AccessibilityNodeInfo? {
+        // 1) 无障碍输入焦点（最可靠）
+        service.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.let { node ->
+            if (node.isEditable) return node
+        }
+        service.rootInActiveWindow?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.let { node ->
+            if (node.isEditable) return node
+        }
 
-            runBlocking {
-                text.forEach { char ->
-                    val currentText = focusedNode.text?.toString() ?: ""
-                    val args = Bundle()
-                    args.putCharSequence(
-                        AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
-                        currentText + char
-                    )
-                    if (!focusedNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
-                        Log.w(TAG, "Failed to input character: $char")
-                        return@runBlocking false
-                    }
-                    if (delayMs > 0) {
-                        delay(delayMs)
-                    }
-                }
-                true
+        // 2) 跨窗口：在持有焦点的窗口里找“聚焦且可编辑”的节点
+        try {
+            for (w in service.windows) {
+                if (!w.isFocused) continue
+                val root = w.root ?: continue
+                findFocusedEditable(root)?.let { return it }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "inputTextCharByChar failed", e)
-            false
+            Log.w(TAG, "scan windows failed", e)
         }
+
+        // 3) 活动窗口树里找“聚焦且可编辑”的节点
+        service.rootInActiveWindow?.let { root ->
+            findFocusedEditable(root)?.let { return it }
+        }
+        return null
+    }
+
+    /** 广度优先查找“当前聚焦且可编辑”的节点（isFocused 表示持有视图焦点，即光标所在框）。 */
+    private fun findFocusedEditable(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+        while (queue.isNotEmpty()) {
+            val node = queue.removeFirst()
+            if (node.isEditable && node.isFocused) return node
+            for (i in 0 until node.childCount) {
+                node.getChild(i)?.let { queue.add(it) }
+            }
+        }
+        return null
     }
 
     /**

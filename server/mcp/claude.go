@@ -15,14 +15,14 @@ const anthropicAPI = "https://api.anthropic.com/v1/messages"
 const anthropicVersion = "2023-06-01"
 
 type claudeRequest struct {
-	Model     string    `json:"model"`
-	MaxTokens int       `json:"max_tokens"`
-	System    string    `json:"system,omitempty"`
+	Model     string          `json:"model"`
+	MaxTokens int             `json:"max_tokens"`
+	System    string          `json:"system,omitempty"`
 	Messages  []claudeMessage `json:"messages"`
 }
 
 type claudeMessage struct {
-	Role    string         `json:"role"`
+	Role    string          `json:"role"`
 	Content []claudeContent `json:"content"`
 }
 

@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
     <cache-path name="install_cache" path="." />
+    <!-- 系统更新 APK 下到应用专属外部目录 Android/data/<pkg>/files/Download，
+         安装时经 FileProvider 共享，无需存储运行时权限 -->
+    <external-files-path name="update_downloads" path="Download/" />
+    <!-- 问题反馈：拍照/录像/录音的采集产物存于应用专属外部目录 -->
+    <external-files-path name="feedback" path="feedback/" />
 </paths>

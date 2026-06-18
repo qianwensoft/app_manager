@@ -16,6 +16,7 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
@@ -97,7 +98,7 @@ class PermissionFragment : Fragment() {
             label = "无障碍服务（触控转发）",
             hint = "开启后可使用 Web 端远程操控触屏",
             checkFn = { isAccessibilityEnabled(requireContext()) },
-            grantFn = { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+            grantFn = { openAccessibilityGrant() }
         )
 
         setupSpecialPermission(
@@ -311,6 +312,39 @@ class PermissionFragment : Fragment() {
     }
 
     // ── 辅助方法 ─────────────────────────────────────────────────────────────
+
+    /**
+     * 打开无障碍授权。Android 13+ 对侧载/会话安装的应用默认把无障碍开关锁为
+     * 「受限制的设置」，直接跳无障碍页用户也点不动。此时先引导到「应用详情」让用户
+     * 通过右上角菜单「允许受限制的设置」解锁，再回无障碍页开启。
+     */
+    private fun openAccessibilityGrant() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            AlertDialog.Builder(requireContext())
+                .setTitle("开启无障碍服务")
+                .setMessage(
+                    "Android 13 及以上对本应用的无障碍开关默认锁定为「受限制的设置」。\n\n" +
+                    "若在无障碍页面无法开启（开关变灰），请按以下步骤解锁：\n" +
+                    "1. 点「去应用详情」\n" +
+                    "2. 点右上角 ⋮ 菜单 →「允许受限制的设置」\n" +
+                    "3. 返回后再进无障碍页面开启本应用"
+                )
+                .setPositiveButton("去无障碍页面") { _, _ ->
+                    runCatching { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+                }
+                .setNeutralButton("去应用详情") { _, _ ->
+                    runCatching {
+                        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = Uri.fromParts("package", requireContext().packageName, null)
+                        })
+                    }
+                }
+                .setNegativeButton("取消", null)
+                .show()
+        } else {
+            runCatching { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+        }
+    }
 
     private fun isAccessibilityEnabled(ctx: Context): Boolean {
         val service = "${ctx.packageName}/${TouchAccessibilityService::class.java.canonicalName}"

@@ -59,7 +59,7 @@ type Device struct {
 	// 指针：MySQL 在 NO_ZERO_DATE 下禁止 '0000-00-00'，未上线/未心跳时为 NULL
 	LastSeenAt *time.Time `json:"last_seen_at"`
 	// Agent 菜单下发 revision（单调递增，与 agent_menu 分配变更同步）
-	AgentMenuRevision uint      `gorm:"default:0" json:"agent_menu_revision"`
+	AgentMenuRevision uint `gorm:"default:0" json:"agent_menu_revision"`
 	// 当前前台应用包名（Agent 心跳上报）
 	ForegroundPackage string    `gorm:"column:foreground_package;size:200" json:"foreground_package"`
 	CreatedAt         time.Time `json:"created_at"`

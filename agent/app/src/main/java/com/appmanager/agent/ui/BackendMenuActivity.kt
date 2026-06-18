@@ -73,6 +73,9 @@ class BackendMenuActivity : AppCompatActivity() {
         findViewById<View>(R.id.card_tile_system_update).setOnClickListener {
             startActivity(Intent(this, SystemUpdateActivity::class.java))
         }
+        findViewById<View>(R.id.card_tile_printer).setOnClickListener {
+            startActivity(Intent(this, PrinterSettingsActivity::class.java))
+        }
 
         // 动态后台推送菜单（show_on_agent_home=false）
         buildBackendPushedMenus()
@@ -132,11 +135,34 @@ class BackendMenuActivity : AppCompatActivity() {
         }
     }
 
+    private val openMenuLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val menu = pendingMenu
+        pendingMenu = null
+        if (result.resultCode == android.app.Activity.RESULT_OK && menu != null) {
+            openMenuInternal(menu)
+        }
+    }
+    private var pendingMenu: Map<String, Any?>? = null
+
     private fun openMenu(menu: Map<String, Any?>) {
+        if (!com.appmanager.agent.auth.AgentAuth.isLoggedIn(this)) {
+            pendingMenu = menu
+            openMenuLauncher.launch(
+                Intent(this, LoginActivity::class.java)
+                    .putExtra(LoginActivity.EXTRA_REQUIRED_HINT, true)
+            )
+            return
+        }
+        openMenuInternal(menu)
+    }
+
+    private fun openMenuInternal(menu: Map<String, Any?>) {
         when (menu["target_type"] as? String) {
             "form_app_entry" -> AgentMenuStore.launchFormAppEntry(this, menu, newTask = true)
             else -> {
-                val url = AgentMenuStore.getFirstHomePreviewUrl(this) ?: return
+                val url = AgentMenuStore.resolveMenuUrl(this, menu) ?: return
                 startActivity(
                     Intent(this, ScadaWebViewActivity::class.java)
                         .putExtra(ScadaWebViewActivity.EXTRA_URL, url)

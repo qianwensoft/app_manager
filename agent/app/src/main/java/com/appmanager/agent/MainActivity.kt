@@ -26,6 +26,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.appmanager.agent.config.AgentConfig
 import com.appmanager.agent.config.AgentRegistration
+import com.appmanager.agent.auth.AgentAuth
 import com.appmanager.agent.service.AgentService
 import com.appmanager.agent.ui.BackendMenuActivity
 import com.appmanager.agent.ui.PersonalCenterActivity
@@ -64,8 +65,10 @@ class MainActivity : AppCompatActivity() {
             val json = org.json.JSONObject(text)
             val serverUrl = json.getString("serverUrl")
             val deviceToken = resolveRegistrationToken(json.optString("deviceToken", ""))
+            // dev：二维码可携带表单调试地址，扫码即把表单运行时指向开发机
+            val formBase = json.optString("formAppBaseUrl", "")
             val cur = AgentConfig.get(this)
-            AgentConfig.save(this, cur.copy(serverUrl = serverUrl, deviceToken = deviceToken, allowRemoteScreen = cur.allowRemoteScreen))
+            AgentConfig.save(this, cur.copy(serverUrl = serverUrl, deviceToken = deviceToken, formAppBaseUrl = formBase, allowRemoteScreen = cur.allowRemoteScreen))
             startForegroundService(Intent(this, AgentService::class.java))
             Toast.makeText(this, "扫码成功，服务已启动", Toast.LENGTH_SHORT).show()
             updateDeviceInfo(AgentRegistration.ensureMachineCodeConfig(this))
@@ -80,6 +83,19 @@ class MainActivity : AppCompatActivity() {
         if (result.resultCode == Activity.RESULT_OK) {
             updateDeviceInfo(AgentRegistration.ensureMachineCodeConfig(this))
         }
+    }
+
+    /** 未登录点击菜单时拉起登录页；登录成功后继续打开原目标菜单。 */
+    private var pendingMenu: Map<String, Any?>? = null
+    private val loginLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val menu = pendingMenu
+        pendingMenu = null
+        if (result.resultCode == Activity.RESULT_OK && menu != null) {
+            openMenuInternal(menu)
+        }
+        // 取消登录则留在首页，不打开目标菜单
     }
 
     private val profileUiReceiver = object : BroadcastReceiver() {
@@ -158,6 +174,11 @@ class MainActivity : AppCompatActivity() {
             refreshProfileLauncher.launch(Intent(this, PersonalCenterActivity::class.java))
         }
 
+        // 问题反馈（固定第二，原生采集入口）
+        items += TileItem(getString(R.string.main_tile_feedback), android.R.drawable.ic_menu_send) {
+            startActivity(Intent(this, com.appmanager.agent.ui.FeedbackActivity::class.java))
+        }
+
         // 前台推送菜单（show_on_agent_home=true）
         AgentMenuStore.getAllMenuItems(this)
             .filter { m -> m["show_on_agent_home"] as? Boolean == true }
@@ -210,9 +231,22 @@ class MainActivity : AppCompatActivity() {
     // ── 菜单打开 ──────────────────────────────────────────────────────
 
     private fun openMenu(menu: Map<String, Any?>) {
+        // 登录守卫：未登录先拉起登录页，登录成功后再打开目标菜单
+        if (!AgentAuth.isLoggedIn(this)) {
+            pendingMenu = menu
+            loginLauncher.launch(
+                Intent(this, com.appmanager.agent.ui.LoginActivity::class.java)
+                    .putExtra(com.appmanager.agent.ui.LoginActivity.EXTRA_REQUIRED_HINT, true)
+            )
+            return
+        }
+        openMenuInternal(menu)
+    }
+
+    private fun openMenuInternal(menu: Map<String, Any?>) {
         when (menu["target_type"] as? String) {
             "form_app_entry" -> AgentMenuStore.launchFormAppEntry(this, menu, newTask = true)
-            else -> openScadaUrl(AgentMenuStore.getFirstHomePreviewUrl(this))
+            else -> openScadaUrl(AgentMenuStore.resolveMenuUrl(this, menu))
         }
     }
 
@@ -310,6 +344,8 @@ class MainActivity : AppCompatActivity() {
         if (requestCode != REQUEST_CODE_SCREEN) return
         screenCaptureRequested = false
         if (resultCode == Activity.RESULT_OK && data != null) {
+            // Android 14: mediaProjection FGS must be started from Activity context (onActivityResult).
+            startForegroundService(Intent(this, com.appmanager.agent.service.ScreenProjectionForegroundService::class.java))
             val intent = Intent(this, AgentService::class.java).apply {
                 action = AgentService.ACTION_START_SCREEN
                 putExtra(AgentService.EXTRA_RESULT_CODE, resultCode)

@@ -14,3 +14,8 @@ export const getAgentOnlineTrend = (hours = 24) => http.get('/settings/agent-onl
 export const getApiCallTrend = (hours = 24, granularity = 'hour') =>
   http.get('/settings/api-call-trend', { params: { hours, granularity } })
 export const getApiCallDetails = (hours = 24) => http.get('/settings/api-call-details', { params: { hours } })
+export const getStompStats = () => http.get('/settings/stomp-stats')
+
+// AI（Claude）配置
+export const getClaudeConfig = () => http.get('/settings/claude')
+export const updateClaudeConfig = (data) => http.put('/settings/claude', data)

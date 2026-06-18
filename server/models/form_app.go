@@ -12,7 +12,7 @@ type FormAppInfo struct {
 	Description    string     `gorm:"type:text" json:"description"`
 	EntryPageKey   string     `gorm:"size:64;default:'form'" json:"entry_page_key"`
 	GlobalConfig   string     `gorm:"type:text" json:"global_config"`
-	DesignSchema   string     `gorm:"type:longtext" json:"design_schema,omitempty"`   // deprecated, use FormAppPage
+	DesignSchema   string     `gorm:"type:longtext" json:"design_schema,omitempty"`  // deprecated, use FormAppPage
 	RuntimeSchema  string     `gorm:"type:longtext" json:"runtime_schema,omitempty"` // deprecated, use FormAppPage
 	UISchema       string     `gorm:"type:longtext" json:"ui_schema,omitempty"`      // deprecated, use FormAppPage
 	PublishStatus  int        `gorm:"default:0" json:"publish_status"`               // 0 未发布 1 已发布
@@ -53,7 +53,7 @@ type FormAppPageLink struct {
 type FormAppEventRoute struct {
 	ID            uint      `gorm:"primaryKey" json:"id"`
 	FormAppID     uint      `gorm:"index" json:"form_app_id"`
-	EventType     string    `gorm:"size:32" json:"event_type"` // barcode | qrcode | nfc | custom
+	EventType     string    `gorm:"size:32" json:"event_type"`   // barcode | qrcode | nfc | custom
 	MatcherType   string    `gorm:"size:32" json:"matcher_type"` // prefix | regex | exact | all
 	MatcherValue  string    `gorm:"size:500" json:"matcher_value"`
 	TargetPageKey string    `gorm:"size:64" json:"target_page_key"`

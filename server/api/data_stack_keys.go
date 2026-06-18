@@ -90,7 +90,6 @@ func firstDatasetByID(id uint) (*models.Dataset, error) {
 	return &row, nil
 }
 
-
 func dataSourceCodeExists(code string, excludeID uint) bool {
 	code = strings.TrimSpace(code)
 	if code == "" {

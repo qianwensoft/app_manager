@@ -173,6 +173,19 @@
               <el-tag v-if="tp.refresh.url" size="small" type="success" style="margin-left:8px">已配置</el-tag>
               <el-tag v-else size="small" type="info" style="margin-left:8px">未配置 · 到期后重新 fetch</el-tag>
             </template>
+            <el-alert type="info" :closable="false" show-icon style="margin-bottom:12px">
+              <template #title>如何注入 refresh_token</template>
+              <div style="font-size:12px;line-height:1.7">
+                在 <strong>Headers</strong> 或 <strong>Body</strong> 中用占位符
+                <code>&#123;&#123;refresh_token&#125;&#125;</code> 引用上次保存的刷新令牌，
+                同样支持 <code>&#123;&#123;access_token&#125;&#125;</code>（URL 不做替换）。
+                例如 Body：<code>{ "grant_type": "refresh_token", "refresh_token": "&#123;&#123;refresh_token&#125;&#125;" }</code>。<br />
+                refresh_token 的来源：fetch / refresh 响应中由下方「<strong>refresh_token 路径</strong>」解析并缓存；
+                <span v-if="tp.paths && tp.paths.refresh_token">当前路径 <code>{{ tp.paths.refresh_token }}</code>。</span>
+                <span v-else style="color:#e6a23c">当前未配置路径，刷新后将无法获得新的 refresh_token。</span>
+                <span v-if="!tokenStatus.has_refresh_token" style="color:#e6a23c">（暂无已缓存的 refresh_token，请先执行 fetch 获取）</span>
+              </div>
+            </el-alert>
             <el-form-item label="URL">
               <el-input v-model="tp.refresh.url" placeholder="留空则每次过期后重新 fetch；或相对路径（自动拼接 Base URL）" @blur="normalizeTokenUrl('refresh')" @input="onRefreshUrlInput" />
               <p v-if="tp.refresh.url && !isAbsUrl(tp.refresh.url)" class="subhint" style="margin-top:4px">
@@ -237,12 +250,37 @@
         <el-form-item label="提前刷新(秒)">
           <el-input-number v-model="tp.skew_seconds" :min="10" :max="3600" />
         </el-form-item>
-        <el-form-item label="鉴权 Header 名">
-          <el-input v-model="tp.auth_header_name" placeholder="Authorization" />
+        <el-form-item label="Token 参数位置">
+          <el-radio-group v-model="tp.token_in">
+            <el-radio-button value="header">Header</el-radio-button>
+            <el-radio-button value="json_body">JSON Body</el-radio-button>
+          </el-radio-group>
         </el-form-item>
-        <el-form-item label="Header 模板">
-          <el-input v-model="tp.auth_header_template" placeholder="Bearer {{access_token}}" />
-        </el-form-item>
+        <template v-if="tp.token_in !== 'json_body'">
+          <el-form-item label="鉴权 Header 名">
+            <el-input v-model="tp.auth_header_name" placeholder="Authorization" />
+          </el-form-item>
+          <el-form-item label="Header 模板">
+            <el-input v-model="tp.auth_header_template" placeholder="Bearer {{access_token}}" />
+          </el-form-item>
+        </template>
+        <template v-else>
+          <el-form-item label="Body 字段名">
+            <el-input v-model="tp.token_body_key" placeholder="access_token" />
+          </el-form-item>
+          <el-form-item label="Body 值模板">
+            <el-input v-model="tp.token_body_value_template" placeholder="{{access_token}}" />
+          </el-form-item>
+          <el-form-item label=" ">
+            <el-alert type="info" :closable="false" show-icon>
+              <div style="font-size:12px;line-height:1.7">
+                调用业务接口时，会在<strong>请求发出前</strong>把「Body 值模板」注入到业务请求 JSON body 的「Body 字段名」字段中（不再写鉴权 Header）。
+                值模板支持 <code>&#123;&#123;access_token&#125;&#125;</code> / <code>&#123;&#123;refresh_token&#125;&#125;</code> 占位符。
+                要求该接口请求体为 JSON 对象（空体将自动以 <code>{}</code> 处理）。
+              </div>
+            </el-alert>
+          </el-form-item>
+        </template>
               <el-form-item>
                 <el-button type="primary" :loading="savingTp" @click="saveTokenProvider">保存 Token 配置</el-button>
               </el-form-item>
@@ -308,12 +346,19 @@
                 >
                   删除
                 </el-button>
+                <el-button v-if="row._aiPrev != null" size="small" type="warning" link @click="undoAICode('before', idx)">撤销 AI</el-button>
               </div>
               <ExtensionScriptEditor
                 v-model="row.code"
                 phase="before"
                 placeholder="function main(ctx) { ... }"
                 :min-height="220"
+              />
+              <ExtScriptAIAssistant
+                phase="before"
+                :app-id="appId"
+                :current-code="row.code"
+                @apply="(code) => applyAICode('before', idx, code)"
               />
             </div>
 
@@ -346,12 +391,19 @@
                 >
                   删除
                 </el-button>
+                <el-button v-if="row._aiPrev != null" size="small" type="warning" link @click="undoAICode('after', idx)">撤销 AI</el-button>
               </div>
               <ExtensionScriptEditor
                 v-model="row.code"
                 phase="after"
                 placeholder="function main(ctx) { ... }"
                 :min-height="220"
+              />
+              <ExtScriptAIAssistant
+                phase="after"
+                :app-id="appId"
+                :current-code="row.code"
+                @apply="(code) => applyAICode('after', idx, code)"
               />
             </div>
 
@@ -367,6 +419,7 @@
           <template #header>应用接口</template>
           <div class="toolbar">
             <el-button type="primary" @click="openEpDlg()">新建接口</el-button>
+            <el-button type="warning" plain @click="epAiDlg = true">AI 助手</el-button>
             <el-button @click="loadEndpoints">刷新列表</el-button>
             <el-button @click="goEndpointDebug">打开调试页</el-button>
           </div>
@@ -721,6 +774,11 @@
         <el-button type="primary" :loading="epDlg.saving" @click="saveEp">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="epAiDlg" title="AI 助手 · 按接口文档追加应用接口" width="780px" destroy-on-close top="6vh">
+      <p class="subhint" style="margin-top:0">粘贴第三方接口文档地址，AI 会抓取并探测下级链接，自动推断接口（含入参/返回 Schema），预览确认后追加到当前应用。</p>
+      <InterfaceImportAIAssistant :app-id="Number(appId)" @created="onEpAiCreated" />
+    </el-dialog>
   </div>
 </template>
 
@@ -730,6 +788,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as ob from '@/api/outbound'
 import ExtensionScriptEditor from '@/components/ExtensionScriptEditor.vue'
+import ExtScriptAIAssistant from '@/components/ExtScriptAIAssistant.vue'
+import InterfaceImportAIAssistant from '@/components/InterfaceImportAIAssistant.vue'
 import { copyText } from '@/utils/clipboard'
 import JsonTemplateEditor from '@/components/JsonTemplateEditor.vue'
 import KvParamEditor from '@/components/KvParamEditor.vue'
@@ -771,7 +831,7 @@ const savingExt = ref(false)
 const savingTp = ref(false)
 const tokenBusy = ref(false)
 const epLoading = ref(false)
-const autoRefreshEnabled = ref(false)
+const autoRefreshEnabled = ref(true)
 let autoTimer = null
 const countdownSec = ref(null)
 let countdownInterval = null
@@ -910,6 +970,38 @@ function removeExtScript(phase, idx) {
     return
   }
   list.splice(idx, 1)
+}
+
+// 应用 AI 生成的代码：若该行已有非空代码，先二次确认；旧值暂存到 _aiPrev 以便撤销。
+async function applyAICode(phase, idx, code) {
+  const list = extList(phase)
+  const row = list[idx]
+  if (!row) return
+  const prev = String(row.code || '')
+  if (prev.trim()) {
+    try {
+      await ElMessageBox.confirm('将用 AI 生成的代码替换当前脚本内容，是否继续？（可点「撤销 AI」恢复）', '确认替换', {
+        type: 'warning',
+        confirmButtonText: '替换',
+        cancelButtonText: '取消'
+      })
+    } catch (e) {
+      return // 用户取消
+    }
+  }
+  row._aiPrev = prev
+  row.code = code
+  ElMessage.success('已应用 AI 脚本，可点「撤销 AI」恢复')
+}
+
+// 撤销最近一次 AI 应用，恢复旧代码。
+function undoAICode(phase, idx) {
+  const list = extList(phase)
+  const row = list[idx]
+  if (!row || row._aiPrev == null) return
+  row.code = row._aiPrev
+  row._aiPrev = null
+  ElMessage.success('已恢复为应用前的脚本')
 }
 
 function fillEmptyExtCodeFromDefault(phase) {
@@ -1058,6 +1150,9 @@ function defaultTp() {
     refresh: { url: '', method: 'POST', headers: {}, body: {}, body_type: 'json' },
     paths: { access_token: 'access_token', expires_in: 'expires_in', expires_in_mode: 'path', expires_at: '', refresh_token: '' },
     skew_seconds: 60,
+    token_in: 'header',
+    token_body_key: 'access_token',
+    token_body_value_template: '{{access_token}}',
     auth_header_name: 'Authorization',
     auth_header_template: 'Bearer {{access_token}}'
   }
@@ -1118,6 +1213,9 @@ function mergeTp(raw) {
   Object.assign(d.paths, raw.paths || {})
   if (!d.paths.expires_in_mode) d.paths.expires_in_mode = 'path'
   if (raw.skew_seconds != null) d.skew_seconds = raw.skew_seconds
+  if (raw.token_in) d.token_in = raw.token_in
+  if (raw.token_body_key) d.token_body_key = raw.token_body_key
+  if (raw.token_body_value_template) d.token_body_value_template = raw.token_body_value_template
   if (raw.auth_header_name) d.auth_header_name = raw.auth_header_name
   if (raw.auth_header_template) d.auth_header_template = raw.auth_header_template
   return d
@@ -1131,6 +1229,9 @@ function applyTpToReactive(src) {
   Object.assign(tp.refresh, d.refresh)
   Object.assign(tp.paths, d.paths)
   tp.skew_seconds = d.skew_seconds
+  tp.token_in = d.token_in
+  tp.token_body_key = d.token_body_key
+  tp.token_body_value_template = d.token_body_value_template
   tp.auth_header_name = d.auth_header_name
   tp.auth_header_template = d.auth_header_template
   try {
@@ -1237,6 +1338,9 @@ function buildTokenProviderPayload() {
     refresh: { ...tp.refresh, headers: rh, body: rb },
     paths: { ...tp.paths },
     skew_seconds: tp.skew_seconds,
+    token_in: tp.token_in,
+    token_body_key: tp.token_body_key,
+    token_body_value_template: tp.token_body_value_template,
     auth_header_name: tp.auth_header_name,
     auth_header_template: tp.auth_header_template
   }
@@ -1500,14 +1604,15 @@ async function doFetch() {
   tokenBusy.value = true
   try {
     const r = await ob.postOutboundAppTokenFetch(appId.value)
+    // 先展示请求/响应日志，避免后续 loadApp 等步骤出错时日志丢失
+    openTokenExchangeDlg(r.token_exchange)
     if (r.token_status) applyTokenStatus(r.token_status)
     if (r.token_exchange?.code_context) {
       codeContext.value = r.token_exchange.code_context
       codeContextKeys.value = Object.keys(r.token_exchange.code_context)
     }
-    await loadApp()
     ElMessage.success('已获取 Token')
-    openTokenExchangeDlg(r.token_exchange)
+    await loadApp()
   } catch (e) {
     const ex = e?.response?.data?.token_exchange
     if (ex) openTokenExchangeDlg(ex)
@@ -1520,14 +1625,15 @@ async function doRefresh() {
   tokenBusy.value = true
   try {
     const r = await ob.postOutboundAppTokenRefresh(appId.value)
+    // 先展示请求/响应日志，避免后续 loadApp 等步骤出错时日志丢失
+    openTokenExchangeDlg(r.token_exchange)
     if (r.token_status) applyTokenStatus(r.token_status)
     if (r.token_exchange?.code_context) {
       codeContext.value = r.token_exchange.code_context
       codeContextKeys.value = Object.keys(r.token_exchange.code_context)
     }
-    await loadApp()
     ElMessage.success('已刷新')
-    openTokenExchangeDlg(r.token_exchange)
+    await loadApp()
   } catch (e) {
     const ex = e?.response?.data?.token_exchange
     if (ex) openTokenExchangeDlg(ex)
@@ -1564,6 +1670,13 @@ const epDlg = reactive({
     enabled: true
   }
 })
+
+const epAiDlg = ref(false)
+
+async function onEpAiCreated() {
+  epAiDlg.value = false
+  await loadEndpoints()
+}
 
 const epDlgTitle = computed(() => {
   if (epDlg.editId) return '编辑接口'

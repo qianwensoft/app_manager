@@ -39,16 +39,16 @@ func (d *DataSource) IsReadOnly() bool {
 //     ingress.kind=http_poll（轮询）可通过 ingress.cache_required=false 省略物理缓冲表。轮询类仍可继续创建多个
 //     数据接口做参数化细管。接入出站连接器时应避免 HTTP 步骤回调本系统开放数据接口形成环。
 type Dataset struct {
-	ID           uint        `gorm:"primaryKey" json:"id"`
-	Code         string      `gorm:"size:80;uniqueIndex" json:"code"` // 业务编码
-	DataSourceID *uint       `gorm:"index" json:"data_source_id"`
-	DataSource   *DataSource `gorm:"foreignKey:DataSourceID" json:"data_source,omitempty"`
-	Category     string      `gorm:"size:100;index" json:"category"`
-	Name         string      `gorm:"size:200" json:"name"`
-	Kind         string      `gorm:"size:32;default:query" json:"kind"` // static, query, buffer, transaction
-	Definition   string      `gorm:"type:text" json:"definition"`       // static: JSON 行数组；query/buffer: SQL
-	StepsJSON    string      `gorm:"type:text" json:"steps_json"`       // 事务：步骤数组 JSON
-	ParamSchema  string      `gorm:"type:text" json:"param_schema"`
+	ID           uint            `gorm:"primaryKey" json:"id"`
+	Code         string          `gorm:"size:80;uniqueIndex" json:"code"` // 业务编码
+	DataSourceID *uint           `gorm:"index" json:"data_source_id"`
+	DataSource   *DataSource     `gorm:"foreignKey:DataSourceID" json:"data_source,omitempty"`
+	Category     string          `gorm:"size:100;index" json:"category"`
+	Name         string          `gorm:"size:200" json:"name"`
+	Kind         string          `gorm:"size:32;default:query" json:"kind"` // static, query, buffer, transaction
+	Definition   string          `gorm:"type:text" json:"definition"`       // static: JSON 行数组；query/buffer: SQL
+	StepsJSON    string          `gorm:"type:text" json:"steps_json"`       // 事务：步骤数组 JSON
+	ParamSchema  string          `gorm:"type:text" json:"param_schema"`
 	MetaJSON     string          `gorm:"type:text" json:"meta_json"` // 入站、缓冲表名等扩展 JSON
 	Structures   []DataStructure `gorm:"foreignKey:DatasetID" json:"structures,omitempty"`
 	CreatedAt    time.Time       `json:"created_at"`
@@ -79,28 +79,28 @@ type DataInterfaceGroup struct {
 
 // DataInterface 对外数据接口
 type DataInterface struct {
-	ID                 uint           `gorm:"primaryKey" json:"id"`
-	GroupID            *uint          `gorm:"index" json:"group_id"`
-	Category           string         `gorm:"size:100;index" json:"category"`
-	Name               string         `gorm:"size:200" json:"name"`
-	Code               string         `gorm:"uniqueIndex;size:120" json:"code"` // 开放 API 路径主键；可与 slug 相同
-	Slug               string         `gorm:"uniqueIndex;size:120" json:"slug"`
-	Kind               string         `gorm:"size:32;default:query" json:"kind"` // query — returns []row; queryOne — returns first row as object (or null); transaction
-	DatasetID          uint           `gorm:"index" json:"dataset_id"`
-	Dataset            *Dataset       `gorm:"foreignKey:DatasetID" json:"dataset,omitempty"`
-	DataStructureID    *uint          `gorm:"index" json:"data_structure_id"`
-	DataStructure      *DataStructure `gorm:"foreignKey:DataStructureID" json:"data_structure,omitempty"`
-	ParamDefaultsJSON  string         `gorm:"type:text" json:"param_defaults_json"` // 本接口默认参数组 JSON
-	Method             string         `gorm:"size:10;default:POST" json:"method"`
-	Enabled            bool           `gorm:"default:true" json:"enabled"`
-	RequiredScopes     string         `gorm:"type:text" json:"required_scopes"` // JSON 数组，可选
+	ID                uint           `gorm:"primaryKey" json:"id"`
+	GroupID           *uint          `gorm:"index" json:"group_id"`
+	Category          string         `gorm:"size:100;index" json:"category"`
+	Name              string         `gorm:"size:200" json:"name"`
+	Code              string         `gorm:"uniqueIndex;size:120" json:"code"` // 开放 API 路径主键；可与 slug 相同
+	Slug              string         `gorm:"uniqueIndex;size:120" json:"slug"`
+	Kind              string         `gorm:"size:32;default:query" json:"kind"` // query — returns []row; queryOne — returns first row as object (or null); transaction
+	DatasetID         uint           `gorm:"index" json:"dataset_id"`
+	Dataset           *Dataset       `gorm:"foreignKey:DatasetID" json:"dataset,omitempty"`
+	DataStructureID   *uint          `gorm:"index" json:"data_structure_id"`
+	DataStructure     *DataStructure `gorm:"foreignKey:DataStructureID" json:"data_structure,omitempty"`
+	ParamDefaultsJSON string         `gorm:"type:text" json:"param_defaults_json"` // 本接口默认参数组 JSON
+	Method            string         `gorm:"size:10;default:POST" json:"method"`
+	Enabled           bool           `gorm:"default:true" json:"enabled"`
+	RequiredScopes    string         `gorm:"type:text" json:"required_scopes"` // JSON 数组，可选
 	// StaticCrudOp 非空时：绑定数据集须为 kind=static，开放路由按操作读写 JSON 行表，不走 SQL。
 	// 取值 list | create | update | delete；空字符串表示普通 query/transaction 行为。
 	StaticCrudOp string `gorm:"size:16;default:''" json:"static_crud_op"`
 	// SchemaJSON 接口关联的字段 schema（JSON Schema 格式），用于模拟数据生成与文档。
 	// 自动生成的接口由 GenerateCrudInterfaces 写入；手动接口可自由编辑。
-	StepsJSON   string `gorm:"type:text" json:"steps_json"`   // 事务接口：SQL 步骤数组 JSON
-	SchemaJSON  string `gorm:"type:text" json:"schema_json"`
+	StepsJSON  string `gorm:"type:text" json:"steps_json"` // 事务接口：SQL 步骤数组 JSON
+	SchemaJSON string `gorm:"type:text" json:"schema_json"`
 	// 声明式整形（数据集深度定制）：空值=关闭，向后兼容。仅作用于 query/queryOne（部分作用于 static）。
 	ParamContractJSON string    `gorm:"type:text" json:"param_contract_json"` // []ParamSpec：参数契约（类型/必填/枚举/范围/正则/默认）
 	FieldMappingJSON  string    `gorm:"type:text" json:"field_mapping_json"`  // ProjectionSpec：输出字段投影/重命名

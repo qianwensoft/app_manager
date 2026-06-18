@@ -4,6 +4,9 @@
     <p class="hint">在此管理外部系统与鉴权；具体 HTTP 接口在「应用详情」中维护。连接器中按应用选择接口。</p>
     <div class="toolbar">
       <el-button type="primary" @click="openCreate">新建应用</el-button>
+      <el-button type="warning" plain @click="aiDlg = true">
+        <el-icon style="margin-right: 4px"><MagicStick /></el-icon>AI 助手
+      </el-button>
       <el-button
         type="success"
         :disabled="selected.length !== 1"
@@ -71,6 +74,11 @@
         <el-button type="primary" :loading="dlg.saving" @click="saveCreate">创建</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="aiDlg" title="AI 助手 · 按接口文档创建外部应用" width="780px" destroy-on-close top="6vh">
+      <p class="hint" style="margin-top:0">粘贴第三方接口文档地址，AI 会抓取并探测下级链接，自动推断出一个外部应用及其下多条接口（含入参/返回 Schema），预览确认后创建。</p>
+      <InterfaceImportAIAssistant :app-id="0" @created="onAiCreated" />
+    </el-dialog>
   </div>
 </template>
 
@@ -78,13 +86,16 @@
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { MagicStick } from '@element-plus/icons-vue'
 import * as ob from '@/api/outbound'
+import InterfaceImportAIAssistant from '@/components/InterfaceImportAIAssistant.vue'
 
 const router = useRouter()
 const apps = ref([])
 const loading = ref(false)
 const selected = ref([])
 const cloning = ref(false)
+const aiDlg = ref(false)
 const dlg = reactive({
   visible: false,
   saving: false,
@@ -141,6 +152,12 @@ async function remove(row) {
 
 function onSelectionChange(rows) {
   selected.value = rows
+}
+
+async function onAiCreated({ appId } = {}) {
+  aiDlg.value = false
+  if (appId) router.push(`/outbound/apps/${appId}`)
+  else await load()
 }
 
 async function cloneApp() {

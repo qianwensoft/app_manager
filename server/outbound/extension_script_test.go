@@ -161,4 +161,3 @@ func TestBeforeRequestScriptSetResponseBodyIsNoop(t *testing.T) {
 	}
 	// env.OutRespBody will be non-nil but callers in before_request path don't read it; just ensure no panic
 }
-

@@ -45,6 +45,44 @@
                         style="@style/AppManagerSectionTitle"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
+                        android:text="@string/personal_center_section_account" />
+
+                    <TextView
+                        android:id="@+id/tvLoginStatus"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:textColor="@color/agent_text_primary"
+                        android:textSize="15sp" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnLoginAction"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:minHeight="48dp"
+                        android:text="@string/personal_center_go_login"
+                        app:cornerRadius="12dp" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                app:cardCornerRadius="12dp"
+                app:cardElevation="2dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        style="@style/AppManagerSectionTitle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
                         android:text="@string/personal_center_section_profile" />
 
                     <TextView

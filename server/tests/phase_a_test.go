@@ -144,8 +144,8 @@ func TestPhaseA_MCP002_ListScada(t *testing.T) {
 	initTestDB(t)
 	ensureAdminUser(t)
 	database.DB.Create(&models.ScadaInfo{
-		ScadaName: "Phase A Test",
-		ScadaCode: "phase_a_test",
+		ScadaName:  "Phase A Test",
+		ScadaCode:  "phase_a_test",
 		CanvasData: `{"version":1,"activeCanvasId":1,"canvases":{"1":{"id":1,"elements":[]}}}`,
 	})
 	w := postMCP(t, mcpRouter(), `{"jsonrpc":"2.0","id":2,"method":"list_scada","params":{}}`)

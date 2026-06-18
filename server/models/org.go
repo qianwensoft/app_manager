@@ -4,13 +4,13 @@ import "time"
 
 // Department 部门（支持树形结构）
 type Department struct {
-	ID         uint        `gorm:"primaryKey" json:"id"`
-	ParentID   *uint       `json:"parent_id"`
-	Name       string      `gorm:"size:100;not null" json:"name"`
-	Code       string      `gorm:"size:64;uniqueIndex" json:"code"`
-	SortOrder  int         `json:"sort_order"`
-	Children   []Department `gorm:"-" json:"children,omitempty"`
-	CreatedAt  time.Time   `json:"created_at"`
+	ID        uint         `gorm:"primaryKey" json:"id"`
+	ParentID  *uint        `json:"parent_id"`
+	Name      string       `gorm:"size:100;not null" json:"name"`
+	Code      string       `gorm:"size:64;uniqueIndex" json:"code"`
+	SortOrder int          `json:"sort_order"`
+	Children  []Department `gorm:"-" json:"children,omitempty"`
+	CreatedAt time.Time    `json:"created_at"`
 }
 
 // Position 岗位
@@ -35,13 +35,13 @@ type UserDepartment struct {
 
 // DeviceGroup 设备分组（替代 Device.GroupName 字符串，支持树形）
 type DeviceGroup struct {
-	ID        uint        `gorm:"primaryKey" json:"id"`
-	ParentID  *uint       `json:"parent_id"`
-	Name      string      `gorm:"size:100;not null" json:"name"`
-	Code      string      `gorm:"size:64;uniqueIndex" json:"code"`
-	SortOrder int         `json:"sort_order"`
+	ID        uint          `gorm:"primaryKey" json:"id"`
+	ParentID  *uint         `json:"parent_id"`
+	Name      string        `gorm:"size:100;not null" json:"name"`
+	Code      string        `gorm:"size:64;uniqueIndex" json:"code"`
+	SortOrder int           `json:"sort_order"`
 	Children  []DeviceGroup `gorm:"-" json:"children,omitempty"`
-	CreatedAt time.Time   `json:"created_at"`
+	CreatedAt time.Time     `json:"created_at"`
 }
 
 // DeviceGroupMember 设备-分组关联

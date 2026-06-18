@@ -3,6 +3,7 @@ package outbound
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -150,17 +151,19 @@ func syntheticDeviceEvent(vars map[string]string) models.DeviceEvent {
 }
 
 // DebugHTTPEndpoint 执行一次出站 HTTP（不写 outbound_deliveries），返回 exchange、变量表、Header 分层与体积元数据。
-// afterResponseScriptIndex 非 nil 时仅执行该下标的 after_response 脚本（须已启用）；nil 表示与线上一致执行全部。
-func DebugHTTPEndpoint(db *gorm.DB, app *models.OutboundApp, ep models.OutboundEndpoint, sampleVars map[string]string, timeoutMS int, afterResponseScriptIndex *int) (
+// afterScriptOrder 非 nil 时按指定序列执行 after_response 脚本；nil 时使用 ep.AfterScriptOrderJSON，仍空则退化旧行为（全局先→接口后）。
+func DebugHTTPEndpoint(db *gorm.DB, app *models.OutboundApp, ep models.OutboundEndpoint, sampleVars map[string]string, timeoutMS int, afterScriptOrder []AfterScriptOrderEntry) (
 	trace *TokenExchangeTrace,
 	vars map[string]string,
 	breakdown *EndpointDebugBreakdown,
 	meta map[string]interface{},
+	scriptLogs []ScriptLog,
 	err error,
 ) {
 	trace = &TokenExchangeTrace{Phase: "http"}
 	vars = DefaultDebugTemplateVars(sampleVars)
 	meta = map[string]interface{}{}
+	scriptLogs = []ScriptLog{}
 	defer func() {
 		if meta != nil && vars != nil {
 			meta["context_after_response"] = TemplateContextKVList(vars)
@@ -248,7 +251,17 @@ func DebugHTTPEndpoint(db *gorm.DB, app *models.OutboundApp, ep models.OutboundE
 	}
 
 	trace.Request.Headers = headerFlatStringMap(req.Header)
-	trace.Request.Body, trace.Request.BodyTruncated = debugClipBody([]byte(bodyStr), maxDebugTraceRequestBody)
+	// applyAppAuth 在 json_body 模式下会重写 req.Body（注入 token），用 GetBody 读取实际发送的 body。
+	effectiveBody := []byte(bodyStr)
+	if req.GetBody != nil {
+		if rc, gbErr := req.GetBody(); gbErr == nil {
+			if b, rdErr := io.ReadAll(rc); rdErr == nil {
+				effectiveBody = b
+			}
+			_ = rc.Close()
+		}
+	}
+	trace.Request.Body, trace.Request.BodyTruncated = debugClipBody(effectiveBody, maxDebugTraceRequestBody)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -273,33 +286,28 @@ func DebugHTTPEndpoint(db *gorm.DB, app *models.OutboundApp, ep models.OutboundE
 	} else {
 		meta["response_body_in_trace_truncated"] = false
 	}
-	// 与 ExecuteHTTPWebhook、连接器阶段预览共用 mergeHTTPResponseIntoVarsAndRunAfterResponse；接口调试在非 2xx 时仍跑 after_response。
+	// 与 ExecuteHTTPWebhook、连接器阶段预览共用逻辑；接口调试在非 2xx 时仍跑 after_response。
 	synth := models.OutboundConnectorStep{ConfigJSON: `{"context_merge_after":"http_response_json"}`}
-	var runOpt *ExtensionScriptRunOptions
-	if afterResponseScriptIndex != nil {
-		if verr := ValidateAfterResponseScriptIndex(app, *afterResponseScriptIndex); verr != nil {
-			err = verr
-			return
-		}
-		meta["after_response_script_debug_index"] = *afterResponseScriptIndex
-		runOpt = &ExtensionScriptRunOptions{AfterResponseOnlyIndex: afterResponseScriptIndex}
-	} else {
-		meta["after_response_script_debug_all"] = true
-	}
-	afterEnv := &ScriptEnv{RespStatus: resp.StatusCode, RespBody: clipScriptResponseBody(b)}
-	// 先合并 HTTP 上下文再跑脚本（复用内部逻辑），但需拿到脚本修改后的 OutResp*。
-	// 直接调用底层以便拿到 env 指针。
 	is2xx := resp.StatusCode >= 200 && resp.StatusCode < 300
 	if is2xx {
 		MergeHTTPResponseContext(vars, 0, resp.StatusCode, b)
 		MergeHTTPResponseBodyToContext(vars, synth, b)
 		MergePaginationContext(vars, b)
 	}
-	if serr := RunAppExtensionScriptWithOptions(AppScriptHookAfterResponse, app, vars, afterEnv, runOpt); serr != nil {
-		err = fmt.Errorf("extension_script after_response: %w", serr)
+
+	// 解析执行序列：优先用调用方传入的，其次用接口存储的，最后退化旧行为
+	order := afterScriptOrder
+	if order == nil {
+		order = ParseAfterScriptOrder(ep.AfterScriptOrderJSON)
+	}
+
+	afterEnv := &ScriptEnv{RespStatus: resp.StatusCode, RespBody: clipScriptResponseBody(b)}
+	if serr := RunAfterResponseOrdered(order, app, ep.AfterScriptsJSON, vars, afterEnv, &scriptLogs); serr != nil {
+		err = serr
 		return
 	}
 	applyScriptOutResp(vars, 0, afterEnv)
+
 	// 将脚本改写后的状态码/响应体反映到 trace
 	if afterEnv.OutRespStatus != nil {
 		trace.Response.Status = *afterEnv.OutRespStatus
@@ -308,7 +316,8 @@ func DebugHTTPEndpoint(db *gorm.DB, app *models.OutboundApp, ep models.OutboundE
 		trace.Response.Body = *afterEnv.OutRespBody
 		trace.Response.BodyTruncated = false
 	}
+	meta["script_logs"] = scriptLogs
 	meta["extension_script_after_ran"] = true
 	meta["extension_script_after_http_status"] = resp.StatusCode
-	return trace, vars, breakdown, meta, nil
+	return trace, vars, breakdown, meta, scriptLogs, nil
 }

@@ -11,11 +11,11 @@ import (
 // ── image_to_canvas ───────────────────────────────────────────────────────────
 
 type imageToCanvasParams struct {
-	ImageBase64    string `json:"image_base64"`
+	ImageBase64     string `json:"image_base64"`
 	NaturalLanguage string `json:"natural_language"`
-	CanvasWidth    int    `json:"canvas_width"`
-	CanvasHeight   int    `json:"canvas_height"`
-	Style          string `json:"style"` // "dark" | "light"
+	CanvasWidth     int    `json:"canvas_width"`
+	CanvasHeight    int    `json:"canvas_height"`
+	Style           string `json:"style"` // "dark" | "light"
 }
 
 func imageToCanvas(raw json.RawMessage) (any, *RPCError) {

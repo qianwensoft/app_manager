@@ -110,9 +110,9 @@ func StopCustomEventAnalyze(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
-			"session":       sess,
-			"observations":  obs,
-			"suggestions":   sug,
+			"session":      sess,
+			"observations": obs,
+			"suggestions":  sug,
 		},
 	})
 }

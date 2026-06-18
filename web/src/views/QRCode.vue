@@ -8,6 +8,26 @@
       <p><strong>设备Token：</strong>{{ deviceToken }}</p>
       <el-button type="primary" @click="regenerate" style="margin-top:10px">重新生成</el-button>
     </div>
+    <!-- dev：表单调试地址。填了才写入二维码，扫码即把 Agent 的表单运行时指向开发机 -->
+    <div style="margin-top:16px;width:100%;max-width:360px">
+      <el-input
+        v-model="formAppBaseUrl"
+        placeholder="表单调试地址（dev，可选，如 http://192.168.1.x:5175）"
+        clearable
+        @input="onDebugInput"
+      >
+        <template #prepend>表单调试</template>
+      </el-input>
+      <!-- 一键按当前访问主机填入，省去手敲 IP；端口对应 preview/dev -->
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <el-button size="small" @click="fillDebug(4175)">本机 preview :4175</el-button>
+        <el-button size="small" @click="fillDebug(5175)">本机 dev :5175</el-button>
+        <el-button v-if="formAppBaseUrl" size="small" text @click="fillDebug(null)">清空</el-button>
+      </div>
+      <p v-if="formAppBaseUrl" style="color:#e6a23c;font-size:12px;margin-top:6px;text-align:center">
+        二维码已含调试地址：表单将从此地址加载（仅调试用，正式接入请留空）
+      </p>
+    </div>
     <el-divider />
     <div style="text-align:center">
       <h3>下载 Agent 应用</h3>
@@ -73,6 +93,7 @@ import { copyText } from '@/utils/clipboard'
 const qrCanvas = ref(null)
 const serverUrl = ref('')
 const deviceToken = ref('')
+const formAppBaseUrl = ref('')
 
 function generateToken() {
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
@@ -81,14 +102,38 @@ function generateToken() {
   return token
 }
 
+// 仅依据当前 token / 表单调试地址重绘二维码（不重置 token）
+async function renderConfigQR() {
+  serverUrl.value = `ws://${window.location.host}`
+  const config = { serverUrl: serverUrl.value, deviceToken: deviceToken.value }
+  // 仅在填写时写入，避免正常接入的二维码携带调试字段
+  const base = formAppBaseUrl.value.trim()
+  if (base) config.formAppBaseUrl = base
+  await QRCode.toCanvas(qrCanvas.value, JSON.stringify(config), { width: 280, margin: 2 })
+}
+
 async function generateQRCode() {
   deviceToken.value = generateToken()
-  serverUrl.value = `ws://${window.location.host}`
-  const config = JSON.stringify({ serverUrl: serverUrl.value, deviceToken: deviceToken.value })
-  await QRCode.toCanvas(qrCanvas.value, config, { width: 280, margin: 2 })
+  await renderConfigQR()
 }
 
 function regenerate() { generateQRCode() }
+
+const DEBUG_URL_KEY = 'qr_form_app_base_url'
+
+// 按当前访问主机一键填入调试地址：通过开发机 LAN IP 打开 UI 时，
+// location.hostname 即开发机地址，免去手敲 IP。port=null 表示清空。
+function fillDebug(port) {
+  formAppBaseUrl.value = port ? `http://${window.location.hostname}:${port}` : ''
+  onDebugInput()
+}
+
+function onDebugInput() {
+  const v = formAppBaseUrl.value.trim()
+  if (v) localStorage.setItem(DEBUG_URL_KEY, v)
+  else localStorage.removeItem(DEBUG_URL_KEY)
+  renderConfigQR()
+}
 
 // 下载 Agent
 const downloadQrCanvas = ref(null)
@@ -173,6 +218,8 @@ function formatDate(d) {
 
 onMounted(async () => {
   await nextTick()
+  // 恢复上次的调试地址，刷新页面后无需重填
+  formAppBaseUrl.value = localStorage.getItem(DEBUG_URL_KEY) || ''
   generateQRCode()
   renderDownloadQR()
   loadLinks()

@@ -70,6 +70,7 @@ func main() {
 		datastack.StartBufferPollers(database.DB)
 		outbound.InitTriggerManager(database.DB)
 		api.StartMetricsAggregator()
+		api.StartStompStatsPublisher()
 		scada.StartSimEngine()
 		scada.StartBatcher()
 		go scada.StartUDPIngress(9000)

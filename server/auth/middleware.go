@@ -38,9 +38,15 @@ func AuthMiddleware() gin.HandlerFunc {
 }
 
 // FormRuntimeAuthMiddleware accepts JWT Bearer or X-Device-Token (Agent WebView).
+// 媒体类请求（<img>/<video>/<audio> src）无法带 header，故同时接受 ?token=（JWT）
+// 与 ?device_token=（设备令牌）查询参数。
 func FormRuntimeAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if token := strings.TrimSpace(c.GetHeader("Authorization")); token != "" {
+		token := strings.TrimSpace(c.GetHeader("Authorization"))
+		if token == "" {
+			token = strings.TrimSpace(c.Query("token"))
+		}
+		if token != "" {
 			token = strings.TrimPrefix(token, "Bearer ")
 			if claims, err := ParseToken(token); err == nil {
 				c.Set("user_id", claims.UserID)
@@ -52,6 +58,9 @@ func FormRuntimeAuthMiddleware() gin.HandlerFunc {
 			}
 		}
 		devTok := strings.TrimSpace(c.GetHeader("X-Device-Token"))
+		if devTok == "" {
+			devTok = strings.TrimSpace(c.Query("device_token"))
+		}
 		if devTok == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 			c.Abort()

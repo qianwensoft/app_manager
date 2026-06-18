@@ -265,7 +265,6 @@ func parseSchemaJSONKeys(raw string) []string {
 	return nil
 }
 
-
 // parseSchemaJSONItems 从 param_schema 提取完整参数信息（含 type、enum、description、required）。
 func parseSchemaJSONItems(raw string) []InterfaceParamItem {
 	raw = strings.TrimSpace(raw)

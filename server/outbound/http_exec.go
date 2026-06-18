@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -129,6 +130,9 @@ func applyAppAuth(db *gorm.DB, req *http.Request, app *models.OutboundApp, vars 
 		if strings.TrimSpace(cache.AccessToken) == "" {
 			return fmt.Errorf("no access_token in cache; run token fetch or check paths")
 		}
+		if p.TokenIn == "json_body" {
+			return injectTokenIntoJSONBody(req, p, cache, vars)
+		}
 		tpl := expandTemplate(p.AuthHeaderTemplate, vars)
 		tpl = expandTokenTemplate(tpl, cache.AccessToken, cache.RefreshToken)
 		req.Header[p.AuthHeaderName] = []string{tpl}
@@ -136,6 +140,44 @@ func applyAppAuth(db *gorm.DB, req *http.Request, app *models.OutboundApp, vars 
 	default:
 		return fmt.Errorf("unsupported auth_type %q", app.AuthType)
 	}
+}
+
+// injectTokenIntoJSONBody 在请求发出前把 token 注入到请求 JSON body 的指定字段（json_body 模式）。
+// 读取并替换 req.Body：解析为对象 → 设置 p.TokenBodyKey 字段 → 重新序列化 → 重置 Body/ContentLength/GetBody。
+func injectTokenIntoJSONBody(req *http.Request, p TokenProvider, cache TokenCache, vars map[string]string) error {
+	var raw []byte
+	if req.Body != nil {
+		b, err := io.ReadAll(req.Body)
+		if err != nil {
+			return fmt.Errorf("token json_body: read request body: %w", err)
+		}
+		_ = req.Body.Close()
+		raw = b
+	}
+	m := map[string]interface{}{}
+	if t := strings.TrimSpace(string(raw)); t != "" && t != "null" {
+		if err := json.Unmarshal(raw, &m); err != nil {
+			return fmt.Errorf("token json_body: request body is not valid JSON")
+		}
+	}
+
+	tokenVal := expandTemplate(p.TokenBodyValueTemplate, vars)
+	tokenVal = expandTokenTemplate(tokenVal, cache.AccessToken, cache.RefreshToken)
+	m[p.TokenBodyKey] = tokenVal
+
+	out, err := json.Marshal(m)
+	if err != nil {
+		return fmt.Errorf("token json_body: marshal: %w", err)
+	}
+	req.Body = io.NopCloser(bytes.NewReader(out))
+	req.ContentLength = int64(len(out))
+	req.GetBody = func() (io.ReadCloser, error) {
+		return io.NopCloser(bytes.NewReader(out)), nil
+	}
+	if req.Header.Get("Content-Type") == "" {
+		req.Header.Set("Content-Type", "application/json; charset=utf-8")
+	}
+	return nil
 }
 
 func defaultJSONBody(rec models.DeviceEvent) string {
@@ -335,7 +377,7 @@ func ExecuteHTTPWebhook(db *gorm.DB, connector models.OutboundConnector, endpoin
 			d.Error = ""
 			d.DurationMS = time.Since(startAll).Milliseconds()
 			d.DetailJSON = lastDetail
-			if err := mergeHTTPResponseIntoVarsAndRunAfterResponse(workVars, app, connectorStep, meta.StepID, resp.StatusCode, bodyBytes, nil, false, mergeHTTPResponseIntoVars); err != nil {
+			if err := mergeHTTPResponseIntoVarsAndRunAfterResponse(workVars, app, connectorStep, meta.StepID, resp.StatusCode, bodyBytes, nil, false, mergeHTTPResponseIntoVars, endpoint.AfterScriptsJSON, ParseAfterScriptOrder(endpoint.AfterScriptOrderJSON)); err != nil {
 				d.Status = "failed"
 				d.Error = "extension_script after_response: " + err.Error()
 				d.DurationMS = time.Since(startAll).Milliseconds()

@@ -20,19 +20,19 @@ type CustomEventGroup struct {
 
 // CustomEventDefinition 单条 Intent 输出映射：广播动作 + Extra 键顺序尝试 → 上报 event_type（Key）。
 type CustomEventDefinition struct {
-	ID           uint             `gorm:"primaryKey" json:"id"`
-	GroupID      uint             `gorm:"index;not null" json:"group_id"`
-	Group        CustomEventGroup `gorm:"foreignKey:GroupID" json:"group,omitempty"`
-	Key          string           `gorm:"size:80;uniqueIndex;not null" json:"key"`
-	Name         string           `gorm:"size:120;not null" json:"name"`
-	Description  string           `gorm:"type:text" json:"description"`
-	Enabled      bool             `gorm:"default:true" json:"enabled"`
-	MQTTEnabled  bool             `gorm:"default:false" json:"mqtt_enabled"`
-	MQTTTopic    string           `gorm:"size:200" json:"mqtt_topic"`
-	BroadcastActionsJSON string   `gorm:"column:broadcast_actions_json;type:text" json:"-"`
-	ExtraKeysJSON        string   `gorm:"column:extra_keys_json;type:text" json:"-"`
-	CreatedAt    time.Time        `json:"created_at"`
-	UpdatedAt    time.Time        `json:"updated_at"`
+	ID                   uint             `gorm:"primaryKey" json:"id"`
+	GroupID              uint             `gorm:"index;not null" json:"group_id"`
+	Group                CustomEventGroup `gorm:"foreignKey:GroupID" json:"group,omitempty"`
+	Key                  string           `gorm:"size:80;uniqueIndex;not null" json:"key"`
+	Name                 string           `gorm:"size:120;not null" json:"name"`
+	Description          string           `gorm:"type:text" json:"description"`
+	Enabled              bool             `gorm:"default:true" json:"enabled"`
+	MQTTEnabled          bool             `gorm:"default:false" json:"mqtt_enabled"`
+	MQTTTopic            string           `gorm:"size:200" json:"mqtt_topic"`
+	BroadcastActionsJSON string           `gorm:"column:broadcast_actions_json;type:text" json:"-"`
+	ExtraKeysJSON        string           `gorm:"column:extra_keys_json;type:text" json:"-"`
+	CreatedAt            time.Time        `json:"created_at"`
+	UpdatedAt            time.Time        `json:"updated_at"`
 }
 
 // BroadcastActions 供 API 序列化。

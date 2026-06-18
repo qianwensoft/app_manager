@@ -15,10 +15,10 @@ type TriggerConfig struct {
 	ForegroundPackages []string `json:"foreground_packages"`
 
 	// websocket / stomp 通用
-	URL             string            `json:"url"`
-	Headers         map[string]string `json:"headers"`           // 连接时附加 HTTP 头
-	ReconnectDelayMS int              `json:"reconnect_delay_ms"` // 默认 5000
-	PingIntervalMS   int              `json:"ping_interval_ms"`   // websocket ping，默认 30000
+	URL              string            `json:"url"`
+	Headers          map[string]string `json:"headers"`            // 连接时附加 HTTP 头
+	ReconnectDelayMS int               `json:"reconnect_delay_ms"` // 默认 5000
+	PingIntervalMS   int               `json:"ping_interval_ms"`   // websocket ping，默认 30000
 
 	// stomp 专属
 	Login       string `json:"login"`
@@ -47,8 +47,8 @@ type TriggerConfig struct {
 	CronEventType  string `json:"cron_event_type"` // 触发事件类型，默认 cron.tick
 
 	// channel 专属（mqtt / kafka）
-	ChannelType      string `json:"channel_type"`       // mqtt | kafka
-	ChannelTopic     string `json:"channel_topic"`      // MQTT topic 或 Kafka topic
+	ChannelType  string `json:"channel_type"`  // mqtt | kafka
+	ChannelTopic string `json:"channel_topic"` // MQTT topic 或 Kafka topic
 	// MQTT 专属
 	MQTTBroker   string `json:"mqtt_broker"`    // tcp://host:1883
 	MQTTClientID string `json:"mqtt_client_id"` // 空=自动生成

@@ -213,8 +213,8 @@ func RepairGeneratedFormSchemas(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"ok":            true,
-		"total":         len(rows),
+		"ok":             true,
+		"total":          len(rows),
 		"repaired_count": repaired,
 	})
 }
@@ -252,7 +252,7 @@ func defaultPageSchema(pageType string) map[string]interface{} {
 	switch pageType {
 	case "form":
 		return map[string]interface{}{
-			"type": "form",
+			"type":   "form",
 			"layout": "vertical",
 			"sections": []map[string]interface{}{
 				{"key": "fields", "title": "表单字段"},
@@ -261,7 +261,7 @@ func defaultPageSchema(pageType string) map[string]interface{} {
 		}
 	case "list":
 		return map[string]interface{}{
-			"type": "list",
+			"type":   "list",
 			"layout": "table",
 			"sections": []map[string]interface{}{
 				{"key": "filters", "title": "查询条件"},
@@ -271,7 +271,7 @@ func defaultPageSchema(pageType string) map[string]interface{} {
 		}
 	case "detail":
 		return map[string]interface{}{
-			"type": "detail",
+			"type":   "detail",
 			"layout": "description",
 			"sections": []map[string]interface{}{
 				{"key": "content", "title": "详情内容"},
@@ -948,11 +948,11 @@ func buildGeneratedDesignSchema(cols []dbdriver.ColumnInfo, pk string) map[strin
 			continue
 		}
 		props[name] = map[string]interface{}{
-			"type":  "string",
-			"title": strings.ToUpper(name),
+			"type":        "string",
+			"title":       strings.ToUpper(name),
 			"x-decorator": "FormItem",
 			"x-component": inferFormComponentByColumn(name),
-			"x-index": order,
+			"x-index":     order,
 		}
 		order++
 	}
@@ -960,7 +960,7 @@ func buildGeneratedDesignSchema(cols []dbdriver.ColumnInfo, pk string) map[strin
 		"type": "object",
 		"properties": map[string]interface{}{
 			"form": map[string]interface{}{
-				"type": "void",
+				"type":        "void",
 				"x-component": "FormLayout",
 				"x-component-props": map[string]interface{}{
 					"layout": "vertical",
@@ -968,7 +968,7 @@ func buildGeneratedDesignSchema(cols []dbdriver.ColumnInfo, pk string) map[strin
 				"properties": props,
 			},
 			"submit": map[string]interface{}{
-				"type": "void",
+				"type":        "void",
 				"x-component": "SubmitButton",
 				"x-component-props": map[string]interface{}{
 					"text": "提交",
@@ -978,7 +978,7 @@ func buildGeneratedDesignSchema(cols []dbdriver.ColumnInfo, pk string) map[strin
 	}
 	return map[string]interface{}{
 		"form": map[string]interface{}{
-			"labelCol": 6,
+			"labelCol":   6,
 			"wrapperCol": 14,
 		},
 		"schema": schema,
@@ -1002,7 +1002,7 @@ func buildGeneratedListDesignSchema(cols []dbdriver.ColumnInfo, pk string) map[s
 		"type": "object",
 		"properties": map[string]interface{}{
 			"table": map[string]interface{}{
-				"type":       "void",
+				"type":        "void",
 				"x-component": "Table",
 				"x-component-props": map[string]interface{}{
 					"columns": columns,
@@ -1257,14 +1257,19 @@ func GenerateFormAppPagesFromTable(c *gin.Context) {
 	detailConfigBytes, _ := json.Marshal(detailConfig)
 
 	pageForm := models.FormAppPage{
-		FormAppID:     app.ID,
-		PageKey:       "form",
-		PageType:      "form",
-		Title:         "Form",
-		DesignSchema:  string(designBytes),
-		InterfaceCode: func() string { if allowWrite { return submitCode }; return "" }(),
-		ConfigJSON:    string(formConfigBytes),
-		SortOrder:     0,
+		FormAppID:    app.ID,
+		PageKey:      "form",
+		PageType:     "form",
+		Title:        "Form",
+		DesignSchema: string(designBytes),
+		InterfaceCode: func() string {
+			if allowWrite {
+				return submitCode
+			}
+			return ""
+		}(),
+		ConfigJSON: string(formConfigBytes),
+		SortOrder:  0,
 	}
 	pageList := models.FormAppPage{
 		FormAppID:     app.ID,
@@ -1304,17 +1309,17 @@ func GenerateFormAppPagesFromTable(c *gin.Context) {
 	}
 
 	linkListToDetail := models.FormAppPageLink{
-		FormAppID:   app.ID,
-		FromPageKey: "list",
-		ToPageKey:   "detail",
-		TriggerType: "row_click",
+		FormAppID:    app.ID,
+		FromPageKey:  "list",
+		ToPageKey:    "detail",
+		TriggerType:  "row_click",
 		ParamMapping: `{"id":"$row.id"}`,
 	}
 	linkFormToDetail := models.FormAppPageLink{
-		FormAppID:   app.ID,
-		FromPageKey: "form",
-		ToPageKey:   "detail",
-		TriggerType: "auto_redirect",
+		FormAppID:    app.ID,
+		FromPageKey:  "form",
+		ToPageKey:    "detail",
+		TriggerType:  "auto_redirect",
 		ParamMapping: `{"id":"$result.record_id"}`,
 	}
 	if err := tx.Create(&linkListToDetail).Error; err != nil {
@@ -1667,8 +1672,8 @@ func RegenerateSinglePage(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
-			"page_key":      page.PageKey,
-			"page_id":       page.ID,
+			"page_key":       page.PageKey,
+			"page_id":        page.ID,
 			"interface_code": page.InterfaceCode,
 		},
 	})
@@ -1701,7 +1706,7 @@ func buildGeneratedDetailDesignSchema(cols []dbdriver.ColumnInfo, pk string) map
 	}
 	return map[string]interface{}{
 		"form": map[string]interface{}{
-			"labelCol": 6,
+			"labelCol":   6,
 			"wrapperCol": 14,
 		},
 		"schema": schema,

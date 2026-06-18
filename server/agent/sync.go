@@ -24,7 +24,8 @@ func heartbeatBool(v interface{}) (bool, bool) {
 }
 
 // SyncDeviceStatus updates device status in DB when agent connects/disconnects.
-// deviceID is either numeric DB id（来自 Web 端）或 Agent 扫码 token / ADB serial / 硬件串号。
+// deviceID 始终是 Agent WebSocket 连接键（手机机器码 / 扫码 token / 硬件串号），
+// 不会是 Web 端的数据库数字 id，因此按连接键解析、并对纯数字机器码也照常自动注册。
 func SyncDeviceStatus(deviceID string, connected bool) {
 	updates := map[string]interface{}{
 		"agent_connected": connected,
@@ -35,16 +36,16 @@ func SyncDeviceStatus(deviceID string, connected bool) {
 	} else {
 		updates["status"] = "offline"
 	}
-	result := DeviceScope(deviceID).Updates(updates)
+	result := DeviceScopeByConnKey(deviceID).Updates(updates)
 	if result.Error != nil {
 		log.Printf("Failed to sync device status [%s]: %v", deviceID, result.Error)
 		return
 	}
-	if connected && !isNumericID(deviceID) {
+	if connected {
 		persistAgentConnectionKey(deviceID)
 	}
 	// 首次上线：库中尚无对应行时自动建一条；连接键为硬件机器码时同时写入 android_serial
-	if connected && result.RowsAffected == 0 && !isNumericID(deviceID) {
+	if connected && result.RowsAffected == 0 {
 		androidSerial := ""
 		if shouldTryAndroidSerialLookup(deviceID) {
 			androidSerial = normalizeAndroidSerial(deviceID)
@@ -53,23 +54,76 @@ func SyncDeviceStatus(deviceID string, connected bool) {
 			log.Printf("Failed to auto-register agent device [%s]: %v", deviceID, err)
 			return
 		}
-		if err := DeviceScope(deviceID).Updates(updates).Error; err != nil {
+		if err := DeviceScopeByConnKey(deviceID).Updates(updates).Error; err != nil {
 			log.Printf("Failed to sync device status after register [%s]: %v", deviceID, err)
 		}
 	}
 
 	// 推送 Agent 连接状态变化到 STOMP（用于实时更新监控页面）
 	publishAgentConnectionChange()
+
+	// 同时推送设备资料更新到 /topic/devices，触发设备详情/列表页实时 reload 状态。
+	if id, ok := ResolveConnDeviceID(deviceID); ok {
+		PublishDeviceProfileUpdated(id)
+	}
+}
+
+// staleDeviceTimeout 是兜底判定离线的阈值。须明显大于 readPump 的 agentReadTimeout(75s)，
+// 让正常的 ping/超时链路优先生效；该 reaper 只兜底处理服务器重启后内存 Hub 丢失、
+// 或 readPump 异常未走到 Unregister 等边缘情况。
+const staleDeviceTimeout = 3 * time.Minute
+
+// StartStaleDeviceReaper 定期把 agent_connected=true 但 last_seen_at 已过期、
+// 且当前并无活跃 Hub 连接的设备标记为离线，并推送状态变更。在 main.go DB 就绪后启动。
+func StartStaleDeviceReaper() {
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			reapStaleDevices()
+		}
+	}()
+}
+
+func reapStaleDevices() {
+	cutoff := time.Now().Add(-staleDeviceTimeout)
+	var devices []models.Device
+	// last_seen_at 为空也视为过期（上线时会写入；为空说明从未真正心跳过）。
+	err := database.DB.Where("agent_connected = ? AND (last_seen_at IS NULL OR last_seen_at < ?)", true, cutoff).
+		Find(&devices).Error
+	if err != nil {
+		log.Printf("reapStaleDevices query failed: %v", err)
+		return
+	}
+	for _, d := range devices {
+		// 仍有活跃连接则跳过（避免误杀：心跳字段未及时刷新但连接仍在）。
+		if AgentHub.LiveConnectionKeyForDeviceID(d.ID) != "" {
+			continue
+		}
+		if err := database.DB.Model(&models.Device{}).Where("id = ?", d.ID).
+			Updates(map[string]interface{}{
+				"agent_connected": false,
+				"status":          "offline",
+			}).Error; err != nil {
+			log.Printf("reapStaleDevices mark offline [%d] failed: %v", d.ID, err)
+			continue
+		}
+		log.Printf("Device %d marked offline by stale reaper", d.ID)
+		PublishDeviceProfileUpdated(d.ID)
+	}
+	if len(devices) > 0 {
+		publishAgentConnectionChange()
+	}
 }
 
 // persistAgentConnectionKey 在 Agent 上线时把当前 WebSocket 连接键写入 agent_token（若为空），
 // 避免 ADB 预注册设备仅有 serial/android_serial 时无法向 Hub 下发命令。
 func persistAgentConnectionKey(deviceKey string) {
 	key := strings.TrimSpace(deviceKey)
-	if key == "" || isNumericID(key) {
+	if key == "" {
 		return
 	}
-	id, ok := resolveDeviceKeyToID(key)
+	id, ok := resolveConnKeyToID(key)
 	if !ok {
 		return
 	}
@@ -100,10 +154,10 @@ func normalizeAndroidSerial(s string) string {
 // 若提供有效硬件串号 androidSerial，则以串号为唯一键：已存在同串号行则只更新 agent_token（重装 App / 换 Token），否则新建并写入串号。
 // 若无串号，则仍按 agent_token 占位，待心跳上报串号后再收敛到唯一串号行。
 func ensureAgentDevice(deviceKey, androidSerial string) error {
-	if isNumericID(deviceKey) {
+	key := strings.TrimSpace(deviceKey)
+	if key == "" {
 		return nil
 	}
-	key := strings.TrimSpace(deviceKey)
 	sn := normalizeAndroidSerial(androidSerial)
 	now := time.Now()
 
@@ -160,7 +214,7 @@ func strFromInfo(v interface{}) (string, bool) {
 
 // HandleHeartbeat updates last_seen_at on heartbeat
 func HandleHeartbeat(deviceID string, info map[string]interface{}) {
-	dbID, haveID := ResolveDeviceID(deviceID)
+	dbID, haveID := ResolveConnDeviceID(deviceID)
 	var old models.Device
 	if haveID {
 		_ = database.DB.First(&old, dbID).Error
@@ -271,18 +325,18 @@ func HandleHeartbeat(deviceID string, info map[string]interface{}) {
 		}
 	}
 
-	result := DeviceScope(deviceID).Updates(updates)
+	result := DeviceScopeByConnKey(deviceID).Updates(updates)
 	if result.Error != nil {
 		log.Printf("HandleHeartbeat [%s]: %v", deviceID, result.Error)
 		return
 	}
-	if result.RowsAffected == 0 && !isNumericID(deviceID) {
+	if result.RowsAffected == 0 {
 		// 传入 androidSerial，支持重装 App 后按物理设备合并记录
 		if err := ensureAgentDevice(deviceID, androidSerial); err != nil {
 			log.Printf("HandleHeartbeat ensureAgentDevice [%s]: %v", deviceID, err)
 			return
 		}
-		if err := DeviceScope(deviceID).Updates(updates).Error; err != nil {
+		if err := DeviceScopeByConnKey(deviceID).Updates(updates).Error; err != nil {
 			log.Printf("HandleHeartbeat retry [%s]: %v", deviceID, err)
 		}
 	}
@@ -336,13 +390,13 @@ func publishAgentConnectionChange() {
 	agents := make([]map[string]interface{}, 0, len(devices))
 	for _, d := range devices {
 		agent := map[string]interface{}{
-			"device_id":         d.ID,
-			"conn_key":          "", // 填充后续可从 AgentHub 获取
-			"name":              d.Name,
-			"serial":            d.Serial,
-			"android_serial":    d.AndroidSerial,
-			"status":            d.Status,
-			"last_seen_at":      d.LastSeenAt,
+			"device_id":          d.ID,
+			"conn_key":           "", // 填充后续可从 AgentHub 获取
+			"name":               d.Name,
+			"serial":             d.Serial,
+			"android_serial":     d.AndroidSerial,
+			"status":             d.Status,
+			"last_seen_at":       d.LastSeenAt,
 			"foreground_package": d.ForegroundPackage,
 		}
 		// 如果前台应用包名在 APK 管理中存在，填充应用名称

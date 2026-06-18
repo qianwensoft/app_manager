@@ -169,6 +169,8 @@ var migrateGroups = [][]interface{}{
 		&models.FormAppEventRoute{},
 		&models.FormAppAccessPolicy{},
 		&models.FormAppDraft{},
+		&models.AISkill{},
+		&models.FormPageSnapshot{},
 	},
 	// Group 8 — org
 	{
@@ -177,6 +179,16 @@ var migrateGroups = [][]interface{}{
 		&models.UserDepartment{},
 		&models.DeviceGroup{},
 		&models.DeviceGroupMember{},
+	},
+	// Group 9 — work order (问题反馈/工单)
+	{
+		&models.WorkOrderType{},
+		&models.WorkOrderWebhook{},
+		&models.WorkOrder{},
+		&models.WorkOrderItem{},
+		&models.WorkOrderActivity{},
+		&models.WorkOrderTag{},
+		&models.WorkOrderTagLink{},
 	},
 }
 
@@ -225,12 +237,14 @@ func initSchema(db *gorm.DB) error {
 	postMigrate := []func(*gorm.DB){
 		SeedDefaultCustomEvents,
 		SeedDefaultAgentMenus,
+		SeedDefaultWorkOrderTypes,
 		MigrateLegacyOutboundPhases,
 		MigrateDeviceAndroidSerialUnique,
 		MigrateDataStackCode,
 		MigrateThirdPartyAuthorizerAppID,
 		MigrateFormAppToV2,
 		MigrateWirelessAdbPort,
+		MigrateConnectorInterfaceCodeIndex,
 	}
 	if strings.ToLower(strings.TrimSpace(db.Dialector.Name())) == "mysql" {
 		// MySQL 支持并发写，并行执行加速启动。

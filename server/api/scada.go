@@ -141,13 +141,13 @@ func UpdateScadaInfo(c *gin.Context) {
 	}
 	body.ID = uint(id)
 	if err := database.DB.Model(&cur).Updates(map[string]interface{}{
-		"group_id":        body.GroupID,
-		"scada_name":      body.ScadaName,
-		"scada_code":      body.ScadaCode,
-		"description":     body.Description,
-		"preview_image":   body.PreviewImage,
-		"publish_status":  body.PublishStatus,
-		"share_token":     body.ShareToken,
+		"group_id":          body.GroupID,
+		"scada_name":        body.ScadaName,
+		"scada_code":        body.ScadaCode,
+		"description":       body.Description,
+		"preview_image":     body.PreviewImage,
+		"publish_status":    body.PublishStatus,
+		"share_token":       body.ShareToken,
 		"share_expire_time": body.ShareExpireTime,
 	}).Error; err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -236,10 +236,10 @@ func PublishScada(c *gin.Context) {
 	row.ShareExpireTime = nil
 	row.ContentVersion++
 	if err := database.DB.Model(&row).Updates(map[string]interface{}{
-		"publish_status":  1,
-		"share_token":     token,
+		"publish_status":    1,
+		"share_token":       token,
 		"share_expire_time": nil,
-		"content_version": row.ContentVersion,
+		"content_version":   row.ContentVersion,
 	}).Error; err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -251,8 +251,8 @@ func PublishScada(c *gin.Context) {
 func UnpublishScada(c *gin.Context) {
 	id, _ := strconv.ParseUint(c.Param("scada_id"), 10, 64)
 	if err := database.DB.Model(&models.ScadaInfo{}).Where("id = ?", id).Updates(map[string]interface{}{
-		"publish_status":  0,
-		"share_token":     "",
+		"publish_status":    0,
+		"share_token":       "",
 		"share_expire_time": nil,
 	}).Error; err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

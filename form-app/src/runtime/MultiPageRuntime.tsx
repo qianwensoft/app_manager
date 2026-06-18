@@ -1,13 +1,16 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { message, Button } from 'antd'
+import { message, Button, Input, Tag, Tooltip } from 'antd'
 import RuntimeAgentBar from './RuntimeAgentBar'
-import FormRenderer from './FormRenderer'
+import SchemaFormRenderer from './SchemaFormRenderer'
+import { resolveLibrary } from './endResolver'
+import { fieldDefsToSchema } from '@/pages/schemaConverter'
 import ListRenderer from './ListRenderer'
 import DetailRenderer from './DetailRenderer'
 import { setupEventListener, setGlobalEventBlocked } from './EventHandler'
 import { navigationManager } from './NavigationManager'
 import { parseBindingsFromRuntimeSchema, rowsToOptions } from './fieldLogic'
+import { doPrintViaBridge } from './printBridge'
 import { isAgentRuntime, runtimeFetch } from './runtimeAuth'
 import type { FieldDef, FieldOption } from './types'
 
@@ -21,14 +24,17 @@ type MultiPageRuntimeProps = {
 }
 
 export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }: MultiPageRuntimeProps) {
-  const [searchParams] = useSearchParams()
-  const urlPageKey = searchParams.get('page')?.trim() || ''
+  const [searchParams, setSearchParams] = useSearchParams()
+  // 内嵌预览（iframe）模式：隐藏页面导航与 URL 栏，避免与外层预览面板重复、挤占设备屏幕。
+  const embedded = searchParams.get('embed') === '1' || isAgentRuntime()
 
   const [app, setApp] = useState<any>(null)
   const [pages, setPages] = useState<any[]>([])
   const [links, setLinks] = useState<any[]>([])
   const [currentPageKey, setCurrentPageKey] = useState('')
   const [params, setParams] = useState<Record<string, any>>({})
+  const [navOpen, setNavOpen] = useState(true)
+  const didInit = useRef(false)
 
   const bindings = useMemo(
     () => parseBindingsFromRuntimeSchema(app?.runtime_schema),
@@ -78,20 +84,28 @@ export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }:
           setLinks(linksRes.data || [])
         }
 
-        // 确定初始页面：URL 参数 > 应用配置的 entry_page_key > 传入的 entryPageKey > 第一个页面
-        let initialPageKey = urlPageKey
-        if (!initialPageKey && loadedApp?.entry_page_key) {
-          initialPageKey = loadedApp.entry_page_key
-        }
-        if (!initialPageKey) {
-          initialPageKey = entryPageKey
-        }
-        // 如果指定的页面不存在，使用第一个可用页面
-        if (!loadedPages.find(p => p.page_key === initialPageKey) && loadedPages.length > 0) {
-          initialPageKey = loadedPages[0].page_key
-        }
+        // 初始页面定位（只跑一次，避免 URL 回写触发重新加载死循环）
+        if (!didInit.current) {
+          didInit.current = true
+          // 读取 URL：page=xxx 指定初始页，p_* 前缀解析为初始参数
+          const urlPageKey = searchParams.get('page')?.trim() || ''
+          const initialParams: Record<string, any> = {}
+          searchParams.forEach((v, k) => {
+            if (k.startsWith('p_')) initialParams[k.slice(2)] = v
+          })
 
-        navigationManager.push(initialPageKey)
+          let initialPageKey = urlPageKey
+          if (!initialPageKey && loadedApp?.entry_page_key) {
+            initialPageKey = loadedApp.entry_page_key
+          }
+          if (!initialPageKey) {
+            initialPageKey = entryPageKey
+          }
+          if (!loadedPages.find(p => p.page_key === initialPageKey) && loadedPages.length > 0) {
+            initialPageKey = loadedPages[0].page_key
+          }
+          navigationManager.push(initialPageKey, initialParams)
+        }
       } catch (e: any) {
         message.error(e.message)
       }
@@ -107,7 +121,19 @@ export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }:
       unsubNav()
       navigationManager.clear()
     }
-  }, [formAppCode, urlPageKey, entryPageKey])
+  }, [formAppCode])
+
+  // 当前页与参数 → 同步到地址栏（page=xxx & p_yyy=zzz），便于复制/复现
+  useEffect(() => {
+    if (embedded) return // 内嵌预览不改写地址栏
+    if (!currentPageKey) return
+    const next = new URLSearchParams()
+    next.set('page', currentPageKey)
+    Object.entries(params).forEach(([k, v]) => {
+      if (v != null && v !== '') next.set(`p_${k}`, String(v))
+    })
+    setSearchParams(next, { replace: true })
+  }, [currentPageKey, params, embedded])
 
   useEffect(() => {
     if (!app?.id) return
@@ -131,11 +157,92 @@ export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }:
   }
 
   const currentPage = pages.find(p => p.page_key === currentPageKey)
-  if (!currentPage) return <div style={{ padding: 24 }}>页面不存在: {currentPageKey}</div>
+
+  // 左侧页面导航 + 顶部 URL 展示（无论当前页是否存在都渲染）
+  const fullUrl = typeof window !== 'undefined'
+    ? `${window.location.origin}${window.location.pathname}?${searchParams.toString()}`
+    : ''
+
+  const pageTypeColor = (t: string) =>
+    t === 'form' ? 'blue' : t === 'list' ? 'green' : t === 'detail' ? 'orange' : 'purple'
+
+  const sideNav = embedded ? null : (
+    <div style={{
+      width: navOpen ? 220 : 0, flexShrink: 0, overflow: 'hidden',
+      borderRight: navOpen ? '1px solid #e5e7eb' : 'none', background: '#fafafa',
+      transition: 'width .2s',
+    }}>
+      <div style={{ padding: '12px 12px 6px', fontWeight: 600, color: '#555' }}>页面列表</div>
+      <div style={{ overflowY: 'auto' }}>
+        {pages.map(p => (
+          <div
+            key={p.page_key}
+            onClick={() => navigate(p.page_key)}
+            style={{
+              padding: '8px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
+              background: p.page_key === currentPageKey ? '#e6f4ff' : 'transparent',
+              borderLeft: p.page_key === currentPageKey ? '3px solid #1677ff' : '3px solid transparent',
+            }}
+          >
+            <Tag color={pageTypeColor(p.page_type)} style={{ marginInlineEnd: 0 }}>{p.page_type}</Tag>
+            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {p.title || p.page_key}
+            </span>
+          </div>
+        ))}
+        {pages.length === 0 && <div style={{ padding: 12, color: '#999' }}>暂无页面</div>}
+      </div>
+    </div>
+  )
+
+  const urlBar = embedded ? null : (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: '1px solid #e5e7eb', background: '#fff' }}>
+      <Button size="small" onClick={() => setNavOpen(v => !v)}>{navOpen ? '«' : '»'}</Button>
+      <Input size="small" readOnly value={fullUrl} style={{ flex: 1 }} />
+      <Tooltip title="复制链接">
+        <Button size="small" onClick={() => {
+          navigator.clipboard?.writeText(fullUrl).then(
+            () => message.success('已复制链接'),
+            () => message.error('复制失败'),
+          )
+        }}>复制</Button>
+      </Tooltip>
+    </div>
+  )
+
+  if (!currentPage) {
+    return (
+      <div style={{ display: 'flex', height: '100%' }}>
+        {sideNav}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+          {urlBar}
+          <div style={{ padding: 24, color: '#999' }}>
+            {pages.length > 0 ? '请选择左侧页面' : `页面不存在: ${currentPageKey}`}
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   const config = currentPage.config_json ? JSON.parse(currentPage.config_json) : {}
   const fields: FieldDef[] = config.field_definitions || []
+  // 有 design_schema（Formily 布局）时运行时按布局渲染；否则回退扁平 field_definitions
+  let designSchema: any = null
+  if (currentPage.design_schema) {
+    try { designSchema = JSON.parse(currentPage.design_schema) } catch { designSchema = null }
+  }
+  const hasLayoutSchema = !!(designSchema?.schema?.properties)
+  // 统一走 Formily 核心：无 design_schema 时用 field_definitions 即时生成 schema，
+  // 保证非表单布局组件（页头/分区/图片等）与字段在同一套渲染器下显示。
+  const effectiveSchema = hasLayoutSchema ? designSchema : fieldDefsToSchema(fields)
+  const hasRenderableForm = !!(effectiveSchema?.schema?.properties && Object.keys(effectiveSchema.schema.properties).length > 0)
+  // 多端：按页面 end_strategy + 运行环境解析组件库（桌面 antd / 移动 antd-mobile）
+  const libraryKey = resolveLibrary(config.end_strategy)
   const scannerConfig = config.scanner
+  const pageEvents = Array.isArray(config.events) ? config.events : []
+  const printerTemplates = Array.isArray(config.printers) ? config.printers : []
+  // 草稿自动保存：默认关闭，由页面配置 enable_draft 开关控制
+  const enableDraft = !!config.enable_draft
   const submitPath = isAgentRuntime()
     ? '/api/form-app/agent-runtime/submit'
     : '/api/form-app/runtime/submit'
@@ -174,59 +281,73 @@ export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }:
   }
 
   return (
-    <div className="form-app-runtime">
-      <RuntimeAgentBar />
+    <div style={{ display: 'flex', height: '100%' }}>
+      {sideNav}
+      <div className="form-app-runtime" style={{ flex: 1, overflowY: 'auto' }}>
+        {urlBar}
+        <RuntimeAgentBar />
       {navigationManager.canGoBack() && (
         <div style={{ padding: 16, borderBottom: '1px solid #e5e7eb' }}>
           <Button onClick={goBack}>← 返回</Button>
         </div>
       )}
-      {currentPage.page_type === 'form' && (
-        <FormRenderer
-          fields={fields}
-          bindings={bindings}
-          initialValues={params}
-          formCode={formAppCode}
-          pageKey={currentPageKey}
-          onQueryOptions={fetchOptions}
-          scannerConfig={scannerConfig}
-          onScanInterface={async (interfaceCode, paramValues, type = 'internal', endpointId) => {
-            if (type === 'connector') {
-              // 调用连接器接口
-              const res = await authed('/api/outbound/connector-interfaces/call', 'POST', {
-                connector_code: interfaceCode,
-                params: paramValues,
-              })
-              return res.data || {}
+      {(currentPage.page_type === 'form' || currentPage.page_type === 'custom') && (() => {
+        const onScanInterface = async (interfaceCode: string, paramValues: Record<string, any>, type: 'internal' | 'third_party' | 'connector' = 'internal', endpointId?: number) => {
+          if (type === 'connector') {
+            const res = await authed('/api/outbound/connector-interfaces/call', 'POST', {
+              connector_code: interfaceCode,
+              params: paramValues,
+            })
+            return res.data || {}
+          }
+          if (type === 'third_party') {
+            if (!endpointId) {
+              throw new Error('endpoint_id is required for third_party interface')
             }
-            if (type === 'third_party') {
-              // 调用外部应用接口（OutboundEndpoint）
-              if (!endpointId) {
-                throw new Error('endpoint_id is required for third_party interface')
-              }
-              const res = await authed(`/api/outbound/endpoints/${endpointId}/call`, 'POST', {
-                param_values: paramValues,
-              })
-              return res.data || {}
-            }
-            // 调用内部数据接口
-            return authed(submitPath, 'POST', {
-              interface_code: interfaceCode,
-              form_code: formAppCode,
-              page_key: currentPageKey,
+            const res = await authed(`/api/outbound/endpoints/${endpointId}/call`, 'POST', {
               param_values: paramValues,
             })
-          }}
-          onSubmit={async values => {
-            await authed(submitPath, 'POST', {
-              interface_code: currentPage.interface_code,
-              form_code: formAppCode,
-              page_key: currentPageKey,
-              param_values: values,
-            })
-          }}
-        />
-      )}
+            return res.data || {}
+          }
+          const res = await authed(submitPath, 'POST', {
+            interface_code: interfaceCode,
+            form_code: formAppCode,
+            page_key: currentPageKey,
+            param_values: paramValues,
+          })
+          // 与 connector/third_party 保持一致：返回解包后的数据对象
+          return res?.data ?? res?.rows ?? res ?? {}
+        }
+        const onFormSubmit = async (values: Record<string, any>) => {
+          await authed(submitPath, 'POST', {
+            interface_code: currentPage.interface_code,
+            form_code: formAppCode,
+            page_key: currentPageKey,
+            param_values: values,
+          })
+        }
+        return hasRenderableForm ? (
+          <SchemaFormRenderer
+            designSchema={effectiveSchema}
+            bindings={bindings}
+            initialValues={params}
+            formCode={formAppCode}
+            pageKey={currentPageKey}
+            libraryKey={libraryKey}
+            enableDraft={enableDraft}
+            showDefaultSubmit={!!config.show_default_submit}
+            onQueryOptions={fetchOptions}
+            scannerConfig={scannerConfig}
+            events={pageEvents}
+            onScanInterface={onScanInterface}
+            doPrint={(templateId, values, extra) => doPrintViaBridge(printerTemplates, templateId, values, extra)}
+            onNavigate={navigate}
+            onSubmit={onFormSubmit}
+          />
+        ) : (
+          <div style={{ padding: 24, color: '#999' }}>该页面暂无可渲染内容，请在设计器中添加字段或布局组件。</div>
+        )
+      })()}
       {currentPage.page_type === 'list' && (
         <ListRenderer
           fields={fields}
@@ -266,6 +387,7 @@ export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }:
           onBack={goBack}
         />
       )}
+      </div>
     </div>
   )
 }

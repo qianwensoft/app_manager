@@ -341,8 +341,14 @@ func AgentWS(c *gin.Context) {
 	emitAgentSystemEvent("device.online", deviceID)
 	done := agent.AgentHub.Register(deviceID, conn)
 	<-done
-	agent.SyncDeviceStatus(deviceID, false)
-	emitAgentSystemEvent("device.offline", deviceID)
+	// 重连竞态：若本连接已被新连接替换，则离线判定交给新连接，避免把在线设备误标离线。
+	if agent.AgentHub.IsCurrentConn(deviceID, conn) {
+		return
+	}
+	if !agent.AgentHub.HasLocal(deviceID) {
+		agent.SyncDeviceStatus(deviceID, false)
+		emitAgentSystemEvent("device.offline", deviceID)
+	}
 }
 
 func emitAgentSystemEvent(eventType, deviceKey string) {
@@ -637,6 +643,17 @@ func init() {
 				}
 				agent.DeliverInstallTaskResult(cid, out, errStr)
 			}
+		case "command_result":
+			// 通用命令结果（如远程打印调试）。Agent 回传 commandId/success/output。
+			cid, _ := msg["commandId"].(string)
+			if cid == "" {
+				cid, _ = msg["command_id"].(string)
+			}
+			if cid == "" {
+				return
+			}
+			out, _ := msg["output"].(string)
+			agent.DeliverCommandResult(cid, wsMsgBool(msg, "success"), out)
 		case "webrtc_offer":
 			// Agent 发来摄像头 WebRTC offer
 			routeKey := agent.CanonicalRouteKeyFromWS(deviceID)
@@ -831,9 +848,10 @@ func CameraWS(c *gin.Context) {
 	needStartCamera := cluster.IncrCameraViewer(routeKey, string(camera))
 	if needStartCamera {
 		startMsg := map[string]interface{}{
-			"type":   "command",
-			"action": "start_camera",
-			"camera": string(camera),
+			"type":        "command",
+			"action":      "start_camera",
+			"camera":      string(camera),
+			"ice_servers": wrtc.ICEServersJSON(),
 		}
 		if !agent.AgentHub.SendToDevice(devID, startMsg) {
 			log.Printf("CameraWS: agent offline device=%s (devID=%d), cannot start_camera", routeKey, devID)

@@ -69,7 +69,7 @@ class CameraStreamManager(
 
     // ── Public API ──────────────────────────────────────────────────────────────
 
-    fun startCamera(cameraId: String) {
+    fun startCamera(cameraId: String, iceServers: List<Map<String, Any>>? = null) {
         executor.execute {
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
                 != PackageManager.PERMISSION_GRANTED
@@ -99,7 +99,7 @@ class CameraStreamManager(
                     return@execute
                 }
                 try {
-                    val session = createSession(cameraId)
+                    val session = createSession(cameraId, iceServers)
                     sessions[cameraId] = session
                 } catch (e: Exception) {
                     Log.e(TAG, "startCamera $cameraId failed", e)
@@ -181,9 +181,27 @@ class CameraStreamManager(
         }
     }
 
-    private fun createSession(cameraId: String): CameraSession {
-        val session = CameraSession(cameraId)
+    /** 把服务端下发的 ice_servers（[{urls, username?, credential?}]）转为 WebRTC IceServer 列表。 */
+    private fun buildIceServers(raw: List<Map<String, Any>>?): List<PeerConnection.IceServer> {
+        if (raw.isNullOrEmpty()) return emptyList()
+        val out = ArrayList<PeerConnection.IceServer>()
+        for (item in raw) {
+            val urls = when (val u = item["urls"]) {
+                is String -> listOf(u)
+                is List<*> -> u.filterIsInstance<String>()
+                else -> emptyList()
+            }
+            if (urls.isEmpty()) continue
+            val builder = PeerConnection.IceServer.builder(urls)
+            (item["username"] as? String)?.let { builder.setUsername(it) }
+            (item["credential"] as? String)?.let { builder.setPassword(it) }
+            out.add(builder.createIceServer())
+        }
+        return out
+    }
 
+    private fun createSession(cameraId: String, iceServers: List<Map<String, Any>>? = null): CameraSession {
+        val session = CameraSession(cameraId)
         // 1. EGL context
         val eglBase = EglBase.create()
         session.eglBase = eglBase
@@ -220,9 +238,10 @@ class CameraStreamManager(
         videoTrack.setEnabled(true)
         session.videoTrack = videoTrack
 
-        val rtcConfig = PeerConnection.RTCConfiguration(
-            listOf(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer())
-        ).apply {
+        // ICE 服务器由服务端随 start_camera 下发（与 webrtc.ice_servers 统一）。
+        // 局域网下通常为空 → 仅用 host 候选，秒连；不再硬编码访问不到的公网 STUN。
+        val iceList = buildIceServers(iceServers)
+        val rtcConfig = PeerConnection.RTCConfiguration(iceList).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
         }

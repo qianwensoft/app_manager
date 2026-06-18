@@ -57,6 +57,9 @@
         <el-menu-item index="/tasks">
           <el-icon><List /></el-icon><span>任务队列</span>
         </el-menu-item>
+        <el-menu-item index="/work-orders">
+          <el-icon><Tickets /></el-icon><span>工单管理</span>
+        </el-menu-item>
         <el-menu-item index="/apikeys">
           <el-icon><Key /></el-icon><span>授权管理</span>
         </el-menu-item>
@@ -101,7 +104,7 @@
 import { computed, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useRoute, useRouter } from 'vue-router'
-import { Monitor, Phone, VideoCamera, Document, Box, List, Key, Notebook, Connection, Cpu, Bell, Setting, Share, Link, Tools, UserFilled, User, Histogram, Menu, EditPen } from '@element-plus/icons-vue'
+import { Monitor, Phone, VideoCamera, Document, Box, List, Key, Notebook, Connection, Cpu, Bell, Setting, Share, Link, Tools, UserFilled, User, Histogram, Menu, EditPen, Tickets } from '@element-plus/icons-vue'
 import QuickSearch from './QuickSearch.vue'
 
 const auth = useAuthStore()
@@ -133,6 +136,7 @@ const menuActive = computed(() => {
   if (p.startsWith('/outbound')) return '/outbound'
   if (p.startsWith('/data')) return '/data'
   if (p.startsWith('/agent-menus')) return '/agent-menus'
+  if (p.startsWith('/work-orders')) return '/work-orders'
   return p
 })
 

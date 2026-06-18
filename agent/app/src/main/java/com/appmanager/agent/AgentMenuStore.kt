@@ -39,11 +39,21 @@ object AgentMenuStore {
     }
 
     /** 用 serverUrl 将 preview_path 拼成完整 URL；兼容旧字段 preview_url。 */
+    fun resolveMenuUrl(context: Context, m: Map<String, Any?>): String? = resolvePreviewUrl(context, m)
+
     private fun resolvePreviewUrl(context: Context, m: Map<String, Any?>): String? {
         // 优先读新字段 preview_path（相对路径），用 serverUrl 拼绝对地址
         val path = m["preview_path"] as? String
         if (!path.isNullOrBlank()) {
-            val serverUrl = AgentConfig.get(context).serverUrl.trim().trimEnd('/')
+            val cfg = AgentConfig.get(context)
+            // 菜单下发的 form_app_base_url 优先于本地 formAppBaseUrl 配置
+            val menuFormBase = (m["form_app_base_url"] as? String)?.trim()?.trimEnd('/').orEmpty()
+            val localFormBase = cfg.formAppBaseUrl.trim().trimEnd('/')
+            val formBase = menuFormBase.ifEmpty { localFormBase }
+            if (formBase.isNotEmpty() && path.startsWith("/form-app/")) {
+                return formBase + path
+            }
+            val serverUrl = cfg.serverUrl.trim().trimEnd('/')
             val httpBase = ServerUrlUtil.httpBaseFromWs(serverUrl)
             if (httpBase.isNotEmpty()) return httpBase + path
         }
@@ -125,10 +135,12 @@ object AgentMenuStore {
             .ifEmpty { (m["target_ref"] as? String)?.trim().orEmpty() }
         if (code.isEmpty()) return
         val pageKey = (m["form_app_page_key"] as? String)?.trim().orEmpty().ifEmpty { "form" }
+        val menuFormBase = (m["form_app_base_url"] as? String)?.trim()?.trimEnd('/').orEmpty()
         val intent = android.content.Intent(context, FormAppActivity::class.java)
             .putExtra("form_app_code", code)
             .putExtra("page_key", pageKey)
             .putExtra("server_url", getServerUrl(context))
+        if (menuFormBase.isNotEmpty()) intent.putExtra("form_app_base_url", menuFormBase)
         if (newTask) intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(intent)
     }

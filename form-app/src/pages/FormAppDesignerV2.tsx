@@ -96,7 +96,7 @@ export default function FormAppDesignerV2() {
         {step === 'basic' && <BasicInfoPanel app={app} pages={pages} onSaved={loadData} />}
         {step === 'pages' && <PagesPanel app={app} pages={pages} links={links} reload={loadData} />}
         {step === 'flow' && <LinksEventsPanel app={app} pages={pages} links={links} eventRoutes={eventRoutes} reload={loadData} />}
-        {step === 'preview' && <PreviewPanel app={app} pages={pages} />}
+        {step === 'preview' && <PreviewPanel app={app} pages={pages} reload={loadData} />}
         {step === 'deploy' && <DeployPanel app={app} pages={pages} reload={loadData} />}
         {step === 'data' && <DataPanel app={app} pages={pages} />}
       </div>

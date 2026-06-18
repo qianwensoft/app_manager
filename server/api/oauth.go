@@ -337,9 +337,9 @@ func OAuthIntrospect(c *gin.Context) {
 	}
 	active := !apiKey.Revoked && (apiKey.ExpiresAt == nil || apiKey.ExpiresAt.After(time.Now()))
 	resp := gin.H{
-		"active":    active,
+		"active":     active,
 		"token_type": "Bearer",
-		"client_id": "",
+		"client_id":  "",
 	}
 	if active {
 		resp["exp"] = apiKey.ExpiresAt.Unix()

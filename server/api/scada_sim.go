@@ -81,12 +81,12 @@ func UpdateScadaSimPoint(c *gin.Context) {
 	}
 	body.ID = uint(id)
 	if err := database.DB.Model(&models.ScadaSimPoint{}).Where("id = ?", id).Updates(map[string]interface{}{
-		"scada_code":   body.ScadaCode,
-		"link_name":    body.LinkName,
-		"enabled":      body.Enabled,
-		"mode":         body.Mode,
-		"interval_ms":  body.IntervalMs,
-		"params_json":  body.ParamsJSON,
+		"scada_code":  body.ScadaCode,
+		"link_name":   body.LinkName,
+		"enabled":     body.Enabled,
+		"mode":        body.Mode,
+		"interval_ms": body.IntervalMs,
+		"params_json": body.ParamsJSON,
 	}).Error; err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

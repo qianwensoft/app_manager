@@ -14,9 +14,9 @@ import (
 
 // BatchCustomEventListenBody 批量下发监听；规则来自已选定义或分组内全部启用定义，皆空则使用全局全部启用定义。
 type BatchCustomEventListenBody struct {
-	DeviceIDs      []uint `json:"device_ids" binding:"required"`
-	DefinitionIDs  []uint `json:"definition_ids"`
-	GroupIDs       []uint `json:"group_ids"`
+	DeviceIDs     []uint `json:"device_ids" binding:"required"`
+	DefinitionIDs []uint `json:"definition_ids"`
+	GroupIDs      []uint `json:"group_ids"`
 }
 
 // agentCustomEventRule 下发给 Android Agent 的单条映射。

@@ -14,24 +14,24 @@ import (
 )
 
 type deviceListenBrief struct {
-	ID               uint   `json:"id"`
-	Name             string `json:"name"`
-	Serial           string `json:"serial"`
-	AgentConnected   bool   `json:"agent_connected"`
-	AgentToken       string `json:"agent_token,omitempty"`
-	GroupName        string `json:"group_name"`
-	AgentAlias       string `json:"agent_alias"`
-	ServerAlias      string `json:"server_alias"`
+	ID             uint   `json:"id"`
+	Name           string `json:"name"`
+	Serial         string `json:"serial"`
+	AgentConnected bool   `json:"agent_connected"`
+	AgentToken     string `json:"agent_token,omitempty"`
+	GroupName      string `json:"group_name"`
+	AgentAlias     string `json:"agent_alias"`
+	ServerAlias    string `json:"server_alias"`
 }
 
 type customListenStateOut struct {
-	DeviceID         uint              `json:"device_id"`
-	Active           bool              `json:"active"`
-	UpdatedAt        time.Time         `json:"updated_at"`
-	DefinitionIDs    []uint            `json:"definition_ids"`
-	EventKeys        []string          `json:"event_keys"`
-	DefinitionNames  []string          `json:"definition_names"`
-	Device           *deviceListenBrief `json:"device,omitempty"`
+	DeviceID        uint               `json:"device_id"`
+	Active          bool               `json:"active"`
+	UpdatedAt       time.Time          `json:"updated_at"`
+	DefinitionIDs   []uint             `json:"definition_ids"`
+	EventKeys       []string           `json:"event_keys"`
+	DefinitionNames []string           `json:"definition_names"`
+	Device          *deviceListenBrief `json:"device,omitempty"`
 }
 
 func persistListenStateAfterStart(defs []models.CustomEventDefinition, results []customEventListenResult) {

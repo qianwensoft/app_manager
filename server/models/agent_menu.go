@@ -5,12 +5,14 @@ import "time"
 // AgentMenuItem Agent 侧菜单项（组态入口等）
 type AgentMenuItem struct {
 	ID                uint      `gorm:"primaryKey" json:"id"`
+	UserID            *uint     `gorm:"index" json:"user_id"` // 归属账号；nil 表示历史全局菜单（仅 admin 可见/管理）
 	Title             string    `gorm:"size:200" json:"title"`
 	Icon              string    `gorm:"size:500" json:"icon"`
 	TargetType        string    `gorm:"size:32" json:"target_type"` // scada_preview, webview_url, form_app, form_app_preview, form_app_scan_entry, form_app_entry
 	TargetRef         string    `gorm:"size:200" json:"target_ref"` // scada_code 或 URL 或 form_app_code
 	FormAppCode       string    `gorm:"size:64" json:"form_app_code"`
 	FormAppPageKey    string    `gorm:"size:64" json:"form_app_page_key"`
+	FormAppBaseUrl    string    `gorm:"size:512" json:"form_app_base_url"`
 	ShowOnAgentHome   bool      `gorm:"default:true" json:"show_on_agent_home"`
 	IntentAction      string    `gorm:"size:200;index" json:"intent_action"`
 	DefaultExtrasJSON string    `gorm:"type:text" json:"default_extras_json"`

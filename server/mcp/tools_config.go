@@ -12,10 +12,10 @@ func getServerConfig(_ json.RawMessage) (any, *RPCError) {
 	c := config.C
 	return map[string]any{
 		"server": map[string]any{
-			"port":           c.Server.Port,
-			"host":           c.Server.Host,
-			"mode":           c.Server.Mode,
-			"allow_register": c.Server.AllowRegister,
+			"port":            c.Server.Port,
+			"host":            c.Server.Host,
+			"mode":            c.Server.Mode,
+			"allow_register":  c.Server.AllowRegister,
 			"public_base_url": c.Server.PublicBaseURL,
 		},
 		"claude": map[string]any{

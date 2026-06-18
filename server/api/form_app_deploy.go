@@ -10,11 +10,11 @@ import (
 )
 
 type DeployFormAppRequest struct {
-	DeviceIDs      []uint `json:"device_ids"`
-	EntryPageKey   string `json:"entry_page_key"`
-	MenuTitle      string `json:"menu_title"`
-	MenuIcon       string `json:"menu_icon"`
-	ShowOnHome     bool   `json:"show_on_agent_home"`
+	DeviceIDs    []uint `json:"device_ids"`
+	EntryPageKey string `json:"entry_page_key"`
+	MenuTitle    string `json:"menu_title"`
+	MenuIcon     string `json:"menu_icon"`
+	ShowOnHome   bool   `json:"show_on_agent_home"`
 }
 
 func DeployFormAppToDevices(c *gin.Context) {
@@ -56,10 +56,10 @@ func DeployFormAppToDevices(c *gin.Context) {
 
 	if menuItem.ID == 0 {
 		menuItem = models.AgentMenuItem{
-			TargetType: "form_app_entry",
-			TargetRef:  app.Code,
+			TargetType:  "form_app_entry",
+			TargetRef:   app.Code,
 			FormAppCode: app.Code,
-			OpenMode:   "replace",
+			OpenMode:    "replace",
 		}
 	}
 	menuItem.Title = menuTitle

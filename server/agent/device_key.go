@@ -54,6 +54,17 @@ func shouldTryAndroidSerialLookup(key string) bool {
 }
 
 func resolveDeviceKeyToID(key string) (uint, bool) {
+	return resolveKeyToID(key, true)
+}
+
+// resolveConnKeyToID 用于 Agent WebSocket 连接键解析：连接键来自手机机器码，
+// 可能是纯数字（如某些 ANDROID_ID/序列号），绝不能当作数据库主键去匹配，
+// 否则会错配到无关设备行，或在自动注册时被 isNumericID 跳过导致 device_id=0 孤儿连接。
+func resolveConnKeyToID(key string) (uint, bool) {
+	return resolveKeyToID(key, false)
+}
+
+func resolveKeyToID(key string, allowNumericID bool) (uint, bool) {
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return 0, false
@@ -61,7 +72,7 @@ func resolveDeviceKeyToID(key string) (uint, bool) {
 	var d models.Device
 	sess := database.DB.Session(&gorm.Session{NewDB: true})
 
-	if isNumericID(key) {
+	if allowNumericID && isNumericID(key) {
 		id, err := strconv.ParseUint(key, 10, 64)
 		if err == nil {
 			if err := sess.First(&d, uint(id)).Error; err == nil {
@@ -93,10 +104,28 @@ func DeviceScope(deviceKey string) *gorm.DB {
 	return sess.Where("1 = 0")
 }
 
+// DeviceScopeByConnKey 与 DeviceScope 类似，但按 Agent 连接键解析（不把纯数字键当 DB 主键）。
+func DeviceScopeByConnKey(connKey string) *gorm.DB {
+	sess := database.DB.Session(&gorm.Session{NewDB: true}).Table("devices")
+	key := strings.TrimSpace(connKey)
+	if key == "" {
+		return sess.Where("1 = 0")
+	}
+	if id, ok := resolveConnKeyToID(key); ok {
+		return sess.Where("id = ?", id)
+	}
+	return sess.Where("1 = 0")
+}
+
 // ResolveDeviceID returns the DB primary key for a WebSocket / Agent / X-Device-Token key:
 // 数字 id、agent_token、ADB serial（devices.serial），或硬件串号 android_serial。
 func ResolveDeviceID(deviceKey string) (uint, bool) {
 	return resolveDeviceKeyToID(strings.TrimSpace(deviceKey))
+}
+
+// ResolveConnDeviceID 按 Agent 连接键解析 DB 主键（不把纯数字键当 DB id）。
+func ResolveConnDeviceID(connKey string) (uint, bool) {
+	return resolveConnKeyToID(strings.TrimSpace(connKey))
 }
 
 // LookupDeviceByConnectionKey 与 /ws/agent/:key、ResolveDeviceID 规则一致，供仅凭 X-Device-Token 的 HTTP 接口使用。
@@ -151,7 +180,7 @@ func AgentConnectionKeyCandidates(webParam string) ([]string, error) {
 }
 
 // AgentConnectionKey 将 Web/API 中的设备参数（数字 id、Token、ADB serial、硬件串号）映射为 Android Agent 使用的连接键
-//（与 /ws/agent/:key 路径段一致），供 Screen/Shell/Logcat 信令与 Hub 路由使用。
+// （与 /ws/agent/:key 路径段一致），供 Screen/Shell/Logcat 信令与 Hub 路由使用。
 func AgentConnectionKey(webParam string) (string, error) {
 	routeKey, _, err := CanonicalRouteKey(webParam)
 	return routeKey, err

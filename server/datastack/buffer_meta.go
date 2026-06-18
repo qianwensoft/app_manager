@@ -7,14 +7,14 @@ import (
 
 // BufferIngress 从 datasets.meta_json 解析的入站片段（供 HTTP 写入 / 轮询）。
 type BufferIngress struct {
-	Kind              string `json:"kind"`
-	WebhookSecret     string `json:"webhook_secret"`
-	RawColumn         string `json:"raw_column"` // 单列写入时的列名，默认 payload
-	PollURL           string `json:"poll_url"`
-	PollIntervalSec   int    `json:"poll_interval_sec"`
-	PollMethod        string `json:"poll_method"` // GET 默认
-	PollHeadersJSON   string `json:"poll_headers_json"`
-	PollBody          string `json:"poll_body"`
+	Kind            string `json:"kind"`
+	WebhookSecret   string `json:"webhook_secret"`
+	RawColumn       string `json:"raw_column"` // 单列写入时的列名，默认 payload
+	PollURL         string `json:"poll_url"`
+	PollIntervalSec int    `json:"poll_interval_sec"`
+	PollMethod      string `json:"poll_method"` // GET 默认
+	PollHeadersJSON string `json:"poll_headers_json"`
+	PollBody        string `json:"poll_body"`
 }
 
 type bufferMetaEnvelope struct {

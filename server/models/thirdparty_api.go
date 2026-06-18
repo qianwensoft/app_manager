@@ -4,16 +4,16 @@ import "time"
 
 // ThirdPartyApiEndpoint 第三方应用 API 端点配置
 type ThirdPartyApiEndpoint struct {
-	ID          uint                 `gorm:"primaryKey" json:"id"`
-	ProviderID  uint                 `gorm:"index;not null" json:"provider_id"`
-	Provider    *ThirdPartyProvider  `gorm:"foreignKey:ProviderID" json:"provider,omitempty"`
-	Code        string               `gorm:"size:80;uniqueIndex" json:"code"` // 业务编码，用于在配置中引用
-	Name        string               `gorm:"size:200" json:"name"`
-	Description string               `gorm:"type:text" json:"description"`
+	ID          uint                `gorm:"primaryKey" json:"id"`
+	ProviderID  uint                `gorm:"index;not null" json:"provider_id"`
+	Provider    *ThirdPartyProvider `gorm:"foreignKey:ProviderID" json:"provider,omitempty"`
+	Code        string              `gorm:"size:80;uniqueIndex" json:"code"` // 业务编码，用于在配置中引用
+	Name        string              `gorm:"size:200" json:"name"`
+	Description string              `gorm:"type:text" json:"description"`
 
 	// HTTP 配置
-	Method      string `gorm:"size:10;default:POST" json:"method"` // GET, POST, PUT, DELETE
-	Path        string `gorm:"size:500" json:"path"`               // API 路径，如 /api/v1/employee/query
+	Method string `gorm:"size:10;default:POST" json:"method"` // GET, POST, PUT, DELETE
+	Path   string `gorm:"size:500" json:"path"`               // API 路径，如 /api/v1/employee/query
 
 	// 请求配置
 	HeadersJSON string `gorm:"type:text" json:"headers_json"` // 额外的 HTTP 头 JSON，如 {"Content-Type": "application/json"}

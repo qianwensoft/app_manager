@@ -80,9 +80,9 @@ func stripMissingWhereClauses(sqlStr string, params map[string]interface{}) stri
 		clauseEnd = whereEnd + termLoc[0]
 	}
 
-	head := sqlStr[:whereEnd]               // "... WHERE"
-	clause := sqlStr[whereEnd:clauseEnd]     // 条件主体
-	tail := sqlStr[clauseEnd:]               // "ORDER BY ..." 等
+	head := sqlStr[:whereEnd]            // "... WHERE"
+	clause := sqlStr[whereEnd:clauseEnd] // 条件主体
+	tail := sqlStr[clauseEnd:]           // "ORDER BY ..." 等
 
 	rebuilt := rebuildWhereClause(clause, params)
 	if strings.TrimSpace(rebuilt) == "" {

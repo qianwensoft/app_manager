@@ -1,9 +1,12 @@
 package com.appmanager.agent.util
 
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
@@ -56,8 +59,27 @@ object AgentCatalogApi {
     }
 
     @Throws(IOException::class)
-    fun delete(httpBase: String, path: String, deviceToken: String): String {
+    fun putJson(httpBase: String, path: String, deviceToken: String, jsonBody: String = "{}"): String {
         val base = httpBase.trim().trimEnd('/')
+        val p = if (path.startsWith("/")) path else "/$path"
+        val url = base + p
+        val body = jsonBody.toRequestBody(jsonMedia)
+        val req = Request.Builder()
+            .url(url)
+            .header("X-Device-Token", deviceToken)
+            .put(body)
+            .build()
+        client.newCall(req).execute().use { resp ->
+            val respBody = resp.body?.string() ?: ""
+            if (!resp.isSuccessful) {
+                throw IOException("HTTP ${resp.code}: ${respBody.take(200)}")
+            }
+            return respBody
+        }
+    }
+
+    @Throws(IOException::class)
+    fun delete(httpBase: String, path: String, deviceToken: String): String {        val base = httpBase.trim().trimEnd('/')
         val p = if (path.startsWith("/")) path else "/$path"
         val url = base + p
         val req = Request.Builder()
@@ -73,4 +95,40 @@ object AgentCatalogApi {
             return respBody
         }
     }
+
+    /** 上传单个文件到工单（multipart）。formFields 作为额外文本字段一并提交。 */
+    @Throws(IOException::class)
+    fun uploadFile(
+        httpBase: String,
+        path: String,
+        deviceToken: String,
+        file: File,
+        contentType: String,
+        formFields: Map<String, String> = emptyMap(),
+    ): String {
+        val base = httpBase.trim().trimEnd('/')
+        val p = if (path.startsWith("/")) path else "/$path"
+        val url = base + p
+        val builder = MultipartBody.Builder().setType(MultipartBody.FORM)
+        formFields.forEach { (k, v) -> builder.addFormDataPart(k, v) }
+        builder.addFormDataPart("file", file.name, file.asRequestBody(contentType.toMediaType()))
+        val req = Request.Builder()
+            .url(url)
+            .header("X-Device-Token", deviceToken)
+            .post(builder.build())
+            .build()
+        uploadClient.newCall(req).execute().use { resp ->
+            val respBody = resp.body?.string() ?: ""
+            if (!resp.isSuccessful) {
+                throw IOException("HTTP ${resp.code}: ${respBody.take(200)}")
+            }
+            return respBody
+        }
+    }
+
+    private val uploadClient = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(300, TimeUnit.SECONDS)
+        .readTimeout(120, TimeUnit.SECONDS)
+        .build()
 }

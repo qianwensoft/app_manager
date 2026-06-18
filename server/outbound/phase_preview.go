@@ -66,8 +66,17 @@ func runDryHTTPMerges(db *gorm.DB, vars map[string]string, st models.OutboundCon
 	body := fakeHTTPPreviewBody(phaseIdx, stepIdx, st.EndpointID)
 	sid := previewStepTableID(phaseIdx, stepIdx)
 	if app, ok := tryLoadOutboundAppForEndpoint(db, st.EndpointID); ok {
-		// 与 ExecuteHTTPWebhook、接口调试共用：先按步配置合并 2xx 响应与 context，再跑 after_response
-		return mergeHTTPResponseIntoVarsAndRunAfterResponse(vars, app, st, sid, 200, body, nil, false, true)
+		// 与 ExecuteHTTPWebhook、接口调试共用：先按步配置合并 2xx 响应与 context，再跑 after_response（应用级 + 接口级）
+		epAfter := ""
+		var epOrder []AfterScriptOrderEntry
+		if st.EndpointID != 0 {
+			var ep models.OutboundEndpoint
+			if db.Select("after_scripts_json", "after_script_order_json").First(&ep, st.EndpointID).Error == nil {
+				epAfter = ep.AfterScriptsJSON
+				epOrder = ParseAfterScriptOrder(ep.AfterScriptOrderJSON)
+			}
+		}
+		return mergeHTTPResponseIntoVarsAndRunAfterResponse(vars, app, st, sid, 200, body, nil, false, true, epAfter, epOrder)
 	}
 	MergeHTTPResponseContext(vars, sid, 200, body)
 	MergeHTTPResponseBodyToContext(vars, st, body)
@@ -127,7 +136,7 @@ func buildStepPreviewResult(st models.OutboundConnectorStep, phaseIdx, stepIdx i
 			parts = append(parts, "执行前：event_data→context 已按配置处理")
 		}
 		parts = append(parts, "预览不执行设备端脚本；无 HTTP 响应可写入 context")
-	case "view_url", "message", "broadcast_intent", "keyboard_hid":
+	case "view_url", "message", "broadcast_intent", "keyboard_hid", "print":
 		if before == ContextMergeEventDataJSON {
 			parts = append(parts, "执行前：event_data→context 已按配置处理")
 		} else {
@@ -194,10 +203,33 @@ func runDryStep(db *gorm.DB, connector models.OutboundConnector, runLiveHTTP boo
 	MergeStepEventDataToContext(vars, st, rec)
 	MergeStepTemplateParamsFromConfigJSON(vars, st.ConfigJSON)
 	res := buildStepPreviewResult(st, phaseIdx, stepIdx)
+	normType := NormalizeOutboundStepType(st.StepType)
+	// 脚本步骤在调试/预览中真实执行（不写投递日志），使其对 context / 返回值的修改可见。
+	switch normType {
+	case "app_script":
+		_, hook, err := runAppScriptCore(db, st, vars)
+		if err != nil {
+			res.Status = "failed"
+			res.Summary = "应用脚本执行失败：" + truncateErr(err.Error(), 400)
+			return res, nil
+		}
+		res.Status = "ok"
+		res.Summary = "已真实执行应用脚本（hook=" + hook + "）；context 改动见下方快照。"
+		return res, nil
+	case "connector_script":
+		if err := runConnectorScriptCore(connector, st, vars); err != nil {
+			res.Status = "failed"
+			res.Summary = "连接器脚本执行失败：" + truncateErr(err.Error(), 400)
+			return res, nil
+		}
+		res.Status = "ok"
+		res.Summary = "已真实执行连接器内联脚本；context 改动见下方快照。"
+		return res, nil
+	}
 	if err := runDryHTTPMerges(db, vars, st, phaseIdx, stepIdx); err != nil {
 		return res, err
 	}
-	if NormalizeOutboundStepType(st.StepType) == "http" && db != nil && st.EndpointID > 0 {
+	if normType == "http" && db != nil && st.EndpointID > 0 {
 		res.Summary += "。已按真实出站逻辑执行该接口所属应用的 after_response 扩展脚本（若已配置）。"
 	}
 	return res, nil
@@ -212,7 +244,7 @@ type PhasePreviewWire struct {
 
 // runOnePreviewPhase 在 vars 上模拟执行一个阶段；executeLiveHTTP 时已选 endpoint 的 HTTP 步发起真实请求（不写投递表）。
 // stepResults 非 nil 时，向其中追加本阶段各步的 PhaseStepPreviewResult（仅用于当前测试阶段展示）。
-func runOnePreviewPhase(db *gorm.DB, connector models.OutboundConnector, executeLiveHTTP bool, vars map[string]string, rec models.DeviceEvent, phase PhasePreviewWire, phaseIdx int, stepResults *[]PhaseStepPreviewResult) error {
+func runOnePreviewPhase(db *gorm.DB, connector models.OutboundConnector, executeLiveHTTP bool, vars map[string]string, rec models.DeviceEvent, phase PhasePreviewWire, phaseIdx int, stepResults *[]PhaseStepPreviewResult, onStep func(stepIdx int, r PhaseStepPreviewResult)) error {
 	mode := strings.TrimSpace(phase.RunMode)
 	if mode == "" {
 		mode = "parallel"
@@ -223,6 +255,10 @@ func runOnePreviewPhase(db *gorm.DB, connector models.OutboundConnector, execute
 		r, err := runDryStep(db, connector, executeLiveHTTP, vars, rec, st, phaseIdx, stepIdx)
 		if stepResults != nil {
 			*stepResults = append(*stepResults, r)
+		}
+		if onStep != nil {
+			// 在该步合并完成后回调，便于调用方对 vars 做「每步后」快照。
+			onStep(stepIdx, r)
 		}
 		return err
 	}
@@ -330,13 +366,13 @@ func RunPhaseContextPreview(db *gorm.DB, phaseIndex int, phases []PhasePreviewWi
 	}
 	vars, rec := PhasePreviewBaseline(overrides)
 	for pi := 0; pi < phaseIndex; pi++ {
-		if err := runOnePreviewPhase(db, conn, live, vars, rec, phases[pi], pi, nil); err != nil {
+		if err := runOnePreviewPhase(db, conn, live, vars, rec, phases[pi], pi, nil, nil); err != nil {
 			return nil, err
 		}
 	}
 	before := cloneStringStringMap(vars)
 	var stepResults []PhaseStepPreviewResult
-	if err := runOnePreviewPhase(db, conn, live, vars, rec, phases[phaseIndex], phaseIndex, &stepResults); err != nil {
+	if err := runOnePreviewPhase(db, conn, live, vars, rec, phases[phaseIndex], phaseIndex, &stepResults, nil); err != nil {
 		return nil, err
 	}
 	after := cloneStringStringMap(vars)

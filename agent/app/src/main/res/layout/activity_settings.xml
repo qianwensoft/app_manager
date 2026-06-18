@@ -83,6 +83,74 @@
                         android:focusableInTouchMode="false"
                         android:longClickable="true"
                         android:textIsSelectable="true" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="@string/label_form_app_base_url"
+                        android:textColor="@color/agent_text_secondary"
+                        android:textSize="13sp" />
+
+                    <EditText
+                        android:id="@+id/etFormAppBaseUrl"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:hint="http://192.168.1.x:4175"
+                        android:inputType="textUri"
+                        android:minHeight="48dp" />
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginTop="16dp"
+                        android:background="#1F000000" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/settings_conn_state"
+                            android:textColor="@color/agent_text_secondary"
+                            android:textSize="13sp" />
+
+                        <TextView
+                            android:id="@+id/tvConnState"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:layout_weight="1"
+                            android:text="@string/settings_conn_unknown"
+                            android:textColor="@color/agent_text_primary"
+                            android:textSize="14sp"
+                            android:textStyle="bold" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btnReconnect"
+                            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:minWidth="0dp"
+                            android:minHeight="40dp"
+                            android:text="@string/settings_reconnect"
+                            app:cornerRadius="10dp" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/tvConnDetail"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text=""
+                        android:textColor="@color/agent_text_secondary"
+                        android:textSize="12sp"
+                        android:visibility="gone" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
@@ -126,6 +194,52 @@
                         app:iconGravity="textStart"
                         app:iconPadding="8dp"
                         app:iconTint="@android:color/white" />
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginTop="16dp"
+                        android:background="#1F000000" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="16dp"
+                        android:text="@string/settings_scan_mode"
+                        android:textColor="@color/agent_text_primary"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:lineSpacingExtra="3dp"
+                        android:text="@string/settings_scan_mode_hint"
+                        android:textColor="@color/agent_text_secondary"
+                        android:textSize="13sp" />
+
+                    <RadioGroup
+                        android:id="@+id/rgScanMode"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:orientation="vertical">
+
+                        <RadioButton
+                            android:id="@+id/rbScanHardware"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:minHeight="44dp"
+                            android:text="@string/settings_scan_mode_hardware" />
+
+                        <RadioButton
+                            android:id="@+id/rbScanCamera"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:minHeight="44dp"
+                            android:text="@string/settings_scan_mode_camera" />
+                    </RadioGroup>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 

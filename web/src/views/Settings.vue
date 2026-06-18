@@ -216,6 +216,72 @@
               </el-table-column>
             </el-table>
           </el-card>
+
+          <!-- STOMP 主题监控 -->
+          <el-card class="mb-4">
+            <template #header>
+              <div style="display: flex; align-items: center; gap: 12px">
+                <h3 style="margin: 0">STOMP 主题订阅</h3>
+                <span v-if="stompTimestamp" style="font-size: 12px; color: #909399">
+                  更新于 {{ new Date(stompTimestamp).toLocaleTimeString() }}
+                </span>
+              </div>
+            </template>
+            <el-empty v-if="!stompGroups.length" description="暂无 STOMP 主题数据" :image-size="60" />
+            <div v-else>
+              <div
+                v-for="group in stompGroups"
+                :key="group.category"
+                style="margin-bottom: 12px; border: 1px solid #ebeef5; border-radius: 6px; overflow: hidden"
+              >
+                <!-- 分类标题行，可折叠 -->
+                <div
+                  style="display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: #f5f7fa; cursor: pointer; user-select: none"
+                  @click="stompExpandedCategories.has(group.category) ? stompExpandedCategories.delete(group.category) : stompExpandedCategories.add(group.category)"
+                >
+                  <el-icon style="transition: transform 0.2s" :style="{ transform: stompExpandedCategories.has(group.category) ? 'rotate(90deg)' : 'rotate(0deg)' }">
+                    <ArrowRight />
+                  </el-icon>
+                  <el-tag size="small" :type="{ device: 'primary', scada: 'success', connector: 'warning', webhook: 'info', system: '' }[group.category] || ''">
+                    {{ { device: '设备', scada: 'SCADA', connector: '连接器', webhook: 'Webhook', system: '系统' }[group.category] || group.category }}
+                  </el-tag>
+                  <span style="font-size: 13px; color: #606266">{{ group.topics.length }} 个主题</span>
+                  <span style="margin-left: auto; font-size: 12px; color: #909399">
+                    订阅 <b style="color: #303133">{{ group.sub_total }}</b>
+                    &nbsp;·&nbsp;
+                    消息 <b style="color: #303133">{{ group.msg_total.toLocaleString() }}</b>
+                  </span>
+                </div>
+                <!-- 展开的主题表格 -->
+                <el-table
+                  v-if="stompExpandedCategories.has(group.category)"
+                  :data="group.topics"
+                  size="small"
+                  border
+                  style="border-top: 1px solid #ebeef5"
+                >
+                  <el-table-column prop="topic" label="主题" min-width="280" show-overflow-tooltip />
+                  <el-table-column label="订阅数" width="90" align="center">
+                    <template #default="{ row }">
+                      <el-tag v-if="row.sub_count > 0" type="success" size="small">{{ row.sub_count }}</el-tag>
+                      <span v-else style="color: #c0c4cc">0</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="消息数" width="110" align="right">
+                    <template #default="{ row }">
+                      <span style="font-variant-numeric: tabular-nums">{{ row.msg_count.toLocaleString() }}</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column v-if="group.category !== 'system'" prop="dim_key" label="维度 ID" width="100" align="center">
+                    <template #default="{ row }">
+                      <span v-if="row.dim_key" style="font-size: 12px; color: #606266">{{ row.dim_key }}</span>
+                      <span v-else style="color: #c0c4cc">-</span>
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </div>
+            </div>
+          </el-card>
         </div>
       </el-tab-pane>
 
@@ -249,6 +315,108 @@
             </template>
           </el-table-column>
         </el-table>
+      </el-tab-pane>
+
+      <el-tab-pane label="AI 配置" name="ai">
+        <h3 style="margin: 0 0 16px">Claude（Anthropic）配置</h3>
+        <el-form label-width="120px" style="max-width: 560px">
+          <el-form-item label="代理 API 地址">
+            <el-input
+              v-model="aiForm.base_url"
+              placeholder="留空使用官方 https://api.anthropic.com"
+              clearable
+            />
+            <div style="color: #909399; font-size: 12px; line-height: 1.6">
+              支持 Claude Code 代理 / 中转服务，填写到域名即可（自动拼接 /v1/messages）。
+            </div>
+          </el-form-item>
+          <el-form-item label="请求代理服务器">
+            <el-input
+              v-model="aiForm.proxy_url"
+              placeholder="如 http://127.0.0.1:7890 或 socks5://127.0.0.1:1080，留空不使用"
+              clearable
+            />
+            <div style="color: #909399; font-size: 12px; line-height: 1.6">
+              通用网络代理（HTTP/HTTPS/SOCKS5），所有 Claude 请求均通过该代理发出。
+            </div>
+          </el-form-item>
+          <el-form-item label="API Key">
+            <el-input
+              v-model="aiForm.api_key"
+              type="password"
+              show-password
+              :placeholder="aiKeySet ? '已配置（留空则不修改）' : '请输入 Claude API Key'"
+            />
+          </el-form-item>
+          <el-form-item label="模型">
+            <el-select
+              v-model="aiForm.model"
+              filterable
+              allow-create
+              default-first-option
+              placeholder="选择或输入模型"
+              style="width: 100%"
+            >
+              <el-option label="Claude Opus 4.5（claude-opus-4-5）" value="claude-opus-4-5" />
+              <el-option label="Claude Sonnet 4.5（claude-sonnet-4-5）" value="claude-sonnet-4-5" />
+              <el-option label="Claude Haiku 4.5（claude-haiku-4-5）" value="claude-haiku-4-5" />
+            </el-select>
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" :loading="aiSaving" @click="saveAiConfig">保存</el-button>
+            <el-tag v-if="aiKeySet" type="success" style="margin-left: 12px">API Key 已配置</el-tag>
+            <el-tag v-else type="warning" style="margin-left: 12px">尚未配置 API Key</el-tag>
+          </el-form-item>
+          <el-alert
+            type="info"
+            :closable="false"
+            title="配置用于 form-app 中的 AI 助手（对话生成表单字段，支持图片输入）。保存后将写入服务器配置文件。"
+            show-icon
+          />
+        </el-form>
+
+        <el-divider />
+
+        <h3 style="margin: 0 0 12px">简单对话测试</h3>
+        <p style="color: #909399; margin: 0 0 12px; font-size: 13px">
+          用于验证已配置的 API Key 与模型是否可用。回复以流式逐字返回。
+        </p>
+        <div style="max-width: 720px">
+          <div
+            ref="demoScrollRef"
+            style="height: 280px; overflow-y: auto; border: 1px solid #ebeef5; border-radius: 6px; padding: 12px; background: #fafafa; margin-bottom: 12px"
+          >
+            <el-empty v-if="demoMessages.length === 0 && !demoStreaming" description="向 Claude 发一条消息试试" :image-size="60" />
+            <div
+              v-for="(m, i) in demoMessages"
+              :key="i"
+              :style="{ textAlign: m.role === 'user' ? 'right' : 'left', marginBottom: '12px' }"
+            >
+              <div :style="{
+                display: 'inline-block', maxWidth: '85%', padding: '8px 12px', borderRadius: '8px',
+                textAlign: 'left', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                background: m.role === 'user' ? '#e6f4ff' : '#fff', border: '1px solid #eee',
+              }">{{ m.content }}</div>
+            </div>
+            <div v-if="demoStreaming" style="text-align: left; margin-bottom: 12px">
+              <div style="display: inline-block; max-width: 85%; padding: 8px 12px; border-radius: 8px; background: #fff; border: 1px solid #eee; white-space: pre-wrap; word-break: break-word">
+                {{ demoStreamText || '...' }}
+              </div>
+            </div>
+          </div>
+          <div style="display: flex; gap: 8px">
+            <el-input
+              v-model="demoInput"
+              type="textarea"
+              :autosize="{ minRows: 1, maxRows: 4 }"
+              placeholder="输入消息，回车发送（Shift+Enter 换行）"
+              :disabled="demoStreaming"
+              @keydown.enter.exact.prevent="sendDemo"
+            />
+            <el-button type="primary" :loading="demoStreaming" @click="sendDemo">发送</el-button>
+            <el-button v-if="demoMessages.length" :disabled="demoStreaming" @click="demoMessages = []">清空</el-button>
+          </div>
+        </div>
       </el-tab-pane>
     </el-tabs>
 
@@ -301,10 +469,11 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, watch, onBeforeUnmount } from 'vue'
+import { ref, onMounted, computed, watch, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getHeartbeatSettings, updateHeartbeatSettings, getSystemInfo, updateEnvSettings, checkFFmpeg, installFFmpeg, getAgentConnections, getAgentOnlineTrend, getApiCallTrend, getApiCallDetails } from '@/api/settings'
+import { ArrowRight } from '@element-plus/icons-vue'
+import { getHeartbeatSettings, updateHeartbeatSettings, getSystemInfo, updateEnvSettings, checkFFmpeg, installFFmpeg, getAgentConnections, getAgentOnlineTrend, getApiCallTrend, getApiCallDetails, getStompStats, getClaudeConfig, updateClaudeConfig } from '@/api/settings'
 import { uploadAgentAPK, listAgentUpdates, downloadAgentAPK, deleteAgentUpdate } from '@/api/agentUpdate'
 import { getRegisterSetting, updateRegisterSetting } from '@/api/user'
 import TrendChart from '@/components/TrendChart.vue'
@@ -340,6 +509,119 @@ const envForm = ref({
   public_base_url: ''
 })
 
+// AI（Claude）配置
+const aiForm = ref({ api_key: '', model: 'claude-opus-4-5', base_url: '', proxy_url: '' })
+const aiKeySet = ref(false)
+const aiSaving = ref(false)
+
+const loadAiConfig = async () => {
+  try {
+    const res = await getClaudeConfig()
+    aiKeySet.value = !!res.api_key_set
+    if (res.model) aiForm.value.model = res.model
+    aiForm.value.base_url = res.base_url || ''
+    aiForm.value.proxy_url = res.proxy_url || ''
+  } catch (e) { /* 静默 */ }
+}
+
+const saveAiConfig = async () => {
+  aiSaving.value = true
+  try {
+    const payload = {
+      model: aiForm.value.model,
+      base_url: aiForm.value.base_url || '',
+      proxy_url: aiForm.value.proxy_url || '',
+    }
+    if (aiForm.value.api_key) payload.api_key = aiForm.value.api_key
+    const res = await updateClaudeConfig(payload)
+    aiKeySet.value = !!res.api_key_set
+    aiForm.value.api_key = ''
+    ElMessage.success('保存成功')
+  } catch (e) {
+    // http 拦截器已提示错误
+  } finally {
+    aiSaving.value = false
+  }
+}
+
+// AI 简单对话测试（SSE 流式）
+const demoMessages = ref([])
+const demoInput = ref('')
+const demoStreaming = ref(false)
+const demoStreamText = ref('')
+const demoScrollRef = ref(null)
+
+const scrollDemoToBottom = () => {
+  nextTick(() => {
+    const el = demoScrollRef.value
+    if (el) el.scrollTop = el.scrollHeight
+  })
+}
+
+const sendDemo = async () => {
+  if (demoStreaming.value) return
+  const text = demoInput.value.trim()
+  if (!text) return
+
+  demoMessages.value.push({ role: 'user', content: text })
+  demoInput.value = ''
+  demoStreaming.value = true
+  demoStreamText.value = ''
+  scrollDemoToBottom()
+
+  const payload = { messages: demoMessages.value.map(m => ({ role: m.role, content: m.content })) }
+  const token = localStorage.getItem('token') || ''
+  let acc = ''
+
+  try {
+    const resp = await fetch('/api/settings/claude/demo-chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(payload),
+    })
+    if (!resp.ok || !resp.body) {
+      let msg = `HTTP ${resp.status}`
+      try { const d = await resp.json(); if (d?.error) msg = d.error } catch {}
+      ElMessage.error(msg)
+      demoStreaming.value = false
+      return
+    }
+
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    let buf = ''
+    for (;;) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      const blocks = buf.split('\n\n')
+      buf = blocks.pop() || ''
+      for (const block of blocks) {
+        let event = 'message', data = ''
+        for (const line of block.split('\n')) {
+          if (line.startsWith('event:')) event = line.slice(6).trim()
+          else if (line.startsWith('data:')) data += line.slice(5).trim()
+        }
+        if (!data) continue
+        let parsed
+        try { parsed = JSON.parse(data) } catch { continue }
+        if (event === 'delta') { acc += parsed.text || ''; demoStreamText.value = acc; scrollDemoToBottom() }
+        else if (event === 'error') { ElMessage.error(parsed.message || '生成失败') }
+      }
+    }
+  } catch (e) {
+    ElMessage.error(e?.message || '请求失败')
+  } finally {
+    if (acc) demoMessages.value.push({ role: 'assistant', content: acc })
+    demoStreamText.value = ''
+    demoStreaming.value = false
+    scrollDemoToBottom()
+  }
+}
+
 // 运行监控
 const monitorHours = ref(24)
 const monitorLoading = ref(false)
@@ -347,6 +629,11 @@ const agentConn = ref({ online_count: 0, agents: [] })
 const agentTrend = ref([])
 const apiTrend = ref([])
 const apiDetails = ref([])
+
+// STOMP 主题监控
+const stompGroups = ref([])
+const stompTimestamp = ref('')
+const stompExpandedCategories = ref(new Set(['device', 'system']))
 
 const fmtTs = (ts) => {
   const d = new Date(ts)
@@ -389,16 +676,19 @@ const loadMonitor = async () => {
   monitorLoading.value = true
   try {
     const gran = monitorHours.value > 24 ? 'hour' : 'minute'
-    const [conn, aTrend, cTrend, details] = await Promise.all([
+    const [conn, aTrend, cTrend, details, sStats] = await Promise.all([
       getAgentConnections(),
       getAgentOnlineTrend(monitorHours.value),
       getApiCallTrend(monitorHours.value, gran),
-      getApiCallDetails(monitorHours.value)
+      getApiCallDetails(monitorHours.value),
+      getStompStats()
     ])
     agentConn.value = conn || { online_count: 0, agents: [] }
     agentTrend.value = aTrend?.points || []
     apiTrend.value = cTrend?.points || []
     apiDetails.value = details?.details || []
+    stompGroups.value = sStats?.groups || []
+    stompTimestamp.value = sStats?.timestamp || ''
   } catch (e) {
     ElMessage.error('加载监控数据失败: ' + (e?.response?.data?.error || e.message))
   } finally {
@@ -427,7 +717,6 @@ const connectMonitorStomp = () => {
         try {
           const data = JSON.parse(message.body)
           if (data.type === 'agent_connection_change') {
-            // 实时更新 Agent 连接数据
             agentConn.value = {
               online_count: data.online_count,
               agents: data.agents || []
@@ -435,6 +724,18 @@ const connectMonitorStomp = () => {
           }
         } catch (e) {
           console.warn('[Monitor] Parse STOMP message error:', e)
+        }
+      })
+      // 订阅 STOMP 主题统计变化
+      stompClient.subscribe('/topic/monitor/stomp-stats', (message) => {
+        try {
+          const data = JSON.parse(message.body)
+          if (data.type === 'stomp_stats') {
+            stompGroups.value = data.groups || []
+            stompTimestamp.value = data.timestamp || ''
+          }
+        } catch (e) {
+          console.warn('[Monitor] Parse stomp-stats error:', e)
         }
       })
     },
@@ -481,6 +782,7 @@ onMounted(async () => {
   allowRegister.value = regRes.allow_register
   loadUpdates()
   loadSystemInfo()
+  loadAiConfig()
 
   // 如果初始标签是 monitor，加载监控数据并启动 STOMP
   if (activeTab.value === 'monitor') {

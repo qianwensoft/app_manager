@@ -59,6 +59,33 @@ class AgentService : LifecycleService() {
         const val EXTRA_RESULT_CODE = "resultCode"
         const val EXTRA_DATA = "data"
 
+        /** 强制重连（设置页「重新连接」触发，丢弃现有连接立即重建）。 */
+        const val ACTION_FORCE_RECONNECT = "FORCE_RECONNECT"
+
+        /** 连接状态变更广播，供 UI 实时刷新。 */
+        const val ACTION_CONN_STATE = "com.appmanager.agent.CONN_STATE"
+        const val EXTRA_CONN_STATE = "conn_state"
+        const val EXTRA_CONN_DETAIL = "conn_detail"
+
+        const val STATE_CONNECTING = "connecting"
+        const val STATE_CONNECTED = "connected"
+        const val STATE_DISCONNECTED = "disconnected"
+        const val STATE_ERROR = "error"
+
+        /** 当前连接状态（进程内全局，供设置页直接读取初值）。 */
+        @Volatile
+        var connState: String = STATE_DISCONNECTED
+            private set
+        @Volatile
+        var connDetail: String = ""
+            private set
+
+        fun forceReconnect(context: android.content.Context) {
+            context.startForegroundService(Intent(context, AgentService::class.java).apply {
+                action = ACTION_FORCE_RECONNECT
+            })
+        }
+
         fun reportWirelessAdbGuideAck(context: android.content.Context, scannedDeviceId: Long, tokenMatched: Boolean) {
             context.startForegroundService(Intent(context, AgentService::class.java).apply {
                 action = ACTION_WIRELESS_ADB_ACK
@@ -111,6 +138,7 @@ class AgentService : LifecycleService() {
     private var cameraStreamManager: CameraStreamManager? = null
     private var shellManager: ShellManager? = null
     private var logcatManager: LogcatManager? = null
+    private var autoUpdateManager: AutoUpdateManager? = null
     private var deviceToken: String = ""
 
     /** 当前 WebSocket / 上报使用的设备连接键（机器码或 Token）。 */
@@ -144,6 +172,19 @@ class AgentService : LifecycleService() {
                 reportWirelessAdbGuideAck(scannedId, tokenMatched)
             }
             return START_STICKY
+        }
+
+        // 设置页「重新连接」：丢弃现有连接，强制立即重建
+        if (intent?.action == ACTION_FORCE_RECONNECT) {
+            startForegroundSafely("连接中...")
+            if (::webSocket.isInitialized) {
+                Log.i(TAG, "Force reconnect requested")
+                reconnectForNewEndpoint()
+                setConnState(STATE_CONNECTING)
+                webSocket.connect()
+                return START_STICKY
+            }
+            // 未初始化则继续走下方正常建连流程
         }
 
         // 处理屏幕录制授权回调
@@ -191,7 +232,7 @@ class AgentService : LifecycleService() {
             deviceToken = tok,
             onMessage = { msg -> CommandDispatcher.dispatch(msg, this) },
             onConnected = {
-                updateNotification("已连接")
+                setConnState(STATE_CONNECTED)
                 heartbeatManager.start()
                 deviceInfoCollector.start()
 
@@ -224,12 +265,22 @@ class AgentService : LifecycleService() {
                 com.appmanager.agent.util.CustomEventProbeHelper.bind(webSocket, tok)
                 AgentMenuSync.fetchManifestAsync(serviceScope, this@AgentService, url, tok)
                 CustomEventListenSync.syncFromServerAsync(serviceScope, this@AgentService, url, tok)
+
+                // 后台自动更新：每 10 分钟校验，发现更高 versionCode 自动下载并安装
+                if (autoUpdateManager == null) {
+                    autoUpdateManager = AutoUpdateManager(this@AgentService)
+                }
+                autoUpdateManager?.start()
             },
             onDisconnected = {
-                updateNotification("重连中...")
+                setConnState(STATE_DISCONNECTED)
                 heartbeatManager.stop()
                 deviceInfoCollector.stop()
                 foregroundAppMonitor?.stop()
+            },
+            onError = { reason ->
+                // 把失败原因显示到通知 + 广播给 UI，方便真机无 adb 时定位
+                setConnState(STATE_ERROR, reason)
             }
         )
 
@@ -241,6 +292,7 @@ class AgentService : LifecycleService() {
 
         acquireCpuWakeLock()
         attachInstallCallback(this)
+        setConnState(STATE_CONNECTING)
         webSocket.connect()
 
         return START_STICKY
@@ -263,6 +315,7 @@ class AgentService : LifecycleService() {
         cameraStreamManager?.stopAll()
         shellManager?.stop()
         logcatManager?.stop()
+        autoUpdateManager?.stop()
         CustomEventBroadcastHelper.stop(this)
         com.appmanager.agent.util.CustomEventProbeHelper.stop(this)
         com.appmanager.agent.MenuIntentReceiver.unregister(this)
@@ -329,11 +382,11 @@ class AgentService : LifecycleService() {
         demoteFromProjectionForeground()
     }
 
-    fun startCamera(cameraId: String) {
+    fun startCamera(cameraId: String, iceServers: List<Map<String, Any>>? = null) {
         if (cameraStreamManager == null) {
             cameraStreamManager = CameraStreamManager(this, webSocket)
         }
-        cameraStreamManager?.startCamera(cameraId)
+        cameraStreamManager?.startCamera(cameraId, iceServers)
     }
 
     fun stopCamera(cameraId: String) {
@@ -735,6 +788,24 @@ class AgentService : LifecycleService() {
         manager.notify(NOTIF_ID, buildNotification(status))
     }
 
+    /** 更新连接状态：写全局态 + 刷新通知 + 广播给 UI。 */
+    private fun setConnState(state: String, detail: String = "") {
+        connState = state
+        connDetail = detail
+        val text = when (state) {
+            STATE_CONNECTED -> "已连接"
+            STATE_CONNECTING -> "连接中..."
+            STATE_ERROR -> "连接失败：$detail"
+            else -> "重连中..."
+        }
+        updateNotification(text)
+        sendBroadcast(Intent(ACTION_CONN_STATE).apply {
+            setPackage(packageName) // 限本应用内，等价私有广播
+            putExtra(EXTRA_CONN_STATE, state)
+            putExtra(EXTRA_CONN_DETAIL, detail)
+        })
+    }
+
     /** 当前前台服务是否已包含 mediaProjection 类型（投屏中）。 */
     @Volatile
     private var projectionForegroundActive = false
@@ -763,27 +834,28 @@ class AgentService : LifecycleService() {
     }
 
     /**
-     * 投屏授权拿到后，把前台服务类型升级为 dataSync|mediaProjection。
-     * 必须在 [android.media.projection.MediaProjectionManager.getMediaProjection] 之后、
-     * 真正开始采集之前调用，否则 Android 14 会拒绝 mediaProjection 采集。
+     * 投屏授权拿到后，启动专用 mediaProjection 前台服务。
+     * Android 14 要求 mediaProjection 型 FGS 从 Activity 的 onActivityResult 上下文启动，
+     * AgentService 保持 dataSync 类型不变，由 ScreenProjectionForegroundService 持有投屏类型。
      */
     fun promoteToProjectionForeground() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
-        val type = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
         try {
-            ServiceCompat.startForeground(this, NOTIF_ID, buildNotification("投屏中"), type)
+            startForegroundService(Intent(this, ScreenProjectionForegroundService::class.java))
             projectionForegroundActive = true
         } catch (e: Exception) {
             Log.e(TAG, "promoteToProjectionForeground failed: ${e.message}", e)
         }
     }
 
-    /** 投屏结束后回退到仅 dataSync 类型，释放 mediaProjection 占用。 */
+    /** 投屏结束后停止专用 mediaProjection 前台服务。 */
     fun demoteFromProjectionForeground() {
         if (!projectionForegroundActive) return
         projectionForegroundActive = false
-        startForegroundSafely("已连接")
+        try {
+            stopService(Intent(this, ScreenProjectionForegroundService::class.java))
+        } catch (e: Exception) {
+            Log.e(TAG, "demoteFromProjectionForeground failed: ${e.message}", e)
+        }
     }
 
     /**

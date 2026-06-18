@@ -166,8 +166,9 @@ const maxHTTPResponseContextBody = maxEventDataSubst
 
 // MergeHTTPResponseContext 将最近一次成功 HTTP 响应写入 vars，供同连接器后续步骤 expandTemplate 使用。
 // 占位符：
-//   {{http.last.body}}  {{http.last.status}}
-//   {{http.step.<步骤表 id>.body}}  {{http.step.<步骤表 id>.status}}（meta.StepID / 步骤主键）
+//
+//	{{http.last.body}}  {{http.last.status}}
+//	{{http.step.<步骤表 id>.body}}  {{http.step.<步骤表 id>.status}}（meta.StepID / 步骤主键）
 func MergeHTTPResponseContext(vars map[string]string, stepID uint, httpStatus int, body []byte) {
 	if vars == nil {
 		return
@@ -352,11 +353,11 @@ func DeviceEventJSONPlaceholder(rec models.DeviceEvent) string {
 		created = time.Now()
 	}
 	payload := map[string]interface{}{
-		"id":          rec.ID,
-		"device_id":   rec.DeviceID,
-		"event_type":  rec.EventType,
-		"event_data":  eventDataField,
-		"created_at":  created.UTC().Format(time.RFC3339Nano),
+		"id":         rec.ID,
+		"device_id":  rec.DeviceID,
+		"event_type": rec.EventType,
+		"event_data": eventDataField,
+		"created_at": created.UTC().Format(time.RFC3339Nano),
 	}
 	b, err := json.Marshal(payload)
 	if err != nil {
@@ -466,11 +467,11 @@ func TemplateDemoPayload() map[string]interface{} {
 		"execution_template": vars,
 		"device_event":       rec,
 		"device": map[string]interface{}{
-			"id":             rec.DeviceID,
-			"name":           vars["{{device.name}}"],
-			"serial":         vars["{{device.serial}}"],
-			"agent_alias":    vars["{{device.agent_alias}}"],
-			"server_alias":   vars["{{device.server_alias}}"],
+			"id":           rec.DeviceID,
+			"name":         vars["{{device.name}}"],
+			"serial":       vars["{{device.serial}}"],
+			"agent_alias":  vars["{{device.agent_alias}}"],
+			"server_alias": vars["{{device.server_alias}}"],
 		},
 		"definition": map[string]interface{}{
 			"key":  vars["{{definition.key}}"],

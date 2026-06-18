@@ -19,7 +19,8 @@ type appParam struct {
 // 占位符格式：{{app.<key>}}，例如 key="client_id" → {{app.client_id}}。
 // sensitive 字段不影响注入（运行时均可用；API 响应层负责脱敏）。
 // 同时将 token cache 字段注入为全局占位符：
-//   {{app.access_token}}、{{app.refresh_token}}、{{app.token_expires_at}}
+//
+//	{{app.access_token}}、{{app.refresh_token}}、{{app.token_expires_at}}
 func MergeAppParamsIntoVars(vars map[string]string, app *models.OutboundApp) {
 	if vars == nil || app == nil {
 		return

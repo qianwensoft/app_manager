@@ -28,11 +28,11 @@ type RPCError struct {
 }
 
 const (
-	ErrParse        = -32700
-	ErrInvalidReq   = -32600
-	ErrNotFound     = -32601
+	ErrParse         = -32700
+	ErrInvalidReq    = -32600
+	ErrNotFound      = -32601
 	ErrInvalidParams = -32602
-	ErrInternal     = -32603
+	ErrInternal      = -32603
 )
 
 type toolFunc func(params json.RawMessage) (any, *RPCError)
@@ -56,24 +56,24 @@ func init() {
 		"text_to_canvas":  textToCanvas,
 		"refine_canvas":   refineCanvas,
 		// datasource
-		"list_datasources":    listDatasources,
-		"list_datasets":       listDatasets,
-		"query_dataset":       queryDataset,
+		"list_datasources":     listDatasources,
+		"list_datasets":        listDatasets,
+		"query_dataset":        queryDataset,
 		"list_data_interfaces": listDataInterfaces,
-		"bind_data_to_canvas": bindDataToCanvas,
-		"list_sim_points":     listSimPoints,
-		"create_sim_point":    createSimPoint,
+		"bind_data_to_canvas":  bindDataToCanvas,
+		"list_sim_points":      listSimPoints,
+		"create_sim_point":     createSimPoint,
 		// outbound
 		"list_outbound_connectors": listOutboundConnectors,
 		"list_webhook_event_types": listWebhookEventTypes,
 		"get_connector_schema":     getConnectorSchema,
 		"trigger_connector":        triggerConnector,
 		// deploy
-		"list_devices":      listDevices,
+		"list_devices":       listDevices,
 		"list_device_groups": listDeviceGroups,
-		"list_departments":  listDepartments,
-		"deploy_scada":      deployScada,
-		"get_deploy_status": getDeployStatus,
+		"list_departments":   listDepartments,
+		"deploy_scada":       deployScada,
+		"get_deploy_status":  getDeployStatus,
 		// config
 		"get_server_config":    getServerConfig,
 		"update_server_config": updateServerConfig,

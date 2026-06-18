@@ -5,10 +5,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
+
+// agentReadTimeout 是 Agent WebSocket 的读空闲超时。Agent 端 OkHttp 每 30s 主动发一个
+// ping frame，正常情况下 readPump 会在 PingHandler / 业务消息里不断刷新 deadline。
+// 一旦 Agent 进程死亡或网络半开（TCP 未正常关闭），服务器在该时长内收不到任何帧，
+// ReadMessage 会超时返回 error，从而触发 Unregister 把设备状态置为离线。
+// 取 ~2.5x 的 ping 周期，容忍一次丢包/抖动。
+const agentReadTimeout = 75 * time.Second
 
 type Connection struct {
 	DeviceID string
@@ -66,6 +75,13 @@ func (h *Hub) Register(deviceID string, conn *websocket.Conn) <-chan struct{} {
 	done := make(chan struct{})
 	c := &Connection{DeviceID: deviceID, Conn: conn, send: make(chan []byte, 64)}
 	h.mu.Lock()
+	// 同键已有连接（Android 重连/半开）：先剔除旧连接并关闭，避免旧连接的 readPump
+	// 退出时 Unregister 误删这条新连接，导致设备瞬间“离线”或连接数虚高/孤儿连接。
+	if old, ok := h.connections[deviceID]; ok {
+		close(old.send)
+		_ = old.Conn.Close()
+		log.Printf("Agent re-register, evicted stale connection: %s", deviceID)
+	}
 	h.connections[deviceID] = c
 	h.mu.Unlock()
 	log.Printf("Agent connected: %s", deviceID)
@@ -100,6 +116,28 @@ func (h *Hub) Unregister(deviceID string) {
 	}
 }
 
+// unregisterConn 仅当 map 中当前连接确为 c 时才注销，避免「旧连接 readPump 退出」
+// 误删 Register 刚替换上的新连接（Android 频繁重连场景）。
+func (h *Hub) unregisterConn(c *Connection) {
+	h.mu.Lock()
+	cur, ok := h.connections[c.DeviceID]
+	if !ok || cur != c {
+		// 已被新连接替换：旧连接的 send 在 Register 剔除时已 close，这里不再重复处理。
+		h.mu.Unlock()
+		return
+	}
+	close(c.send)
+	delete(h.connections, c.DeviceID)
+	h.mu.Unlock()
+	log.Printf("Agent disconnected: %s", c.DeviceID)
+	if clusterOnUnregister != nil {
+		clusterOnUnregister(c.DeviceID)
+	}
+	if OnAgentDisconnect != nil {
+		OnAgentDisconnect(c.DeviceID)
+	}
+}
+
 func (h *Hub) Send(deviceID string, msg interface{}) error {
 	data, err := json.Marshal(msg)
 	if err != nil {
@@ -125,6 +163,15 @@ func (h *Hub) HasLocal(deviceID string) bool {
 	defer h.mu.RUnlock()
 	_, ok := h.connections[deviceID]
 	return ok
+}
+
+// IsCurrentConn 报告 deviceID 当前注册的连接是否就是 conn。
+// 用于重连竞态：被替换的旧连接断开时不应把设备误判为离线。
+func (h *Hub) IsCurrentConn(deviceID string, conn *websocket.Conn) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	c, ok := h.connections[deviceID]
+	return ok && c.Conn == conn
 }
 
 // OnlineCount 返回本进程当前持有的 Agent WebSocket 连接数。
@@ -227,12 +274,28 @@ func (h *Hub) SendToDevice(deviceID uint, msg interface{}) bool {
 }
 
 func (h *Hub) readPump(c *Connection) {
-	defer h.Unregister(c.DeviceID)
+	defer h.unregisterConn(c)
+	// 读空闲超时 + ping/pong 刷新：Agent 端每 30s 发 ping，收到即重置 deadline。
+	// 若 Agent 半开/进程死亡，readPump 会在 agentReadTimeout 后超时退出并触发 Unregister。
+	_ = c.Conn.SetReadDeadline(time.Now().Add(agentReadTimeout))
+	c.Conn.SetPingHandler(func(string) error {
+		_ = c.Conn.SetReadDeadline(time.Now().Add(agentReadTimeout))
+		// 回 pong（gorilla 默认行为）；忽略写超时类瞬时错误。
+		err := c.Conn.WriteControl(websocket.PongMessage, nil, time.Now().Add(10*time.Second))
+		if err == websocket.ErrCloseSent {
+			return nil
+		} else if e, ok := err.(net.Error); ok && e.Timeout() {
+			return nil
+		}
+		return err
+	})
 	for {
 		mt, data, err := c.Conn.ReadMessage()
 		if err != nil {
 			break
 		}
+		// 收到任意业务帧也刷新 deadline。
+		_ = c.Conn.SetReadDeadline(time.Now().Add(agentReadTimeout))
 		if mt == websocket.BinaryMessage && len(data) >= 6 && data[0] == 0x01 {
 			// Agent 二进制投屏：0x01 + width(2 BE) + height(2 BE) + JPEG
 			routeKey := CanonicalRouteKeyFromWS(c.DeviceID)

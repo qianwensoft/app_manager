@@ -98,7 +98,7 @@ object CommandDispatcher {
                         val camera = (msg.data as? Map<*, *>)?.get("camera") as? String
                             ?: msg.camera
                             ?: "back"
-                        service.startCamera(camera)
+                        service.startCamera(camera, msg.iceServers)
                     }
                     CommandAction.STOP_CAMERA -> {
                         val camera = (msg.data as? Map<*, *>)?.get("camera") as? String
@@ -263,6 +263,18 @@ object CommandDispatcher {
                         }
                     }
                     CommandAction.KEYBOARD_INPUT -> SystemCommandHandler.keyboardInput(msg, service)
+                    CommandAction.NAV_KEY -> {
+                        val key = (msg.data as? Map<*, *>)?.get("key") as? String
+                        if (key.isNullOrBlank()) {
+                            sendResult(service, msg.commandId, false, "nav_key missing key")
+                        } else {
+                            val ok = com.appmanager.agent.service.TouchAccessibilityService.performNavKey(key)
+                            sendResult(service, msg.commandId, ok, if (ok) "" else "无障碍服务未启用或不支持该键: $key")
+                        }
+                    }
+                    CommandAction.PRINT -> PrinterCommandHandler.print(msg.data, msg.commandId, service)
+                    CommandAction.LIST_BLUETOOTH_PRINTERS -> PrinterCommandHandler.listPrinters(msg.commandId, service)
+                    CommandAction.SET_DEFAULT_PRINTER -> PrinterCommandHandler.setDefaultPrinter(msg.data, msg.commandId, service)
                     else -> Log.w(TAG, "Unknown command action: ${msg.action}")
                 }
             }

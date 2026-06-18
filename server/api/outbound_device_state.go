@@ -15,12 +15,12 @@ import (
 )
 
 type outboundDeviceStateRow struct {
-	DeviceID  uint                   `json:"device_id"`
-	Paused    bool                   `json:"paused"`
-	Excluded  bool                   `json:"excluded"`
-	Status    string                 `json:"status"` // active | paused | excluded
-	UpdatedAt time.Time              `json:"updated_at"`
-	Device    *deviceListenBrief     `json:"device,omitempty"`
+	DeviceID  uint               `json:"device_id"`
+	Paused    bool               `json:"paused"`
+	Excluded  bool               `json:"excluded"`
+	Status    string             `json:"status"` // active | paused | excluded
+	UpdatedAt time.Time          `json:"updated_at"`
+	Device    *deviceListenBrief `json:"device,omitempty"`
 }
 
 func outboundDeviceStatus(paused, excluded bool) string {
@@ -269,4 +269,3 @@ func AgentOutboundConnectorExclude(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
-

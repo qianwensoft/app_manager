@@ -23,6 +23,12 @@ export type FieldDef = {
   /** 列表查询条件：依赖字段变化后重新拉取本字段选项 */
   listen_targets?: string[]
   options_interface_code?: string
+  /** component === 'PrintButton' 时：绑定的打印模板 id / 触发的按钮事件 id / 文案 */
+  print_template_id?: string
+  button_id?: string
+  button_text?: string
+  button_type?: 'primary' | 'default' | 'dashed'
+  button_block?: boolean
 }
 
 export type FieldBinding = {

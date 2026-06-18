@@ -3,6 +3,7 @@ package api
 import (
 	"app-manager/database"
 	"app-manager/models"
+	"app-manager/outbound"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -191,6 +192,7 @@ func executeConnectorInterface(connector *models.OutboundConnector, params map[s
 		userID:     userID,
 		vars:       make(map[string]interface{}),
 		context:    make(map[string]interface{}),
+		stringVars: make(map[string]string),
 		stepCount:  0,
 		logs:       []string{},
 		phaseIndex: make(map[uint]int),
@@ -236,6 +238,9 @@ func executeConnectorInterface(connector *models.OutboundConnector, params map[s
 	ctx.vars["timestamp"] = time.Now().Unix()
 	ctx.vars["timestamp_ms"] = time.Now().UnixMilli()
 
+	// 将 context 同步到 outbound 格式的 stringVars（{{context.k}}），供脚本/HTTP 步骤使用
+	syncContextToStringVars(ctx)
+
 	// 顺序执行阶段
 	currentPhaseIdx := 0
 	for currentPhaseIdx < len(phases) {
@@ -269,51 +274,14 @@ func executeConnectorInterface(connector *models.OutboundConnector, params map[s
 	}
 
 	// 应用输出映射（如果配置了）
-	outputData := ctx.context // 默认返回完整 context
-	if connector.OutputMappingsJSON != "" {
-		var mappings []map[string]interface{}
-		if err := json.Unmarshal([]byte(connector.OutputMappingsJSON), &mappings); err == nil && len(mappings) > 0 {
-			// 有配置输出映射，按映射构建输出
-			outputData = make(map[string]interface{})
-			for _, mapping := range mappings {
-				outputKey, _ := mapping["output_key"].(string)
-				source, _ := mapping["source"].(string)
-				value, _ := mapping["value"].(string)
+	outputData := applyConnectorOutputMappings(connector.OutputMappingsJSON, ctx.context, ctx.vars)
 
-				if outputKey == "" {
-					continue
-				}
-
-				var outputValue interface{}
-				switch source {
-				case "context":
-					// 从 context 中获取值
-					if value != "" {
-						if v, ok := ctx.context[value]; ok {
-							outputValue = v
-						} else if v, ok := ctx.vars["context."+value]; ok {
-							outputValue = v
-						}
-					}
-				case "var":
-					// 从 vars 中获取值（支持 {{...}} 格式）
-					cleanValue := strings.Trim(value, "{} ")
-					if v, ok := ctx.vars[cleanValue]; ok {
-						outputValue = v
-					}
-				case "fixed":
-					// 固定值
-					outputValue = value
-				}
-
-				// 支持点路径（如 a.b.c）
-				if strings.Contains(outputKey, ".") {
-					setNestedValue(outputData, outputKey, outputValue)
-				} else {
-					outputData[outputKey] = outputValue
-				}
-			}
-		}
+	// 全流程结束、输出映射之后：执行连接器全局 result 脚本整体改写返回值。
+	if newOut, ran, rerr := outbound.RunConnectorResultScript(connector.CustomScriptJSON, outputData, connectorContextStringVars(ctx.context)); rerr != nil {
+		return nil, fmt.Errorf("返回值脚本: %w", rerr)
+	} else if ran {
+		outputData = newOut
+		ctx.logs = append(ctx.logs, "已执行连接器返回值脚本（result）改写最终输出")
 	}
 
 	// 返回结果
@@ -322,6 +290,79 @@ func executeConnectorInterface(connector *models.OutboundConnector, params map[s
 		StepCount: ctx.stepCount,
 		Logs:      ctx.logs,
 	}, nil
+}
+
+// connectorContextStringVars 把 context 业务数据转成 {{context.k}}=string 占位符表，供 result 脚本 ctx.getContext 使用。
+func connectorContextStringVars(ctxMap map[string]interface{}) map[string]string {
+	out := make(map[string]string)
+	for k, v := range ctxMap {
+		switch t := v.(type) {
+		case string:
+			out["{{context."+k+"}}"] = t
+		case nil:
+			out["{{context."+k+"}}"] = ""
+		default:
+			if b, err := json.Marshal(v); err == nil {
+				out["{{context."+k+"}}"] = string(b)
+			} else {
+				out["{{context."+k+"}}"] = fmt.Sprint(v)
+			}
+		}
+	}
+	return out
+}
+
+// applyConnectorOutputMappings 按 output_mappings 配置，从 context / vars / 固定值构建最终输出。
+// mappingsJSON 为空或解析失败/无映射时，直接返回完整 context（默认行为）。
+// 调试器与真实接口调用共用，避免两份逻辑漂移。
+func applyConnectorOutputMappings(mappingsJSON string, ctxMap map[string]interface{}, vars map[string]interface{}) map[string]interface{} {
+	if strings.TrimSpace(mappingsJSON) == "" {
+		return ctxMap
+	}
+	var mappings []map[string]interface{}
+	if err := json.Unmarshal([]byte(mappingsJSON), &mappings); err != nil || len(mappings) == 0 {
+		return ctxMap
+	}
+	outputData := make(map[string]interface{})
+	for _, mapping := range mappings {
+		outputKey, _ := mapping["output_key"].(string)
+		source, _ := mapping["source"].(string)
+		value, _ := mapping["value"].(string)
+
+		if outputKey == "" {
+			continue
+		}
+
+		var outputValue interface{}
+		switch source {
+		case "context":
+			// 从 context 中获取值
+			if value != "" {
+				if v, ok := ctxMap[value]; ok {
+					outputValue = v
+				} else if v, ok := vars["context."+value]; ok {
+					outputValue = v
+				}
+			}
+		case "var":
+			// 从 vars 中获取值（支持 {{...}} 格式）
+			cleanValue := strings.Trim(value, "{} ")
+			if v, ok := vars[cleanValue]; ok {
+				outputValue = v
+			}
+		case "fixed":
+			// 固定值
+			outputValue = value
+		}
+
+		// 支持点路径（如 a.b.c）
+		if strings.Contains(outputKey, ".") {
+			setNestedValue(outputData, outputKey, outputValue)
+		} else {
+			outputData[outputKey] = outputValue
+		}
+	}
+	return outputData
 }
 
 // setNestedValue 设置嵌套对象的值（支持点路径）
@@ -352,6 +393,7 @@ type connectorExecutionContext struct {
 	userID     uint
 	vars       map[string]interface{} // 运行时变量（扁平化的占位符键值对）
 	context    map[string]interface{} // context 命名空间（业务数据）
+	stringVars map[string]string      // outbound 包使用的 {{k}} 格式占位符表，跨步骤持久
 	stepCount  int
 	logs       []string
 	phaseIndex map[uint]int // phase_id -> index
@@ -369,33 +411,34 @@ func executePhase(ctx *connectorExecutionContext, phase *models.OutboundConnecto
 		}
 	}
 
-	// 根据 RunMode 执行步骤
-	switch phase.RunMode {
+	// 根据 RunMode 执行步骤（空值默认 sequential）
+	runMode := strings.TrimSpace(phase.RunMode)
+	if runMode == "" {
+		runMode = "sequential"
+	}
+	switch runMode {
 	case "sequential":
-		// 顺序执行
 		for _, step := range steps {
 			nextPhaseID, err := executeStep(ctx, &step)
 			if err != nil {
 				return 0, err
 			}
 			if nextPhaseID > 0 {
-				return nextPhaseID, nil // 跳转
+				return nextPhaseID, nil
 			}
 		}
 	case "parallel":
-		// 并行执行（简化版：依然顺序执行，但不中断）
 		for _, step := range steps {
-			_, _ = executeStep(ctx, &step) // 忽略错误
+			_, _ = executeStep(ctx, &step)
 		}
 	case "failover":
-		// 失败转移：执行第一个成功的
 		for _, step := range steps {
 			nextPhaseID, err := executeStep(ctx, &step)
 			if err == nil {
 				if nextPhaseID > 0 {
 					return nextPhaseID, nil
 				}
-				break // 成功则停止
+				break
 			}
 		}
 	default:
@@ -419,17 +462,15 @@ func executeStep(ctx *connectorExecutionContext, step *models.OutboundConnectorS
 
 	switch step.StepType {
 	case "condition":
-		// 条件判断
 		nextPhaseID, err = executeConditionStep(ctx, step)
 	case "call_connector":
-		// 调用其他连接器
 		err = executeCallConnectorStep(ctx, step)
 	case "http":
-		// HTTP 调用（TODO: 实现完整的 HTTP 调用逻辑）
-		ctx.logs = append(ctx.logs, fmt.Sprintf("HTTP step %d (not fully implemented)", step.ID))
+		err = executeInterfaceHTTPStep(ctx, step)
 	case "app_script":
-		// 应用脚本（TODO: 实现 JavaScript 执行）
-		ctx.logs = append(ctx.logs, fmt.Sprintf("App script step %d (not fully implemented)", step.ID))
+		err = executeInterfaceAppScriptStep(ctx, step)
+	case "connector_script":
+		err = executeInterfaceConnectorScriptStep(ctx, step)
 	default:
 		ctx.logs = append(ctx.logs, fmt.Sprintf("Unknown step type: %s", step.StepType))
 	}
@@ -526,5 +567,98 @@ func executeCallConnectorStep(ctx *connectorExecutionContext, step *models.Outbo
 	}
 
 	ctx.logs = append(ctx.logs, fmt.Sprintf("Connector %s returned %d vars", step.CallConnectorCode, len(result.Data)))
+	return nil
+}
+
+// syncContextToStringVars 把 ctx.context 里的值同步成 {{context.k}} 格式写入 ctx.stringVars，
+// 供 outbound 包的执行函数（脚本/HTTP）使用。
+func syncContextToStringVars(ctx *connectorExecutionContext) {
+	for k, v := range ctx.context {
+		switch t := v.(type) {
+		case string:
+			ctx.stringVars["{{context."+k+"}}"] = t
+		case nil:
+			ctx.stringVars["{{context."+k+"}}"] = ""
+		default:
+			if b, err := json.Marshal(v); err == nil {
+				ctx.stringVars["{{context."+k+"}}"] = string(b)
+			} else {
+				ctx.stringVars["{{context."+k+"}}"] = fmt.Sprint(t)
+			}
+		}
+	}
+}
+
+// syncStringVarsBackToContext 把 outbound 执行后 stringVars 里 {{context.k}} 的变化合并回 ctx.context 和 ctx.vars。
+func syncStringVarsBackToContext(ctx *connectorExecutionContext) {
+	for k, v := range ctx.stringVars {
+		if strings.HasPrefix(k, "{{context.") && strings.HasSuffix(k, "}}") {
+			field := k[len("{{context.") : len(k)-2]
+			ctx.context[field] = v
+			ctx.vars["context."+field] = v
+			ctx.vars[field] = v
+		}
+	}
+}
+
+// executeInterfaceHTTPStep 在接口模式下执行 http 步骤，复用 outbound.ExecuteHTTPWebhook。
+func executeInterfaceHTTPStep(ctx *connectorExecutionContext, step *models.OutboundConnectorStep) error {
+	if step.EndpointID == 0 {
+		return fmt.Errorf("http step %d: endpoint_id 未配置", step.ID)
+	}
+	var ep models.OutboundEndpoint
+	if err := database.DB.Preload("App").First(&ep, step.EndpointID).Error; err != nil {
+		return fmt.Errorf("http step %d: 接口不存在", step.ID)
+	}
+	if !ep.Enabled || ep.App == nil || !ep.App.Enabled {
+		return fmt.Errorf("http step %d: 接口或应用已禁用", step.ID)
+	}
+
+	syncContextToStringVars(ctx)
+	meta := outbound.StepExecutionMeta{StepType: "http", StepID: step.ID}
+	d := outbound.ExecuteHTTPWebhook(
+		database.DB, *ctx.connector, ep, ep.App,
+		models.DeviceEvent{}, nil, nil,
+		ctx.stringVars, meta, true, *step, nil,
+	)
+	syncStringVarsBackToContext(ctx)
+
+	if d.Status != "success" {
+		return fmt.Errorf("http step %d failed: %s", step.ID, d.Error)
+	}
+	return nil
+}
+
+// executeInterfaceAppScriptStep 在接口模式下执行 app_script 步骤，复用 outbound.ExecuteAppScriptStep。
+func executeInterfaceAppScriptStep(ctx *connectorExecutionContext, step *models.OutboundConnectorStep) error {
+	syncContextToStringVars(ctx)
+	meta := outbound.StepExecutionMeta{StepType: "app_script", StepID: step.ID}
+	d := outbound.ExecuteAppScriptStep(
+		database.DB, *ctx.connector, *step,
+		models.DeviceEvent{}, nil, nil,
+		ctx.stringVars, meta,
+	)
+	syncStringVarsBackToContext(ctx)
+
+	if d.Status != "success" {
+		return fmt.Errorf("app_script step %d failed: %s", step.ID, d.Error)
+	}
+	return nil
+}
+
+// executeInterfaceConnectorScriptStep 在接口模式下执行 connector_script 步骤，复用 outbound.ExecuteConnectorScriptStep。
+func executeInterfaceConnectorScriptStep(ctx *connectorExecutionContext, step *models.OutboundConnectorStep) error {
+	syncContextToStringVars(ctx)
+	meta := outbound.StepExecutionMeta{StepType: "connector_script", StepID: step.ID}
+	d := outbound.ExecuteConnectorScriptStep(
+		database.DB, *ctx.connector, *step,
+		models.DeviceEvent{}, nil, nil,
+		ctx.stringVars, meta,
+	)
+	syncStringVarsBackToContext(ctx)
+
+	if d.Status != "success" {
+		return fmt.Errorf("connector_script step %d failed: %s", step.ID, d.Error)
+	}
 	return nil
 }

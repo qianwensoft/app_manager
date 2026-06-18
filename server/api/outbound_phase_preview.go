@@ -12,11 +12,11 @@ import (
 )
 
 type outboundPhasePreviewIn struct {
-	PhaseIndex        int               `json:"phase_index"`
-	Phases            []json.RawMessage `json:"phases"`
-	Overrides         map[string]string `json:"overrides"`
-	ConnectorID       uint              `json:"connector_id"`
-	ExecuteLiveHTTP   bool              `json:"execute_live_http"`
+	PhaseIndex      int               `json:"phase_index"`
+	Phases          []json.RawMessage `json:"phases"`
+	Overrides       map[string]string `json:"overrides"`
+	ConnectorID     uint              `json:"connector_id"`
+	ExecuteLiveHTTP bool              `json:"execute_live_http"`
 }
 
 // PostOutboundPhasePreview POST /api/outbound/phase-preview

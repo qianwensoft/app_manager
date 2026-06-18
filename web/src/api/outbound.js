@@ -48,6 +48,7 @@ export const getOutboundTemplateDemo = () => http.get('/outbound/template-demo')
 export const postOutboundTemplateExpand = (data) => http.post('/outbound/template-expand', data)
 export const getOutboundTemplateVars = () => http.get('/outbound/template-vars')
 export const postOutboundPhasePreview = (data) => http.post('/outbound/phase-preview', data)
+export const postOutboundInterfaceDebug = (data) => http.post('/outbound/interface-debug', data)
 
 // 导出导入
 export const exportOutboundApp = (id, includeSecrets = false) =>

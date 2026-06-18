@@ -16,8 +16,8 @@ func TestBlockedSelfOpenAPIURL(t *testing.T) {
 	}
 
 	cases := []struct {
-		url      string
-		blocked  bool
+		url     string
+		blocked bool
 	}{
 		{"http://127.0.0.1:8080/api/open/v1/data/foo", true},
 		{"http://localhost:8080/api/open/v1/ingress/buffer/x", true},

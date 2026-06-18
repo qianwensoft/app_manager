@@ -13,7 +13,9 @@ data class Message(
     val camera: String? = null,
     val sdp: String? = null,
     val candidate: Map<String, Any>? = null,
-    val role: String? = null
+    val role: String? = null,
+    /** start_camera 随命令下发的 ICE 服务器列表（与服务端 webrtc.ice_servers 统一）。 */
+    @SerializedName("ice_servers") val iceServers: List<Map<String, Any>>? = null
 )
 
 // ─── 上行：Agent → Server ────────────────────────────────────────────────────
@@ -144,6 +146,9 @@ object CommandAction {
     /** 远程触发 Agent 菜单 intent_action：data.intent_action */
     const val TRIGGER_AGENT_MENU = "trigger_agent_menu"
 
+    /** 虚拟导航键（无障碍 performGlobalAction）：data.key = back | home | recents | notifications | quick_settings | power_dialog | lock_screen */
+    const val NAV_KEY = "nav_key"
+
     // ─── 文件管理（Agent 文件系统） ─────────────────────────────────────────
     /** 列目录：data: { request_id, path, include_hidden? } */
     const val FS_LIST = "fs_list"
@@ -180,4 +185,12 @@ object CommandAction {
 
     /** 键盘HID输出：data.input_method、data.text、data.keys、data.delay_ms、data.target_app */
     const val KEYBOARD_INPUT = "keyboard_input"
+
+    // ─── 蓝牙打印 ───────────────────────────────────────────────────────────
+    /** 打印：data { protocol?, transport?, mac?, content:[...], raw_base64? }（缺省用默认打印机） */
+    const val PRINT = "print"
+    /** 列出已配对蓝牙打印机：结果经 sendResult.output 返回 JSON 数组 */
+    const val LIST_BLUETOOTH_PRINTERS = "list_bluetooth_printers"
+    /** 设置默认打印机：data { mac, name, protocol, transport } */
+    const val SET_DEFAULT_PRINTER = "set_default_printer"
 }

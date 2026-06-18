@@ -195,6 +195,32 @@
                 </com.google.android.material.card.MaterialCardView>
             </LinearLayout>
 
+            <!-- Row 4: 打印配置 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/card_tile_printer"
+                    style="@style/AppManagerGridTile"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1">
+                    <LinearLayout style="@style/AppManagerGridTileInner">
+                        <ImageView android:layout_width="32dp" android:layout_height="32dp"
+                            android:src="@android:drawable/ic_menu_sort_by_size"
+                            android:contentDescription="@string/main_tile_printer"
+                            app:tint="@color/agent_tile_icon_tint" />
+                        <TextView style="@style/AppManagerGridTileLabel" android:text="@string/main_tile_printer" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- 占位，保持三列对齐 -->
+                <View android:layout_width="0dp" android:layout_height="0dp" android:layout_weight="1" />
+                <View android:layout_width="0dp" android:layout_height="0dp" android:layout_weight="1" />
+            </LinearLayout>
+
             <!-- 后台推送菜单区域（动态填充） -->
             <TextView
                 android:id="@+id/tv_backend_menus_title"

@@ -1223,9 +1223,9 @@ const startCameraStream = (camId) => {
   const ws = new WebSocket(wsUrl)
   cameraWSs[camId] = ws
 
-  const pc = new RTCPeerConnection({
-    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-  })
+  // 默认不配 STUN：局域网下仅用 host 候选即可秒连；跨网段时由服务端在 offer
+  // 里下发 ice_servers（与服务端 webrtc.ice_servers 配置统一）后再 setConfiguration。
+  const pc = new RTCPeerConnection({ iceServers: [] })
   cameraPCs[camId] = pc
 
   // Server sends track to browser — bind to video element
@@ -1269,6 +1269,10 @@ const startCameraStream = (camId) => {
   ws.onmessage = async (e) => {
     const msg = JSON.parse(e.data)
     if (msg.type === 'webrtc_offer') {
+      // 应用服务端下发的 ICE 配置（跨网段才有；LAN 通常为空，保持纯 host 秒连）
+      if (Array.isArray(msg.ice_servers) && msg.ice_servers.length > 0) {
+        try { pc.setConfiguration({ iceServers: msg.ice_servers }) } catch (_) {}
+      }
       // Server sends offer when publisher track is ready
       await pc.setRemoteDescription({ type: 'offer', sdp: msg.sdp })
       const answer = await pc.createAnswer()
@@ -2411,8 +2415,21 @@ onMounted(async () => {
 })
 
 // 发送虚拟按键
+// keycode → Agent 无障碍导航键映射（仅这三类可用 performGlobalAction，无需 ADB）
+const NAV_KEY_BY_KEYCODE = { 4: 'back', 3: 'home', 187: 'recents' }
+
 const sendKeyEvent = async (keycode) => {
   if (!deviceId.value) return
+  // Agent 在线且是导航键时，优先走无障碍通道（纯 Agent 设备无 ADB 也能用）；失败再回退 ADB
+  const navKey = NAV_KEY_BY_KEYCODE[keycode]
+  if (navKey && screenDevice.value?.agent_connected) {
+    try {
+      await deviceApi.agentNavKey(deviceId.value, navKey)
+      return
+    } catch (e) {
+      // 无障碍未启用等情况，回退到 ADB keyevent
+    }
+  }
   try {
     await deviceApi.keyEvent(deviceId.value, keycode)
   } catch (e) {

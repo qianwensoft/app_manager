@@ -257,9 +257,9 @@ func looksLikePNG(b []byte) bool {
 // 不对 POWER(26)/GO_TO_SLEEP(223)/WAKEUP(224) 前置唤醒，避免「先亮屏再按电源」被立刻关掉等问题。
 func (c *Client) KeyEvent(serial string, keycode int) error {
 	const (
-		keycodePower      = 26
-		keycodeGoToSleep  = 223
-		keycodeWakeup     = 224
+		keycodePower     = 26
+		keycodeGoToSleep = 223
+		keycodeWakeup    = 224
 	)
 	needWake := keycode != keycodeWakeup && keycode != keycodePower && keycode != keycodeGoToSleep
 	if needWake {

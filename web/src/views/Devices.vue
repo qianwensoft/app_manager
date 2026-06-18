@@ -84,6 +84,13 @@
           </div>
           <template #footer>
             <div style="display:flex;flex-wrap:wrap;gap:8px">
+              <el-button
+                v-if="d.agent_connected || d.status === 'online'"
+                size="small"
+                type="success"
+                :icon="MonitorIcon"
+                @click="$router.push(`/screen?device=${d.id}`)"
+              >查看屏幕</el-button>
               <el-button size="small" @click="editDevice(d)">编辑</el-button>
               <el-button size="small" @click="$router.push(`/devices/${d.id}`)">详情</el-button>
               <el-button size="small" type="primary" plain @click="$router.push(`/devices/${d.id}?tab=files`)">文件</el-button>
@@ -135,7 +142,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Refresh as RefreshIcon } from '@element-plus/icons-vue'
+import { Refresh as RefreshIcon, Monitor as MonitorIcon } from '@element-plus/icons-vue'
 import * as deviceApi from '@/api/device'
 import { useEventListenerStore } from '@/stores/eventListeners'
 import NetworkCell from '@/components/NetworkCell.vue'

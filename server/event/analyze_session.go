@@ -49,8 +49,8 @@ type AnalyzeSession struct {
 }
 
 type analyzeSessionStore struct {
-	mu   sync.RWMutex
-	byID map[string]*AnalyzeSession
+	mu    sync.RWMutex
+	byID  map[string]*AnalyzeSession
 	byDev map[uint]string // device_id -> session_id
 }
 

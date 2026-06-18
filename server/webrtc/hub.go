@@ -325,9 +325,10 @@ func (h *Hub) sendViewerOffer(deviceID string, camera CameraType, viewerID strin
 	v.track = localTrack
 	dc.mu.Unlock()
 
-	// Send offer to browser
+	// Send offer to browser（附带服务端 ICE 配置，三端统一，LAN 默认无 STUN 秒连）
 	v.sendFn(map[string]interface{}{
 		"type": "webrtc_offer", "camera": string(camera), "sdp": offer.SDP,
+		"ice_servers": ICEServersJSON(),
 	})
 	log.Printf("WebRTC: offer sent to viewer=%s device=%s camera=%s", viewerID, deviceID, camera)
 }

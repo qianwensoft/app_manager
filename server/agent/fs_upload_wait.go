@@ -45,4 +45,3 @@ func DeliverFsUploadEvent(uploadID string, ev FsUploadEvent) {
 	default:
 	}
 }
-
