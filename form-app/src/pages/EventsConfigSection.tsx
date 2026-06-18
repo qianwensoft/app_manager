@@ -147,6 +147,21 @@ export default function EventsConfigSection({
                   <Input size="small" value={ev.name} onChange={e => updEvent(idx, { name: e.target.value })} />
                 </div>
 
+                <div>
+                  <label style={labelStyle}>
+                    事件级别
+                    <Tooltip title="页面级：随页面挂载/卸载。应用级：在 form-app 加载后常驻、跨页面存活（存于 global_config，需在应用级配置处保存）。">
+                      <span style={{ color: '#94a3b8', marginLeft: 4, cursor: 'help' }}>ⓘ</span>
+                    </Tooltip>
+                  </label>
+                  <Select size="small" style={{ width: '100%' }} value={ev.scope || 'page'}
+                    onChange={(sc: 'page' | 'app') => updEvent(idx, { scope: sc })}
+                    options={[
+                      { value: 'page', label: '页面级（随页面）' },
+                      { value: 'app', label: '应用级（跨页面常驻）' },
+                    ]} />
+                </div>
+
                 <SourceEditor source={ev.source} fields={fields} onChange={s => updEvent(idx, { source: s })} />
 
                 <ConditionEditor when={ev.when} onChange={w => updEvent(idx, { when: w })} fields={fields} />
@@ -200,6 +215,7 @@ function SourceEditor({ source, fields, onChange }: {
               kind === 'scan' ? { kind: 'scan', scan_type: 'any' }
               : kind === 'custom_event' ? { kind: 'custom_event', event_name: '' }
               : kind === 'button' ? { kind: 'button', button_id: '' }
+              : kind === 'state_change' ? { kind: 'state_change', scope: 'app', field: '' }
               : kind === 'page_enter' ? { kind: 'page_enter' }
               : kind === 'page_exit' ? { kind: 'page_exit' }
               : { kind: 'field_change', field: '' }
@@ -210,6 +226,7 @@ function SourceEditor({ source, fields, onChange }: {
             { value: 'custom_event', label: '自定义事件' },
             { value: 'button', label: '按钮' },
             { value: 'field_change', label: '字段变更' },
+            { value: 'state_change', label: '状态变更' },
             { value: 'page_enter', label: '进入页面' },
             { value: 'page_exit', label: '退出页面' },
           ]}
@@ -237,6 +254,21 @@ function SourceEditor({ source, fields, onChange }: {
             <Select size="small" style={{ width: '100%' }} placeholder="选择字段"
               value={source.field || undefined} onChange={v => onChange({ kind: 'field_change', field: v })}
               options={fields.map(f => ({ value: f.field, label: f.label || f.field }))} />
+          )}
+          {source.kind === 'state_change' && (
+            <div style={{ display: 'flex', gap: 6 }}>
+              <Select size="small" style={{ width: 90 }} value={source.scope}
+                onChange={(sc: 'page' | 'app') => onChange({ kind: 'state_change', scope: sc, field: source.field })}
+                options={[{ value: 'app', label: '应用级' }, { value: 'page', label: '页面级' }]} />
+              {source.scope === 'page' ? (
+                <Select size="small" style={{ flex: 1 }} placeholder="选择字段" showSearch
+                  value={source.field || undefined} onChange={v => onChange({ kind: 'state_change', scope: 'page', field: v })}
+                  options={fields.map(f => ({ value: f.field, label: f.label || f.field }))} />
+              ) : (
+                <Input size="small" style={{ flex: 1 }} placeholder="状态字段名（$app.字段）"
+                  value={source.field} onChange={e => onChange({ kind: 'state_change', scope: 'app', field: e.target.value })} />
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -279,19 +311,77 @@ function ConditionEditor({ when, onChange, fields, label = '触发条件' }: {
   )
 }
 
+// ── 降级保护编辑器（超时/重试/失败策略，可选） ──────────────────────
+function DegradeEditor({ action, onChange, actionCount }: {
+  action: EventAction; onChange: (patch: any) => void; actionCount: number
+}) {
+  const a = action as any
+  const has = a.timeout != null || a.retry != null || (a.onError && a.onError !== 'abort')
+  const retry = a.retry as { maxAttempts: number; backoff: string; initialDelay: number } | undefined
+  return (
+    <Collapse ghost style={{ marginBottom: 6 }}>
+      <Collapse.Panel key="d"
+        header={<span style={{ fontSize: 11, color: has ? '#0ea5e9' : '#94a3b8' }}>降级保护{has ? '（已配置）' : '（默认关闭）'}</span>}
+      >
+        <Space direction="vertical" size={6} style={{ width: '100%' }}>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <span style={{ fontSize: 12, color: '#64748b', width: 56 }}>超时(ms)</span>
+            <Input size="small" type="number" style={{ flex: 1 }} placeholder="不限"
+              value={a.timeout ?? ''} onChange={e => onChange({ timeout: e.target.value ? Number(e.target.value) : undefined })} />
+          </div>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <span style={{ fontSize: 12, color: '#64748b', width: 56 }}>重试</span>
+            <Input size="small" type="number" style={{ width: 70 }} placeholder="次数"
+              value={retry?.maxAttempts ?? ''}
+              onChange={e => {
+                const n = e.target.value ? Number(e.target.value) : 0
+                onChange({ retry: n > 1 ? { maxAttempts: n, backoff: retry?.backoff || 'fixed', initialDelay: retry?.initialDelay ?? 0 } : undefined })
+              }} />
+            {retry && retry.maxAttempts > 1 && (
+              <>
+                <Select size="small" style={{ width: 90 }} value={retry.backoff}
+                  onChange={(v: string) => onChange({ retry: { ...retry, backoff: v } })}
+                  options={[{ value: 'fixed', label: '固定' }, { value: 'linear', label: '线性' }, { value: 'exponential', label: '指数' }]} />
+                <Input size="small" type="number" style={{ flex: 1 }} placeholder="间隔ms"
+                  value={retry.initialDelay} onChange={e => onChange({ retry: { ...retry, initialDelay: Number(e.target.value) || 0 } })} />
+              </>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <span style={{ fontSize: 12, color: '#64748b', width: 56 }}>失败时</span>
+            <Select size="small" style={{ width: 110 }} value={a.onError || 'abort'}
+              onChange={(v: string) => onChange({ onError: v === 'abort' ? undefined : v, fallbackActionIndex: v === 'fallback' ? a.fallbackActionIndex : undefined })}
+              options={[
+                { value: 'abort', label: '中断后续' },
+                { value: 'continue', label: '跳过续跑' },
+                { value: 'fallback', label: '转回退动作' },
+              ]} />
+            {a.onError === 'fallback' && (
+              <Input size="small" type="number" style={{ flex: 1 }} placeholder="回退动作序号(从0)"
+                value={a.fallbackActionIndex ?? ''} max={actionCount - 1}
+                onChange={e => onChange({ fallbackActionIndex: e.target.value ? Number(e.target.value) : undefined })} />
+            )}
+          </div>
+        </Space>
+      </Collapse.Panel>
+    </Collapse>
+  )
+}
+
 // ── 值来源输入（带常用前缀提示） ────────────────────────────────────
 function SrcInput({ value, onChange, fields, style }: {
   value: string; onChange: (v: string) => void; fields: FieldDef[]; style?: React.CSSProperties
 }) {
   return (
-    <Tooltip title="$scan=触发值，$form.字段=表单值，$event.x=事件载荷，其他=字面量">
+    <Tooltip title="$scan=触发值，$form.字段=页面值，$app.字段=应用级状态，$event.x=事件载荷，其他=字面量">
       <AutoComplete
         size="small" style={style}
         value={value}
         onChange={v => onChange(v || '')}
-        placeholder="$scan / $form.字段 / 字面量"
+        placeholder="$scan / $form.字段 / $app.字段 / 字面量"
         options={[
           { value: '$scan', label: '$scan（触发值）' },
+          { value: '$app.', label: '$app.（应用级状态）' },
           ...fields.map(f => ({ value: `$form.${f.field}`, label: `$form.${f.field}` })),
         ]}
         filterOption={(input, opt) => !!opt?.value?.toString().includes(input)}
@@ -377,10 +467,21 @@ function ActionsEditor({
             />
           </div>
 
+          {/* 降级保护：超时 / 重试 / 失败策略（全部可选，默认行为不变） */}
+          <DegradeEditor action={a} onChange={patch => upd(i, patch)} actionCount={actions.length} />
+
           {a.type === 'set_field' && (
             <div style={{ display: 'flex', gap: 6 }}>
-              <Select size="small" style={{ flex: 1 }} placeholder="目标字段" value={a.field || undefined}
-                onChange={v => upd(i, { field: v })} options={fieldOptions} />
+              <Select size="small" style={{ width: 76 }} value={a.scope || 'page'}
+                onChange={(v: any) => upd(i, { scope: v })}
+                options={[{ value: 'page', label: '页面' }, { value: 'app', label: '应用' }]} />
+              {a.scope === 'app' ? (
+                <Input size="small" style={{ flex: 1 }} placeholder="状态字段名" value={a.field}
+                  onChange={e => upd(i, { field: e.target.value })} />
+              ) : (
+                <Select size="small" style={{ flex: 1 }} placeholder="目标字段" value={a.field || undefined}
+                  onChange={v => upd(i, { field: v })} options={fieldOptions} />
+              )}
               <span style={{ color: '#94a3b8' }}>←</span>
               <SrcInput style={{ flex: 1 }} value={a.value_src} fields={fields} onChange={v => upd(i, { value_src: v })} />
             </div>
@@ -466,7 +567,7 @@ function ActionsEditor({
             <div>
               <ScriptEditor value={a.script} onChange={v => upd(i, { script: v })} />
               <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
-                脚本内用 <code>ctx</code> 访问运行时：ctx.get/set/setProp、ctx.callInterface(await)、ctx.print、ctx.navigate、ctx.toast、ctx.speak、ctx.emit、ctx.scan/event/values。输入 <code>ctx.</code> 触发补全。
+                脚本内用 <code>ctx</code> 访问运行时：ctx.get/set/setProp、ctx.appGet/appSet（应用级状态）、ctx.callInterface(await)、ctx.print、ctx.navigate、ctx.toast、ctx.speak、ctx.emit、ctx.scan/event/values。输入 <code>ctx.</code> 触发补全。
               </div>
             </div>
           )}

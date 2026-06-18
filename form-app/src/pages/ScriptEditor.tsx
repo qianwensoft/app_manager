@@ -25,6 +25,8 @@ const CTX_MEMBERS: Array<{ label: string; apply: string; detail: string }> = [
   { label: 'toast', apply: "toast('')", detail: '顶部提示' },
   { label: 'speak', apply: "speak('')", detail: '语音播报' },
   { label: 'emit', apply: "emit('', {})", detail: '触发自定义事件 emit(name, data?)' },
+  { label: 'appGet', apply: "appGet('')", detail: '读应用级状态 appGet(field)' },
+  { label: 'appSet', apply: "appSet('', )", detail: '写应用级状态 appSet(field, value)' },
 ]
 
 const consoleMethods = [
