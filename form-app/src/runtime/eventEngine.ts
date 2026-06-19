@@ -36,6 +36,7 @@ export function resolveSrc(src: string | undefined, ctx: EventContext): any {
   if (src === undefined || src === null) return undefined
   const s = String(src)
   if (s === '$scan') return ctx.scan
+  if (s.startsWith('$node.')) return resolveNestedField(ctx.nodeOutputs, s.slice(6))
   if (s.startsWith('$app.')) return resolveNestedField(ctx.app, s.slice(5))
   if (s.startsWith('$form.')) return resolveNestedField(ctx.form, s.slice(6))
   if (s.startsWith('$event.')) return resolveNestedField(ctx.event, s.slice(7))
@@ -97,6 +98,8 @@ export interface EventEngineDeps {
   navigate?: (pageKey: string, params: Record<string, any>) => void
   /** 提示 */
   toast?: (msg: string) => void
+  /** DAG 执行轨迹回调（可观测性；线性路径不触发） */
+  onTrace?: (traces: import('./dag/types').NodeTrace[]) => void
 }
 
 /** 空状态容器：app 作用域被请求但无 AppState 时的安全兜底（全部 no-op）。 */
@@ -249,6 +252,12 @@ async function runActions(
   deps: EventEngineDeps,
   emitScope: EmitScope = rootEmitScope(),
 ): Promise<void> {
+  // 窄 DAG 路径：事件配了 graph 且有节点时走拓扑调度；否则走线性 actions（存量）
+  if (ev.graph && ev.graph.nodes && ev.graph.nodes.length > 0) {
+    const { runGraph } = await import('./dag/scheduler')
+    await runGraph(ev.graph, ctx, deps, emitScope)
+    return
+  }
   const actions = ev.actions || []
   for (let i = 0; i < actions.length; i++) {
     const action = actions[i]

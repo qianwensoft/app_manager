@@ -1,7 +1,10 @@
 # 第 5 步：窄 DAG 调度器 落地设计
 
-**版本**: v1.0
+**版本**: v1.1（已实现）
 **日期**: 2026-06-19
+**状态**: ✅ 运行时已实现 + 单测 11 例通过（fan-out/barrier/condition/$node/超时/环检测/migrate）。设计器画布（第 6 步）未做，故目前 graph 只能由 migrate 生成或手写 JSON。
+**实现文件**: `runtime/dag/{types,validate,migrate,scheduler}.ts`；`eventEngine` 接 runActions 分流（动态 import 防循环）+ resolveSrc 加 `$node.` + EventContext.nodeOutputs + EventEngineDeps.onTrace。
+**已知延后**: run_script 节点内读 `$node` 暂未注入 ScriptApi（tool 节点参数已可经 `$node.x` 取上游产出）；需要时再给 ScriptApi 加 `node()`。
 **前置**: 第 1-4 步（StateScope / AppState / ToolRegistry / 降级守卫 + 环路守卫）均已落地并测过
 **对应**: [事件系统演进架构设计-DAG版.md] 第 5 步 + 3.1 节
 **范围**: 把事件流的动作链从**线性 `runActions`** 升级为**窄 DAG 调度**（5 类节点：tool/run_script/parallel/barrier/condition）。**自研**，不引入 workflow-engine。不含画布设计器（第 6 步）。

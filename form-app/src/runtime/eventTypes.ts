@@ -22,6 +22,8 @@ export interface EventContext {
   app?: Record<string, any>
   /** 事件载荷（自定义事件可携带对象） */
   event?: any
+  /** DAG 执行时的节点产出表，供 $node.<id>.<key> 取值（仅 DAG 路径注入） */
+  nodeOutputs?: Record<string, any>
 }
 
 /** 状态作用域：page=当前页面状态，app=应用级共享状态 */
@@ -182,6 +184,11 @@ export interface PageEvent {
   when?: ConditionExpr
   /** 顺序执行的动作链 */
   actions: EventAction[]
+  /**
+   * 窄 DAG 编排（可选）。存在且有节点时，运行时走 runGraph（拓扑调度）而非线性 actions。
+   * 结构见 runtime/dag/types.ts。存量事件无此字段，仍走 actions 线性路径。
+   */
+  graph?: import('./dag/types').FlowGraph
 }
 
 // ── 兼容旧 scanner 配置 ──────────────────────────────────────────────
