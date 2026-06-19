@@ -75,6 +75,12 @@ func ListWorkOrders(c *gin.Context) {
 	}
 
 	q := database.DB.Model(&models.WorkOrder{})
+	// 归档过滤：默认仅未归档；archived=1 时仅归档（独立归档页）。
+	if c.Query("archived") == "1" {
+		q = q.Where("archived = ?", true)
+	} else {
+		q = q.Where("archived = ? OR archived IS NULL", false)
+	}
 	if s := c.Query("status"); s != "" {
 		q = q.Where("status = ?", s)
 	}
@@ -89,6 +95,20 @@ func ListWorkOrders(c *gin.Context) {
 	}
 	if v := c.Query("visibility"); v != "" {
 		q = q.Where("visibility = ?", v)
+	}
+	// 标签多选筛选：命中任一选中标签即可（OR 语义），用 link 表子查询避免 join 去重。
+	if t := strings.TrimSpace(c.Query("tags")); t != "" {
+		codes := make([]string, 0)
+		for _, p := range strings.Split(t, ",") {
+			if s := strings.TrimSpace(p); s != "" {
+				codes = append(codes, s)
+			}
+		}
+		if len(codes) > 0 {
+			sub := database.DB.Model(&models.WorkOrderTagLink{}).
+				Select("work_order_id").Where("tag_code IN ?", codes)
+			q = q.Where("id IN (?)", sub)
+		}
 	}
 
 	// 非管理员：仅公开 或 自己创建/被指派的工单。
@@ -131,7 +151,7 @@ func ListWorkOrders(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": out, "total": total, "page": page, "limit": limit})
 }
 
-// GetWorkOrder 详情（含 items + activities）。
+// GetWorkOrder 详情（含 items + activities + tags）。
 func GetWorkOrder(c *gin.Context) {
 	var wo models.WorkOrder
 	if err := database.DB.First(&wo, c.Param("id")).Error; err != nil {
@@ -139,8 +159,20 @@ func GetWorkOrder(c *gin.Context) {
 		return
 	}
 	database.DB.Where("work_order_id = ?", wo.ID).Order("id ASC").Find(&wo.Items)
-	database.DB.Where("work_order_id = ?", wo.ID).Order("id ASC").Find(&wo.Activities)
-	c.JSON(http.StatusOK, gin.H{"data": wo})
+	database.DB.Where("work_order_id = ?", wo.ID).Order("id DESC").Find(&wo.Activities)
+	// 标签：tags 为 code 列表（与列表/看板一致），tag_links 含名称快照供详情展示。
+	var links []models.WorkOrderTagLink
+	database.DB.Where("work_order_id = ?", wo.ID).Order("tag_code ASC").Find(&links)
+	tags := make([]string, 0, len(links))
+	for _, l := range links {
+		tags = append(tags, l.TagCode)
+	}
+	type detailRow struct {
+		models.WorkOrder
+		Tags     []string                  `json:"tags"`
+		TagLinks []models.WorkOrderTagLink `json:"tag_links"`
+	}
+	c.JSON(http.StatusOK, gin.H{"data": detailRow{WorkOrder: wo, Tags: tags, TagLinks: links}})
 }
 
 // CreateWorkOrder 创建工单（Agent device-token 或登录用户）。
@@ -202,7 +234,7 @@ func CreateWorkOrder(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": wo})
 }
 
-// UpdateWorkOrder 改 title/priority/visibility。
+// UpdateWorkOrder 改 title/description/priority/visibility/other_codes，变更记入时间线。
 func UpdateWorkOrder(c *gin.Context) {
 	var wo models.WorkOrder
 	if err := database.DB.First(&wo, c.Param("id")).Error; err != nil {
@@ -210,32 +242,70 @@ func UpdateWorkOrder(c *gin.Context) {
 		return
 	}
 	var req struct {
-		Title      *string `json:"title"`
-		Priority   *string `json:"priority"`
-		Visibility *string `json:"visibility"`
-		OtherCodes *string `json:"other_codes"`
+		Title       *string `json:"title"`
+		Description *string `json:"description"`
+		Priority    *string `json:"priority"`
+		Visibility  *string `json:"visibility"`
+		OtherCodes  *string `json:"other_codes"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	updates := map[string]interface{}{}
+	actor := actorLabel(c)
+	uid := c.GetUint("user_id")
+
+	// 标题变更
 	if req.Title != nil {
-		updates["title"] = strings.TrimSpace(*req.Title)
+		newTitle := strings.TrimSpace(*req.Title)
+		if newTitle != wo.Title {
+			updates["title"] = newTitle
+			addWorkOrderActivity(wo.ID, "update", wo.Status, wo.Status, uid, actor, fmt.Sprintf("标题：%s → %s", wo.Title, newTitle))
+		}
 	}
+	// 描述变更
+	if req.Description != nil {
+		newDesc := strings.TrimSpace(*req.Description)
+		if newDesc != wo.Description {
+			updates["description"] = newDesc
+			detail := "修改了工单描述"
+			if wo.Description == "" {
+				detail = "添加了工单描述"
+			} else if newDesc == "" {
+				detail = "清空了工单描述"
+			}
+			addWorkOrderActivity(wo.ID, "update", wo.Status, wo.Status, uid, actor, detail)
+		}
+	}
+	// 其他编码变更
 	if req.OtherCodes != nil {
-		updates["other_codes"] = normalizeCodes(*req.OtherCodes)
+		newCodes := normalizeCodes(*req.OtherCodes)
+		if newCodes != wo.OtherCodes {
+			updates["other_codes"] = newCodes
+			addWorkOrderActivity(wo.ID, "update", wo.Status, wo.Status, uid, actor, fmt.Sprintf("其他编码：%s → %s", wo.OtherCodes, newCodes))
+		}
 	}
+	// 优先级变更
 	if req.Priority != nil {
-		updates["priority"] = *req.Priority
+		if *req.Priority != wo.Priority {
+			updates["priority"] = *req.Priority
+			addWorkOrderActivity(wo.ID, "update", wo.Status, wo.Status, uid, actor, fmt.Sprintf("优先级：%s → %s", wo.Priority, *req.Priority))
+		}
 	}
+	// 可见性变更
 	if req.Visibility != nil {
 		if *req.Visibility != "public" && *req.Visibility != "private" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid visibility"})
 			return
 		}
-		updates["visibility"] = *req.Visibility
+		if *req.Visibility != wo.Visibility {
+			updates["visibility"] = *req.Visibility
+			visLabel := map[string]string{"public": "公开", "private": "私有"}
+			addWorkOrderActivity(wo.ID, "update", wo.Status, wo.Status, uid, actor, fmt.Sprintf("可见性：%s → %s", visLabel[wo.Visibility], visLabel[*req.Visibility]))
+		}
 	}
+
 	if len(updates) > 0 {
 		database.DB.Model(&wo).Updates(updates)
 	}
@@ -379,6 +449,80 @@ func DeleteWorkOrder(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "ok"})
 }
 
+// BatchArchiveWorkOrders 批量归档：仅允许 closed/resolved 状态的工单归档。
+func BatchArchiveWorkOrders(c *gin.Context) {
+	var req struct {
+		IDs []uint `json:"ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if len(req.IDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ids required"})
+		return
+	}
+	var rows []models.WorkOrder
+	database.DB.Where("id IN ?", req.IDs).Find(&rows)
+	uid := c.GetUint("user_id")
+	actor := actorLabel(c)
+	now := time.Now()
+	archived := 0
+	var skipped []string
+	for i := range rows {
+		wo := &rows[i]
+		if wo.Archived {
+			continue // 已归档跳过
+		}
+		if wo.Status != "closed" && wo.Status != "resolved" {
+			skipped = append(skipped, wo.Code)
+			continue // 仅已关闭/已解决可归档
+		}
+		database.DB.Model(wo).Updates(map[string]interface{}{
+			"archived":    true,
+			"archived_at": &now,
+			"archived_by": &uid,
+		})
+		addWorkOrderActivity(wo.ID, "archive", wo.Status, wo.Status, uid, actor, "")
+		archived++
+	}
+	c.JSON(http.StatusOK, gin.H{"archived": archived, "skipped": skipped})
+}
+
+// BatchUnarchiveWorkOrders 批量取消归档。
+func BatchUnarchiveWorkOrders(c *gin.Context) {
+	var req struct {
+		IDs []uint `json:"ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if len(req.IDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ids required"})
+		return
+	}
+	var rows []models.WorkOrder
+	database.DB.Where("id IN ?", req.IDs).Find(&rows)
+	uid := c.GetUint("user_id")
+	actor := actorLabel(c)
+	unarchived := 0
+	for i := range rows {
+		wo := &rows[i]
+		if !wo.Archived {
+			continue
+		}
+		database.DB.Model(wo).Updates(map[string]interface{}{
+			"archived":    false,
+			"archived_at": nil,
+			"archived_by": nil,
+		})
+		addWorkOrderActivity(wo.ID, "unarchive", wo.Status, wo.Status, uid, actor, "")
+		unarchived++
+	}
+	c.JSON(http.StatusOK, gin.H{"unarchived": unarchived})
+}
+
 // workOrderView 给 device 端补充设备名/提交人展示字段。
 type workOrderView struct {
 	models.WorkOrder
@@ -434,7 +578,9 @@ func ListMyWorkOrders(c *gin.Context) {
 		return
 	}
 	var rows []models.WorkOrder
-	database.DB.Where("device_id = ?", deviceID).Order("id DESC").Limit(100).Find(&rows)
+	database.DB.Where("device_id = ?", deviceID).
+		Where("archived = ? OR archived IS NULL", false).
+		Order("id DESC").Limit(100).Find(&rows)
 	out := make([]workOrderView, 0, len(rows))
 	for i := range rows {
 		out = append(out, enrichWorkOrder(&rows[i]))
@@ -456,7 +602,7 @@ func GetMyWorkOrder(c *gin.Context) {
 		return
 	}
 	database.DB.Where("work_order_id = ?", wo.ID).Order("id ASC").Find(&wo.Items)
-	database.DB.Where("work_order_id = ?", wo.ID).Order("id ASC").Find(&wo.Activities)
+	database.DB.Where("work_order_id = ?", wo.ID).Order("id DESC").Find(&wo.Activities)
 	c.JSON(http.StatusOK, gin.H{"data": enrichWorkOrder(&wo)})
 }
 
@@ -606,6 +752,7 @@ func UpdateWorkOrderType(c *gin.Context) {
 		"form_app_code": req.FormAppCode,
 		"form_page_key": req.FormPageKey,
 		"default_title": req.DefaultTitle,
+		"board_card_template": req.BoardCardTemplate,
 		"enabled":       req.Enabled,
 		"sort_order":    req.SortOrder,
 	})
@@ -655,7 +802,7 @@ func OpenGetWorkOrder(c *gin.Context) {
 		return
 	}
 	database.DB.Where("work_order_id = ?", wo.ID).Order("id ASC").Find(&wo.Items)
-	database.DB.Where("work_order_id = ?", wo.ID).Order("id ASC").Find(&wo.Activities)
+	database.DB.Where("work_order_id = ?", wo.ID).Order("id DESC").Find(&wo.Activities)
 	c.JSON(http.StatusOK, gin.H{"data": wo})
 }
 

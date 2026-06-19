@@ -5,13 +5,18 @@
     <el-row :gutter="16">
       <el-col :span="16">
         <el-card shadow="never" style="margin-bottom:16px">
-          <template #header><b>{{ wo.title }}</b></template>
+          <template #header>
+            <div class="card-head">
+              <b>{{ wo.title }}</b>
+              <el-button text type="primary" size="small" @click="openEdit">编辑</el-button>
+            </div>
+          </template>
           <el-descriptions :column="2" border>
             <el-descriptions-item label="状态">
               <el-tag :type="statusType(wo.status)">{{ statusLabel(wo.status) }}</el-tag>
             </el-descriptions-item>
             <el-descriptions-item label="优先级">
-              <el-tag :type="priorityType(wo.priority)" size="small">{{ wo.priority }}</el-tag>
+              <el-tag :type="priorityType(wo.priority)" size="small">{{ priorityLabel(wo.priority) }}</el-tag>
             </el-descriptions-item>
             <el-descriptions-item label="类型">{{ wo.type_code || '-' }}</el-descriptions-item>
             <el-descriptions-item label="设备">{{ wo.device_id || '-' }}</el-descriptions-item>
@@ -112,23 +117,19 @@
         </el-card>
 
         <el-card shadow="never" style="margin-bottom:16px">
-          <template #header><b>标签</b></template>
+          <template #header>
+            <div class="card-head">
+              <b>标签</b>
+              <el-button text type="primary" size="small" @click="openTagEdit">编辑</el-button>
+            </div>
+          </template>
           <div class="tags-box">
             <el-tag
               v-for="code in (wo.tags || [])" :key="code"
-              closable :color="tagColor(code)"
+              :color="tagColor(code)"
               :style="tagColor(code) ? 'color:#fff;border:none' : ''"
-              @close="removeTag(code)"
             >{{ tagName(code) }}</el-tag>
-            <el-select
-              v-model="addTagCode" placeholder="添加标签" size="small"
-              style="width:140px" @change="onAddTag"
-            >
-              <el-option
-                v-for="t in availableTags" :key="t.code"
-                :label="t.name" :value="t.code"
-              />
-            </el-select>
+            <span v-if="!(wo.tags || []).length" class="tags-empty">暂无标签</span>
           </div>
         </el-card>
 
@@ -162,6 +163,44 @@
       </el-col>
     </el-row>
 
+    <el-dialog v-model="editDialog" title="编辑工单" width="560px">
+      <el-form :model="editForm" label-width="80px">
+        <el-form-item label="标题">
+          <el-input v-model="editForm.title" placeholder="请输入标题" />
+        </el-form-item>
+        <el-form-item label="描述">
+          <el-input v-model="editForm.description" type="textarea" :rows="4" placeholder="请输入描述" />
+        </el-form-item>
+        <el-form-item label="优先级">
+          <el-select v-model="editForm.priority" placeholder="选择优先级">
+            <el-option label="普通" value="normal" />
+            <el-option label="高" value="high" />
+            <el-option label="紧急" value="urgent" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editDialog = false">取消</el-button>
+        <el-button type="primary" @click="saveEdit">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="tagDialog" title="修改标签" width="460px">
+      <el-select
+        v-model="tagDraft" multiple filterable clearable
+        placeholder="选择标签（可多选）" style="width:100%"
+      >
+        <el-option v-for="t in tagDict" :key="t.code" :label="t.name" :value="t.code">
+          <span :style="t.color ? `display:inline-block;width:8px;height:8px;border-radius:50%;background:${t.color};margin-right:6px` : ''" />
+          {{ t.name }}
+        </el-option>
+      </el-select>
+      <template #footer>
+        <el-button @click="tagDialog = false">取消</el-button>
+        <el-button type="primary" @click="saveTagEdit">保存</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="assignDialog" title="转交工单" width="420px">
       <el-form label-width="80px">
         <el-form-item label="处理人ID"><el-input v-model.number="assignTo" type="number" /></el-form-item>
@@ -192,7 +231,7 @@ import {
   getWorkOrderTypes, workOrderItemDownloadUrl,
   getWorkOrderTagDict, setWorkOrderTags
 } from '@/api/workOrder'
-import { statusLabel, statusType, priorityType } from './workOrderConst'
+import { statusLabel, statusType, priorityType, priorityLabel } from './workOrderConst'
 
 const route = useRoute()
 const id = route.params.id
@@ -204,6 +243,32 @@ const assignTo = ref(null)
 const assignComment = ref('')
 const previewDialog = ref(false)
 const previewItem = ref(null)
+
+// 编辑对话框
+const editDialog = ref(false)
+const editForm = ref({ title: '', description: '', priority: 'normal' })
+const openEdit = () => {
+  editForm.value = {
+    title: wo.value.title || '',
+    description: wo.value.description || '',
+    priority: wo.value.priority || 'normal'
+  }
+  editDialog.value = true
+}
+const saveEdit = async () => {
+  if (!editForm.value.title?.trim()) {
+    ElMessage.warning('标题不能为空')
+    return
+  }
+  await updateWorkOrder(id, {
+    title: editForm.value.title,
+    description: editForm.value.description,
+    priority: editForm.value.priority
+  })
+  editDialog.value = false
+  ElMessage.success('工单已更新')
+  load()
+}
 
 // 其他编码
 const editCodes = ref(false)
@@ -231,25 +296,25 @@ const renderCodeQr = async (code) => {
 
 // 标签字典 + 维护
 const tagDict = ref([])
-const addTagCode = ref('')
-const tagName = (code) => tagDict.value.find(t => t.code === code)?.name || code
+const tagDialog = ref(false)
+const tagDraft = ref([])
+// 名称优先取字典；字典已删则回退工单关联快照（tag_links.tag_name）。
+const tagName = (code) => {
+  const dictName = tagDict.value.find(t => t.code === code)?.name
+  if (dictName) return dictName
+  const snap = (wo.value.tag_links || []).find(l => l.tag_code === code)?.tag_name
+  return snap || code
+}
 const tagColor = (code) => tagDict.value.find(t => t.code === code)?.color || ''
-const availableTags = computed(() =>
-  tagDict.value.filter(t => !(wo.value.tags || []).includes(t.code))
-)
-const saveTags = async (tags) => {
-  await setWorkOrderTags(id, tags)
+const openTagEdit = () => {
+  tagDraft.value = [...(wo.value.tags || [])]
+  tagDialog.value = true
+}
+const saveTagEdit = async () => {
+  await setWorkOrderTags(id, tagDraft.value)
+  tagDialog.value = false
   ElMessage.success('标签已更新')
   load()
-}
-const onAddTag = (code) => {
-  if (!code) return
-  const next = [...(wo.value.tags || []), code]
-  addTagCode.value = ''
-  saveTags(next)
-}
-const removeTag = (code) => {
-  saveTags((wo.value.tags || []).filter(c => c !== code))
 }
 
 const photoItems = computed(() => (wo.value.items || []).filter(it => it.kind === 'photo'))
@@ -259,7 +324,7 @@ const openPreview = (it) => { previewItem.value = it; previewDialog.value = true
 
 const kindLabels = { text: '文字', photo: '照片', video: '视频', voice: '语音', screen_record: '录屏', logcat: '日志', resource: '资源' }
 const kindLabel = (k) => kindLabels[k] || k
-const actionLabels = { create: '创建', comment: '备注', assign: '转交', status_change: '状态变更', close: '关闭', reopen: '重新打开', external_update: '第三方更新', tag_change: '标签变更' }
+const actionLabels = { create: '创建', update: '更新', comment: '备注', assign: '转交', status_change: '状态变更', close: '关闭', reopen: '重新打开', external_update: '第三方更新', tag_change: '标签变更', archive: '归档', unarchive: '取消归档' }
 const actionLabel = (a) => actionLabels[a] || a
 
 const dlUrl = (itemId) => workOrderItemDownloadUrl(id, itemId)
@@ -339,4 +404,6 @@ onMounted(async () => {
 .qr-img { width: 160px; height: 160px; }
 .qr-text { font-size: 12px; color: #606266; word-break: break-all; text-align: center; }
 .tags-box { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.tags-empty { font-size: 13px; color: #c0c4cc; }
+.card-head { display: flex; align-items: center; justify-content: space-between; }
 </style>
