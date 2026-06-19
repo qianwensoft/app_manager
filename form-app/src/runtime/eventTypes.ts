@@ -24,6 +24,8 @@ export interface EventContext {
   event?: any
   /** DAG 执行时的节点产出表，供 $node.<id>.<key> 取值（仅 DAG 路径注入） */
   nodeOutputs?: Record<string, any>
+  /** 跨设备事件的 hop（内部字段，emit_cross_app 读取以传递 parentHop） */
+  _crossDeviceHop?: number
 }
 
 /** 状态作用域：page=当前页面状态，app=应用级共享状态 */

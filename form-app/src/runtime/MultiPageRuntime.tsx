@@ -187,6 +187,7 @@ export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }:
     const appPrinters = Array.isArray(globalCfg.printers) ? globalCfg.printers : []
     return setupAppEvents(appEvents, {
       appState,
+      formAppCode,
       activePageRef: activePageRef.current,
       onScanInterface,
       doPrint: async (templateId, values, extra) => doPrintViaBridge(appPrinters, templateId, values, extra),
