@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { message, Button, Input, Tag, Tooltip } from 'antd'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Toaster } from '@/components/ui/toaster'
+import { message } from '@/lib/message'
 import RuntimeAgentBar from './RuntimeAgentBar'
 import SchemaFormRenderer from './SchemaFormRenderer'
 import { resolveLibrary } from './endResolver'
@@ -216,9 +219,6 @@ export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }:
     ? `${window.location.origin}${window.location.pathname}?${searchParams.toString()}`
     : ''
 
-  const pageTypeColor = (t: string) =>
-    t === 'form' ? 'blue' : t === 'list' ? 'green' : t === 'detail' ? 'orange' : 'purple'
-
   const sideNav = embedded ? null : (
     <div style={{
       width: navOpen ? 220 : 0, flexShrink: 0, overflow: 'hidden',
@@ -237,7 +237,13 @@ export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }:
               borderLeft: p.page_key === currentPageKey ? '3px solid #1677ff' : '3px solid transparent',
             }}
           >
-            <Tag color={pageTypeColor(p.page_type)} style={{ marginInlineEnd: 0 }}>{p.page_type}</Tag>
+            <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+              p.page_type === 'form' ? 'bg-blue-100 text-blue-800' :
+              p.page_type === 'list' ? 'bg-green-100 text-green-800' :
+              'bg-gray-100 text-gray-800'
+            }`}>
+              {p.page_type}
+            </span>
             <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {p.title || p.page_key}
             </span>
@@ -250,16 +256,21 @@ export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }:
 
   const urlBar = embedded ? null : (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: '1px solid #e5e7eb', background: '#fff' }}>
-      <Button size="small" onClick={() => setNavOpen(v => !v)}>{navOpen ? '«' : '»'}</Button>
-      <Input size="small" readOnly value={fullUrl} style={{ flex: 1 }} />
-      <Tooltip title="复制链接">
-        <Button size="small" onClick={() => {
+      <Button size="sm" variant="outline" onClick={() => setNavOpen(v => !v)}>{navOpen ? '«' : '»'}</Button>
+      <Input size="sm" readOnly value={fullUrl} className="flex-1" />
+      <Button
+        size="sm"
+        variant="outline"
+        title="复制链接"
+        onClick={() => {
           navigator.clipboard?.writeText(fullUrl).then(
             () => message.success('已复制链接'),
             () => message.error('复制失败'),
           )
-        }}>复制</Button>
-      </Tooltip>
+        }}
+      >
+        复制
+      </Button>
     </div>
   )
 
@@ -342,7 +353,7 @@ export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }:
         <RuntimeAgentBar />
       {navigationManager.canGoBack() && (
         <div style={{ padding: 16, borderBottom: '1px solid #e5e7eb' }}>
-          <Button onClick={goBack}>← 返回</Button>
+          <Button variant="outline" onClick={goBack}>← 返回</Button>
         </div>
       )}
       {(currentPage.page_type === 'form' || currentPage.page_type === 'custom') && (() => {
@@ -444,6 +455,7 @@ export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }:
       )}
       </div>
     </div>
+    <Toaster />
     </AppStateContext.Provider>
   )
 }
