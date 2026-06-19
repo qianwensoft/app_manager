@@ -9,8 +9,10 @@
  * navigate / callInterface / getFormValues）。
  */
 import { useState } from 'react'
-import { Button, message } from 'antd'
+import { Button } from '@/components/ui/button'
+import { message } from '@/lib/message'
 import { useFormAction } from './FormActionContext'
+import { Loader2 } from 'lucide-react'
 
 type ButtonType = 'primary' | 'default' | 'dashed' | 'link' | 'text'
 type ActionKind = 'submit' | 'event' | 'navigate' | 'interface'
@@ -30,6 +32,17 @@ function resolveParamMapping(
     }
   }
   return out
+}
+
+/** antd type → shadcn variant 映射 */
+function getVariant(type: ButtonType): 'default' | 'destructive' | 'outline' | 'secondary' | 'ghost' | 'link' {
+  switch (type) {
+    case 'primary': return 'default'
+    case 'dashed': return 'outline'
+    case 'link': return 'link'
+    case 'text': return 'ghost'
+    default: return 'secondary'
+  }
 }
 
 // ── 通用动作按钮 ──────────────────────────────────────────────────────
@@ -106,12 +119,13 @@ export function ActionButton(props: ActionButtonProps) {
 
   return (
     <Button
-      type={type}
-      block={block}
-      htmlType="button"
-      loading={action === 'submit' ? submitting : loading}
+      variant={getVariant(type)}
+      className={block ? 'w-full' : ''}
+      type="button"
+      disabled={action === 'submit' ? submitting : loading}
       onClick={onClick}
     >
+      {(action === 'submit' ? submitting : loading) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
       {text}
     </Button>
   )
@@ -131,9 +145,9 @@ export function EventButton(props: EventButtonProps) {
   const { triggerButton } = useFormAction()
   return (
     <Button
-      type={type}
-      block={block}
-      htmlType="button"
+      variant={getVariant(type)}
+      className={block ? 'w-full' : ''}
+      type="button"
       onClick={() => { if (buttonId) triggerButton?.(buttonId) }}
     >
       {text}
@@ -156,9 +170,9 @@ export function NavigateButton(props: NavigateButtonProps) {
   const { navigate, getFormValues } = useFormAction()
   return (
     <Button
-      type={type}
-      block={block}
-      htmlType="button"
+      variant={getVariant(type)}
+      className={block ? 'w-full' : ''}
+      type="button"
       onClick={() => {
         if (targetPage) navigate?.(targetPage, resolveParamMapping(paramMapping, getFormValues?.() || {}))
       }}

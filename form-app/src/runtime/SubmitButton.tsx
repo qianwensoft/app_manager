@@ -7,8 +7,9 @@
  *   - block: 是否撑满整行
  * 点击后调用表单级 submit()，统一走 SchemaFormRenderer 的提交逻辑（校验 + onSubmit）。
  */
-import { Button } from 'antd'
+import { Button } from '@/components/ui/button'
 import { useFormSubmit } from './SubmitButtonContext'
+import { Loader2 } from 'lucide-react'
 
 interface SubmitButtonProps {
   text?: string
@@ -20,14 +21,18 @@ export default function SubmitButton(props: SubmitButtonProps) {
   const { text = '提交', type = 'primary', block } = props
   const { submit, submitting } = useFormSubmit()
 
+  // antd type → shadcn variant 映射
+  const variant = type === 'primary' ? 'default' : type === 'dashed' ? 'outline' : 'secondary'
+
   return (
     <Button
-      type={type}
-      block={block}
-      htmlType="button"
-      loading={submitting}
+      variant={variant}
+      className={block ? 'w-full' : ''}
+      type="button"
+      disabled={submitting}
       onClick={() => submit?.()}
     >
+      {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
       {text}
     </Button>
   )

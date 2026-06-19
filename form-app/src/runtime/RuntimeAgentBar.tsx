@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
-import { Button } from 'antd'
+import { Button } from '@/components/ui/button'
+import { ScanLine } from 'lucide-react'
 
 type AndroidBridge = {
   scanBarcode?: () => void
@@ -20,14 +21,13 @@ export default function RuntimeAgentBar() {
   return (
     <div className="runtime-agent-bar">
       <Button
-        type="primary"
-        shape="circle"
-        size="large"
-        className="runtime-scan-fab"
+        variant="default"
+        size="icon"
+        className="runtime-scan-fab h-14 w-14 rounded-full shadow-lg"
         aria-label="扫码"
         onClick={() => bridge.scanBarcode?.()}
       >
-        扫
+        <ScanLine className="h-6 w-6" />
       </Button>
     </div>
   )

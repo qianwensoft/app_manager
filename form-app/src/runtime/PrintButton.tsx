@@ -7,8 +7,10 @@
  * 点击后优先走绑定模板的 print；若配置了 buttonId 则同时触发对应事件。
  */
 import { useState } from 'react'
-import { Button, message } from 'antd'
+import { Button } from '@/components/ui/button'
+import { message } from '@/lib/message'
 import { usePrintButton } from './PrintButtonContext'
+import { Loader2 } from 'lucide-react'
 
 interface PrintButtonProps {
   templateId?: string
@@ -43,8 +45,16 @@ export default function PrintButton(props: PrintButtonProps) {
     }
   }
 
+  const variant = type === 'primary' ? 'default' : type === 'dashed' ? 'outline' : 'secondary'
+
   return (
-    <Button type={type} block={block} loading={loading} onClick={onClick}>
+    <Button
+      variant={variant}
+      className={block ? 'w-full' : ''}
+      disabled={loading}
+      onClick={onClick}
+    >
+      {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
       {text}
     </Button>
   )
