@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Button, message, Tag } from 'antd'
+import { message } from '@/lib/message'
 import { createForm, onFieldValueChange, type Form as FormilyForm } from '@formily/core'
 import { FormProvider, createSchemaField } from '@formily/react'
-import { Form as FormilyAntdForm } from '@formily/antd'
 import { SubmitButtonContext } from './SubmitButtonContext'
 import { FormActionContext } from './FormActionContext'
 import type { FieldBinding, FieldOption } from './types'
@@ -18,11 +17,12 @@ import {
   clearLocalDraft, clearServerDraft, draftStorageKey,
   loadLocalDraft, loadServerDraft, saveLocalDraft, saveServerDraft,
 } from './formDraft'
+import { shadcnComponents, ShadcnFormContainer } from './componentLibraries/shadcn'
 import { antdComponents } from './componentLibraries/antd'
 import { loadLibrary, type LibraryKey, type ComponentRegistry } from './componentLibraries'
 
-// 默认桌面 antd 的 SchemaField（同步可用，移动库按 libraryKey 动态加载后重建）。
-const defaultSchemaField = createSchemaField({ components: antdComponents })
+// 默认 shadcn 的 SchemaField（同步可用，移动库按 libraryKey 动态加载后重建）。
+const defaultSchemaField = createSchemaField({ components: shadcnComponents })
 
 type SchemaFormRendererProps = {
   designSchema: any
@@ -64,7 +64,7 @@ export default function SchemaFormRenderer({
   onScanInterface,
   doPrint,
   onNavigate,
-  libraryKey = 'antd',
+  libraryKey = 'shadcn',
   formCode,
   pageKey,
   enableDraft = false,
@@ -74,17 +74,17 @@ export default function SchemaFormRenderer({
   const valuesRef = useRef<Record<string, any>>(initialValues)
   const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null)
 
-  // 按 libraryKey 构建 SchemaField：桌面 antd 同步可用；移动库动态加载后重建。
-  const [registry, setRegistry] = useState<ComponentRegistry>(antdComponents)
+  // 按 libraryKey 构建 SchemaField：shadcn 同步可用；移动库动态加载后重建。
+  const [registry, setRegistry] = useState<ComponentRegistry>(shadcnComponents)
   useEffect(() => {
     let alive = true
     loadLibrary(libraryKey)
       .then((comps) => { if (alive) setRegistry(comps) })
-      .catch(() => { /* 加载失败时保持桌面 antd 兜底 */ })
+      .catch(() => { /* 加载失败时保持 shadcn 兜底 */ })
     return () => { alive = false }
   }, [libraryKey])
   const SchemaField = useMemo(
-    () => (registry === antdComponents ? defaultSchemaField : createSchemaField({ components: registry })),
+    () => (registry === shadcnComponents ? defaultSchemaField : createSchemaField({ components: registry })),
     [registry],
   )
 
@@ -296,19 +296,27 @@ export default function SchemaFormRenderer({
         <SubmitButtonContext.Provider value={{ submit: handleSubmit, submitting: loading }}>
           <div style={{ padding: 16 }}>
             {draftSavedAt && (
-              <div style={{ marginBottom: 12 }}>
-                <Tag color="blue">草稿已自动保存</Tag>
-                <Button type="link" size="small" onClick={clearDraft}>清除草稿</Button>
+              <div className="flex items-center gap-2 mb-3">
+                <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                  草稿已自动保存
+                </span>
+                <button
+                  type="button"
+                  className="text-sm text-blue-600 hover:underline"
+                  onClick={clearDraft}
+                >
+                  清除草稿
+                </button>
               </div>
             )}
             <FormProvider form={form}>
-              <FormilyAntdForm {...formProps}>
+              <ShadcnFormContainer {...formProps}>
                 <SchemaField schema={schema} />
-              </FormilyAntdForm>
+              </ShadcnFormContainer>
             </FormProvider>
             {!hasSubmitButton && showDefaultSubmit && (
-              <div style={{ marginTop: 16 }}>
-                <Button type="primary" loading={loading} onClick={handleSubmit}>
+              <div className="mt-4">
+                <Button disabled={loading} onClick={handleSubmit}>
                   {submitLabel}
                 </Button>
               </div>
