@@ -1,5 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Table, Input, Button, message, Select } from 'antd'
+import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@/components/ui/table'
+import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { message } from '@/lib/message'
+import { Loader2 } from 'lucide-react'
 import type { FieldBinding, FieldDef, FieldOption, QueryCondition } from './types'
 import { bindingsTriggeredBy, buildBindingParamValues, rowsToOptions } from './fieldLogic'
 
@@ -100,26 +105,24 @@ export default function ListRenderer({
     loadData(1)
   }
 
-  const columns = fields.map(f => ({
-    title: f.label,
-    dataIndex: f.field,
-    key: f.field,
-  }))
-
   const renderCondInput = (cond: QueryCondition) => {
     const opts = condOptions[cond.field]
     if (cond.component === 'Select' || opts?.length) {
       return (
         <Select
-          allowClear
-          placeholder={cond.label}
-          value={queryParams[cond.field]}
-          onChange={v => handleCondChange(cond.field, v)}
-          style={{ width: 200 }}
+          value={queryParams[cond.field] ? String(queryParams[cond.field]) : undefined}
+          onValueChange={v => handleCondChange(cond.field, v)}
         >
-          {(opts || []).map(opt => (
-            <Select.Option key={String(opt.value)} value={opt.value}>{opt.label}</Select.Option>
-          ))}
+          <SelectTrigger className="w-[200px]">
+            <SelectValue placeholder={cond.label} />
+          </SelectTrigger>
+          <SelectContent>
+            {(opts || []).map(opt => (
+              <SelectItem key={String(opt.value)} value={String(opt.value)}>
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
         </Select>
       )
     }
@@ -129,7 +132,7 @@ export default function ListRenderer({
         placeholder={cond.label}
         value={queryParams[cond.field] || ''}
         onChange={e => handleCondChange(cond.field, e.target.value)}
-        style={{ width: 200 }}
+        className="w-[200px]"
       />
     )
   }
@@ -141,11 +144,11 @@ export default function ListRenderer({
           <div key={cond.field}>{renderCondInput(cond)}</div>
         ))}
         {queryConditions.length > 0 && (
-          <Button type="primary" onClick={handleSearch}>查询</Button>
+          <Button onClick={handleSearch}>查询</Button>
         )}
         <div style={{ marginLeft: 'auto' }}>
           {onNew && (
-            <Button type="primary" onClick={onNew}>+ {newButtonLabel}</Button>
+            <Button onClick={onNew}>+ {newButtonLabel}</Button>
           )}
         </div>
       </div>
@@ -170,25 +173,73 @@ export default function ListRenderer({
           )}
         </div>
       ) : (
-        <Table
-          dataSource={data}
-          columns={columns}
-          loading={loading}
-          rowKey="id"
-          pagination={{
-            current: page,
-            pageSize,
-            total,
-            onChange: p => {
-              setPage(p)
-              loadData(p)
-            },
-          }}
-          onRow={record => ({
-            onClick: () => onRowClick?.(record),
-            style: { cursor: onRowClick ? 'pointer' : 'default' },
-          })}
-        />
+        <>
+          {loading ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  {fields.map(f => (
+                    <TableHead key={f.field}>{f.label}</TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={fields.length} className="text-center text-muted-foreground">
+                      暂无数据
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  data.map((row, idx) => (
+                    <TableRow
+                      key={row.id || idx}
+                      onClick={() => onRowClick?.(row)}
+                      className={onRowClick ? 'cursor-pointer hover:bg-muted/50' : ''}
+                    >
+                      {fields.map(f => (
+                        <TableCell key={f.field}>{row[f.field] ?? '-'}</TableCell>
+                      ))}
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          )}
+          {total > pageSize && (
+            <div className="flex justify-center gap-2 mt-4">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page === 1}
+                onClick={() => {
+                  setPage(page - 1)
+                  loadData(page - 1)
+                }}
+              >
+                上一页
+              </Button>
+              <span className="flex items-center px-4 text-sm text-muted-foreground">
+                第 {page} / {Math.ceil(total / pageSize)} 页
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page >= Math.ceil(total / pageSize)}
+                onClick={() => {
+                  setPage(page + 1)
+                  loadData(page + 1)
+                }}
+              >
+                下一页
+              </Button>
+            </div>
+          )}
+        </>
       )}
     </div>
   )
