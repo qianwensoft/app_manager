@@ -21,6 +21,9 @@ export const statusType = (s) => ({
 
 export const priorityType = (p) => ({ normal: 'info', high: 'warning', urgent: 'danger' }[p] || 'info')
 
+// 优先级中文展示（避免列表/看板直接显示 normal/high/urgent）
+export const priorityLabel = (p) => ({ normal: '普通', high: '较高', urgent: '紧急' }[p] || p || '普通')
+
 // 工单事件（用于外发 webhook 监听配置）
 export const workOrderEvents = [
   { value: 'work_order.created', label: '工单创建' },

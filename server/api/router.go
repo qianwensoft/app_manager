@@ -511,11 +511,22 @@ func SetupRouter() *gin.Engine {
 		wo.POST("/webhooks", auth.RequireRole("admin", "operator"), CreateWorkOrderWebhook)
 		wo.PUT("/webhooks/:id", auth.RequireRole("admin", "operator"), UpdateWorkOrderWebhook)
 		wo.DELETE("/webhooks/:id", auth.RequireRole("admin", "operator"), DeleteWorkOrderWebhook)
+		// 工作流管理（admin/operator）
+		wo.GET("/workflows", auth.RequireRole("admin", "operator"), ListWorkOrderWorkflows)
+		wo.GET("/workflows/:id", auth.RequireRole("admin", "operator"), GetWorkOrderWorkflow)
+		wo.POST("/workflows", auth.RequireRole("admin", "operator"), CreateWorkOrderWorkflow)
+		wo.PUT("/workflows/:id", auth.RequireRole("admin", "operator"), UpdateWorkOrderWorkflow)
+		wo.DELETE("/workflows/:id", auth.RequireRole("admin", "operator"), DeleteWorkOrderWorkflow)
+		wo.POST("/workflows/:id/test", auth.RequireRole("admin", "operator"), TestWorkOrderWorkflow)
+		wo.GET("/workflow-logs", auth.RequireRole("admin", "operator"), ListWorkOrderWorkflowLogs)
 		// 标签字典管理（admin/operator）
 		wo.GET("/tag-dict", auth.RequireRole("admin", "operator"), ListWorkOrderTags)
 		wo.POST("/tag-dict", auth.RequireRole("admin", "operator"), CreateWorkOrderTag)
 		wo.PUT("/tag-dict/:id", auth.RequireRole("admin", "operator"), UpdateWorkOrderTag)
 		wo.DELETE("/tag-dict/:id", auth.RequireRole("admin", "operator"), DeleteWorkOrderTag)
+		// 批量归档/取消归档（静态段，须在 /:id 之前避免路由歧义）
+		wo.POST("/batch/archive", auth.RequireRole("admin", "operator"), BatchArchiveWorkOrders)
+		wo.POST("/batch/unarchive", auth.RequireRole("admin", "operator"), BatchUnarchiveWorkOrders)
 		wo.GET("/:id", GetWorkOrder)
 		wo.PUT("/:id", auth.RequireRole("admin", "operator"), UpdateWorkOrder)
 		wo.DELETE("/:id", auth.RequireRole("admin", "operator"), DeleteWorkOrder)
@@ -713,7 +724,7 @@ func SetupRouter() *gin.Engine {
 	r.NoRoute(func(c *gin.Context) {
 		path := c.Request.URL.Path
 		if len(path) >= 14 && path[:14] == "/scada-editor/" {
-			c.File("./web/dist/scada-editor/index.html")
+			c.File(scadaEditorDir + "/index.html")
 			return
 		}
 		if len(path) >= 10 && path[:10] == "/form-app/" {

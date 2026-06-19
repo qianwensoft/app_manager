@@ -15,6 +15,7 @@ import (
 	"app-manager/database"
 	"app-manager/models"
 	"app-manager/storage"
+	"app-manager/workflow"
 
 	"github.com/gin-gonic/gin"
 )
@@ -308,6 +309,8 @@ func UpdateWorkOrder(c *gin.Context) {
 
 	if len(updates) > 0 {
 		database.DB.Model(&wo).Updates(updates)
+		// 触发更新事件
+		dispatchWorkOrderEvent("work_order.updated", &wo, actor)
 	}
 	c.JSON(http.StatusOK, gin.H{"data": wo})
 }
@@ -864,3 +867,152 @@ func jsonString(v interface{}) string {
 	b, _ := json.Marshal(v)
 	return string(b)
 }
+
+// ── 工作流（Workflow）─────────────────────────────────────────────────────
+
+// ListWorkOrderWorkflows 工作流列表。
+func ListWorkOrderWorkflows(c *gin.Context) {
+	var rows []models.WorkOrderWorkflow
+	q := database.DB.Order("sort_order ASC, id ASC")
+	if t := c.Query("type_code"); t != "" {
+		q = q.Where("type_code = ?", t)
+	}
+	q.Find(&rows)
+	c.JSON(http.StatusOK, gin.H{"data": rows})
+}
+
+// GetWorkOrderWorkflow 工作流详情。
+func GetWorkOrderWorkflow(c *gin.Context) {
+	var wf models.WorkOrderWorkflow
+	if err := database.DB.First(&wf, c.Param("id")).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": wf})
+}
+
+// CreateWorkOrderWorkflow 创建工作流。
+func CreateWorkOrderWorkflow(c *gin.Context) {
+	var wf models.WorkOrderWorkflow
+	if err := c.ShouldBindJSON(&wf); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if strings.TrimSpace(wf.Name) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "name is required"})
+		return
+	}
+	// 验证 actions_json 格式
+	var actions []workflow.WorkflowAction
+	if err := json.Unmarshal([]byte(wf.ActionsJSON), &actions); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid actions_json: " + err.Error()})
+		return
+	}
+	if err := database.DB.Create(&wf).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": wf})
+}
+
+// UpdateWorkOrderWorkflow 更新工作流。
+func UpdateWorkOrderWorkflow(c *gin.Context) {
+	var wf models.WorkOrderWorkflow
+	if err := database.DB.First(&wf, c.Param("id")).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+	var req models.WorkOrderWorkflow
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	// 验证 actions_json 格式
+	if req.ActionsJSON != "" {
+		var actions []workflow.WorkflowAction
+		if err := json.Unmarshal([]byte(req.ActionsJSON), &actions); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid actions_json: " + err.Error()})
+			return
+		}
+	}
+	database.DB.Model(&wf).Updates(map[string]interface{}{
+		"name":         req.Name,
+		"type_code":    req.TypeCode,
+		"events":       req.Events,
+		"actions_json": req.ActionsJSON,
+		"description":  req.Description,
+		"enabled":      req.Enabled,
+		"sort_order":   req.SortOrder,
+	})
+	c.JSON(http.StatusOK, gin.H{"data": wf})
+}
+
+// DeleteWorkOrderWorkflow 删除工作流。
+func DeleteWorkOrderWorkflow(c *gin.Context) {
+	if err := database.DB.Delete(&models.WorkOrderWorkflow{}, c.Param("id")).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "ok"})
+}
+
+// ListWorkOrderWorkflowLogs 工作流执行日志。
+func ListWorkOrderWorkflowLogs(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 200 {
+		limit = 50
+	}
+
+	q := database.DB.Model(&models.WorkOrderWorkflowLog{})
+	if wfID := c.Query("workflow_id"); wfID != "" {
+		q = q.Where("workflow_id = ?", wfID)
+	}
+	if woID := c.Query("work_order_id"); woID != "" {
+		q = q.Where("work_order_id = ?", woID)
+	}
+	if status := c.Query("status"); status != "" {
+		q = q.Where("status = ?", status)
+	}
+
+	var total int64
+	q.Count(&total)
+
+	var rows []models.WorkOrderWorkflowLog
+	q.Order("id DESC").Offset((page - 1) * limit).Limit(limit).Find(&rows)
+	c.JSON(http.StatusOK, gin.H{"data": rows, "total": total, "page": page, "limit": limit})
+}
+
+// TestWorkOrderWorkflow 测试工作流（手动触发）。
+func TestWorkOrderWorkflow(c *gin.Context) {
+	var req struct {
+		WorkOrderID uint   `json:"work_order_id"`
+		Event       string `json:"event"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	var wf models.WorkOrderWorkflow
+	if err := database.DB.First(&wf, c.Param("id")).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "workflow not found"})
+		return
+	}
+	var wo models.WorkOrder
+	if err := database.DB.First(&wo, req.WorkOrderID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "work order not found"})
+		return
+	}
+	event := req.Event
+	if event == "" {
+		event = "work_order.test"
+	}
+	actor := actorLabel(c)
+	// 同步执行测试
+	go workflow.DefaultEngine.Dispatch(event, &wo, actor)
+	c.JSON(http.StatusOK, gin.H{"message": "workflow dispatched"})
+}
+

@@ -18,6 +18,44 @@ export const getScreenShareClaims = async (deviceId, shareToken) => {
   return r.json()
 }
 
+// ── 设备注册（反向注册，电视等无摄像头端亦可用）：浏览器直连设备上的 ReverseRegisterServer ──
+// 不走 axios（baseURL 是本系统 /api），而是直连设备的 http://<ip>:<port>。
+const REVERSE_REGISTER_PORT = 8765
+
+const reverseBase = (ip, port = REVERSE_REGISTER_PORT) => `http://${ip}:${port}`
+
+// 拉取设备端机型信息以供管理端展示确认。带超时避免 IP 错误时长时间挂起。
+export const fetchAgentInfo = async (ip, port = REVERSE_REGISTER_PORT) => {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), 4000)
+  try {
+    const r = await fetch(`${reverseBase(ip, port)}/agent/info`, { signal: ctrl.signal })
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    return await r.json()
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+// 携带授权码 + serverUrl 认领设备端。serverUrl 用当前页面 host，与扫码接入一致。
+export const claimAgent = async (ip, payload, port = REVERSE_REGISTER_PORT) => {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), 6000)
+  try {
+    const r = await fetch(`${reverseBase(ip, port)}/agent/claim`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: ctrl.signal,
+    })
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`)
+    return data
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 export const createScreenShare = (deviceId, data) => http.post(`/devices/${deviceId}/screen-shares`, data)
 export const listScreenShares = (deviceId) => http.get(`/devices/${deviceId}/screen-shares`)
 export const revokeScreenShare = (deviceId, shareId) => http.delete(`/devices/${deviceId}/screen-shares/${shareId}`)

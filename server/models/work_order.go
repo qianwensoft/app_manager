@@ -13,6 +13,10 @@ type WorkOrderType struct {
 	FormPageKey string `gorm:"size:64;default:'form'" json:"form_page_key"`
 	// DefaultTitle 选择该类型时自动带出的默认工单标题（提交端标题为空时填充）。
 	DefaultTitle string    `gorm:"size:200" json:"default_title"`
+	// BoardCardTemplate 看板卡片正文模板：多行，每行一段，支持 {{field}} 占位符
+	// （field 取工单行字段，如 title/code/priority/status/device_name/tags/other_codes）。
+	// 空表示用默认卡片布局。
+	BoardCardTemplate string `gorm:"type:text" json:"board_card_template"`
 	Enabled      bool      `gorm:"default:true" json:"enabled"`
 	SortOrder   int       `gorm:"default:0" json:"sort_order"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -65,6 +69,10 @@ type WorkOrder struct {
 	CreatedBy   uint       `gorm:"index" json:"created_by"`    // 提交人 user_id；device 提交时为 0
 	ClosedBy    *uint      `json:"closed_by"`
 	ClosedAt    *time.Time `json:"closed_at"`
+	// Archived 归档标记：归档后默认列表不展示，需单独归档页查询。
+	Archived   bool       `gorm:"index;default:false" json:"archived"`
+	ArchivedAt *time.Time `json:"archived_at"`
+	ArchivedBy *uint      `json:"archived_by"`
 	// ExternalRef 第三方系统回写的工单号（对账/幂等）。
 	ExternalRef string `gorm:"size:128;index" json:"external_ref"`
 	// OtherCodes 其他编码（App 拍照识别二维码等填入），多个用逗号分隔。
@@ -134,7 +142,48 @@ type WorkOrderTagLink struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
 	WorkOrderID uint      `gorm:"index:idx_wo_tag,unique,priority:1" json:"work_order_id"`
 	TagCode     string    `gorm:"size:64;index:idx_wo_tag,unique,priority:2" json:"tag_code"`
-	CreatedAt   time.Time `json:"created_at"`
+	// TagName 挂载时刻的标签名称快照：字典改名后历史关联仍保留当时名称。
+	TagName   string    `gorm:"size:120" json:"tag_name"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 func (WorkOrderTagLink) TableName() string { return "work_order_tag_links" }
+
+// WorkOrderWorkflow 工单工作流：监听工单事件，执行自动化动作（调接口/执行 JS/更新工单等）。
+type WorkOrderWorkflow struct {
+	ID   uint   `gorm:"primaryKey" json:"id"`
+	Name string `gorm:"size:120;not null" json:"name"`
+	// TypeCode 关联工单类型 Code；空表示对所有类型生效（全局工作流）。
+	TypeCode string `gorm:"size:64;index" json:"type_code"`
+	// Events 监听的工单事件（JSON 字符串数组），如 ["work_order.created","work_order.status_changed"]；空表示全部。
+	Events string `gorm:"type:text" json:"events"`
+	// ActionsJSON 动作列表（JSON 数组），每个动作含 type + config。
+	// type: call_endpoint | call_connector | call_data_interface | execute_js | update_work_order | create_work_order | query_work_orders
+	ActionsJSON string    `gorm:"column:actions_json;type:text;not null" json:"actions_json"`
+	Description string    `gorm:"type:text" json:"description"`
+	Enabled     bool      `gorm:"default:true" json:"enabled"`
+	SortOrder   int       `gorm:"default:0" json:"sort_order"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+func (WorkOrderWorkflow) TableName() string { return "work_order_workflows" }
+
+// WorkOrderWorkflowLog 工作流执行日志。
+type WorkOrderWorkflowLog struct {
+	ID         uint      `gorm:"primaryKey" json:"id"`
+	WorkflowID uint      `gorm:"index" json:"workflow_id"`
+	// WorkOrderID 触发工单 ID。
+	WorkOrderID uint   `gorm:"index" json:"work_order_id"`
+	Event       string `gorm:"size:64" json:"event"`
+	// ActionsExecuted 已执行动作数。
+	ActionsExecuted int `json:"actions_executed"`
+	// Status 执行状态：success | partial | failed。
+	Status string `gorm:"size:32" json:"status"`
+	// ErrorMsg 错误信息（失败时）。
+	ErrorMsg  string    `gorm:"type:text" json:"error_msg"`
+	DurationMs int64     `json:"duration_ms"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (WorkOrderWorkflowLog) TableName() string { return "work_order_workflow_logs" }

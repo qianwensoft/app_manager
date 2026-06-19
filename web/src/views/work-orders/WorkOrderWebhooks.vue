@@ -1,7 +1,7 @@
 <template>
   <div>
     <div class="toolbar">
-      <el-page-header content="工单外发配置" @back="$router.push('/work-orders')" />
+      <el-page-header v-if="!embedded" content="工单外发配置" @back="$router.push('/work-orders')" />
       <div class="spacer" />
       <el-button type="primary" @click="openCreate">新增 Webhook</el-button>
     </div>
@@ -145,6 +145,8 @@ import {
   getEndpointParamSchema, getConnectorInterface
 } from '@/api/outbound'
 import { workOrderEvents, workOrderEventParams } from './workOrderConst'
+
+defineProps({ embedded: { type: Boolean, default: false } })
 
 const rows = ref([])
 const types = ref([])

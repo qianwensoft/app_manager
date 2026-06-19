@@ -61,6 +61,9 @@ export const scadaApi = {
   publish: (id: number): Promise<{ data: ScadaInfo }> =>
     http.post(`/scada/infos/${id}/publish`),
 
+  unpublish: (id: number): Promise<{ data: ScadaInfo }> =>
+    http.post(`/scada/infos/${id}/unpublish`),
+
   getByShareToken: (token: string): Promise<{ data: ScadaInfo }> =>
     http.get(`/scada/info/share/${token}`),
 

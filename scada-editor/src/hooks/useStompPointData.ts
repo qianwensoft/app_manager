@@ -7,9 +7,11 @@ interface Options {
   scadaCode: string
   onData: (data: PointDataMap) => void
   enabled?: boolean
+  /** 免登分享模式：走 /ws/stomp-scada?share_token=，不需要 JWT */
+  shareToken?: string
 }
 
-export function useStompPointData({ scadaCode, onData, enabled = true }: Options) {
+export function useStompPointData({ scadaCode, onData, enabled = true, shareToken }: Options) {
   const clientRef = useRef<Client | null>(null)
   const onDataRef = useRef(onData)
   onDataRef.current = onData
@@ -17,9 +19,10 @@ export function useStompPointData({ scadaCode, onData, enabled = true }: Options
   const connect = useCallback(() => {
     if (!enabled || !scadaCode) return
 
-    const token = localStorage.getItem('token') ?? ''
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const wsUrl = `${proto}://${window.location.host}/ws/stomp${token ? `?token=${token}` : ''}`
+    const wsUrl = shareToken
+      ? `${proto}://${window.location.host}/ws/stomp-scada?share_token=${encodeURIComponent(shareToken)}`
+      : `${proto}://${window.location.host}/ws/stomp${(() => { const t = localStorage.getItem('token') ?? ''; return t ? `?token=${t}` : '' })()}`
 
     const client = new Client({
       brokerURL: wsUrl,
@@ -40,7 +43,7 @@ export function useStompPointData({ scadaCode, onData, enabled = true }: Options
 
     client.activate()
     clientRef.current = client
-  }, [enabled, scadaCode])
+  }, [enabled, scadaCode, shareToken])
 
   useEffect(() => {
     connect()

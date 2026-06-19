@@ -112,6 +112,7 @@ func workOrderEventPayload(event string, wo *models.WorkOrder, actor string) map
 		"tags":         strings.Join(workOrderTagCodes(wo.ID), ","),
 		"actor":        actor,
 		"data_json":    wo.DataJSON,
+		"created_at":   wo.CreatedAt,
 		"ts":           time.Now().UTC().Format(time.RFC3339),
 	}
 }

@@ -64,11 +64,14 @@ class MainActivity : AppCompatActivity() {
         try {
             val json = org.json.JSONObject(text)
             val serverUrl = json.getString("serverUrl")
-            val deviceToken = resolveRegistrationToken(json.optString("deviceToken", ""))
             // dev：二维码可携带表单调试地址，扫码即把表单运行时指向开发机
             val formBase = json.optString("formAppBaseUrl", "")
-            val cur = AgentConfig.get(this)
-            AgentConfig.save(this, cur.copy(serverUrl = serverUrl, deviceToken = deviceToken, formAppBaseUrl = formBase, allowRemoteScreen = cur.allowRemoteScreen))
+            AgentRegistration.applyServerConfig(
+                this,
+                serverUrl = serverUrl,
+                fallbackToken = json.optString("deviceToken", ""),
+                formAppBaseUrl = formBase,
+            )
             startForegroundService(Intent(this, AgentService::class.java))
             Toast.makeText(this, "扫码成功，服务已启动", Toast.LENGTH_SHORT).show()
             updateDeviceInfo(AgentRegistration.ensureMachineCodeConfig(this))
@@ -107,6 +110,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** 连接状态变更广播：用于实时刷新「设备注册」入口的显隐。 */
+    private val connStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != AgentService.ACTION_CONN_STATE) return
+            runOnUiThread { updateReverseRegisterVisibility() }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -133,6 +144,10 @@ class MainActivity : AppCompatActivity() {
         }
 
         findViewById<View>(R.id.btnMainScanQr)?.setOnClickListener { launchQrScan() }
+        findViewById<View>(R.id.btnReverseRegister)?.setOnClickListener {
+            startActivity(Intent(this, com.appmanager.agent.ui.ReverseRegisterActivity::class.java))
+        }
+        updateReverseRegisterVisibility()
 
         window.decorView.post { handleIntent(intent) }
     }
@@ -140,6 +155,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         updateDeviceInfo(AgentConfig.get(this))
+        updateReverseRegisterVisibility()
         buildFrontPageTiles()
     }
 
@@ -147,11 +163,14 @@ class MainActivity : AppCompatActivity() {
         super.onStart()
         val f = IntentFilter(DeviceProfileSync.ACTION_UI_REFRESH)
         ContextCompat.registerReceiver(this, profileUiReceiver, f, ContextCompat.RECEIVER_NOT_EXPORTED)
+        val cf = IntentFilter(AgentService.ACTION_CONN_STATE)
+        ContextCompat.registerReceiver(this, connStateReceiver, cf, ContextCompat.RECEIVER_NOT_EXPORTED)
     }
 
     override fun onStop() {
         super.onStop()
         try { unregisterReceiver(profileUiReceiver) } catch (_: Exception) {}
+        try { unregisterReceiver(connStateReceiver) } catch (_: Exception) {}
     }
 
     // ── 动态前台磁贴 ─────────────────────────────────────────────────
@@ -377,9 +396,17 @@ class MainActivity : AppCompatActivity() {
         tvDeviceInfo.text = "分组: $group\n别名: $alias\n机器码: $codeLine"
     }
 
-    private fun resolveRegistrationToken(fallbackFromQr: String): String {
-        val code = DeviceMachineId.get(this)
-        return if (code.isNotEmpty()) code else fallbackFromQr.trim()
+    /**
+     * 「设备注册」入口仅在未正常连接服务器时显示：
+     * 未配置服务器地址，或当前连接状态不是「已连接」（断开/出错/连接中）。
+     * 正常连接后隐藏，避免日常使用时误触改写配置。
+     */
+    private fun updateReverseRegisterVisibility() {
+        val cfg = AgentConfig.get(this)
+        val notConnected = cfg.serverUrl.isEmpty() ||
+            AgentService.connState != AgentService.STATE_CONNECTED
+        findViewById<View>(R.id.btnReverseRegister)?.visibility =
+            if (notConnected) View.VISIBLE else View.GONE
     }
 
     private fun requestBatteryOptimizationExemption() {

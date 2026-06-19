@@ -58,6 +58,16 @@ export function useScadaInfo(id: number) {
   })
 }
 
+// 免登分享：按 share_token 拉取已发布组态（供 app 端 WebView / 外部分享）
+export function useScadaByShareToken(token?: string) {
+  return useQuery({
+    queryKey: ['scada', 'share', token] as const,
+    queryFn: () => scadaApi.getByShareToken(token!).then((r) => r.data),
+    enabled: !!token,
+    retry: false,
+  })
+}
+
 export function useCreateInfo() {
   const qc = useQueryClient()
   return useMutation({
@@ -108,6 +118,14 @@ export function usePublish() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: number) => scadaApi.publish(id).then((r) => r.data),
+    onSuccess: (data) => qc.invalidateQueries({ queryKey: scadaKeys.info(data.id) }),
+  })
+}
+
+export function useUnpublish() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) => scadaApi.unpublish(id).then((r) => r.data),
     onSuccess: (data) => qc.invalidateQueries({ queryKey: scadaKeys.info(data.id) }),
   })
 }

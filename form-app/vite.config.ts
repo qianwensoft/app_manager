@@ -11,7 +11,6 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: [
         { find: '@', replacement: path.resolve(__dirname, 'src') },
-        { find: /^~antd/, replacement: 'antd' },
       ],
     },
     base: '/form-app/',
@@ -56,13 +55,6 @@ export default defineConfig(({ mode }) => {
       outDir: 'dist',
       sourcemap: false,
       target: ['es2015', 'chrome67'],
-    },
-    css: {
-      preprocessorOptions: {
-        less: {
-          javascriptEnabled: true,
-        },
-      },
     },
   }
 })

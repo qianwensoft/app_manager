@@ -1,7 +1,7 @@
 <template>
   <div>
     <div class="toolbar">
-      <el-page-header content="工单类型" @back="$router.push('/work-orders')" />
+      <el-page-header v-if="!embedded" content="工单类型" @back="$router.push('/work-orders')" />
       <div class="spacer" />
       <el-button type="primary" @click="openCreate">新增类型</el-button>
     </div>
@@ -45,6 +45,14 @@
         <el-form-item label="表单页面 key">
           <el-input v-model="editing.form_page_key" placeholder="默认 form" />
         </el-form-item>
+        <el-form-item label="看板卡片模板">
+          <el-input
+            v-model="editing.board_card_template"
+            type="textarea"
+            :rows="4"
+            placeholder="每行一段，留空用默认卡片。占位符：{{title}} {{code}} {{priority}} {{status_label}} {{type_name}} {{device_name}} {{device_id}} {{tags}} {{other_codes}} {{created_at}}"
+          />
+        </el-form-item>
         <el-form-item label="排序"><el-input-number v-model="editing.sort_order" :min="0" /></el-form-item>
         <el-form-item label="启用"><el-switch v-model="editing.enabled" /></el-form-item>
       </el-form>
@@ -60,6 +68,8 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getWorkOrderTypes, createWorkOrderType, updateWorkOrderType, deleteWorkOrderType } from '@/api/workOrder'
+
+defineProps({ embedded: { type: Boolean, default: false } })
 
 const rows = ref([])
 const loading = ref(false)
@@ -77,7 +87,7 @@ const load = async () => {
 }
 
 const openCreate = () => {
-  editing.value = { code: '', name: '', description: '', default_title: '', form_app_code: '', form_page_key: 'form', sort_order: 0, enabled: true }
+  editing.value = { code: '', name: '', description: '', default_title: '', form_app_code: '', form_page_key: 'form', board_card_template: '', sort_order: 0, enabled: true }
   dialog.value = true
 }
 const openEdit = (row) => { editing.value = { ...row }; dialog.value = true }

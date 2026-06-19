@@ -17,4 +17,27 @@ object AgentRegistration {
         AgentConfig.save(context, next)
         return next
     }
+
+    /**
+     * 写入服务器地址完成注册配置（扫码与电视反向注册共用）。
+     * deviceToken 优先用本机机器码，机器码不可用时回退入参 fallbackToken。
+     * 返回保存后的配置，调用方据此启动 [com.appmanager.agent.service.AgentService]。
+     */
+    fun applyServerConfig(
+        context: Context,
+        serverUrl: String,
+        fallbackToken: String = "",
+        formAppBaseUrl: String = "",
+    ): AgentConfig {
+        val cur = AgentConfig.get(context)
+        val code = DeviceMachineId.get(context)
+        val token = if (code.isNotEmpty()) code else fallbackToken.trim()
+        val next = cur.copy(
+            serverUrl = serverUrl.trim(),
+            deviceToken = token,
+            formAppBaseUrl = formAppBaseUrl.trim(),
+        )
+        AgentConfig.save(context, next)
+        return next
+    }
 }

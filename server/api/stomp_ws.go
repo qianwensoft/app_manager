@@ -27,6 +27,10 @@ var stompDestMonitorStompStats = regexp.MustCompile(`^/topic/monitor/stomp-stats
 const stompDestDevices = "/topic/devices"
 const stompDestEvents = "/topic/events"
 const stompDestOutboundWebhookList = "/topic/outbound/webhooks/list"
+const stompDestWorkOrders = "/topic/work-orders"
+
+// 单工单事件流：/topic/work-orders/{id}
+var stompDestWorkOrderByID = regexp.MustCompile(`^/topic/work-orders/(\d+)$`)
 
 // StompWS STOMP 1.2 over WebSocket（需先经 StompWSAuth；浏览器用 query token=JWT）。订阅录屏进度：/topic/device/{id}/recording
 func StompWS(c *gin.Context) {
@@ -85,10 +89,15 @@ func StompWS(c *gin.Context) {
 				continue
 			}
 			switch dest {
-			case stompDestDevices, stompDestEvents, stompDestOutboundWebhookList:
+			case stompDestDevices, stompDestEvents, stompDestOutboundWebhookList, stompDestWorkOrders:
 				unsubs[subID] = stomp.DefaultHub.Subscribe(dest, subID, send)
 				log.Printf("STOMP SUBSCRIBE user=%d dest=%s sub=%s", c.GetUint("user_id"), dest, subID)
 			default:
+				if stompDestWorkOrderByID.MatchString(dest) {
+					unsubs[subID] = stomp.DefaultHub.Subscribe(dest, subID, send)
+					log.Printf("STOMP SUBSCRIBE user=%d dest=%s sub=%s", c.GetUint("user_id"), dest, subID)
+					continue
+				}
 				if mMon := stompDestMonitorAgentConnections.FindStringSubmatch(dest); mMon != nil {
 					unsubs[subID] = stomp.DefaultHub.Subscribe(dest, subID, send)
 					log.Printf("STOMP SUBSCRIBE user=%d dest=%s sub=%s", c.GetUint("user_id"), dest, subID)
