@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { createApp, deleteApp, createRunnableFormPage, runtimeUrl } from './helpers'
+import { createApp, deleteApp, createRunnableFormPage, runtimeUrl, authHeaders, fieldInput } from './helpers'
 
 /**
  * 用例组 E：AppState 应用级常驻事件（本轮第 2 步成果）—— 端到端
@@ -43,15 +43,17 @@ test.describe('E. 应用级常驻事件', () => {
     })
     const upd = await request.put(`/api/form-app/infos/${appId}`, {
       data: { ...app, global_config: globalConfig },
+      headers: authHeaders(),
     })
     expect(upd.ok()).toBeTruthy()
 
     await page.goto(runtimeUrl(code))
     await page.waitForLoadState('networkidle')
+    const echo = fieldInput(page, '回显')
+    await expect(echo).toBeVisible() // 字段渲染 + 页面/应用级事件均注册后再触发
 
     // 触发：emit setStatus → 写 $app.status=ACTIVE → 应用级 state_change → echo=ACTIVE
     await page.evaluate(() => (window as any).eventManager?.emit('setStatus', ''))
-    const echo = page.locator('.ant-form-item', { hasText: '回显' }).locator('input').first()
     await expect(echo).toHaveValue('ACTIVE')
   })
 

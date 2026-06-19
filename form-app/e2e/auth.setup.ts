@@ -26,6 +26,9 @@ setup('登录并写入 storageState', async () => {
 
   fs.mkdirSync(AUTH_DIR, { recursive: true })
 
+  // 持久化裸 token，供 API 测试夹具（request）附带 Authorization 头使用
+  fs.writeFileSync(path.join(AUTH_DIR, 'token.txt'), token)
+
   // 构造 storageState：把 token 注入 form-app 源（origin）的 localStorage
   const origin = new URL(BASE_URL).origin
   const state = {

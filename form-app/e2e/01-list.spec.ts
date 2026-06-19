@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { createApp, deleteApp, gotoForms, uniqueCode, FORMS_URL } from './helpers'
+import { createApp, deleteApp, gotoForms, uniqueCode, FORMS_URL, cjkBtn } from './helpers'
 
 /**
  * 用例组 A：表单应用列表页（/form-app/forms）
@@ -24,8 +24,9 @@ test.describe('A. 表单列表页', () => {
     const app = await createApp(request)
     appId = app.id
     await gotoForms(page)
-    await expect(page.getByText(app.name)).toBeVisible()
-    await expect(page.getByText(app.code)).toBeVisible()
+    await page.getByPlaceholder(/搜索应用/).fill(app.code)
+    await expect(page.getByText(app.name, { exact: true })).toBeVisible()
+    await expect(page.locator('.formapp-code', { hasText: app.code })).toBeVisible()
   })
 
   test('A3 搜索按名称过滤', async ({ page, request }) => {
@@ -33,23 +34,27 @@ test.describe('A. 表单列表页', () => {
     appId = app.id
     await gotoForms(page)
     await page.getByPlaceholder(/搜索应用/).fill(app.name)
-    await expect(page.getByText(app.name)).toBeVisible()
+    await expect(page.getByText(app.name, { exact: true })).toBeVisible()
     // 不匹配的关键词应过滤掉
     await page.getByPlaceholder(/搜索应用/).fill('不存在的关键词zzz999')
-    await expect(page.getByText(app.name)).toHaveCount(0)
+    await expect(page.getByText(app.name, { exact: true })).toHaveCount(0)
   })
 
   test('A4 删除走二次确认弹窗', async ({ page, request }) => {
     const app = await createApp(request)
     appId = app.id
     await gotoForms(page)
-    const row = page.locator('*', { hasText: app.code }).filter({ has: page.getByText('删除') }).last()
-    await page.getByText('删除', { exact: false }).first().click()
-    // 确认弹窗出现
-    await expect(page.getByText('确认删除')).toBeVisible()
+    // 先搜索隔离出目标行，再点该行的删除按钮
+    await page.getByPlaceholder(/搜索应用/).fill(app.code)
+    const row = page.locator('tr.formapp-table-row', { hasText: app.code })
+    await expect(row).toBeVisible()
+    await row.locator('.formapp-action-btn-danger').click()
+    // 确认弹窗出现（标题用 heading 角色避免与确认按钮文本歧义）
+    await expect(page.getByRole('heading', { name: '确认删除' })).toBeVisible()
     await expect(page.getByText(/此操作无法撤销/)).toBeVisible()
-    await page.getByRole('button', { name: '确认删除' }).click()
-    await expect(page.getByText('应用已删除')).toBeVisible()
+    await page.getByRole('button', { name: cjkBtn('确认删除') }).click()
+    // 删除后该行从列表消失（toast 是瞬时的，断言行移除更稳）
+    await expect(page.locator('tr.formapp-table-row', { hasText: app.code })).toHaveCount(0)
     appId = 0 // 已删除，afterEach 不必再删
   })
 

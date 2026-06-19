@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { createApp, deleteApp, createRunnableFormPage, runtimeUrl } from './helpers'
+import { createApp, deleteApp, createRunnableFormPage, runtimeUrl, fieldInput } from './helpers'
 
 /**
  * 用例组 D：事件系统（本轮改造重点）—— 运行时行为
@@ -35,10 +35,10 @@ test.describe('D. 事件系统运行时', () => {
     await page.goto(runtimeUrl(code))
     await page.waitForLoadState('networkidle')
 
-    const srcInput = page.locator('.ant-form-item', { hasText: '来源' }).locator('input').first()
+    const srcInput = fieldInput(page, '来源')
     await srcInput.fill('HELLO')
     await srcInput.blur()
-    const mirrorInput = page.locator('.ant-form-item', { hasText: '镜像' }).locator('input').first()
+    const mirrorInput = fieldInput(page, '镜像')
     await expect(mirrorInput).toHaveValue('HELLO')
   })
 
@@ -55,9 +55,10 @@ test.describe('D. 事件系统运行时', () => {
     })
     await page.goto(runtimeUrl(code))
     await page.waitForLoadState('networkidle')
+    const input = fieldInput(page, '条码')
+    await expect(input).toBeVisible() // 确保字段已渲染、事件监听已注册再触发
     // 经事件总线模拟一次条码扫描
     await page.evaluate(() => (window as any).eventManager?.emit('barcode', 'CODE-9527'))
-    const input = page.locator('.ant-form-item', { hasText: '条码' }).locator('input').first()
     await expect(input).toHaveValue('CODE-9527')
   })
 
@@ -75,7 +76,8 @@ test.describe('D. 事件系统运行时', () => {
     })
     await page.goto(runtimeUrl(code))
     await page.waitForLoadState('networkidle')
-    const input = page.locator('.ant-form-item', { hasText: '条码' }).locator('input').first()
+    const input = fieldInput(page, '条码')
+    await expect(input).toBeVisible()
     // 条件不满足 → 不应填入
     await page.evaluate(() => (window as any).eventManager?.emit('barcode', 'NO'))
     await expect(input).toHaveValue('')
@@ -97,8 +99,9 @@ test.describe('D. 事件系统运行时', () => {
     })
     await page.goto(runtimeUrl(code))
     await page.waitForLoadState('networkidle')
+    const input = fieldInput(page, '标记')
+    await expect(input).toBeVisible()
     await page.evaluate(() => (window as any).eventManager?.emit('ping', ''))
-    const input = page.locator('.ant-form-item', { hasText: '标记' }).locator('input').first()
     await expect(input).toHaveValue('PONG')
   })
 })
