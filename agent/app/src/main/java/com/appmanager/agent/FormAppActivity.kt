@@ -42,6 +42,7 @@ class FormAppActivity : AppCompatActivity() {
     private val tag = "FormAppActivity"
     private lateinit var webView: WebView
     private lateinit var bridge: FormAppBridge
+    private var formAppCode: String = ""
 
     private val scanLauncher = registerForActivityResult(ScanContract()) { result ->
         if (result.contents != null) {
@@ -76,7 +77,7 @@ class FormAppActivity : AppCompatActivity() {
         webView = WebView(this)
         setContentView(webView)
 
-        val formAppCode = intent.getStringExtra("form_app_code") ?: "test_app"
+        formAppCode = intent.getStringExtra("form_app_code") ?: "test_app"
         val pageKey = intent.getStringExtra("page_key") ?: "form"
         val serverUrl = intent.getStringExtra("server_url") ?: ""
 
@@ -85,7 +86,7 @@ class FormAppActivity : AppCompatActivity() {
         val localFormBase = AgentConfig.get(this).formAppBaseUrl.trim().trimEnd('/')
         val base = menuFormBase.ifEmpty { localFormBase }.ifEmpty { serverUrl }
 
-        bridge = FormAppBridge(this, this, webView)
+        bridge = FormAppBridge(this, this, webView, formAppCode)
 
         webView.settings.apply {
             javaScriptEnabled = true
@@ -95,6 +96,9 @@ class FormAppActivity : AppCompatActivity() {
         webView.addJavascriptInterface(bridge, "AndroidBridge")
         webView.webViewClient = WebViewClient()
         webView.webChromeClient = WebChromeClient()
+
+        // 注册到跨 app 事件中继注册表（第 7a 步）
+        FormAppRegistry.register(formAppCode, webView)
 
         val url = "$base/form-app/runtime/$formAppCode?page=$pageKey"
         webView.loadUrl(url)
@@ -159,6 +163,10 @@ class FormAppActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         if (::bridge.isInitialized) bridge.release()
+        // 从跨 app 事件中继注册表移除（第 7a 步）
+        if (::webView.isInitialized && formAppCode.isNotEmpty()) {
+            FormAppRegistry.unregister(formAppCode, webView)
+        }
         super.onDestroy()
     }
 }

@@ -16,7 +16,8 @@ import java.util.Locale
 class FormAppBridge(
     private val activity: FormAppActivity,
     private val context: Context,
-    private val webView: WebView
+    private val webView: WebView,
+    private val formAppCode: String
 ) {
     // ── 语音播报（TextToSpeech，懒初始化，中文优先） ──────────────────
     @Volatile private var tts: TextToSpeech? = null
@@ -213,5 +214,70 @@ class FormAppBridge(
                 defaultPrinterTransport = o.optString("transport", cur.defaultPrinterTransport).ifEmpty { cur.defaultPrinterTransport }
             ))
         } catch (_: Throwable) { /* 忽略 */ }
+    }
+
+    /**
+     * 跨 form-app 事件中继（第 7a 步：同设备跨 app）。
+     *
+     * 前端调用：AndroidBridge.emitCrossAppEvent(jsonPayload)
+     * jsonPayload 结构：{ event, payload, origin, hop, _target: { formCode } }
+     *
+     * 功能：
+     * 1. 解析 _target.formCode（目标 form-app）
+     * 2. 从 FormAppRegistry 查找目标 WebView
+     * 3. 移除扩展字段 _target（不转发给接收端）
+     * 4. 调用目标 WebView 的 window.dispatchCrossDeviceEvent(cleanPayload)
+     *
+     * 幂等/去重/防回环由 TS 接收端 (crossDevice/receiver.ts) 处理。
+     */
+    @JavascriptInterface
+    fun emitCrossAppEvent(jsonPayload: String) {
+        try {
+            // 1. 解析载荷
+            val json = JSONObject(jsonPayload)
+            val targetFormCode = json.optJSONObject("_target")?.optString("formCode", "") ?: ""
+            if (targetFormCode.isEmpty()) {
+                Log.w("FormAppBridge", "emitCrossAppEvent: _target.formCode 缺失")
+                return
+            }
+
+            // 2. 查找目标 WebView
+            val targetWebView = FormAppRegistry.find(targetFormCode)
+            if (targetWebView == null) {
+                Log.w("FormAppBridge", "emitCrossAppEvent: 目标 form-app 未运行: $targetFormCode")
+                return
+            }
+
+            // 3. 移除扩展字段 _target（不转发给接收端）
+            json.remove("_target")
+
+            // 补全 origin.deviceId（同设备内可选，补一个便于诊断）
+            val originObj = json.optJSONObject("origin")
+            if (originObj != null && !originObj.has("deviceId")) {
+                val deviceId = android.provider.Settings.Secure.getString(
+                    context.contentResolver,
+                    android.provider.Settings.Secure.ANDROID_ID
+                )
+                originObj.put("deviceId", deviceId)
+            }
+
+            val cleanPayload = json.toString()
+
+            // 4. 调用目标 WebView 的 JS（需在其线程）
+            targetWebView.post {
+                // 转义单引号防止注入（JSONObject.quote 会加外层双引号，这里手动转义）
+                val escaped = cleanPayload
+                    .replace("\\", "\\\\")
+                    .replace("'", "\\'")
+                    .replace("\n", "\\n")
+                    .replace("\r", "\\r")
+                val jsCode = "if(window.dispatchCrossDeviceEvent){window.dispatchCrossDeviceEvent('$escaped')}"
+                targetWebView.evaluateJavascript(jsCode, null)
+            }
+
+            Log.d("FormAppBridge", "emitCrossAppEvent: $formAppCode → $targetFormCode, event: ${json.optString("event")}")
+        } catch (e: Exception) {
+            Log.e("FormAppBridge", "emitCrossAppEvent 失败", e)
+        }
     }
 }
