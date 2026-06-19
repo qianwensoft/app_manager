@@ -86,6 +86,7 @@ export default function PreviewPanel({ app, pages, reload }: Props) {
         <Select value={pageKey} onChange={setPageKey} style={{ width: 220 }}>
           {pages.map(p => <Select.Option key={p.page_key} value={p.page_key}>{p.title} ({p.page_key})</Select.Option>)}
         </Select>
+        {/* @ts-ignore */}
         <Segmented value={device} onChange={v => setDevice(v as any)} options={Object.keys(DEVICE_PRESETS)} />
         <Button onClick={() => setNonce(n => n + 1)}>刷新</Button>
         <Button type="primary" onClick={() => setAiOpen(true)} disabled={!currentPage}>AI 对话编辑</Button>

@@ -380,9 +380,9 @@ export default function PageDesignerPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-      <Designer engine={engine}>
-        <StudioPanel>
-          <CompositePanel>
+      <Designer engine={engine} {...({} as any)}>
+        <StudioPanel {...({} as any)}>
+          <CompositePanel {...({} as any)}>
             <CompositeItem title="组件" icon="Component">
               <ResourceWidget title="页面布局" sources={[PageHeader, Section, LayoutDivider, StaticImage, StaticText]} />
               <ResourceWidget
@@ -403,9 +403,9 @@ export default function PageDesignerPage() {
             </CompositeItem>
           </CompositePanel>
 
-          <Workbench>
-            <WorkspacePanel>
-              <ToolbarPanel>
+          <Workbench {...({} as any)}>
+            <WorkspacePanel {...({} as any)}>
+              <ToolbarPanel {...({} as any)}>
                 {/* 左侧：返回 + 页面信息 */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 4 }}>
                   <Button size="small" onClick={() => navigate(-1)}>← 返回</Button>
@@ -466,15 +466,15 @@ export default function PageDesignerPage() {
                 </div>
               </ToolbarPanel>
 
-              <ViewportPanel style={{ height: '100%' }}>
-                <ViewPanel type="DESIGNABLE">
+              <ViewportPanel style={{ height: '100%' }} {...({} as any)}>
+                <ViewPanel type="DESIGNABLE" {...({} as any)}>
                   {() => <ComponentTreeWidget components={componentMap} />}
                 </ViewPanel>
               </ViewportPanel>
             </WorkspacePanel>
           </Workbench>
 
-          <SettingsPanel title="属性配置">
+          <SettingsPanel title="属性配置" {...({} as any)}>
             <Tabs defaultActiveKey="props" size="small" style={{ padding: '0 8px' }}>
               <Tabs.TabPane key="props" tab="属性">
                 <SettingsForm uploadAction="/api/scada/resource/upload/widget" />
