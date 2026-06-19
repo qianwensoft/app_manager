@@ -257,7 +257,7 @@ export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }:
   const urlBar = embedded ? null : (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: '1px solid #e5e7eb', background: '#fff' }}>
       <Button size="sm" variant="outline" onClick={() => setNavOpen(v => !v)}>{navOpen ? '«' : '»'}</Button>
-      <Input size="sm" readOnly value={fullUrl} className="flex-1" />
+      <Input readOnly value={fullUrl} className="flex-1" />
       <Button
         size="sm"
         variant="outline"
