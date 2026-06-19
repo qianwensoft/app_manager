@@ -37,3 +37,8 @@ Thumbs.db
 
 # 日志
 *.log
+
+# Playwright E2E
+form-app/e2e/.auth/
+form-app/playwright-report/
+form-app/test-results/
