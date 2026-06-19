@@ -1,5 +1,5 @@
 import React from 'react'
-import { Table } from 'antd'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { createBehavior, createResource } from '@designable/core'
 import type { DnFC } from '@designable/react'
 
@@ -11,17 +11,29 @@ export const TableList: DnFC<any> = (props) => {
     key: col.key || col.dataIndex,
   }))
 
+  const displayColumns = columns.length > 0 ? columns : [{ title: '列1', dataIndex: 'col1', key: 'col1' }]
+
   return (
-    <div style={{ border: '1px dashed #d9d9d9', padding: 12, borderRadius: 6 }}>
-      <div style={{ fontSize: 12, color: '#999', marginBottom: 8 }}>
-        Table — 查询接口: {p.interface_code || '(从页面配置读取)'} | 列数: {columns.length}
+    <div className="border border-dashed p-3 rounded-md">
+      <div className="text-xs text-muted-foreground mb-2">
+        Table — 查询接口: {p.interface_code || '(从页面配置读取)'} | 列数: {displayColumns.length}
       </div>
-      <Table
-        size="small"
-        columns={columns.length > 0 ? columns : [{ title: '列1', dataIndex: 'col1', key: 'col1' }]}
-        dataSource={[]}
-        pagination={{ simple: true, pageSize: 10, total: 0 }}
-      />
+      <Table>
+        <TableHeader>
+          <TableRow>
+            {displayColumns.map((col: any) => (
+              <TableHead key={col.key}>{col.title}</TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          <TableRow>
+            <TableCell colSpan={displayColumns.length} className="text-center text-muted-foreground">
+              暂无数据
+            </TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
     </div>
   )
 }

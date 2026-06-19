@@ -1,9 +1,20 @@
-import React from 'react'
-import { Button, Modal } from 'antd'
+import React, { useState } from 'react'
+import { Button } from '@/components/ui/button'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { createBehavior, createResource } from '@designable/core'
 import type { DnFC } from '@designable/react'
 
 export const ConfirmDialogButton: DnFC<any> = (props) => {
+  const [open, setOpen] = useState(false)
   const p = props || {}
   const text = p.text || '确认操作'
   const title = p.title || '确认'
@@ -12,19 +23,23 @@ export const ConfirmDialogButton: DnFC<any> = (props) => {
   const cancelText = p.cancelText || '取消'
 
   return (
-    <Button
-      htmlType="button"
-      onClick={() =>
-        Modal.confirm({
-          title,
-          content,
-          okText,
-          cancelText,
-        })
-      }
-    >
-      {text}
-    </Button>
+    <>
+      <Button type="button" onClick={() => setOpen(true)}>
+        {text}
+      </Button>
+      <AlertDialog open={open} onOpenChange={setOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{title}</AlertDialogTitle>
+            <AlertDialogDescription>{content}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{cancelText}</AlertDialogCancel>
+            <AlertDialogAction>{okText}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   )
 }
 

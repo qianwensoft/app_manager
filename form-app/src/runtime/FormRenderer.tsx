@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Button, message, Space, Tag } from 'antd'
+import { Button } from '@/components/ui/button'
+import { message } from '@/lib/message'
 import FieldRenderer from './FieldRenderer'
 import { validateForm } from './FieldValidator'
 import type { FieldBinding, FieldDef, FieldOption } from './types'
@@ -283,9 +284,17 @@ export default function FormRenderer({
   return (
     <div className="form-renderer-root" style={{ maxWidth: 600, margin: '0 auto', padding: 24 }}>
       {draftSavedAt && (
-        <div style={{ marginBottom: 12 }}>
-          <Tag color="blue">草稿已自动保存</Tag>
-          <Button type="link" size="small" onClick={clearDraft}>清除草稿</Button>
+        <div className="flex items-center gap-2 mb-3">
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+            草稿已自动保存
+          </span>
+          <button
+            type="button"
+            className="text-sm text-blue-600 hover:underline"
+            onClick={clearDraft}
+          >
+            清除草稿
+          </button>
         </div>
       )}
       {visibleFields.map(def => {
@@ -300,11 +309,11 @@ export default function FormRenderer({
           />
         )
       })}
-      <Space style={{ marginTop: 16 }}>
-        <Button type="primary" onClick={handleSubmit} loading={loading}>
+      <div className="flex gap-2 mt-4">
+        <Button onClick={handleSubmit} disabled={loading}>
           {submitLabel}
         </Button>
-      </Space>
+      </div>
     </div>
   )
 }

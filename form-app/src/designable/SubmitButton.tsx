@@ -1,12 +1,12 @@
 import React from 'react'
-import { Button } from 'antd'
+import { Button } from '@/components/ui/button'
 import { createBehavior, createResource } from '@designable/core'
 import type { DnFC } from '@designable/react'
 
 export const SubmitButton: DnFC<any> = (props) => {
   const text = props?.text || props?.children || '提交'
   return (
-    <Button type="primary" htmlType="button">
+    <Button type="button">
       {text}
     </Button>
   )

@@ -1,12 +1,13 @@
 import React from 'react'
-import { Button } from 'antd'
+import { Button } from '@/components/ui/button'
 import { createBehavior, createResource } from '@designable/core'
 import type { DnFC } from '@designable/react'
 
 export const ScanTrigger: DnFC<any> = (props) => {
   const p = props?.['x-component-props'] || props || {}
   return (
-    <Button icon={<span>📷</span>} type="default">
+    <Button variant="outline">
+      <span className="mr-2">📷</span>
       {p.text || '扫码'}
     </Button>
   )
