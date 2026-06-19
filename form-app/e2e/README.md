@@ -16,16 +16,24 @@
 ```bash
 cd form-app
 npm i -D @playwright/test
-npx playwright install chromium
-# 指向测试环境
-E2E_BASE_URL=http://192.168.1.136:3000 npx playwright test
+./node_modules/.bin/playwright install chromium
+# 指向测试环境（单 worker 更稳，事件用例对时序敏感）
+E2E_BASE_URL=http://192.168.1.136:3000 ./node_modules/.bin/playwright test --workers=1
 # 看报告
-npx playwright show-report
+./node_modules/.bin/playwright show-report
 # 只跑某组
-npx playwright test e2e/04-events.spec.ts
+./node_modules/.bin/playwright test e2e/04-events.spec.ts
 # 带界面调试
-npx playwright test --headed --debug
+./node_modules/.bin/playwright test --headed --debug
 ```
+
+> ⚠️ **必须用项目本地 `./node_modules/.bin/playwright`，不要用 `npx playwright`。**
+> `npx` 可能解析到全局缓存里的不同 Playwright 版本，触发
+> 「Playwright Test did not expect test.describe() to be called here / two different
+> versions of @playwright/test」假错（与代码无关）。也可在 package.json 走
+> `npm run test:e2e`（已指向本地 binary）。
+>
+> ✅ 最近一次在 `http://192.168.1.136:3000` 实跑：**19/19 全过**。
 
 ## 登录态
 
@@ -49,11 +57,14 @@ form-app 自身无登录页（登录态由外壳注入）。`auth.setup.ts` 直�
 清理，互不污染。运行时页用 `createRunnableFormPage` 经 API 注入 field_definitions +
 events，避免依赖 UI 设计器的脆弱性。
 
-## 已知约束（本机无法验证）
+## 覆盖边界
 
-- 本套用例**未在目标环境实跑过**（编写机无法访问该内网）。首次运行可能因真实
-  DOM 细节（antd 版本差异、字段渲染包裹层）需要微调选择器——选择器已尽量用语义
-  文本 + `.ant-form-item` 容器定位，降低脆弱性。
+- 已在 `http://192.168.1.136:3000` 实跑通过（19/19）。选择器以语义文本 + 跨渲染库
+  容器（`fieldInput()`）+ CJK 空白容忍（`cjkBtn()`）定位，降低对 antd 版本/包裹层的脆弱性。
 - 扫码用 `window.eventManager.emit` 模拟（与真机同路径），未覆盖键盘楔/真实扫码硬件。
+- 提交（C3）只验证「前端校验放行 + 发出 submit 请求」；后端接口执行需页面绑定
+  `interface_code`，属另一层关注点，不在本套范围。
 - 打印（AndroidBridge）、agent WebView 端到端不在浏览器 E2E 范围。
-</content>
+- 数据隔离：用例经 API 建/删 app（`afterEach` 清理）；注意 `CreateFormApp` 会自动建
+  默认 `form` 页，故 `createRunnableFormPage` 更新该默认页而非新建。
+
