@@ -27,6 +27,7 @@ const CTX_MEMBERS: Array<{ label: string; apply: string; detail: string }> = [
   { label: 'emit', apply: "emit('', {})", detail: '触发自定义事件 emit(name, data?)' },
   { label: 'appGet', apply: "appGet('')", detail: '读应用级状态 appGet(field)' },
   { label: 'appSet', apply: "appSet('', )", detail: '写应用级状态 appSet(field, value)' },
+  { label: 'node', apply: "node('')", detail: '读上游节点产出 node(nodeId, path?)（DAG）' },
 ]
 
 const consoleMethods = [

@@ -165,6 +165,8 @@ export interface ScriptApi {
   appGet: (field: string) => any
   /** 写入应用级状态字段（AppState） */
   appSet: (field: string, value: any) => void
+  /** 读取上游节点产出（DAG 路径）：node('q') 取整个产出，node('q','data.id') 取点路径 */
+  node: (nodeId: string, path?: string) => any
 }
 
 /** 用运行时依赖与上下文构造脚本 API。guardedEmit 为带环路守卫的 emit。 */
@@ -201,6 +203,10 @@ function buildScriptApi(
     },
     appGet: (field) => appScope.get(field),
     appSet: (field, value) => { if (field) appScope.set(field, value) },
+    node: (nodeId, path) => {
+      const out = ctx.nodeOutputs?.[nodeId]
+      return path ? resolveNestedField(out, path) : out
+    },
   }
 }
 

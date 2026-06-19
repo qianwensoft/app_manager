@@ -132,6 +132,31 @@ describe('runGraph 调度', () => {
     expect(onTrace).toHaveBeenCalledOnce()
     expect(onTrace.mock.calls[0][0][0].status).toBe('ok')
   })
+
+  it('真实场景：parallel 调 2 接口 → barrier → run_script 读 $node 决策 → set_field', async () => {
+    const page = fakeScope()
+    const onScanInterface = vi.fn()
+      .mockResolvedValueOnce({ data: { stock: 3 } })  // 接口 A
+      .mockResolvedValueOnce({ data: { stock: 7 } })  // 接口 B
+    const deps: EventEngineDeps = { pageState: page, onScanInterface }
+    const g: FlowGraph = {
+      nodes: [
+        { id: 'p', kind: 'parallel' },
+        { id: 'a', kind: 'tool', action: { type: 'call_interface', interface_type: 'internal', interface_code: 'A' } as any },
+        { id: 'b', kind: 'tool', action: { type: 'call_interface', interface_type: 'internal', interface_code: 'B' } as any },
+        { id: 'm', kind: 'barrier' },
+        // 决策节点：读两个上游接口产出求和写回页面
+        { id: 'd', kind: 'run_script', script: "ctx.set('total', (ctx.node('a','result.data.stock')||0) + (ctx.node('b','result.data.stock')||0))" },
+      ],
+      edges: [
+        { id: 'e1', source: 'p', target: 'a' }, { id: 'e2', source: 'p', target: 'b' },
+        { id: 'e3', source: 'a', target: 'm' }, { id: 'e4', source: 'b', target: 'm' },
+        { id: 'e5', source: 'm', target: 'd' },
+      ],
+    }
+    await runGraph(g, baseCtx, deps)
+    expect(page.store.total).toBe(10) // 3 + 7，证明 run_script 经 ctx.node 读到两个上游产出
+  })
 })
 
 describe('migrateActionsToGraph', () => {
