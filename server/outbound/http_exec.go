@@ -157,7 +157,12 @@ func injectTokenIntoJSONBody(req *http.Request, p TokenProvider, cache TokenCach
 	m := map[string]interface{}{}
 	if t := strings.TrimSpace(string(raw)); t != "" && t != "null" {
 		if err := json.Unmarshal(raw, &m); err != nil {
-			return fmt.Errorf("token json_body: request body is not valid JSON")
+			// 详细记录解析失败的 body 内容，便于调试
+			bodyPreview := string(raw)
+			if len(bodyPreview) > 500 {
+				bodyPreview = bodyPreview[:500] + "...(truncated)"
+			}
+			return fmt.Errorf("token json_body: request body is not valid JSON: %w\nBody preview: %s", err, bodyPreview)
 		}
 	}
 
