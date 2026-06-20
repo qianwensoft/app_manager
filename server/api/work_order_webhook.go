@@ -143,19 +143,35 @@ func GetWorkOrderWebhookLog(c *gin.Context) {
 
 // workOrderEventPayload 构造外发/占位符可用的扁平字段。
 func workOrderEventPayload(event string, wo *models.WorkOrder, actor string) map[string]interface{} {
+	// cleanString 清理字符串中的控制字符，避免破坏 JSON 格式
+	cleanString := func(s string) string {
+		// 移除或替换控制字符（ASCII 0-31，除了制表符）
+		// 保留制表符（\t），但移除其他控制字符如换行、回车等
+		result := strings.Map(func(r rune) rune {
+			if r == '\t' {
+				return r // 保留制表符
+			}
+			if r < 32 || r == 127 {
+				return -1 // 删除其他控制字符
+			}
+			return r
+		}, s)
+		return strings.TrimSpace(result)
+	}
+
 	payload := map[string]interface{}{
 		"event":               event,
 		"id":                  wo.ID,
 		"code":                wo.Code,
 		"type_code":           wo.TypeCode,
 		"device_id":           wo.DeviceID,
-		"title":               wo.Title,
-		"description":         wo.Description,
+		"title":               cleanString(wo.Title),
+		"description":         cleanString(wo.Description),
 		"status":              wo.Status,
 		"priority":            wo.Priority,
 		"visibility":          wo.Visibility,
-		"external_ref":        wo.ExternalRef,
-		"other_codes":         wo.OtherCodes,
+		"external_ref":        cleanString(wo.ExternalRef),
+		"other_codes":         cleanString(wo.OtherCodes),
 		"device_name":         wo.DeviceName,
 		"device_alias_server": wo.DeviceAliasServer,
 		"device_alias_agent":  wo.DeviceAliasAgent,
@@ -380,8 +396,6 @@ func renderPlaceholders(tmpl string, payload map[string]interface{}) interface{}
 	// 不处理转义字符 - JSON 序列化会自动处理
 	return out
 }
-
-// unescapeString 处理常见转义字符
 
 func invokeWorkOrderEndpoint(h models.WorkOrderWebhook, params map[string]interface{}) {
 	startTime := time.Now()
