@@ -325,7 +325,7 @@ const saveTagEdit = async () => {
 const photoItems = computed(() => (wo.value.items || []).filter(it => it.kind === 'photo'))
 const imageList = computed(() => photoItems.value.map(it => ({
   id: it.id,
-  url: dlUrl(it.id),
+  url: `${dlUrl(it.id)}&t=${Date.now()}`, // 添加时间戳避免缓存
   name: it.file_name,
   workOrderId: id
 })))
@@ -339,6 +339,7 @@ const openImagePreview = (itemId) => {
 }
 const handleImageSaved = () => {
   // 图片保存后重新加载工单数据，更新显示
+  imagePreviewVisible.value = false
   load()
 }
 const openPreview = (it) => { previewItem.value = it; previewDialog.value = true }

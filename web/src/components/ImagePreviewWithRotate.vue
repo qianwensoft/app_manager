@@ -175,9 +175,19 @@ const saveRotated = async () => {
     saving.value = true
 
     // 将 canvas 转换为 Blob
-    const blob = await new Promise((resolve) => {
-      canvasRef.value.toBlob(resolve, 'image/jpeg', 0.95)
+    const blob = await new Promise((resolve, reject) => {
+      canvasRef.value.toBlob((result) => {
+        if (result) {
+          resolve(result)
+        } else {
+          reject(new Error('转换图片失败'))
+        }
+      }, 'image/jpeg', 0.95)
     })
+
+    if (!blob) {
+      throw new Error('无法生成图片')
+    }
 
     // 创建 File 对象
     const file = new File([blob], currentImage.value.name || 'rotated.jpg', { type: 'image/jpeg' })
@@ -185,9 +195,20 @@ const saveRotated = async () => {
     // 上传
     await updateWorkOrderItem(currentImage.value.workOrderId, currentImage.value.id, file)
 
-    ElMessage.success('图片已保存')
+    ElMessage.success('图片已保存，页面将自动刷新')
     rotationAngle.value = 0
+
+    // 清除图片缓存
+    if (imageCache.value[currentImage.value.url]) {
+      delete imageCache.value[currentImage.value.url]
+    }
+
     emit('saved', currentImage.value.id)
+
+    // 延迟关闭对话框，让用户看到成功提示
+    setTimeout(() => {
+      visible.value = false
+    }, 500)
   } catch (error) {
     console.error('Failed to save rotated image:', error)
     ElMessage.error('保存失败：' + (error.response?.data?.error || error.message))
