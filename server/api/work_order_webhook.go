@@ -348,7 +348,6 @@ func resolveWebhookParams(paramsJSON string, payload map[string]interface{}) map
 // renderPlaceholders 替换 {{key}} 为 payload[key]；支持多个占位符拼接。
 // 整串恰好是单个占位符时保留原始类型（数字、布尔等）；
 // 包含多个占位符或混合文本时，执行字符串替换后返回字符串。
-// 注意：会清理最终字符串中的控制字符，避免破坏 JSON 格式。
 func renderPlaceholders(tmpl string, payload map[string]interface{}) interface{} {
 	t := strings.TrimSpace(tmpl)
 
@@ -393,19 +392,7 @@ func renderPlaceholders(tmpl string, payload map[string]interface{}) interface{}
 		out = strings.ReplaceAll(out, placeholder, strVal)
 	}
 
-	// 清理控制字符：移除换行、回车等会破坏 JSON 格式的字符
-	// 保留制表符（\t），移除其他控制字符
-	out = strings.Map(func(r rune) rune {
-		if r == '\t' {
-			return r // 保留制表符
-		}
-		if r < 32 || r == 127 {
-			return -1 // 删除其他控制字符（包括换行、回车）
-		}
-		return r
-	}, out)
-
-	return strings.TrimSpace(out)
+	return out
 }
 
 func invokeWorkOrderEndpoint(h models.WorkOrderWebhook, params map[string]interface{}) {
@@ -457,11 +444,22 @@ func invokeWorkOrderEndpoint(h models.WorkOrderWebhook, params map[string]interf
 	resolvedJSON, _ := json.Marshal(params)
 	logEntry.ResolvedJSON = string(resolvedJSON)
 
+	// escapeForJSON 将字符串值进行 JSON 转义，确保可以安全嵌入 JSON 字符串中
+	escapeForJSON := func(s string) string {
+		// 使用 json.Marshal 对字符串进行转义，然后去掉首尾引号
+		b, _ := json.Marshal(s)
+		if len(b) >= 2 {
+			return string(b[1 : len(b)-1]) // 去掉引号
+		}
+		return s
+	}
+
 	sampleVars := make(map[string]string, len(params))
 	for k, v := range params {
 		switch s := v.(type) {
 		case string:
-			sampleVars["{{"+k+"}}"] = s
+			// 对字符串值进行 JSON 转义，避免控制字符破坏 JSON 格式
+			sampleVars["{{"+k+"}}"] = escapeForJSON(s)
 		default:
 			sampleVars["{{"+k+"}}"] = jsonString(v)
 		}
