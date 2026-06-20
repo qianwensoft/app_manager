@@ -1047,8 +1047,14 @@ const loadEndpointParams = async (idx, endpointId) => {
   const action = actions.value[idx]
   try {
     const res = await getEndpointParamSchema(endpointId)
-    action.builder.paramList = res.data?.params || []
+    console.log('Endpoint param schema response:', res)
+    // axios 响应: res.data 就是 API 返回的 JSON
+    const params = res.data?.params || res.params || []
+    console.log('Params:', params)
+    action.builder.paramList = params
+    console.log('Set paramList to:', action.builder.paramList)
   } catch (e) {
+    console.error('Failed to load endpoint params:', e)
     ElMessage.warning('加载接口参数失败: ' + e.message)
     action.builder.paramList = []
   }
@@ -1087,8 +1093,14 @@ const loadInterfaceParams = async (idx, interfaceId) => {
   const action = actions.value[idx]
   try {
     const res = await getInterfaceParamSchema(interfaceId)
-    action.builder.paramList = res.data?.params || []
+    console.log('Interface param schema response:', res)
+    // axios 响应: res.data 就是 API 返回的 JSON
+    const params = res.data?.params || res.params || []
+    console.log('Params:', params)
+    action.builder.paramList = params
+    console.log('Set paramList to:', action.builder.paramList)
   } catch (e) {
+    console.error('Failed to load interface params:', e)
     ElMessage.warning('加载接口参数失败: ' + e.message)
     action.builder.paramList = []
   }
