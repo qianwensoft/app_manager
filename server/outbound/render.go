@@ -421,7 +421,26 @@ func expandTemplate(s string, vars map[string]string) string {
 		s = strings.ReplaceAll(s, p.k, p.v)
 	}
 	// 在静态变量替换之后求值函数调用（{{$func(args)}}）
-	return evalFunctions(s)
+	s = evalFunctions(s)
+	// 处理转义字符（\n、\r\n、\t 等）
+	return unescapeString(s)
+}
+
+// unescapeString 处理常见转义字符（\n → 换行、\r\n → 回车换行、\t → 制表符、\\ → 反斜杠）
+func unescapeString(s string) string {
+	// 按顺序处理，避免重复替换
+	replacements := []struct{ old, new string }{
+		{"\\r\\n", "\r\n"}, // Windows 换行
+		{"\\n", "\n"},      // Unix 换行
+		{"\\r", "\r"},      // Mac 旧换行
+		{"\\t", "\t"},      // 制表符
+		{"\\\\", "\\"},     // 反斜杠本身
+	}
+	result := s
+	for _, r := range replacements {
+		result = strings.ReplaceAll(result, r.old, r.new)
+	}
+	return result
 }
 
 // ExpandTemplate 与运行时占位符替换规则一致（供连接器编辑预览等 API）。
