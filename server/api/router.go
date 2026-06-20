@@ -497,6 +497,7 @@ func SetupRouter() *gin.Engine {
 		woRuntime.POST("/mine/:id/status", ChangeMyWorkOrderStatus)
 		woRuntime.POST("/:id/items", UploadWorkOrderItem)
 		woRuntime.GET("/:id/items/:item_id/download", DownloadWorkOrderItem)
+		woRuntime.PUT("/:id/items/:item_id", UpdateWorkOrderItem)
 		// 标签字典读取 + 工单标签维护：web(JWT) 与 app(device-token) 共用
 		woRuntime.GET("/tags", ListWorkOrderTagDict)
 		woRuntime.PUT("/:id/tags", SetWorkOrderTags)

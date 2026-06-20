@@ -79,15 +79,12 @@
                 <span v-if="it.target_pkg" class="item-pkg">{{ it.target_pkg }}</span>
                 <el-link :href="dlUrl(it.id)" target="_blank" type="primary" style="margin-left:auto">下载</el-link>
               </div>
-              <el-image
+              <img
                 v-if="it.kind === 'photo'"
                 :src="dlUrl(it.id)"
-                :preview-src-list="imagePreviewList"
-                :initial-index="imageIndex(it.id)"
                 fit="contain"
                 class="item-img"
-                preview-teleported
-                hide-on-click-modal
+                @click="openImagePreview(it.id)"
               />
               <div v-else-if="it.kind === 'video' || it.kind === 'screen_record'" class="media-block">
                 <video :src="dlUrl(it.id)" controls class="item-video" />
@@ -217,6 +214,13 @@
         :src="dlUrl(previewItem.id)" controls autoplay style="width:100%;max-height:70vh" />
       <audio v-else-if="previewItem && previewItem.kind === 'voice'" :src="dlUrl(previewItem.id)" controls autoplay style="width:100%" />
     </el-dialog>
+
+    <ImagePreviewWithRotate
+      v-model="imagePreviewVisible"
+      :image-list="imageList"
+      :initial-index="imagePreviewIndex"
+      @saved="handleImageSaved"
+    />
   </div>
 </template>
 
@@ -232,6 +236,7 @@ import {
   getWorkOrderTagDict, setWorkOrderTags
 } from '@/api/workOrder'
 import { statusLabel, statusType, priorityType, priorityLabel } from './workOrderConst'
+import ImagePreviewWithRotate from '@/components/ImagePreviewWithRotate.vue'
 
 const route = useRoute()
 const id = route.params.id
@@ -318,8 +323,24 @@ const saveTagEdit = async () => {
 }
 
 const photoItems = computed(() => (wo.value.items || []).filter(it => it.kind === 'photo'))
-const imagePreviewList = computed(() => photoItems.value.map(it => dlUrl(it.id)))
-const imageIndex = (itemId) => photoItems.value.findIndex(it => it.id === itemId)
+const imageList = computed(() => photoItems.value.map(it => ({
+  id: it.id,
+  url: dlUrl(it.id),
+  name: it.file_name,
+  workOrderId: id
+})))
+const imagePreviewVisible = ref(false)
+const imagePreviewIndex = ref(0)
+const openImagePreview = (itemId) => {
+  imagePreviewIndex.value = photoItems.value.findIndex(it => it.id === itemId)
+  if (imagePreviewIndex.value >= 0) {
+    imagePreviewVisible.value = true
+  }
+}
+const handleImageSaved = () => {
+  // 图片保存后重新加载工单数据，更新显示
+  load()
+}
 const openPreview = (it) => { previewItem.value = it; previewDialog.value = true }
 
 const kindLabels = { text: '文字', photo: '照片', video: '视频', voice: '语音', screen_record: '录屏', logcat: '日志', resource: '资源' }

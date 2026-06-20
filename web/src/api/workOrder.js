@@ -15,6 +15,14 @@ export const batchUnarchiveWorkOrders = (ids) => http.post('/work-orders/batch/u
 export const workOrderItemDownloadUrl = (id, itemId) =>
   `/api/work-orders/${id}/items/${itemId}/download?token=${encodeURIComponent(localStorage.getItem('token') || '')}`
 
+export const updateWorkOrderItem = (workOrderId, itemId, file) => {
+  const formData = new FormData()
+  formData.append('file', file)
+  return http.put(`/work-orders/${workOrderId}/items/${itemId}`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  })
+}
+
 // 工单类型
 export const getWorkOrderTypes = () => http.get('/work-orders/types')
 export const createWorkOrderType = (data) => http.post('/work-orders/types', data)

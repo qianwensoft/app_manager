@@ -825,6 +825,52 @@ func DownloadWorkOrderItem(c *gin.Context) {
 	c.File(item.FilePath)
 }
 
+// UpdateWorkOrderItem 更新工单附件（如替换旋转后的图片）。
+func UpdateWorkOrderItem(c *gin.Context) {
+	var item models.WorkOrderItem
+	if err := database.DB.Where("work_order_id = ? AND id = ?", c.Param("id"), c.Param("item_id")).First(&item).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+
+	// 仅支持更新图片类型
+	if item.Kind != "photo" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "only photo items can be updated"})
+		return
+	}
+
+	file, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "file required"})
+		return
+	}
+
+	// 删除旧文件
+	if item.FilePath != "" {
+		_ = os.Remove(item.FilePath)
+	}
+
+	// 使用与上传时相同的方式保存文件
+	savePath, err := storage.SaveFile(file, "work-order")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save file"})
+		return
+	}
+
+	// 更新数据库记录
+	updates := map[string]interface{}{
+		"file_path":    savePath,
+		"content_type": file.Header.Get("Content-Type"),
+		"file_size":    file.Size,
+	}
+	if err := database.DB.Model(&item).Updates(updates).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "ok", "data": item})
+}
+
 // ── 工单类型 types ────────────────────────────────────────────────────────
 
 func ListWorkOrderTypes(c *gin.Context) {
