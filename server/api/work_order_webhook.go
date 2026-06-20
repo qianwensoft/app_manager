@@ -456,7 +456,7 @@ func invokeWorkOrderEndpoint(h models.WorkOrderWebhook, params map[string]interf
 		}
 	}
 
-	_, _, _, _, _, err := outbound.DebugHTTPEndpoint(database.DB, ep.App, ep, sampleVars, ep.TimeoutMS, nil)
+	trace, _, _, _, scriptLogs, err := outbound.DebugHTTPEndpoint(database.DB, ep.App, ep, sampleVars, ep.TimeoutMS, nil)
 	logEntry.DurationMs = time.Since(startTime).Milliseconds()
 
 	if err != nil {
@@ -465,6 +465,20 @@ func invokeWorkOrderEndpoint(h models.WorkOrderWebhook, params map[string]interf
 		logEntry.ErrorMsg = err.Error()
 	} else {
 		logEntry.Status = "success"
+		// 保存 HTTP 状态码和原始响应
+		if trace != nil && trace.Response.Status > 0 {
+			logEntry.StatusCode = trace.Response.Status
+			// 保存原始响应体（限制 10KB）
+			logEntry.ResponseBody = truncateString(trace.Response.Body, 10000)
+		}
+		// 如果有 JS 脚本处理，保存脚本日志
+		if len(scriptLogs) > 0 {
+			scriptOutput := "\n\n--- Script Processing Logs ---\n"
+			for _, sl := range scriptLogs {
+				scriptOutput += fmt.Sprintf("[%s/%d %s] %s: %s\n", sl.Scope, sl.Index, sl.Name, sl.Level, sl.Line)
+			}
+			logEntry.ResponseBody = truncateString(logEntry.ResponseBody+scriptOutput, 10000)
+		}
 	}
 
 	database.DB.Create(&logEntry)
