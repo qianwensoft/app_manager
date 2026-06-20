@@ -59,7 +59,7 @@
         </el-form-item>
         <el-form-item v-if="editing.target === 'endpoint'" label="第三方接口">
           <el-select v-model="editing.endpoint_id" filterable placeholder="选择 outbound endpoint" style="width:100%">
-            <el-option v-for="ep in endpoints" :key="ep.id" :label="`${ep.app?.name || ''} / ${ep.name}`" :value="ep.id" />
+            <el-option v-for="ep in endpoints" :key="ep.id" :label="`${ep.app_name || ''} / ${ep.name}`" :value="ep.id" />
           </el-select>
         </el-form-item>
         <el-form-item v-else label="连接器接口">
@@ -140,7 +140,7 @@
             <div v-else>
               <WorkOrderParamsEditor
                 v-model="editing.params_json"
-                :min-height="300"
+                :min-height="200"
                 placeholder='{"order_no": "{{code}}", "device": "{{device_name}}_{{device_serial}}", "reporter": "{{created_by_username}}"}'
               />
             </div>
@@ -339,7 +339,7 @@ watch(() => [editing.value.target, editing.value.endpoint_id, editing.value.conn
 const targetLabel = (row) => {
   if (row.target === 'connector') return row.connector_code || '-'
   const ep = endpoints.value.find(e => e.id === row.endpoint_id)
-  return ep ? `${ep.app?.name || ''} / ${ep.name}` : `#${row.endpoint_id}`
+  return ep ? `${ep.app_name || ''} / ${ep.name}` : `#${row.endpoint_id}`
 }
 const eventsLabel = (s) => {
   if (!s) return '全部'

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 // isNumericID is true when key is a decimal database id（Web / API）.
@@ -70,7 +71,11 @@ func resolveKeyToID(key string, allowNumericID bool) (uint, bool) {
 		return 0, false
 	}
 	var d models.Device
-	sess := database.DB.Session(&gorm.Session{NewDB: true})
+	// 静默查询模式：探测性查询不记录"record not found"日志
+	sess := database.DB.Session(&gorm.Session{
+		NewDB:                true,
+		Logger:               database.DB.Config.Logger.LogMode(logger.Silent),
+	})
 
 	if allowNumericID && isNumericID(key) {
 		id, err := strconv.ParseUint(key, 10, 64)
