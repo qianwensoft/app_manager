@@ -102,6 +102,19 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
+            <!-- 设备注册入口：无摄像头端（电视/盒子）无法扫码时改用反向注册；
+                 手机/平板也可随时用（换服务器、重新归属）。focusable 便于遥控器聚焦。 -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnReverseRegister"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:focusable="true"
+                android:text="@string/reverse_register_entry"
+                android:textSize="16sp"
+                app:icon="@android:drawable/ic_menu_share"
+                app:iconGravity="textStart" />
+
             <!-- 前台应用区域标题 -->
             <TextView
                 style="@style/AppManagerSectionTitle"

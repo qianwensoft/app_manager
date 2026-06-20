@@ -103,7 +103,7 @@ scada-editor-build: deps-scada-editor
 	cp -R $(SCADA_EDITOR)/dist $(WEB)/dist/scada-editor
 
 deps-form-app:
-	cd $(FORM_APP) && $(NPM) ci
+	cd $(FORM_APP) && $(NPM) ci --legacy-peer-deps
 
 form-app-build: deps-form-app
 	cd $(FORM_APP) && $(NPM) run build

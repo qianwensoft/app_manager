@@ -7,6 +7,17 @@
     <string name="notify_action_grant_screen">授权投屏</string>
     <string name="agent_version_label">Agent 版本：%1$s</string>
 
+    <!-- 设备注册（反向注册，电视等无摄像头端亦可用） -->
+    <string name="reverse_register_title">设备注册</string>
+    <string name="reverse_register_entry">设备注册</string>
+    <string name="reverse_register_hint">在管理平台「设备」页选择「设备注册」，输入下方 IP 与授权码完成接入。</string>
+    <string name="reverse_register_ip_label">本机 IP</string>
+    <string name="reverse_register_port_label">端口</string>
+    <string name="reverse_register_code_label">授权码</string>
+    <string name="reverse_register_waiting">等待管理端认领…</string>
+    <string name="reverse_register_no_network">未连接到局域网，请先接入网络</string>
+    <string name="reverse_register_success">注册成功，服务已启动</string>
+
     <!-- 首页 -->
     <string name="main_header_title">APP Manager</string>
     <string name="main_section_device">设备概况</string>

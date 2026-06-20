@@ -15,24 +15,55 @@
     <!-- 右侧主区 -->
     <div class="main">
       <div class="toolbar">
-        <el-select v-model="filters.status" placeholder="状态" clearable style="width:130px" @change="load">
+        <el-select v-model="filters.status" placeholder="状态" clearable style="width:130px" @change="reload">
           <el-option v-for="s in statusOptions" :key="s.value" :label="s.label" :value="s.value" />
         </el-select>
-        <el-input v-model="filters.device_id" placeholder="设备ID" clearable style="width:120px" @keyup.enter="load" />
-        <el-button @click="load">查询</el-button>
+        <el-input v-model="filters.device_id" placeholder="设备ID" clearable style="width:120px" @keyup.enter="reload" />
+        <el-select
+          v-model="filters.tags"
+          multiple
+          filterable
+          collapse-tags
+          collapse-tags-tooltip
+          clearable
+          placeholder="标签"
+          style="width:200px"
+          @change="onTagFilter"
+        >
+          <el-option
+            v-for="t in tagDict"
+            :key="t.code"
+            :label="t.name"
+            :value="t.code"
+          >
+            <span :style="t.color ? `display:inline-block;width:8px;height:8px;border-radius:50%;background:${t.color};margin-right:6px` : ''" />
+            {{ t.name }}
+          </el-option>
+        </el-select>
+        <el-button @click="reload">查询</el-button>
         <el-radio-group v-model="view" style="margin-left:8px">
           <el-radio-button value="list">列表</el-radio-button>
           <el-radio-button value="board">看板</el-radio-button>
         </el-radio-group>
         <div class="spacer" />
-        <el-button @click="$router.push('/work-orders/types')">工单类型</el-button>
-        <el-button @click="$router.push('/work-orders/tags')">工单标签</el-button>
-        <el-button @click="$router.push('/work-orders/webhooks')">外发配置</el-button>
+        <el-button
+          v-if="view === 'board'"
+          @click="enterBoardFullscreen"
+        >全屏看板</el-button>
+        <el-button
+          v-if="view === 'list'"
+          type="warning"
+          :disabled="!canArchiveSelection"
+          @click="doBatchArchive"
+        >批量归档{{ selection.length ? ` (${selection.length})` : '' }}</el-button>
+        <el-button @click="$router.push('/work-orders/archived')">已归档</el-button>
+        <el-button @click="$router.push('/work-orders/settings')">工单设置</el-button>
       </div>
 
       <!-- 列表视图 -->
       <template v-if="view === 'list'">
-        <el-table :data="rows" border v-loading="loading">
+        <el-table :data="rows" border v-loading="loading" @selection-change="onSelectionChange">
+          <el-table-column type="selection" width="44" :selectable="() => true" />
           <el-table-column prop="code" label="工单号" width="170" />
           <el-table-column prop="title" label="标题" show-overflow-tooltip />
           <el-table-column prop="type_code" label="类型" width="110">
@@ -45,7 +76,7 @@
           </el-table-column>
           <el-table-column prop="priority" label="优先级" width="90">
             <template #default="{ row }">
-              <el-tag :type="priorityType(row.priority)" size="small">{{ row.priority }}</el-tag>
+              <el-tag :type="priorityType(row.priority)" size="small">{{ priorityLabel(row.priority) }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column prop="visibility" label="公开" width="80">
@@ -66,7 +97,9 @@
               <el-tag
                 v-for="code in (row.tags || [])" :key="code"
                 size="small" :color="tagColor(code)"
-                :style="tagColor(code) ? 'color:#fff;border:none;margin:2px' : 'margin:2px'"
+                class="wo-tag-clickable"
+                :style="tagColor(code) ? 'color:#fff;border:none' : ''"
+                @click="quickFilterTag(code)"
               >{{ tagName(code) }}</el-tag>
               <span v-if="!(row.tags || []).length">-</span>
             </template>
@@ -90,31 +123,74 @@
       </template>
 
       <!-- 看板视图 -->
-      <div v-else class="board" v-loading="loading">
-        <div v-for="col in boardColumns" :key="col.key" class="board-col">
-          <div class="board-col-head">
-            <el-tag :type="col.tag" effect="plain">{{ col.label }}</el-tag>
-            <span class="board-count">{{ boardData[col.key].length }}</span>
-          </div>
-          <draggable
-            :list="boardData[col.key]"
-            group="work-orders"
-            item-key="id"
-            class="board-list"
-            :disabled="!canDrag"
-            @change="(e) => onDragChange(e, col)"
-          >
-            <template #item="{ element }">
-              <div class="board-card" @click="$router.push(`/work-orders/${element.id}`)">
-                <div class="board-card-title">{{ element.title }}</div>
-                <div class="board-card-meta">
-                  <span>{{ element.code }}</span>
-                  <el-tag :type="priorityType(element.priority)" size="small">{{ element.priority }}</el-tag>
+      <div
+        v-else
+        ref="boardEl"
+        class="board"
+        :class="{ 'board-fullscreen': boardFullscreen }"
+        v-loading="loading"
+      >
+        <div v-if="boardFullscreen" class="board-fs-bar">
+          <span class="board-fs-title">工单看板</span>
+          <div class="spacer" />
+          <el-button size="small" @click="exitBoardFullscreen">退出全屏</el-button>
+        </div>
+        <div class="board-cols">
+          <div v-for="col in displayBoardColumns" :key="col.key" class="board-col">
+            <div class="board-col-head">
+              <el-tag :type="col.tag" effect="plain">{{ col.label }}</el-tag>
+              <span class="board-count">{{ boardData[col.key].length }}</span>
+            </div>
+            <draggable
+              :list="boardData[col.key]"
+              group="work-orders"
+              item-key="id"
+              class="board-list"
+              :disabled="!canDrag"
+              @change="(e) => onDragChange(e, col)"
+            >
+              <template #item="{ element }">
+                <div
+                  class="board-card"
+                  role="button"
+                  tabindex="0"
+                  :aria-label="`工单 ${element.code || ''} ${element.title || ''}`"
+                  @click="onCardClick(element.id)"
+                  @keydown.enter.prevent="onCardClick(element.id)"
+                  @keydown.space.prevent="onCardClick(element.id)"
+                >
+                  <!-- 类型配置了卡片模板则按模板渲染，否则用默认布局 -->
+                  <template v-if="cardTemplate(element.type_code)">
+                    <div
+                      v-for="(line, i) in renderCardTemplate(element, cardTemplate(element.type_code))"
+                      :key="i"
+                      class="board-card-line"
+                      :class="{ 'board-card-title': i === 0 }"
+                    >{{ line }}</div>
+                  </template>
+                  <template v-else>
+                    <div class="board-card-title">{{ element.title }}</div>
+                    <div class="board-card-meta">
+                      <span>{{ element.code }}</span>
+                      <el-tag :type="priorityType(element.priority)" size="small">{{ priorityLabel(element.priority) }}</el-tag>
+                    </div>
+                    <div class="board-card-sub">{{ typeName(element.type_code) }} · 设备{{ element.device_id || '-' }}</div>
+                    <div v-if="element.other_codes" class="board-card-codes" :title="element.other_codes">
+                      编码：{{ element.other_codes }}
+                    </div>
+                    <div v-if="(element.tags || []).length" class="board-card-tags">
+                      <el-tag
+                        v-for="code in element.tags" :key="code"
+                        size="small" :color="tagColor(code)"
+                        :style="tagColor(code) ? 'color:#fff;border:none' : ''"
+                      >{{ tagName(code) }}</el-tag>
+                    </div>
+                  </template>
                 </div>
-                <div class="board-card-sub">{{ typeName(element.type_code) }} · 设备{{ element.device_id || '-' }}</div>
-              </div>
-            </template>
-          </draggable>
+              </template>
+            </draggable>
+            <div v-if="!boardData[col.key].length" class="board-empty">暂无工单</div>
+          </div>
         </div>
       </div>
     </div>
@@ -122,15 +198,17 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch, computed } from 'vue'
-import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import draggable from 'vuedraggable'
-import { getWorkOrders, getWorkOrderTypes, changeWorkOrderStatus, getWorkOrderTagDict } from '@/api/workOrder'
-import { statusOptions, statusLabel, statusType, priorityType } from './workOrderConst'
+import { getWorkOrders, getWorkOrderTypes, changeWorkOrderStatus, getWorkOrderTagDict, batchArchiveWorkOrders } from '@/api/workOrder'
+import { statusOptions, statusLabel, statusType, priorityType, priorityLabel } from './workOrderConst'
 import { useAuthStore } from '@/stores/auth'
+import { createWorkOrdersStomp } from '@/utils/workOrdersStomp'
 
 const route = useRoute()
+const router = useRouter()
 const auth = useAuthStore()
 const canDrag = computed(() => auth.isOperator)
 
@@ -145,7 +223,39 @@ const page = ref(1)
 const limit = ref(20)
 const loading = ref(false)
 const view = ref('list')
-const filters = ref({ status: '', type_code: '', device_id: '' })
+const filters = ref({ status: '', type_code: '', device_id: '', tags: [] })
+
+const onTagFilter = () => { page.value = 1; syncQuery(); load() }
+
+// 多选 + 批量归档：仅当选中项全部为「已关闭/已解决」时可归档
+const selection = ref([])
+const onSelectionChange = (rows) => { selection.value = rows }
+const canArchiveSelection = computed(() =>
+  selection.value.length > 0 &&
+  selection.value.every(r => r.status === 'closed' || r.status === 'resolved')
+)
+const doBatchArchive = async () => {
+  if (!canArchiveSelection.value) return
+  try {
+    await ElMessageBox.confirm(`确认归档选中的 ${selection.value.length} 个工单？归档后默认列表不再显示。`, '批量归档', { type: 'warning' })
+  } catch { return }
+  try {
+    const res = await batchArchiveWorkOrders(selection.value.map(r => r.id))
+    ElMessage.success(`已归档 ${res.archived || 0} 个工单`)
+    selection.value = []
+    load()
+  } catch (e) {
+    ElMessage.error(e.message || '归档失败')
+  }
+}
+
+// 点击列表中的标签 → 加入筛选条件（已选则忽略）
+const quickFilterTag = (code) => {
+  if (!filters.value.tags.includes(code)) {
+    filters.value.tags.push(code)
+    onTagFilter()
+  }
+}
 
 // 看板四列
 const boardColumns = [
@@ -156,19 +266,100 @@ const boardColumns = [
 ]
 const boardData = ref({ pending: [], in_progress: [], resolved: [], closed: [] })
 
+// 全屏看板：仅展示「待处理/进行中/已解决」三列（不含已关闭）。
+const boardEl = ref(null)
+const boardFullscreen = ref(false)
+const displayBoardColumns = computed(() =>
+  boardFullscreen.value ? boardColumns.filter(c => c.key !== 'closed') : boardColumns
+)
+const enterBoardFullscreen = async () => {
+  const el = boardEl.value
+  boardFullscreen.value = true
+  try {
+    if (el?.requestFullscreen) await el.requestFullscreen()
+  } catch { /* 浏览器拒绝时仍用 CSS 伪全屏兜底 */ }
+}
+const exitBoardFullscreen = async () => {
+  try {
+    if (document.fullscreenElement) await document.exitFullscreen()
+  } catch { /* noop */ }
+  boardFullscreen.value = false
+}
+// 用户按 Esc 退出原生全屏时同步状态。
+const onFsChange = () => { if (!document.fullscreenElement) boardFullscreen.value = false }
+// 全屏下点击卡片改用新标签打开详情（避免离开全屏；伪全屏时正常跳转）。
+const onCardClick = (id) => {
+  if (boardFullscreen.value && document.fullscreenElement) {
+    window.open(router.resolve(`/work-orders/${id}`).href, '_blank')
+  } else {
+    router.push(`/work-orders/${id}`)
+  }
+}
+
 const typeName = (code) => types.value.find(t => t.code === code)?.name || code || '-'
 const typeCount = (code) => typeCounts.value[code || ''] || 0
+
+// 看板卡片模板：取该类型的 board_card_template（空则回退默认布局）。
+const cardTemplate = (code) => types.value.find(t => t.code === code)?.board_card_template || ''
+// 模板渲染：按行替换 {{key}} → 工单字段值，缺失留空；过滤全空行。
+const renderCardTemplate = (wo, tpl) => {
+  const val = (key) => {
+    const k = key.trim()
+    if (k === 'type_name') return typeName(wo.type_code)
+    if (k === 'status_label') return statusLabel(wo.status)
+    if (k === 'tags') return (wo.tags || []).map(c => tagName(c)).join('、')
+    const v = wo[k]
+    return v === undefined || v === null ? '' : String(v)
+  }
+  return tpl.split('\n')
+    .map(line => line.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, k) => val(k)))
+    .filter(line => line.trim() !== '')
+}
 
 const onTypeSelect = (index) => {
   filters.value.type_code = index === '__none__' ? '' : index
   // “未分类”用特殊标记，避免与“全部”混淆
   noneOnly.value = index === '__none__'
   page.value = 1
+  syncQuery()
   load()
 }
 const noneOnly = ref(false)
 
-const onPage = (p) => { page.value = p; load() }
+// ── URL ↔ 查询条件双向绑定 ──────────────────────────────────────────────
+// 把当前视图/筛选/分页写进地址栏 query（replace 不污染历史），空值不写保持链接干净。
+const buildQuery = () => {
+  const q = {}
+  if (view.value !== 'list') q.view = view.value
+  if (filters.value.status) q.status = filters.value.status
+  if (filters.value.device_id) q.device_id = filters.value.device_id
+  if (filters.value.tags.length) q.tags = filters.value.tags.join(',')
+  if (noneOnly.value) q.type_code = '__none__'
+  else if (filters.value.type_code) q.type_code = filters.value.type_code
+  if (page.value > 1) q.page = String(page.value)
+  return q
+}
+const syncQuery = () => {
+  router.replace({ query: buildQuery() }).catch(() => {})
+}
+// 从地址栏还原（首次进入 / 后退前进）。
+const restoreFromQuery = () => {
+  const q = route.query
+  view.value = q.view === 'board' ? 'board' : 'list'
+  filters.value.status = q.status || ''
+  filters.value.device_id = q.device_id || ''
+  filters.value.tags = q.tags ? String(q.tags).split(',').filter(Boolean) : []
+  if (q.type_code === '__none__') {
+    noneOnly.value = true
+    filters.value.type_code = ''
+  } else {
+    noneOnly.value = false
+    filters.value.type_code = q.type_code || ''
+  }
+  page.value = q.page ? Math.max(1, parseInt(q.page, 10) || 1) : 1
+}
+
+const onPage = (p) => { page.value = p; syncQuery(); load() }
 
 const load = async () => {
   loading.value = true
@@ -178,6 +369,7 @@ const load = async () => {
     } else {
       const params = { status: filters.value.status, device_id: filters.value.device_id, page: page.value, limit: limit.value }
       if (filters.value.type_code) params.type_code = filters.value.type_code
+      if (filters.value.tags.length) params.tags = filters.value.tags.join(',')
       const res = await getWorkOrders(params)
       rows.value = filterNone(res.data || [])
       total.value = res.total || 0
@@ -196,6 +388,7 @@ const loadBoard = async () => {
   const params = { limit: 200, page: 1 }
   if (filters.value.type_code) params.type_code = filters.value.type_code
   if (filters.value.device_id) params.device_id = filters.value.device_id
+  if (filters.value.tags.length) params.tags = filters.value.tags.join(',')
   const res = await getWorkOrders(params)
   let data = filterNone(res.data || [])
   const next = { pending: [], in_progress: [], resolved: [], closed: [] }
@@ -225,6 +418,7 @@ const onDragChange = async (evt, col) => {
   const wo = added.element
   if (col.statuses.includes(wo.status)) return // 同状态列内移动不改库
   try {
+    markLocalOp(wo.id, col.target) // 标记本地操作，忽略服务端回推
     await changeWorkOrderStatus(wo.id, col.target, '')
     wo.status = col.target
     ElMessage.success(`已移至「${col.label}」`)
@@ -234,16 +428,104 @@ const onDragChange = async (evt, col) => {
   }
 }
 
-watch(view, () => { load() })
+// reload：回到第 1 页 + 同步 URL + 重新加载（状态/设备/查询按钮用）
+const reload = () => { page.value = 1; syncQuery(); load() }
+
+// 切视图：同步 URL 后加载
+watch(view, () => { syncQuery(); load() })
+
+// ── STOMP 实时更新 + 轻提醒 ─────────────────────────────────────────────
+const woStomp = createWorkOrdersStomp(onWorkOrderEvent, () => localStorage.getItem('token'))
+// 自身拖拽/操作触发的状态变更会被服务端回推，用最近本地操作去重避免重复移动/提醒。
+const recentLocalOps = new Map() // woId -> { status, ts }
+const markLocalOp = (woId, status) => recentLocalOps.set(Number(woId), { status, ts: Date.now() })
+const isOwnEcho = (woId, status) => {
+  const op = recentLocalOps.get(Number(woId))
+  if (op && op.status === status && Date.now() - op.ts < 8000) return true
+  return false
+}
+
+// 事件是否匹配当前筛选条件（类型/标签/设备/未分类）。
+const matchesFilter = (p) => {
+  if (noneOnly.value) { if (p.type_code) return false }
+  else if (filters.value.type_code && p.type_code !== filters.value.type_code) return false
+  if (filters.value.device_id && String(p.device_id) !== String(filters.value.device_id)) return false
+  if (filters.value.tags.length) {
+    const evtTags = (p.tags ? String(p.tags).split(',') : []).filter(Boolean)
+    if (!filters.value.tags.some(t => evtTags.includes(t))) return false
+  }
+  return true
+}
+
+function onWorkOrderEvent(p) {
+  if (!p || !p.id) return
+  const own = isOwnEcho(p.id, p.status)
+  if (!own) notifyEvent(p)
+  if (!matchesFilter(p)) return
+  if (view.value === 'board') applyEventToBoard(p)
+  else applyEventToList(p)
+  loadTypeCounts()
+}
+
+const notifyEvent = (p) => {
+  const isNew = p.event === 'work_order.created'
+  ElNotification({
+    title: isNew ? '新工单' : '工单状态变更',
+    message: isNew
+      ? `${p.code || ''} ${p.title || ''}`.trim()
+      : `${p.code || ''}：${statusLabel(p.status)}`,
+    type: isNew ? 'success' : 'info',
+    duration: 4500,
+    onClick: () => { if (p.id) router.push(`/work-orders/${p.id}`) }
+  })
+}
+
+// 把事件 payload 转成卡片/行可用对象（补 tags 数组）。
+const eventToRow = (p, existing) => ({
+  ...(existing || {}),
+  id: p.id, code: p.code, type_code: p.type_code, title: p.title,
+  status: p.status, priority: p.priority, device_id: p.device_id,
+  device_name_snap: p.device_name || existing?.device_name_snap,
+  other_codes: p.other_codes, created_at: p.created_at || existing?.created_at,
+  tags: p.tags ? String(p.tags).split(',').filter(Boolean) : (existing?.tags || [])
+})
+
+const applyEventToBoard = (p) => {
+  // 先从所有列移除旧卡片
+  let existing = null
+  for (const key of Object.keys(boardData.value)) {
+    const arr = boardData.value[key]
+    const idx = arr.findIndex(w => w.id === p.id)
+    if (idx >= 0) { existing = arr[idx]; arr.splice(idx, 1) }
+  }
+  const col = boardColumns.find(c => c.statuses.includes(p.status))
+  if (!col) return // 该状态不在看板列内（如归档/未知）
+  boardData.value[col.key].unshift(eventToRow(p, existing))
+}
+
+const applyEventToList = (p) => {
+  const idx = rows.value.findIndex(w => w.id === p.id)
+  if (idx >= 0) {
+    rows.value[idx] = eventToRow(p, rows.value[idx])
+  } else if (p.event === 'work_order.created' && page.value === 1) {
+    rows.value.unshift(eventToRow(p, null))
+    total.value += 1
+  }
+}
 
 onMounted(async () => {
-  // 支持总览首页直达：/work-orders?status=open
-  if (route.query.status) filters.value.status = route.query.status
-  if (route.query.view === 'board') view.value = 'board'
+  restoreFromQuery()
   const t = await getWorkOrderTypes()
   types.value = t.data || []
   try { tagDict.value = (await getWorkOrderTagDict()).data || [] } catch { tagDict.value = [] }
   load()
+  woStomp.connect()
+  document.addEventListener('fullscreenchange', onFsChange)
+})
+
+onUnmounted(() => {
+  woStomp.disconnect()
+  document.removeEventListener('fullscreenchange', onFsChange)
 })
 </script>
 
@@ -256,15 +538,44 @@ onMounted(async () => {
 .toolbar { display: flex; gap: 10px; margin-bottom: 12px; align-items: center; flex-wrap: wrap; }
 .spacer { flex: 1; }
 .pager { margin-top: 12px; justify-content: flex-end; }
-.board { display: flex; gap: 12px; align-items: flex-start; }
+.board { display: flex; flex-direction: column; gap: 12px; }
+.board-cols { display: flex; gap: 12px; align-items: flex-start; flex: 1; min-height: 0; }
 .board-col { flex: 1; min-width: 0; background: #f5f7fa; border-radius: 6px; padding: 8px; }
 .board-col-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; padding: 0 4px; }
 .board-count { font-size: 12px; color: #909399; }
 .board-list { min-height: 120px; display: flex; flex-direction: column; gap: 8px; }
-.board-card { background: #fff; border: 1px solid #ebeef5; border-radius: 4px; padding: 10px; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
-.board-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.1); }
+.board-card { background: #fff; border: 1px solid #ebeef5; border-radius: 4px; padding: 10px; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.04); transition: box-shadow .2s ease, border-color .2s ease; }
+.board-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.1); border-color: #c6e2ff; }
+.board-card:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: 2px; }
 .board-card-title { font-size: 14px; color: #303133; margin-bottom: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .board-card-meta { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .board-card-meta span { font-size: 12px; color: #909399; }
 .board-card-sub { font-size: 12px; color: #c0c4cc; margin-top: 4px; }
+.board-card-codes { font-size: 12px; color: #909399; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-card-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.board-empty { text-align: center; color: #c0c4cc; font-size: 13px; padding: 16px 0; }
+/* 可点击标签：统一指针 + 间距，hover 提供反馈 */
+.wo-tag-clickable { cursor: pointer; margin: 2px; transition: opacity .2s ease; }
+.wo-tag-clickable:hover { opacity: .82; }
+/* 全屏看板：占满屏幕、三列等高滚动 */
+.board-fullscreen { position: fixed; inset: 0; z-index: 2000; background: #fff; padding: 16px; box-sizing: border-box; height: 100%; }
+.board-fullscreen .board-cols { align-items: stretch; height: 100%; }
+.board-fullscreen .board-col { display: flex; flex-direction: column; overflow: hidden; }
+.board-fullscreen .board-list { flex: 1; overflow-y: auto; }
+/* 全屏（看板上墙）放大字号，远距离可读 */
+.board-fullscreen .board-card { padding: 14px; }
+.board-fullscreen .board-card-title { font-size: 17px; }
+.board-fullscreen .board-card-meta span { font-size: 14px; }
+.board-fullscreen .board-card-sub { font-size: 14px; }
+.board-fullscreen .board-card-line { font-size: 15px; }
+.board-fullscreen .board-card-line.board-card-title { font-size: 18px; }
+.board-fullscreen .board-count { font-size: 14px; }
+.board-fullscreen .board-col-head { margin-bottom: 12px; }
+.board-fs-bar { display: flex; align-items: center; gap: 10px; padding-bottom: 4px; }
+.board-fs-title { font-size: 18px; font-weight: 600; color: #303133; }
+.board-card-line { font-size: 12px; color: #606266; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-card-line.board-card-title { font-size: 14px; color: #303133; margin-top: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .board-card, .wo-tag-clickable { transition: none; }
+}
 </style>

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useScadaGroups, useScadaInfos, useCreateInfo, useDeleteInfo } from '@/hooks/useScada'
+import { useScadaGroups, useScadaInfos, useCreateInfo, useDeleteInfo, usePublish, useUnpublish } from '@/hooks/useScada'
+import { useStompScadaEvents } from '@/hooks/useStompScadaEvents'
 import type { ScadaGroup } from '@/types'
 
 /* ── Shared button styles ── */
@@ -100,11 +101,15 @@ function ScadaCard({
   onEdit,
   onPreview,
   onDelete,
+  onTogglePublish,
+  publishBusy,
 }: {
   info: CardInfo
   onEdit: () => void
   onPreview: () => void
   onDelete: () => void
+  onTogglePublish: () => void
+  publishBusy: boolean
 }) {
   const [hover, setHover] = useState(false)
 
@@ -183,15 +188,22 @@ function ScadaCard({
           }}>
             {info.scada_name}
           </span>
-          <span style={{
-            fontSize: 10, fontWeight: 600, padding: '2px 6px',
-            borderRadius: 'var(--radius-sm)',
-            background: info.publish_status === 1 ? 'rgba(74,222,128,0.15)' : 'var(--bg-elevated)',
-            color: info.publish_status === 1 ? '#4ade80' : 'var(--text-muted)',
-            border: `1px solid ${info.publish_status === 1 ? 'rgba(74,222,128,0.3)' : 'var(--border)'}`,
-          }}>
+          <button
+            onClick={(e) => { e.stopPropagation(); if (!publishBusy) onTogglePublish() }}
+            disabled={publishBusy}
+            title={info.publish_status === 1 ? '点击取消发布' : '点击发布'}
+            style={{
+              fontSize: 10, fontWeight: 600, padding: '2px 6px',
+              borderRadius: 'var(--radius-sm)',
+              background: info.publish_status === 1 ? 'rgba(74,222,128,0.15)' : 'var(--bg-elevated)',
+              color: info.publish_status === 1 ? '#4ade80' : 'var(--text-muted)',
+              border: `1px solid ${info.publish_status === 1 ? 'rgba(74,222,128,0.3)' : 'var(--border)'}`,
+              cursor: publishBusy ? 'default' : 'pointer',
+              opacity: publishBusy ? 0.6 : 1,
+            }}
+          >
             {info.publish_status === 1 ? '已发布' : '草稿'}
-          </span>
+          </button>
         </div>
 
         <div style={{
@@ -293,9 +305,35 @@ export default function ScadaListPage() {
   const [search, setSearch] = useState('')
 
   const { data: groups = [] } = useScadaGroups()
-  const { data: infos = [], isLoading } = useScadaInfos(selectedGroupId)
+  const { data: infos = [], isLoading, refetch } = useScadaInfos(selectedGroupId)
   const createInfo = useCreateInfo()
   const deleteInfo = useDeleteInfo()
+  const publish = usePublish()
+  const unpublish = useUnpublish()
+  const publishBusy = publish.isPending || unpublish.isPending
+
+  // 实时事件订阅
+  useStompScadaEvents({
+    onEvent: (event) => {
+      // 显示浏览器通知
+      const eventName =
+        event.event === 'scada.created' ? '新建组态' :
+        event.event === 'scada.deleted' ? '组态已删除' :
+        event.event === 'scada.published' ? '组态已发布' :
+        event.event === 'scada.unpublished' ? '组态已取消发布' : '组态更新'
+
+      if (Notification.permission === 'granted') {
+        new Notification(eventName, {
+          body: `${event.scada_name} (${event.scada_code})`,
+          icon: event.preview_image || undefined,
+        })
+      }
+
+      // 刷新列表
+      refetch()
+    },
+    enabled: true,
+  })
 
   const tree = buildTree(groups)
 
@@ -483,8 +521,12 @@ export default function ScadaListPage() {
                 <ScadaCard
                   key={info.id}
                   info={info}
+                  publishBusy={publishBusy}
                   onEdit={() => navigate(`/editor/${info.id}`)}
                   onPreview={() => navigate(`/preview/${info.id}`)}
+                  onTogglePublish={() =>
+                    info.publish_status === 1 ? unpublish.mutate(info.id) : publish.mutate(info.id)
+                  }
                   onDelete={() => { if (confirm('确认删除？此操作不可恢复')) deleteInfo.mutate(info.id) }}
                 />
               ))}

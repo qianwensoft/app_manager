@@ -35,9 +35,10 @@ export function detectEnd(): EndType {
   return 'desktop'
 }
 
-/** 终端类型 → 组件库 key。 */
+/** 终端类型 → 组件库 key。移动端现在也使用 shadcn（响应式）。 */
 export function endToLibrary(end: EndType): LibraryKey {
-  return end === 'mobile' ? 'antd-mobile' : 'antd'
+  // 统一使用 shadcn/ui（响应式设计支持移动端）
+  return 'shadcn'
 }
 
 /**

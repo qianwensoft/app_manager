@@ -256,7 +256,9 @@ export interface CanvasData {
   elements: CanvasElement[]
   zoom: number
   viewport: { x: number; y: number; width: number; height: number }
-  adaptiveMode?: 'none' | 'scale' | 'fit'
+  adaptiveMode?: 'none' | 'scale' | 'fit' | 'screen'
+  // 自动横屏配置：指定哪些设备类型下自动横屏显示
+  autoLandscape?: ('mobile' | 'tablet' | 'desktop')[]
 }
 
 // ScadaInfo（对应后端模型）

@@ -1633,6 +1633,7 @@ export default function PropertiesPanel() {
                   >
                     <option value="none">固定尺寸</option>
                     <option value="fit">适应内容</option>
+                    <option value="screen">屏幕自适应</option>
                   </select>
                   <button
                     title="立即按内容边界调整画布尺寸"
@@ -1646,10 +1647,70 @@ export default function PropertiesPanel() {
                   >适配</button>
                 </div>
               </Row>
+              {/* 自适应模式说明 */}
+              {canvas.adaptiveMode && canvas.adaptiveMode !== 'none' && (
+                <div style={{ fontSize: 9, color: 'var(--text-muted)', lineHeight: 1.5, marginTop: 4 }}>
+                  {canvas.adaptiveMode === 'fit' && '画布将在预览时自动调整为元素实际边界大小'}
+                  {canvas.adaptiveMode === 'screen' && '画布将在预览时填充整个屏幕，无边距'}
+                </div>
+              )}
               <Row label="背景色"><ColorPicker val={canvas.backgroundColor} onChange={(v) => { updateCanvas('backgroundColor', v); updateCanvas('background', v) }} /></Row>
               <Row label="网格"><Toggle checked={canvas.showGrid} onChange={(v) => updateCanvas('showGrid', v)} label={canvas.showGrid ? '显示' : '隐藏'} /></Row>
               <Row label="吸附"><Toggle checked={canvas.snapToGrid} onChange={(v) => updateCanvas('snapToGrid', v)} label={canvas.snapToGrid ? '开启' : '关闭'} /></Row>
               <Row label="格距"><Inp val={canvas.gridSize} onChange={(v) => updateCanvas('gridSize', Number(v))} type="number" /></Row>
+
+              {/* 自动横屏配置 */}
+              <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+                <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 6, letterSpacing: '0.04em' }}>
+                  自动横屏
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {(['mobile', 'tablet', 'desktop'] as const).map((device) => {
+                    const autoLandscape = canvas.autoLandscape ?? []
+                    const checked = autoLandscape.includes(device)
+                    const labels = { mobile: '手机', tablet: '平板', desktop: '电脑' }
+                    return (
+                      <label
+                        key={device}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+                          padding: '4px 6px', borderRadius: 'var(--radius-sm)',
+                          background: checked ? 'var(--accent-muted)' : 'transparent',
+                          border: `1px solid ${checked ? 'var(--border-accent)' : 'var(--border)'} `,
+                          transition: 'all var(--duration-fast)',
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!checked) e.currentTarget.style.background = 'var(--bg-elevated)'
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!checked) e.currentTarget.style.background = 'transparent'
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            const next = e.target.checked
+                              ? [...autoLandscape, device]
+                              : autoLandscape.filter((d) => d !== device)
+                            updateCanvas('autoLandscape', next.length ? next : undefined)
+                          }}
+                          style={{
+                            width: 14, height: 14, cursor: 'pointer',
+                            accentColor: 'var(--accent)',
+                          }}
+                        />
+                        <span style={{ fontSize: 11, color: checked ? 'var(--accent)' : 'var(--text-secondary)' }}>
+                          {labels[device]}
+                        </span>
+                      </label>
+                    )
+                  })}
+                </div>
+                <div style={{ fontSize: 9, color: 'var(--text-muted)', lineHeight: 1.5, marginTop: 6 }}>
+                  勾选的设备类型下，预览和发布页面将自动横屏显示（旋转 90°）
+                </div>
+              </div>
             </Section>
           ) : (
             <div style={{ padding: 16, color: 'var(--text-muted)', fontSize: 11, lineHeight: 1.7 }}>

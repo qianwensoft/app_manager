@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { useStompFormAppEvents } from '@/hooks/useStompFormAppEvents'
 
 type FormAppRow = {
   id: number
@@ -56,6 +57,28 @@ export default function FormAppListPage() {
   useEffect(() => {
     load()
   }, [])
+
+  // 实时事件订阅
+  useStompFormAppEvents({
+    onEvent: (event) => {
+      // 显示浏览器通知
+      const eventName =
+        event.event === 'form_app.created' ? '新建表单应用' :
+        event.event === 'form_app.deleted' ? '表单应用已删除' :
+        event.event === 'form_app.published' ? '表单应用已发布' :
+        event.event === 'form_app.unpublished' ? '表单应用已取消发布' : '表单应用更新'
+
+      if (Notification.permission === 'granted') {
+        new Notification(eventName, {
+          body: `${event.name} (${event.code})`,
+        })
+      }
+
+      // 刷新列表
+      load()
+    },
+    enabled: true,
+  })
 
   const filteredRows = useMemo(() => {
     const k = keyword.trim().toLowerCase()

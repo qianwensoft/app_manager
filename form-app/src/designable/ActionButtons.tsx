@@ -1,5 +1,5 @@
 import React from 'react'
-import { Button } from 'antd'
+import { Button } from '@/components/ui/button'
 import { createBehavior, createResource } from '@designable/core'
 import type { DnFC } from '@designable/react'
 
@@ -11,17 +11,18 @@ const commonButtonProps: Record<string, any> = {
     'x-decorator': 'FormItem',
     'x-component': 'Input',
   },
-  type: {
+  variant: {
     type: 'string',
-    title: '按钮类型',
+    title: '按钮样式',
     'x-decorator': 'FormItem',
     'x-component': 'Select',
     enum: [
-      { label: '主要(primary)', value: 'primary' },
       { label: '默认(default)', value: 'default' },
-      { label: '虚线(dashed)', value: 'dashed' },
+      { label: '次要(secondary)', value: 'secondary' },
+      { label: '轮廓(outline)', value: 'outline' },
+      { label: '幽灵(ghost)', value: 'ghost' },
       { label: '链接(link)', value: 'link' },
-      { label: '文本(text)', value: 'text' },
+      { label: '危险(destructive)', value: 'destructive' },
     ],
   },
   block: {
@@ -37,7 +38,11 @@ const commonButtonProps: Record<string, any> = {
 export const ActionButton: DnFC<any> = (props) => {
   const p = props?.['x-component-props'] || props || {}
   return (
-    <Button type={p.type || 'default'} block={p.block} htmlType="button">
+    <Button
+      variant={p.variant || 'default'}
+      className={p.block ? 'w-full' : ''}
+      type="button"
+    >
       {p.text || '按钮'}
     </Button>
   )
@@ -158,7 +163,11 @@ ActionButton.Resource = createResource({
 export const EventButton: DnFC<any> = (props) => {
   const p = props?.['x-component-props'] || props || {}
   return (
-    <Button type={p.type || 'default'} block={p.block} htmlType="button">
+    <Button
+      variant={p.variant || 'default'}
+      className={p.block ? 'w-full' : ''}
+      type="button"
+    >
       {p.text || '触发事件'}
     </Button>
   )
@@ -218,7 +227,11 @@ EventButton.Resource = createResource({
 export const NavigateButton: DnFC<any> = (props) => {
   const p = props?.['x-component-props'] || props || {}
   return (
-    <Button type={p.type || 'default'} block={p.block} htmlType="button">
+    <Button
+      variant={p.variant || 'default'}
+      className={p.block ? 'w-full' : ''}
+      type="button"
+    >
       {p.text || '跳转'}
     </Button>
   )

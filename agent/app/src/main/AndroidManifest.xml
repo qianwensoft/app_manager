@@ -24,6 +24,22 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
 
+    <!-- TV 兼容：电视/盒子无触摸屏、摄像头、蓝牙、电话等硬件。
+         不声明则 Play/部分应用商店会按 uses-permission 隐式要求这些 feature 而过滤掉 TV，
+         显式 required=false 保证电视端可见可装。 -->
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <uses-feature android:name="android.hardware.faketouch" android:required="false" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+    <uses-feature android:name="android.hardware.location" android:required="false" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+
     <!-- 蓝牙打印（经典蓝牙 SPP + BLE）：<=30 用旧权限，31+ 用运行时新权限 -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
@@ -95,6 +111,7 @@
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
+        android:banner="@drawable/tv_banner"
         android:label="磐石 Agent"
         android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@style/Theme.MaterialComponents.DayNight.DarkActionBar">
@@ -107,6 +124,8 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+                <!-- 电视桌面（Leanback Launcher）只识别此 category，否则装上后 TV 主屏看不到图标 -->
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
             <intent-filter>
                 <action android:name="com.appmanager.agent.ACTION_REQUEST_SCREEN" />
@@ -125,6 +144,13 @@
             android:name=".ui.ScadaWebViewActivity"
             android:exported="false"
             android:label="@string/scada_webview_title"
+            android:theme="@style/Theme.AppManagerMain"
+            android:parentActivityName=".MainActivity" />
+
+        <activity
+            android:name=".ui.ReverseRegisterActivity"
+            android:exported="false"
+            android:label="@string/reverse_register_title"
             android:theme="@style/Theme.AppManagerMain"
             android:parentActivityName=".MainActivity" />
 

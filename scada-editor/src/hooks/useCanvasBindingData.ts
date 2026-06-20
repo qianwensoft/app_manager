@@ -16,6 +16,8 @@ export interface CanvasBindingOptions {
   httpPollIntervalMs?: number
   /** 开放接口轮询（interface 模式） */
   interfaceEnabled?: boolean
+  /** 免登分享模式 token：STOMP 走 /ws/stomp-scada */
+  shareToken?: string
 }
 
 /**
@@ -28,6 +30,7 @@ export function useCanvasBindingData({
   httpPollEnabled = false,
   httpPollIntervalMs = 2000,
   interfaceEnabled = true,
+  shareToken,
 }: CanvasBindingOptions) {
   const [pointData, setPointData] = useState<PointDataMap>({})
 
@@ -39,6 +42,7 @@ export function useCanvasBindingData({
     scadaCode,
     onData: mergeData,
     enabled: stompEnabled && !!scadaCode,
+    shareToken,
   })
 
   useHttpPollingPointData({

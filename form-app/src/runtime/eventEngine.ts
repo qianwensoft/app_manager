@@ -86,6 +86,8 @@ export interface EventEngineDeps {
   pageState: StateScope
   /** 应用级状态容器（AppState）。无 AppState 环境（如旧入口）时可缺省。 */
   appState?: StateScope
+  /** 当前 form-app 编码（跨 app emit 时需要，标识 origin.formCode） */
+  formAppCode?: string
   onScanInterface?: (
     interfaceCode: string,
     paramValues: Record<string, any>,
@@ -124,6 +126,7 @@ function makeCtx(deps: EventEngineDeps, base: Partial<EventContext>): EventConte
     form: deps.pageState.getValues(),
     app: deps.appState?.getValues(),
     event: base.event,
+    _crossDeviceHop: base._crossDeviceHop,
   }
 }
 
@@ -320,9 +323,17 @@ export function setupPageEvents(
         // 自定义事件可能携带 JSON 对象
         let parsed: any = eventData
         try { parsed = JSON.parse(eventData) } catch { /* 保持字符串 */ }
+        // 跨设备事件：接收端注入 _hop（receiver.ts 把 hop 混入 payload）
+        const hop = parsed && typeof parsed === 'object' && typeof parsed._hop === 'number' ? parsed._hop : undefined
+        // 清理内部字段（_hop 不暴露给用户事件逻辑）
+        if (parsed && typeof parsed === 'object' && '_hop' in parsed) {
+          const { _hop, ...rest } = parsed
+          parsed = rest
+        }
         const ctx = makeCtx(deps, {
           scan: typeof eventData === 'string' ? eventData : String(eventData),
           event: parsed,
+          _crossDeviceHop: hop,
         })
         if (!passScanFilter(ctx.scan || '', ev.filters)) return
         if (!evalCondition(ev.when, ctx)) return

@@ -318,6 +318,7 @@ class FeedbackDetailActivity : AppCompatActivity() {
     }
     private fun actionLabel(a: String) = when (a) {
         "create" -> "创建"; "comment" -> "备注"; "assign" -> "转交"; "status_change" -> "状态变更"
-        "close" -> "关闭"; "reopen" -> "重新打开"; "external_update" -> "第三方更新"; "tag_change" -> "标签变更"; else -> a
+        "close" -> "关闭"; "reopen" -> "重新打开"; "external_update" -> "第三方更新"; "tag_change" -> "标签变更"
+        "archive" -> "归档"; "unarchive" -> "取消归档"; else -> a
     }
 }

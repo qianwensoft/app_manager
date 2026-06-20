@@ -76,6 +76,8 @@ func CreateFormApp(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	// 发布实时事件
+	publishFormAppEvent("form_app.created", body)
 	c.JSON(http.StatusOK, gin.H{"data": body})
 }
 
@@ -128,6 +130,8 @@ func DeleteFormApp(c *gin.Context) {
 		return
 	}
 	database.DB.Delete(&row)
+	// 发布实时事件
+	publishFormAppEvent("form_app.deleted", row)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
@@ -184,6 +188,11 @@ func PublishFormApp(c *gin.Context) {
 
 func UnpublishFormApp(c *gin.Context) {
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	var row models.FormAppInfo
+	if err := database.DB.First(&row, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
 	if err := database.DB.Model(&models.FormAppInfo{}).Where("id = ?", id).Updates(map[string]interface{}{
 		"publish_status":  0,
 		"share_token":     "",
@@ -192,6 +201,11 @@ func UnpublishFormApp(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	row.PublishStatus = 0
+	row.ShareToken = ""
+	row.ShareExpireAt = nil
+	// 发布实时事件
+	publishFormAppEvent("form_app.unpublished", row)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 

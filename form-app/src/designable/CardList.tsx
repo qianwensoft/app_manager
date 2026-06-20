@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react'
-import { Card, Pagination, Empty, Spin } from 'antd'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 import { createBehavior, createResource } from '@designable/core'
 import type { DnFC } from '@designable/react'
 
@@ -14,19 +15,28 @@ export const CardList: DnFC<any> = (props) => {
   const desc = p.desc_field || 'desc'
 
   return (
-    <div style={{ border: '1px dashed #d9d9d9', borderRadius: 6, padding: 12 }}>
-      <div style={{ fontSize: 12, color: '#999', marginBottom: 8 }}>
+    <div className="border border-dashed rounded-md p-3">
+      <div className="text-xs text-muted-foreground mb-2">
         CardList — 接口: {p.interface_code || '(未配置)'} | 每页: {p.page_size || 10}
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8 }}>
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-2">
         {DEMO_ITEMS.map(item => (
-          <Card key={item.id} size="small" title={item[title as keyof typeof item] ?? item.title}>
-            <div style={{ fontSize: 13, color: '#666' }}>{item[desc as keyof typeof item] ?? item.desc}</div>
+          <Card key={item.id}>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm">{item[title as keyof typeof item] ?? item.title}</CardTitle>
+            </CardHeader>
+            <CardContent className="text-xs text-muted-foreground">
+              {item[desc as keyof typeof item] ?? item.desc}
+            </CardContent>
           </Card>
         ))}
       </div>
-      <div style={{ textAlign: 'right', marginTop: 8 }}>
-        <Pagination simple current={1} total={20} pageSize={p.page_size || 10} />
+      <div className="text-right mt-2">
+        <div className="inline-flex items-center gap-2">
+          <Button variant="outline" size="sm" disabled>上一页</Button>
+          <span className="text-sm text-muted-foreground">1 / 2</span>
+          <Button variant="outline" size="sm">下一页</Button>
+        </div>
       </div>
     </div>
   )

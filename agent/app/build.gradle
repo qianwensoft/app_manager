@@ -15,8 +15,8 @@ android {
         applicationId "com.appmanager.agent"
         minSdk 21
         targetSdk 34
-        versionCode 194
-        versionName "2.2.59"
+        versionCode 207
+        versionName "2.2.72"
     }
 
     signingConfigs {
@@ -62,4 +62,7 @@ dependencies {
 
     // QR code scanning
     implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
+
+    // 反向注册（电视等无摄像头端）：端上起轻量 HTTP 服务，等管理端浏览器直连认领
+    implementation 'org.nanohttpd:nanohttpd:2.3.1'
 }

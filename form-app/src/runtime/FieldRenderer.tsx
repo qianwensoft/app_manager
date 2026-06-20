@@ -1,4 +1,8 @@
-import { Input, InputNumber, Select, DatePicker, Switch, Rate, Slider, Checkbox, Radio } from 'antd'
+import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Label } from '@/components/ui/label'
 import type { FieldDef } from './types'
 
 type FieldRendererProps = {
@@ -12,66 +16,61 @@ export default function FieldRenderer({ def, value, onChange, error }: FieldRend
   const renderInput = () => {
     switch (def.component) {
       case 'Input':
-        return <Input value={value} onChange={e => onChange(e.target.value)} placeholder={def.placeholder} />
+        return <Input value={value || ''} onChange={e => onChange(e.target.value)} placeholder={def.placeholder} />
       case 'InputNumber':
       case 'NumberPicker':
         return (
-          <InputNumber
-            value={value}
-            onChange={onChange}
-            style={{ width: '100%' }}
+          <Input
+            type="number"
+            value={value ?? ''}
+            onChange={e => onChange(e.target.value === '' ? undefined : Number(e.target.value))}
             min={def.validation?.min}
             max={def.validation?.max}
+            className="w-full"
           />
         )
       case 'Select':
         return (
-          <Select
-            value={value}
-            onChange={onChange}
-            style={{ width: '100%' }}
-            placeholder={def.placeholder}
-            allowClear
-          >
-            {def.options?.map(opt => (
-              <Select.Option key={String(opt.value)} value={opt.value}>{opt.label}</Select.Option>
-            ))}
+          <Select value={value ? String(value) : undefined} onValueChange={onChange}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder={def.placeholder || '请选择'} />
+            </SelectTrigger>
+            <SelectContent>
+              {def.options?.map(opt => (
+                <SelectItem key={String(opt.value)} value={String(opt.value)}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
           </Select>
         )
       case 'DatePicker':
-        return <DatePicker value={value} onChange={onChange} style={{ width: '100%' }} />
+        return <Input type="date" value={value || ''} onChange={e => onChange(e.target.value)} className="w-full" />
       case 'Switch':
-        return <Switch checked={!!value} onChange={onChange} />
-      case 'Rate':
-        return <Rate value={value} onChange={onChange} />
-      case 'Slider':
-        return <Slider value={value} onChange={onChange} min={def.validation?.min} max={def.validation?.max} />
+        return <Switch checked={!!value} onCheckedChange={onChange} />
       case 'Checkbox':
-        return <Checkbox checked={!!value} onChange={e => onChange(e.target.checked)}>{def.label}</Checkbox>
-      case 'Radio':
         return (
-          <Radio.Group value={value} onChange={e => onChange(e.target.value)}>
-            {def.options?.map(opt => (
-              <Radio key={String(opt.value)} value={opt.value}>{opt.label}</Radio>
-            ))}
-          </Radio.Group>
+          <div className="flex items-center space-x-2">
+            <Checkbox checked={!!value} onCheckedChange={onChange} id={def.field} />
+            <Label htmlFor={def.field}>{def.label}</Label>
+          </div>
         )
       default:
-        return <Input value={value} onChange={e => onChange(e.target.value)} placeholder={def.placeholder} />
+        return <Input value={value || ''} onChange={e => onChange(e.target.value)} placeholder={def.placeholder} />
     }
   }
 
   const hideLabel = def.component === 'Checkbox'
 
   return (
-    <div style={{ marginBottom: 16 }}>
+    <div className="mb-4">
       {!hideLabel && (
-        <label style={{ display: 'block', marginBottom: 4, fontWeight: def.required ? 'bold' : 'normal' }}>
-          {def.label} {def.required && <span style={{ color: 'red' }}>*</span>}
-        </label>
+        <Label className={`block mb-1 ${def.required ? 'font-semibold' : ''}`}>
+          {def.label} {def.required && <span className="text-red-600">*</span>}
+        </Label>
       )}
       {renderInput()}
-      {error && <div style={{ color: 'red', fontSize: 12, marginTop: 4 }}>{error}</div>}
+      {error && <div className="text-red-600 text-xs mt-1">{error}</div>}
     </div>
   )
 }

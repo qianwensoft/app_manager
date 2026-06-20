@@ -40,7 +40,8 @@ export default function PreviewPane({ end, getSchema, events, scannerConfig, onS
   const [schema, setSchema] = useState<any>(null)
   const [scanValue, setScanValue] = useState('')
   const [scanType, setScanType] = useState<ScanType>('barcode')
-  const libraryKey: LibraryKey = end === 'mobile' ? 'antd-mobile' : 'antd'
+  // 统一使用 shadcn（响应式）
+  const libraryKey: LibraryKey = 'shadcn'
 
   // 是否存在可模拟的扫码事件源
   const hasScanEvent = useMemo(

@@ -11,8 +11,16 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: [
         { find: '@', replacement: path.resolve(__dirname, 'src') },
-        { find: /^~antd/, replacement: 'antd' },
+        { find: /^~/, replacement: '' },
       ],
+    },
+    css: {
+      preprocessorOptions: {
+        less: {
+          javascriptEnabled: true,
+          modifyVars: {},
+        },
+      },
     },
     base: '/form-app/',
     // dev/preview/build 统一降级到 es2015/chrome67：dev 模式 Vite 默认按
@@ -56,13 +64,6 @@ export default defineConfig(({ mode }) => {
       outDir: 'dist',
       sourcemap: false,
       target: ['es2015', 'chrome67'],
-    },
-    css: {
-      preprocessorOptions: {
-        less: {
-          javascriptEnabled: true,
-        },
-      },
     },
   }
 })

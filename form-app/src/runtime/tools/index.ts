@@ -11,6 +11,7 @@ import './setFieldProp'
 import './speak'
 import './emitEvent'
 import './runScript'
+import './emitCrossApp'
 
 export { getTool, toolNames, registerTool } from './types'
 export type { Tool, ToolExecCtx, RetryConfig } from './types'

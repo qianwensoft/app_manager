@@ -9,6 +9,9 @@ export const assignWorkOrder = (id, assignedTo, comment) =>
   http.post(`/work-orders/${id}/assign`, { assigned_to: assignedTo, comment })
 export const changeWorkOrderStatus = (id, status, comment) =>
   http.post(`/work-orders/${id}/status`, { status, comment })
+// 批量归档 / 取消归档
+export const batchArchiveWorkOrders = (ids) => http.post('/work-orders/batch/archive', { ids })
+export const batchUnarchiveWorkOrders = (ids) => http.post('/work-orders/batch/unarchive', { ids })
 export const workOrderItemDownloadUrl = (id, itemId) =>
   `/api/work-orders/${id}/items/${itemId}/download?token=${encodeURIComponent(localStorage.getItem('token') || '')}`
 
@@ -32,3 +35,13 @@ export const deleteWorkOrderTag = (id) => http.delete(`/work-orders/tag-dict/${i
 // 标签字典（启用项，处理端选择用）+ 工单标签维护
 export const getWorkOrderTagDict = () => http.get('/work-orders/tags')
 export const setWorkOrderTags = (id, tags) => http.put(`/work-orders/${id}/tags`, { tags })
+
+// 工作流管理
+export const getWorkOrderWorkflows = (params = {}) => http.get('/work-orders/workflows', { params })
+export const getWorkOrderWorkflow = (id) => http.get(`/work-orders/workflows/${id}`)
+export const createWorkOrderWorkflow = (data) => http.post('/work-orders/workflows', data)
+export const updateWorkOrderWorkflow = (id, data) => http.put(`/work-orders/workflows/${id}`, data)
+export const deleteWorkOrderWorkflow = (id) => http.delete(`/work-orders/workflows/${id}`)
+export const testWorkOrderWorkflow = (id, workOrderId, event) =>
+  http.post(`/work-orders/workflows/${id}/test`, { work_order_id: workOrderId, event })
+export const getWorkOrderWorkflowLogs = (params = {}) => http.get('/work-orders/workflow-logs', { params })

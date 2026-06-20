@@ -156,9 +156,19 @@ func SetWorkOrderTags(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"data": gin.H{"tags": workOrderTagCodes(wo.ID)}})
 		return
 	}
-	// 重建关联
+	// 重建关联：挂载时把当前字典名称作为快照一起写入。
+	nameByCode := map[string]string{}
+	if len(added) > 0 {
+		var tags []models.WorkOrderTag
+		database.DB.Where("code IN ?", added).Find(&tags)
+		for _, t := range tags {
+			nameByCode[t.Code] = t.Name
+		}
+	}
 	for _, code := range added {
-		database.DB.Create(&models.WorkOrderTagLink{WorkOrderID: wo.ID, TagCode: code, CreatedAt: time.Now()})
+		database.DB.Create(&models.WorkOrderTagLink{
+			WorkOrderID: wo.ID, TagCode: code, TagName: nameByCode[code], CreatedAt: time.Now(),
+		})
 	}
 	for _, code := range removed {
 		database.DB.Where("work_order_id = ? AND tag_code = ?", wo.ID, code).Delete(&models.WorkOrderTagLink{})
@@ -168,6 +178,10 @@ func SetWorkOrderTags(c *gin.Context) {
 	sort.Strings(removed)
 	detail := tagChangeDetail(added, removed)
 	addWorkOrderActivity(wo.ID, "tag_change", wo.Status, wo.Status, c.GetUint("user_id"), actorLabel(c), detail)
+
+	// 触发标签变更事件
+	dispatchWorkOrderEvent("work_order.tags_changed", &wo, actorLabel(c))
+
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"tags": workOrderTagCodes(wo.ID)}})
 }
 

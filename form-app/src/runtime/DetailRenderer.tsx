@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Button, message, Spin } from 'antd'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { message } from '@/lib/message'
+import { Loader2 } from 'lucide-react'
 
 type FieldDef = {
   field: string
@@ -31,17 +34,31 @@ export default function DetailRenderer({ fields, onLoad, onBack }: DetailRendere
     load()
   }, [])
 
-  if (loading) return <Spin style={{ display: 'block', margin: '100px auto' }} />
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center py-24">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
 
   return (
-    <div style={{ maxWidth: 600, margin: '0 auto', padding: 24 }}>
-      {onBack && <Button onClick={onBack} style={{ marginBottom: 16 }}>返回</Button>}
-      {fields.map(f => (
-        <div key={f.field} style={{ marginBottom: 16, padding: 12, background: '#f5f5f5', borderRadius: 4 }}>
-          <div style={{ fontWeight: 'bold', marginBottom: 4 }}>{f.label}</div>
-          <div>{data?.[f.field] ?? '-'}</div>
-        </div>
-      ))}
+    <div className="max-w-2xl mx-auto p-6">
+      {onBack && (
+        <Button variant="outline" onClick={onBack} className="mb-4">
+          返回
+        </Button>
+      )}
+      <div className="space-y-4">
+        {fields.map(f => (
+          <Card key={f.field}>
+            <CardContent className="pt-6">
+              <div className="font-semibold text-sm text-muted-foreground mb-2">{f.label}</div>
+              <div className="text-base">{data?.[f.field] ?? '-'}</div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
     </div>
   )
 }

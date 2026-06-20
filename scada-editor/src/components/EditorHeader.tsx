@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useEditorStore } from '@/store/editorStore'
-import { useSaveCanvas } from '@/hooks/useScada'
+import { useSaveCanvas, usePublish, useUnpublish } from '@/hooks/useScada'
 import { useHistory } from '@/hooks/useHistory'
 import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -31,6 +31,8 @@ const Icons = {
   ChevD:   'M6 9l6 6 6-6',
   External:'M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14 21 3',
   Back:    'M19 12H5M12 19l-7-7 7-7',
+  Publish: 'M12 2v13M12 2 7 7M12 2l5 5M5 16v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3',
+  Unpublish: 'M12 15V2M12 15l-5-5M12 15l5-5M5 16v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3',
 }
 
 /* ── Divider ── */
@@ -48,6 +50,8 @@ export default function EditorHeader({ scadaName, scadaCode, publishStatus, onPr
   const store = useEditorStore()
   const { isDirty, zoom, setZoom, project, scadaId } = store
   const saveCanvas = useSaveCanvas()
+  const publish = usePublish()
+  const unpublish = useUnpublish()
   const { undo, redo, canUndo, canRedo } = useHistory()
   const [showPolicies, setShowPolicies] = useState(false)
   const [showPoints, setShowPoints] = useState(false)
@@ -58,6 +62,24 @@ export default function EditorHeader({ scadaName, scadaCode, publishStatus, onPr
     if (!scadaId) return
     const previewImage = store.getSnapshot(480) ?? undefined
     saveCanvas.mutate({ id: scadaId, project, previewImage })
+  }
+
+  const isPublished = publishStatus === 1
+  const publishBusy = publish.isPending || unpublish.isPending || saveCanvas.isPending
+
+  const doPublish = () => {
+    if (!scadaId || publishBusy) return
+    // 发布前先保存当前画布，确保发布的是最新内容
+    const previewImage = store.getSnapshot(480) ?? undefined
+    saveCanvas.mutate(
+      { id: scadaId, project, previewImage },
+      { onSuccess: () => publish.mutate(scadaId) },
+    )
+  }
+
+  const doUnpublish = () => {
+    if (!scadaId || publishBusy) return
+    unpublish.mutate(scadaId)
   }
 
   return (
@@ -237,6 +259,28 @@ export default function EditorHeader({ scadaName, scadaCode, publishStatus, onPr
       >
         <Icon d={Icons.Save} size={12} />
         {saveCanvas.isPending ? '保存中…' : '保存'}
+      </button>
+
+      {/* Publish / Unpublish */}
+      <button
+        onClick={isPublished ? doUnpublish : doPublish}
+        disabled={publishBusy}
+        title={isPublished ? '取消发布（停止对外分享）' : '发布（保存并对外分享实时大屏）'}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 5,
+          height: 28, padding: '0 10px',
+          borderRadius: 'var(--radius-sm)',
+          background: isPublished ? 'var(--bg-surface)' : 'var(--success, #22c55e)',
+          color: isPublished ? 'var(--text-secondary)' : '#fff',
+          border: isPublished ? '1px solid var(--border-strong)' : 'none',
+          fontSize: 11, fontWeight: 600,
+          cursor: publishBusy ? 'default' : 'pointer',
+          transition: 'all var(--duration-base)',
+          opacity: publishBusy ? 0.7 : 1,
+        }}
+      >
+        <Icon d={isPublished ? Icons.Unpublish : Icons.Publish} size={12} />
+        {publish.isPending ? '发布中…' : unpublish.isPending ? '处理中…' : isPublished ? '取消发布' : '发布'}
       </button>
 
       {/* Point Management */}

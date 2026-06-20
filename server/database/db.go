@@ -184,6 +184,9 @@ var migrateGroups = [][]interface{}{
 	{
 		&models.WorkOrderType{},
 		&models.WorkOrderWebhook{},
+		&models.WorkOrderWebhookLog{},
+		&models.WorkOrderWorkflow{},
+		&models.WorkOrderWorkflowLog{},
 		&models.WorkOrder{},
 		&models.WorkOrderItem{},
 		&models.WorkOrderActivity{},

@@ -1,7 +1,7 @@
 <template>
   <div>
     <div class="toolbar">
-      <el-page-header content="工单标签" @back="$router.push('/work-orders')" />
+      <el-page-header v-if="!embedded" content="工单标签" @back="$router.push('/work-orders')" />
       <div class="spacer" />
       <el-button type="primary" @click="openCreate">新增标签</el-button>
     </div>
@@ -55,6 +55,8 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { listWorkOrderTags, createWorkOrderTag, updateWorkOrderTag, deleteWorkOrderTag } from '@/api/workOrder'
+
+defineProps({ embedded: { type: Boolean, default: false } })
 
 const rows = ref([])
 const loading = ref(false)

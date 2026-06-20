@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 电视桌面横幅（Leanback 要求 320x180）。纯矢量，避免新增位图资源。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+    <path
+        android:fillColor="#1E40AF"
+        android:pathData="M0,0 H320 V180 H0 Z" />
+    <!-- 简洁的「石」字形磐石标记 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M118,52 h84 v18 h-84 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M150,52 h20 v76 h-20 Z" />
+    <path
+        android:fillColor="#93C5FD"
+        android:pathData="M118,108 h84 v20 h-84 Z" />
+</vector>

@@ -104,6 +104,11 @@ class SettingsActivity : AppCompatActivity() {
         val btnScanQR = findViewById<Button>(R.id.btnScanQR)
         val btnSave = findViewById<Button>(R.id.btnSave)
         val btnReconnect = findViewById<Button>(R.id.btnReconnect)
+        val btnReverseRegister = findViewById<Button>(R.id.btnReverseRegister)
+
+        btnReverseRegister.setOnClickListener {
+            startActivity(Intent(this, ReverseRegisterActivity::class.java))
+        }
 
         btnReconnect.setOnClickListener {
             val cfg = AgentConfig.get(this)

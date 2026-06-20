@@ -14,6 +14,8 @@
 import type { StateScope } from './pageState'
 import type { PageEvent } from './eventTypes'
 import { setupPageEvents, type EventEngineDeps } from './eventEngine'
+import { setupCrossDeviceReceiver, teardownCrossDeviceReceiver } from './crossDevice/receiver'
+import { eventManager } from './EventHandler'
 
 /** 当前活动页 pageState 的间接持有者：活动页挂载时 set、卸载时置 null。 */
 export interface ActivePageRef {
@@ -54,6 +56,7 @@ export function createActivePageProxy(ref: ActivePageRef): StateScope {
 
 export interface SetupAppEventsDeps {
   appState: StateScope
+  formAppCode?: string
   activePageRef: ActivePageRef
   onScanInterface?: EventEngineDeps['onScanInterface']
   doPrint?: EventEngineDeps['doPrint']
@@ -76,10 +79,25 @@ export function setupAppEvents(
   const { cleanup } = setupPageEvents(appEvents, {
     pageState: pageProxy,
     appState: deps.appState,
+    formAppCode: deps.formAppCode,
     onScanInterface: deps.onScanInterface,
     doPrint: deps.doPrint,
     navigate: deps.navigate,
     toast: deps.toast,
   })
-  return cleanup
+
+  // 注册跨设备事件接收器（第 7a 步：同设备跨 app）
+  if (deps.formAppCode) {
+    setupCrossDeviceReceiver(deps.formAppCode, (event, payload, hop) => {
+      // 构造 custom_event 源事件，携带 payload 和 hop
+      // eventManager.emit 会触发所有监听该 event 的 custom_event 流
+      const dataWithHop = JSON.stringify({ ...payload, _hop: hop })
+      eventManager.emit(event, dataWithHop)
+    })
+  }
+
+  return () => {
+    cleanup()
+    teardownCrossDeviceReceiver()
+  }
 }

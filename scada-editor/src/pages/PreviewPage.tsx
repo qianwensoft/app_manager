@@ -4,6 +4,7 @@ import { useScadaInfo } from '@/hooks/useScada'
 import { useCanvasBindingData } from '@/hooks/useCanvasBindingData'
 import CanvasViewer from '@/components/CanvasViewer'
 import type { CanvasProject, CanvasData } from '@/types'
+import { shouldAutoLandscape, isLandscape } from '@/utils/deviceDetect'
 
 type DataMode = 'stomp' | 'http' | 'none'
 
@@ -24,6 +25,7 @@ export default function PreviewPage() {
   const [headerCollapsed, setHeaderCollapsed] = useState(false)
   const [headerHovered, setHeaderHovered] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
+  const [needLandscape, setNeedLandscape] = useState(false)
 
   useEffect(() => {
     if (!info?.canvas_data) return
@@ -32,10 +34,50 @@ export default function PreviewPage() {
       setProject(p)
       setActiveId(p.activeCanvasId)
       setDataMode(info.publish_status === 1 ? 'stomp' : 'http')
+
+      // 检查是否需要自动横屏
+      const activeCanvas = p.canvases[p.activeCanvasId]
+      if (activeCanvas && shouldAutoLandscape(activeCanvas.autoLandscape)) {
+        // 如果当前不是横屏，则需要旋转
+        setNeedLandscape(!isLandscape())
+      } else {
+        setNeedLandscape(false)
+      }
     } catch {
       console.error('canvas_data parse error')
     }
   }, [info])
+
+  // 监听画布切换，重新检查横屏需求
+  useEffect(() => {
+    if (!project || !activeId) return
+    const canvas = project.canvases[activeId]
+    if (canvas && shouldAutoLandscape(canvas.autoLandscape)) {
+      setNeedLandscape(!isLandscape())
+    } else {
+      setNeedLandscape(false)
+    }
+  }, [activeId, project])
+
+  // 监听窗口大小变化（屏幕旋转），重新检查横屏需求
+  useEffect(() => {
+    const handleResize = () => {
+      if (!project || !activeId) return
+      const canvas = project.canvases[activeId]
+      if (canvas && shouldAutoLandscape(canvas.autoLandscape)) {
+        setNeedLandscape(!isLandscape())
+      } else {
+        setNeedLandscape(false)
+      }
+    }
+
+    window.addEventListener('resize', handleResize)
+    window.addEventListener('orientationchange', handleResize)
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      window.removeEventListener('orientationchange', handleResize)
+    }
+  }, [project, activeId])
 
   const allElements = project && activeId ? (project.canvases[activeId]?.elements ?? []) : []
   const { pointData, tableLiveData } = useCanvasBindingData({
@@ -56,8 +98,20 @@ export default function PreviewPage() {
 
   const headerVisible = !headerCollapsed || headerHovered
 
+  // 横屏容器样式
+  const landscapeContainerStyle: React.CSSProperties = needLandscape ? {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    width: '100vh',
+    height: '100vw',
+    transform: 'rotate(90deg) translateY(-100%)',
+    transformOrigin: 'top left',
+    overflow: 'hidden',
+  } : {}
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg-app)' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg-app)', ...landscapeContainerStyle }}>
 
       {/* Thin hover zone shown when header is collapsed */}
       {headerCollapsed && (
@@ -190,24 +244,41 @@ export default function PreviewPage() {
           flex: 1, overflow: 'hidden', display: 'flex',
           alignItems: 'center', justifyContent: 'center',
           background: 'radial-gradient(ellipse at center, rgba(74,158,255,0.04) 0%, transparent 70%), var(--bg-base)',
-          padding: 24, boxSizing: 'border-box',
+          padding: activeCanvas?.adaptiveMode === 'screen' ? 0 : 24,
+          boxSizing: 'border-box',
         }}
       >
         {activeCanvas ? (
-          <div style={{
-            boxShadow: '0 0 0 1px var(--border-strong), 0 16px 48px rgba(0,0,0,0.7)',
-            borderRadius: 2, flex: 1, alignSelf: 'stretch', overflow: 'hidden', minWidth: 0, minHeight: 0,
-          }}>
-            <CanvasViewer
-              canvas={activeCanvas}
-              fitContainer
-              fitMode="fit"
-              pointData={pointData}
-              tableLiveData={tableLiveData}
-              scadaCode={info?.scada_code}
-              onSwitchCanvas={setActiveId}
-            />
-          </div>
+          activeCanvas.adaptiveMode === 'screen' ? (
+            // 屏幕自适应：画布填充整个容器，不留边距
+            <div style={{ width: '100%', height: '100%', overflow: 'hidden' }}>
+              <CanvasViewer
+                canvas={activeCanvas}
+                fitContainer
+                fitMode="fill"
+                pointData={pointData}
+                tableLiveData={tableLiveData}
+                scadaCode={info?.scada_code}
+                onSwitchCanvas={setActiveId}
+              />
+            </div>
+          ) : (
+            // 固定尺寸或适应内容：保持原有边距和阴影
+            <div style={{
+              boxShadow: '0 0 0 1px var(--border-strong), 0 16px 48px rgba(0,0,0,0.7)',
+              borderRadius: 2, flex: 1, alignSelf: 'stretch', overflow: 'hidden', minWidth: 0, minHeight: 0,
+            }}>
+              <CanvasViewer
+                canvas={activeCanvas}
+                fitContainer
+                fitMode="fit"
+                pointData={pointData}
+                tableLiveData={tableLiveData}
+                scadaCode={info?.scada_code}
+                onSwitchCanvas={setActiveId}
+              />
+            </div>
+          )
         ) : (
           <div style={centerStyle}>
             {project === null && info.canvas_data
