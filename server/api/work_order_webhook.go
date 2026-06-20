@@ -348,7 +348,7 @@ func resolveWebhookParams(paramsJSON string, payload map[string]interface{}) map
 // renderPlaceholders 替换 {{key}} 为 payload[key]；支持多个占位符拼接。
 // 整串恰好是单个占位符时保留原始类型（数字、布尔等）；
 // 包含多个占位符或混合文本时，执行字符串替换后返回字符串。
-// 注意：不处理转义字符，因为参数会被序列化为 JSON，转义由 JSON 格式自动处理。
+// 注意：会清理最终字符串中的控制字符，避免破坏 JSON 格式。
 func renderPlaceholders(tmpl string, payload map[string]interface{}) interface{} {
 	t := strings.TrimSpace(tmpl)
 
@@ -393,8 +393,19 @@ func renderPlaceholders(tmpl string, payload map[string]interface{}) interface{}
 		out = strings.ReplaceAll(out, placeholder, strVal)
 	}
 
-	// 不处理转义字符 - JSON 序列化会自动处理
-	return out
+	// 清理控制字符：移除换行、回车等会破坏 JSON 格式的字符
+	// 保留制表符（\t），移除其他控制字符
+	out = strings.Map(func(r rune) rune {
+		if r == '\t' {
+			return r // 保留制表符
+		}
+		if r < 32 || r == 127 {
+			return -1 // 删除其他控制字符（包括换行、回车）
+		}
+		return r
+	}, out)
+
+	return strings.TrimSpace(out)
 }
 
 func invokeWorkOrderEndpoint(h models.WorkOrderWebhook, params map[string]interface{}) {
