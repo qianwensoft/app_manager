@@ -144,9 +144,12 @@
               </el-select>
             </el-form-item>
 
-            <el-form-item v-if="action.builder.endpointId && action.builder.paramList" label="参数映射">
+            <el-form-item v-if="action.builder.endpointId" label="参数映射">
               <div class="param-mapping">
-                <div v-if="!action.builder.paramList || action.builder.paramList.length === 0" class="no-params">
+                <div v-if="action.builder.paramList === null" class="no-params">
+                  <el-icon class="is-loading"><Loading /></el-icon> 加载参数中...
+                </div>
+                <div v-else-if="!action.builder.paramList || action.builder.paramList.length === 0" class="no-params">
                   该接口无需参数
                 </div>
                 <div v-else>
@@ -247,9 +250,12 @@
               </el-select>
             </el-form-item>
 
-            <el-form-item v-if="action.builder.interfaceId && action.builder.paramList" label="参数映射">
+            <el-form-item v-if="action.builder.interfaceId" label="参数映射">
               <div class="param-mapping">
-                <div v-if="!action.builder.paramList || action.builder.paramList.length === 0" class="no-params">
+                <div v-if="action.builder.paramList === null" class="no-params">
+                  <el-icon class="is-loading"><Loading /></el-icon> 加载参数中...
+                </div>
+                <div v-else-if="!action.builder.paramList || action.builder.paramList.length === 0" class="no-params">
                   该接口无需参数
                 </div>
                 <div v-else>
@@ -600,7 +606,7 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { More, QuestionFilled, Plus, ArrowUp, ArrowDown } from '@element-plus/icons-vue'
+import { More, QuestionFilled, Plus, ArrowUp, ArrowDown, Loading } from '@element-plus/icons-vue'
 import {
   getWorkOrderWorkflows, createWorkOrderWorkflow, updateWorkOrderWorkflow, deleteWorkOrderWorkflow,
   testWorkOrderWorkflow, getWorkOrderTypes
