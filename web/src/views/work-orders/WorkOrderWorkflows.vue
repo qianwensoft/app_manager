@@ -314,6 +314,207 @@
             </el-form-item>
           </template>
 
+          <!-- Visual builder for execute_js -->
+          <template v-if="action.type === 'execute_js' && action.useBuilder">
+            <el-form-item label="JavaScript 代码">
+              <div class="monaco-editor-wrapper">
+                <div :ref="el => setMonacoRef(idx, el)" class="monaco-container"></div>
+              </div>
+              <div class="hint">
+                可用变量：workOrder（工单对象）、ctx（上下文）、actions（前序动作结果数组）
+              </div>
+            </el-form-item>
+
+            <el-form-item label="可用字段参考">
+              <el-collapse>
+                <el-collapse-item title="工单字段 (workOrder)" name="1">
+                  <div class="code-hint">
+                    <div>workOrder.code - 工单编号</div>
+                    <div>workOrder.title - 标题</div>
+                    <div>workOrder.description - 描述</div>
+                    <div>workOrder.device_id - 设备ID</div>
+                    <div>workOrder.status - 状态</div>
+                    <div>workOrder.priority - 优先级</div>
+                    <div>workOrder.assignee_id - 指派人</div>
+                    <div>workOrder.other_codes - 其他编码</div>
+                  </div>
+                </el-collapse-item>
+                <el-collapse-item title="上下文变量 (ctx)" name="2" v-if="contextVars.length > 0">
+                  <div class="code-hint">
+                    <div v-for="ctx in contextVars" :key="ctx.name">
+                      ctx.{{ ctx.name }} - {{ ctx.description || ctx.name }}
+                    </div>
+                  </div>
+                </el-collapse-item>
+                <el-collapse-item title="前序动作结果 (actions)" name="3" v-if="idx > 0">
+                  <div class="code-hint">
+                    <div v-for="prevIdx in idx" :key="prevIdx">
+                      actions[{{ prevIdx }}].result - 动作{{ prevIdx + 1 }}的执行结果
+                    </div>
+                  </div>
+                </el-collapse-item>
+              </el-collapse>
+            </el-form-item>
+
+            <el-form-item label="生成的配置">
+              <el-input v-model="action.configJSON" type="textarea" :rows="4" readonly />
+            </el-form-item>
+
+            <el-form-item>
+              <el-button text type="primary" size="small" @click="action.useBuilder = false">
+                切换到手动 JSON 模式
+              </el-button>
+            </el-form-item>
+          </template>
+
+          <!-- Visual builder for update_work_order -->
+          <template v-if="action.type === 'update_work_order' && action.useBuilder">
+            <el-form-item label="更新目标">
+              <el-radio-group v-model="action.builder.updateTarget" @change="updateWorkOrderBuilderJSON(idx)">
+                <el-radio value="current">当前工单</el-radio>
+                <el-radio value="specified">指定工单</el-radio>
+              </el-radio-group>
+            </el-form-item>
+
+            <el-form-item label="工单 ID" v-if="action.builder.updateTarget === 'specified'">
+              <el-input
+                v-model="action.builder.workOrderId"
+                placeholder="输入工单ID或模板变量"
+                @input="updateWorkOrderBuilderJSON(idx)"
+              >
+                <template #append>
+                  <el-dropdown @command="cmd => insertWorkOrderIdTemplate(idx, cmd)" trigger="click">
+                    <el-button>
+                      <el-icon><More /></el-icon>
+                    </el-button>
+                    <template #dropdown>
+                      <el-dropdown-menu>
+                        <el-dropdown-item disabled>上下文变量</el-dropdown-item>
+                        <el-dropdown-item
+                          v-for="ctx in contextVars"
+                          :key="ctx.name"
+                          :command="ctxTemplate(ctx.name)"
+                        >
+                          {{ ctxTemplateLabel(ctx) }}
+                        </el-dropdown-item>
+                        <el-dropdown-item divided disabled v-if="idx > 0">前序动作结果</el-dropdown-item>
+                        <el-dropdown-item
+                          v-for="prevIdx in idx"
+                          :key="prevIdx"
+                          :command="actionResultTemplate(prevIdx)"
+                        >
+                          {{ actionResultLabel(prevIdx) }}
+                        </el-dropdown-item>
+                      </el-dropdown-menu>
+                    </template>
+                  </el-dropdown>
+                </template>
+              </el-input>
+            </el-form-item>
+
+            <el-form-item label="更新字段">
+              <div class="update-fields">
+                <div v-for="(field, fieldIdx) in action.builder.updateFields" :key="fieldIdx" class="field-row">
+                  <el-select v-model="field.name" placeholder="选择字段" style="width:200px" @change="updateWorkOrderBuilderJSON(idx)">
+                    <el-option label="标题 (title)" value="title" />
+                    <el-option label="描述 (description)" value="description" />
+                    <el-option label="状态 (status)" value="status" />
+                    <el-option label="优先级 (priority)" value="priority" />
+                    <el-option label="指派人 (assignee_id)" value="assignee_id" />
+                  </el-select>
+                  <el-input
+                    v-model="field.value"
+                    placeholder="字段值或模板变量"
+                    style="flex:1;margin-left:8px"
+                    @input="updateWorkOrderBuilderJSON(idx)"
+                  />
+                  <el-button
+                    text
+                    type="danger"
+                    @click="removeUpdateField(idx, fieldIdx)"
+                    style="margin-left:8px"
+                  >
+                    删除
+                  </el-button>
+                </div>
+                <el-button text type="primary" size="small" @click="addUpdateField(idx)">
+                  <el-icon><Plus /></el-icon> 添加字段
+                </el-button>
+              </div>
+            </el-form-item>
+
+            <el-form-item label="生成的配置">
+              <el-input v-model="action.configJSON" type="textarea" :rows="4" readonly />
+            </el-form-item>
+
+            <el-form-item>
+              <el-button text type="primary" size="small" @click="action.useBuilder = false">
+                切换到手动 JSON 模式
+              </el-button>
+            </el-form-item>
+          </template>
+
+          <!-- Visual builder for create_work_order -->
+          <template v-if="action.type === 'create_work_order' && action.useBuilder">
+            <el-form-item label="工单类型">
+              <el-select v-model="action.builder.typeCode" placeholder="选择工单类型" clearable style="width:100%" @change="updateCreateWorkOrderBuilderJSON(idx)">
+                <el-option v-for="t in types" :key="t.code" :label="t.name" :value="t.code" />
+              </el-select>
+            </el-form-item>
+
+            <el-form-item label="工单字段">
+              <div class="update-fields">
+                <div v-for="(field, fieldIdx) in action.builder.createFields" :key="fieldIdx" class="field-row">
+                  <el-select v-model="field.name" placeholder="选择字段" style="width:200px" @change="updateCreateWorkOrderBuilderJSON(idx)">
+                    <el-option label="标题 (title)" value="title" />
+                    <el-option label="描述 (description)" value="description" />
+                    <el-option label="设备ID (device_id)" value="device_id" />
+                    <el-option label="优先级 (priority)" value="priority" />
+                    <el-option label="指派人 (assignee_id)" value="assignee_id" />
+                  </el-select>
+                  <el-input
+                    v-model="field.value"
+                    placeholder="字段值或模板变量"
+                    style="flex:1;margin-left:8px"
+                    @input="updateCreateWorkOrderBuilderJSON(idx)"
+                  />
+                  <el-button
+                    text
+                    type="danger"
+                    @click="removeCreateField(idx, fieldIdx)"
+                    style="margin-left:8px"
+                  >
+                    删除
+                  </el-button>
+                </div>
+                <el-button text type="primary" size="small" @click="addCreateField(idx)">
+                  <el-icon><Plus /></el-icon> 添加字段
+                </el-button>
+              </div>
+            </el-form-item>
+
+            <el-form-item label="结果保存到上下文">
+              <el-input
+                v-model="action.builder.saveToContext"
+                placeholder="变量名，如：new_work_order_id"
+                @input="updateCreateWorkOrderBuilderJSON(idx)"
+              >
+                <template #prepend>ctx.</template>
+              </el-input>
+              <div class="hint">可选，将创建的工单ID保存到上下文变量</div>
+            </el-form-item>
+
+            <el-form-item label="生成的配置">
+              <el-input v-model="action.configJSON" type="textarea" :rows="4" readonly />
+            </el-form-item>
+
+            <el-form-item>
+              <el-button text type="primary" size="small" @click="action.useBuilder = false">
+                切换到手动 JSON 模式
+              </el-button>
+            </el-form-item>
+          </template>
+
           <!-- Fallback JSON editor -->
           <el-form-item v-else label="配置（JSON）">
             <el-input v-model="action.configJSON" type="textarea" :rows="6" placeholder="动作配置（JSON 对象）" />
@@ -331,9 +532,24 @@
                   切换到可视化配置
                 </el-button>
               </div>
-              <div v-if="action.type === 'execute_js'">格式：{"code": "log('工单: ' + workOrder.code);"}</div>
-              <div v-if="action.type === 'update_work_order'">格式：{"updates": {"status": "in_progress"}} 或 {"work_order_id": 123, "updates": {...}}</div>
-              <div v-if="action.type === 'create_work_order'">格式：{"fields": {"title": "自动创建", "type_code": "xxx"}}</div>
+              <div v-if="action.type === 'execute_js'">
+                格式：{"code": "log('工单: ' + workOrder.code);"}
+                <el-button text type="primary" size="small" @click="action.useBuilder = true; initJsBuilder(idx)" style="margin-left:8px">
+                  切换到可视化配置
+                </el-button>
+              </div>
+              <div v-if="action.type === 'update_work_order'">
+                格式：{"updates": {"status": "in_progress"}} 或 {"work_order_id": 123, "updates": {...}}
+                <el-button text type="primary" size="small" @click="action.useBuilder = true; initUpdateWorkOrderBuilder(idx)" style="margin-left:8px">
+                  切换到可视化配置
+                </el-button>
+              </div>
+              <div v-if="action.type === 'create_work_order'">
+                格式：{"fields": {"title": "自动创建", "type_code": "xxx"}}
+                <el-button text type="primary" size="small" @click="action.useBuilder = true; initCreateWorkOrderBuilder(idx)" style="margin-left:8px">
+                  切换到可视化配置
+                </el-button>
+              </div>
               <div v-if="action.type === 'query_work_orders'">格式：{"conditions": {"device_id": "{{device_id}}"}, "limit": 10}</div>
             </div>
           </el-form-item>
@@ -382,7 +598,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { More, QuestionFilled, Plus, ArrowUp, ArrowDown } from '@element-plus/icons-vue'
 import {
@@ -391,6 +607,7 @@ import {
 } from '@/api/workOrder'
 import { listDataInterfaces, getInterfaceParamSchema } from '@/api/dataStack'
 import { listOutboundEndpoints, getEndpointParamSchema } from '@/api/outbound'
+import * as monaco from 'monaco-editor'
 
 const workflows = ref([])
 const types = ref([])
@@ -407,6 +624,10 @@ const contextDialog = ref(false)
 const contextForm = ref({ name: '', description: '', defaultValue: '' })
 const testDialog = ref(false)
 const testForm = ref({ workflowId: null, workOrderId: null, event: 'work_order.test' })
+
+// Monaco editors for JavaScript actions
+const monacoEditors = ref({})
+const monacoRefs = ref({})
 
 const availableEvents = [
   { label: '创建', value: 'work_order.created' },
@@ -530,7 +751,222 @@ const onActionTypeChange = (idx) => {
   } else if (action.type === 'call_data_interface') {
     action.useBuilder = false
     action.builder = { interfaceId: null, params: {}, paramList: null }
+  } else if (action.type === 'execute_js') {
+    action.useBuilder = false
+    action.builder = { code: '' }
+  } else if (action.type === 'update_work_order') {
+    action.useBuilder = false
+    action.builder = { updateTarget: 'current', workOrderId: '', updateFields: [] }
+  } else if (action.type === 'create_work_order') {
+    action.useBuilder = false
+    action.builder = { typeCode: '', createFields: [], saveToContext: '' }
   }
+}
+
+const setMonacoRef = (idx, el) => {
+  if (el) {
+    monacoRefs.value[idx] = el
+  }
+}
+
+const initJsBuilder = async (idx) => {
+  const action = actions.value[idx]
+  action.builder = { code: '' }
+
+  // Try to parse existing config
+  try {
+    const config = JSON.parse(action.configJSON || '{}')
+    action.builder.code = config.code || ''
+  } catch (e) {
+    // Ignore
+  }
+
+  // Wait for DOM to render
+  await nextTick()
+
+  // Initialize Monaco Editor
+  const container = monacoRefs.value[idx]
+  if (container) {
+    // Dispose existing editor if any
+    if (monacoEditors.value[idx]) {
+      monacoEditors.value[idx].dispose()
+    }
+
+    const editor = monaco.editor.create(container, {
+      value: action.builder.code,
+      language: 'javascript',
+      theme: 'vs',
+      minimap: { enabled: false },
+      lineNumbers: 'on',
+      scrollBeyondLastLine: false,
+      automaticLayout: true,
+      fontSize: 14,
+      tabSize: 2
+    })
+
+    // Add type definitions for autocomplete
+    monaco.languages.typescript.javascriptDefaults.setCompilerOptions({
+      target: monaco.languages.typescript.ScriptTarget.ES2015,
+      allowNonTsExtensions: true,
+      moduleResolution: monaco.languages.typescript.ModuleResolutionKind.NodeJs,
+      module: monaco.languages.typescript.ModuleKind.CommonJS,
+      noEmit: true,
+      typeRoots: ['node_modules/@types']
+    })
+
+    // Add custom type definitions for workOrder, ctx, actions
+    const typeDefinitions = `
+      declare const workOrder: {
+        id: number;
+        code: string;
+        title: string;
+        description: string;
+        device_id: string;
+        status: string;
+        priority: string;
+        assignee_id: number;
+        other_codes: string;
+        created_at: string;
+        updated_at: string;
+      };
+
+      declare const ctx: {
+        ${contextVars.value.map(c => `${c.name}: any;`).join('\n        ')}
+      };
+
+      declare const actions: Array<{result: any}>;
+
+      declare function log(...args: any[]): void;
+    `
+
+    monaco.languages.typescript.javascriptDefaults.addExtraLib(typeDefinitions, 'workflow-types.d.ts')
+
+    // Update config on change
+    editor.onDidChangeModelContent(() => {
+      action.builder.code = editor.getValue()
+      updateJsBuilderJSON(idx)
+    })
+
+    monacoEditors.value[idx] = editor
+  }
+}
+
+const updateJsBuilderJSON = (idx) => {
+  const action = actions.value[idx]
+  const config = { code: action.builder.code }
+  action.configJSON = JSON.stringify(config, null, 2)
+}
+
+const initUpdateWorkOrderBuilder = async (idx) => {
+  const action = actions.value[idx]
+  action.builder = { updateTarget: 'current', workOrderId: '', updateFields: [] }
+
+  try {
+    const config = JSON.parse(action.configJSON || '{}')
+    if (config.work_order_id) {
+      action.builder.updateTarget = 'specified'
+      action.builder.workOrderId = config.work_order_id
+    }
+    if (config.updates) {
+      action.builder.updateFields = Object.entries(config.updates).map(([name, value]) => ({
+        name,
+        value: String(value)
+      }))
+    }
+  } catch (e) {
+    // Ignore
+  }
+}
+
+const addUpdateField = (idx) => {
+  const action = actions.value[idx]
+  action.builder.updateFields.push({ name: '', value: '' })
+}
+
+const removeUpdateField = (idx, fieldIdx) => {
+  const action = actions.value[idx]
+  action.builder.updateFields.splice(fieldIdx, 1)
+  updateWorkOrderBuilderJSON(idx)
+}
+
+const insertWorkOrderIdTemplate = (idx, template) => {
+  const action = actions.value[idx]
+  action.builder.workOrderId += template
+  updateWorkOrderBuilderJSON(idx)
+}
+
+const updateWorkOrderBuilderJSON = (idx) => {
+  const action = actions.value[idx]
+  const config = {}
+
+  if (action.builder.updateTarget === 'specified' && action.builder.workOrderId) {
+    config.work_order_id = action.builder.workOrderId
+  }
+
+  const updates = {}
+  action.builder.updateFields.forEach(field => {
+    if (field.name && field.value) {
+      updates[field.name] = field.value
+    }
+  })
+
+  if (Object.keys(updates).length > 0) {
+    config.updates = updates
+  }
+
+  action.configJSON = JSON.stringify(config, null, 2)
+}
+
+const initCreateWorkOrderBuilder = async (idx) => {
+  const action = actions.value[idx]
+  action.builder = { typeCode: '', createFields: [], saveToContext: '' }
+
+  try {
+    const config = JSON.parse(action.configJSON || '{}')
+    if (config.fields) {
+      action.builder.typeCode = config.fields.type_code || ''
+      action.builder.createFields = Object.entries(config.fields)
+        .filter(([name]) => name !== 'type_code')
+        .map(([name, value]) => ({ name, value: String(value) }))
+    }
+    action.builder.saveToContext = config.save_to_context || ''
+  } catch (e) {
+    // Ignore
+  }
+}
+
+const addCreateField = (idx) => {
+  const action = actions.value[idx]
+  action.builder.createFields.push({ name: '', value: '' })
+}
+
+const removeCreateField = (idx, fieldIdx) => {
+  const action = actions.value[idx]
+  action.builder.createFields.splice(fieldIdx, 1)
+  updateCreateWorkOrderBuilderJSON(idx)
+}
+
+const updateCreateWorkOrderBuilderJSON = (idx) => {
+  const action = actions.value[idx]
+  const fields = {}
+
+  if (action.builder.typeCode) {
+    fields.type_code = action.builder.typeCode
+  }
+
+  action.builder.createFields.forEach(field => {
+    if (field.name && field.value) {
+      fields[field.name] = field.value
+    }
+  })
+
+  const config = { fields }
+
+  if (action.builder.saveToContext) {
+    config.save_to_context = action.builder.saveToContext
+  }
+
+  action.configJSON = JSON.stringify(config, null, 2)
 }
 
 const initEndpointBuilder = async (idx) => {
@@ -763,6 +1199,16 @@ onMounted(async () => {
 
   load()
 })
+
+onBeforeUnmount(() => {
+  // Dispose all Monaco editors
+  Object.values(monacoEditors.value).forEach(editor => {
+    if (editor) {
+      editor.dispose()
+    }
+  })
+})
+
 </script>
 
 <style scoped>
@@ -793,4 +1239,36 @@ onMounted(async () => {
 .param-type { font-size: 12px; color: #909399; background: #f0f0f0; padding: 2px 6px; border-radius: 3px; }
 .param-desc { font-size: 12px; color: #606266; font-style: italic; }
 .no-params { text-align: center; color: #909399; padding: 20px; }
+
+.monaco-editor-wrapper {
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.monaco-container {
+  height: 300px;
+  width: 100%;
+}
+
+.code-hint {
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.8;
+  color: #606266;
+}
+
+.update-fields {
+  border: 1px solid #ebeef5;
+  border-radius: 4px;
+  padding: 12px;
+  background: #fafafa;
+}
+.field-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.field-row:last-child {
+  margin-bottom: 0;
+}
 </style>
