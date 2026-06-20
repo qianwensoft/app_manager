@@ -141,6 +141,71 @@ func GetWorkOrderWebhookLog(c *gin.Context) {
 
 // ── 外发分发 ───────────────────────────────────────────────────────────────
 
+// workOrderTagNames 获取工单标签名称列表（用于 webhook payload）
+func workOrderTagNames(woID uint) []string {
+	var links []models.WorkOrderTagLink
+	database.DB.Where("work_order_id = ?", woID).Find(&links)
+	if len(links) == 0 {
+		return []string{}
+	}
+
+	// 收集所有 tag code
+	codes := make([]string, 0, len(links))
+	for _, l := range links {
+		codes = append(codes, l.TagCode)
+	}
+
+	// 查询标签字典获取名称
+	var tags []models.WorkOrderTag
+	database.DB.Where("code IN ?", codes).Find(&tags)
+
+	// 构建 code -> name 映射
+	codeToName := make(map[string]string)
+	for _, t := range tags {
+		codeToName[t.Code] = t.Name
+	}
+
+	// 按原顺序返回名称，未找到的使用 code
+	names := make([]string, 0, len(codes))
+	for _, code := range codes {
+		if name, ok := codeToName[code]; ok {
+			names = append(names, name)
+		} else {
+			names = append(names, code)
+		}
+	}
+
+	return names
+}
+
+// workOrderStatusName 获取状态中文名称
+func workOrderStatusName(status string) string {
+	statusMap := map[string]string{
+		"open":        "待处理",
+		"in_progress": "处理中",
+		"resolved":    "已解决",
+		"closed":      "已关闭",
+		"reopened":    "重新打开",
+	}
+	if name, ok := statusMap[status]; ok {
+		return name
+	}
+	return status
+}
+
+// workOrderPriorityName 获取优先级中文名称
+func workOrderPriorityName(priority string) string {
+	priorityMap := map[string]string{
+		"normal": "普通",
+		"high":   "较高",
+		"urgent": "紧急",
+	}
+	if name, ok := priorityMap[priority]; ok {
+		return name
+	}
+	return priority
+}
+
 // workOrderEventPayload 构造外发/占位符可用的扁平字段。
 func workOrderEventPayload(event string, wo *models.WorkOrder, actor string) map[string]interface{} {
 	// cleanString 清理字符串中的控制字符，避免破坏 JSON 格式
@@ -177,6 +242,9 @@ func workOrderEventPayload(event string, wo *models.WorkOrder, actor string) map
 		"device_alias_agent":  wo.DeviceAliasAgent,
 		"device_group":        wo.DeviceGroup,
 		"tags":                strings.Join(workOrderTagCodes(wo.ID), ","),
+		"tags_names":          strings.Join(workOrderTagNames(wo.ID), ","),
+		"status_name":         workOrderStatusName(wo.Status),
+		"priority_name":       workOrderPriorityName(wo.Priority),
 		"actor":               actor,
 		"data_json":           wo.DataJSON,
 		"created_at":          wo.CreatedAt,

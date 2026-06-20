@@ -126,9 +126,11 @@
                   </template>
                   <!-- 自定义示例 -->
                   <el-option-group label="多参数拼接示例">
-                    <el-option label="设备_工单号_状态" value="{{device_name}}_{{code}}_{{status}}" />
+                    <el-option label="设备_工单号_状态" value="{{device_name}}_{{code}}_{{status_name}}" />
                     <el-option label="设备信息描述" value="设备：{{device_name}}（{{device_serial}}），分组：{{device_group}}" />
                     <el-option label="提交人信息" value="{{created_by_username}} [{{created_by_role}}]" />
+                    <el-option label="工单状态描述" value="工单{{code}}状态：{{status_name}}" />
+                    <el-option label="工单优先级标题" value="【{{priority_name}}】{{title}}" />
                   </el-option-group>
                 </el-select>
                 <el-button text size="small" @click="paramRows.splice(i, 1)">删除</el-button>
@@ -212,9 +214,25 @@
             </div>
             <div class="example-item">
               <div class="example-title">工单标题（带优先级）</div>
-              <el-input value="【{{priority}}】{{title}}" readonly size="small">
+              <el-input value="【{{priority_name}}】{{title}}" readonly size="small">
                 <template #append>
-                  <el-button @click="copyToClipboard('【{{priority}}】{{title}}')">复制</el-button>
+                  <el-button @click="copyToClipboard('【{{priority_name}}】{{title}}')">复制</el-button>
+                </template>
+              </el-input>
+            </div>
+            <div class="example-item">
+              <div class="example-title">工单状态描述</div>
+              <el-input value="工单 {{code}} 状态已更新为：{{status_name}}" readonly size="small">
+                <template #append>
+                  <el-button @click="copyToClipboard('工单 {{code}} 状态已更新为：{{status_name}}')">复制</el-button>
+                </template>
+              </el-input>
+            </div>
+            <div class="example-item">
+              <div class="example-title">工单标签列表</div>
+              <el-input value="标签：{{tags_names}}" readonly size="small">
+                <template #append>
+                  <el-button @click="copyToClipboard('标签：{{tags_names}}')">复制</el-button>
                 </template>
               </el-input>
             </div>
@@ -253,8 +271,8 @@ const showParamHelper = ref(false)
 
 // 占位符示例文本（避免模板中的 {{ }} 冲突）
 const placeholderExample = '{{key}}'
-const multiParamExample = '"{{device_name}} - {{code}} - {{status}}"'
-const paramHelperTip = '占位符格式：<code>{{key}}</code>，支持多参数拼接，例如：<code>"{{device_name}} - {{code}} - {{status}}"</code>'
+const multiParamExample = '"{{device_name}} - {{code}} - {{status_name}}"'
+const paramHelperTip = '占位符格式：<code>{{key}}</code>，支持多参数拼接，例如：<code>"{{device_name}} - {{code}} - {{status_name}}"</code>。<br/>💡 <strong>提示：</strong>标签、状态、优先级都提供了「编码」和「名称」两种占位符，例如 <code>{{status}}</code> 输出 "open"，<code>{{status_name}}</code> 输出 "待处理"。'
 
 // 入参映射：表格模式 + 原始 JSON 模式
 const paramRawMode = ref(false)
