@@ -324,7 +324,7 @@
           <template v-if="action.type === 'execute_js' && action.useBuilder">
             <el-form-item label="JavaScript 代码">
               <div class="monaco-editor-wrapper">
-                <div :ref="el => setMonacoRef(idx, el)" class="monaco-container"></div>
+                <div :id="`monaco-editor-${idx}`" class="monaco-container"></div>
               </div>
               <div class="hint">
                 可用变量：workOrder（工单对象）、ctx（上下文）、actions（前序动作结果数组）
