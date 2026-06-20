@@ -442,9 +442,12 @@ func invokeWorkOrderEndpoint(h models.WorkOrderWebhook, params map[string]interf
 		return
 	}
 
-	// 记录请求参数
-	reqJSON, _ := json.Marshal(params)
-	logEntry.RequestJSON = string(reqJSON)
+	// 1. 保存原始参数映射（未替换占位符的模板）
+	logEntry.RequestJSON = h.ParamsJSON
+
+	// 2. 保存实际执行参数（占位符已替换）
+	resolvedJSON, _ := json.Marshal(params)
+	logEntry.ResolvedJSON = string(resolvedJSON)
 
 	sampleVars := make(map[string]string, len(params))
 	for k, v := range params {
@@ -456,7 +459,7 @@ func invokeWorkOrderEndpoint(h models.WorkOrderWebhook, params map[string]interf
 		}
 	}
 
-	trace, _, _, _, scriptLogs, err := outbound.DebugHTTPEndpoint(database.DB, ep.App, ep, sampleVars, ep.TimeoutMS, nil)
+	trace, finalVars, _, _, scriptLogs, err := outbound.DebugHTTPEndpoint(database.DB, ep.App, ep, sampleVars, ep.TimeoutMS, nil)
 	logEntry.DurationMs = time.Since(startTime).Milliseconds()
 
 	if err != nil {
@@ -465,19 +468,48 @@ func invokeWorkOrderEndpoint(h models.WorkOrderWebhook, params map[string]interf
 		logEntry.ErrorMsg = err.Error()
 	} else {
 		logEntry.Status = "success"
-		// 保存 HTTP 状态码和原始响应
-		if trace != nil && trace.Response.Status > 0 {
-			logEntry.StatusCode = trace.Response.Status
-			// 保存原始响应体（限制 10KB）
-			logEntry.ResponseBody = truncateString(trace.Response.Body, 10000)
-		}
-		// 如果有 JS 脚本处理，保存脚本日志
-		if len(scriptLogs) > 0 {
-			scriptOutput := "\n\n--- Script Processing Logs ---\n"
-			for _, sl := range scriptLogs {
-				scriptOutput += fmt.Sprintf("[%s/%d %s] %s: %s\n", sl.Scope, sl.Index, sl.Name, sl.Level, sl.Line)
+
+		// 保存完整的请求信息
+		if trace != nil {
+			// 3. 请求详情
+			logEntry.RequestURL = trace.Request.URL
+			logEntry.RequestMethod = trace.Request.Method
+			logEntry.RequestBody = truncateString(trace.Request.Body, 20000)
+			if reqHeaders, err := json.Marshal(trace.Request.Headers); err == nil {
+				logEntry.RequestHeaders = string(reqHeaders)
 			}
-			logEntry.ResponseBody = truncateString(logEntry.ResponseBody+scriptOutput, 10000)
+
+			// 4. 原始响应（外部应用真实返回值）
+			if trace.Response.Status > 0 {
+				logEntry.StatusCode = trace.Response.Status
+				logEntry.ResponseBody = truncateString(trace.Response.Body, 20000)
+				if respHeaders, err := json.Marshal(trace.Response.Headers); err == nil {
+					logEntry.ResponseHeaders = string(respHeaders)
+				}
+			}
+		}
+
+		// 5. JS 脚本处理日志
+		if len(scriptLogs) > 0 {
+			if logsJSON, err := json.Marshal(scriptLogs); err == nil {
+				logEntry.ScriptLogs = string(logsJSON)
+			}
+		}
+
+		// 6. JS 脚本处理后的结果（通过 finalVars 提取）
+		if finalVars != nil {
+			scriptResultMap := make(map[string]string)
+			// 提取 http.last.* 相关变量（脚本可能修改了这些值）
+			for k, v := range finalVars {
+				if strings.HasPrefix(k, "{{http.last.") {
+					scriptResultMap[strings.TrimSuffix(strings.TrimPrefix(k, "{{"), "}}")] = v
+				}
+			}
+			if len(scriptResultMap) > 0 {
+				if resultJSON, err := json.Marshal(scriptResultMap); err == nil {
+					logEntry.ScriptResult = string(resultJSON)
+				}
+			}
 		}
 	}
 
