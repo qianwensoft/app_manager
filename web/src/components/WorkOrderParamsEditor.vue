@@ -54,7 +54,7 @@ import { workOrderEventParams, workOrderEventParamsByCategory, paramCategories }
 
 const props = defineProps({
   modelValue: { type: String, default: '' },
-  minHeight: { type: Number, default: 200 },
+  minHeight: { type: Number, default: 300 },
   placeholder: { type: String, default: '{"key": "{{placeholder}}"}' }
 })
 
@@ -163,9 +163,9 @@ function buildPlaceholderCompletion() {
 }
 
 const editorTheme = EditorView.theme({
-  '&': { fontSize: '13px', border: '1px solid var(--el-border-color)', borderRadius: '4px' },
-  '.cm-editor': { minHeight: 'inherit' },
-  '.cm-scroller': { minHeight: 'inherit', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' },
+  '&': { fontSize: '13px', border: '1px solid var(--el-border-color)', borderRadius: '4px', height: '100%' },
+  '.cm-editor': { height: '100%' },
+  '.cm-scroller': { minHeight: 'inherit', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace', overflow: 'auto' },
   '.cm-content': { minHeight: 'inherit', padding: '10px 0' },
   '.cm-gutters': {
     backgroundColor: 'var(--el-fill-color-light)',
@@ -272,7 +272,18 @@ onBeforeUnmount(() => {
 
 .wo-params-cm {
   border-radius: 4px;
-  overflow: hidden;
+  overflow: auto;
+  display: block;
+  resize: vertical;
+  position: relative;
+}
+
+.wo-params-cm :deep(.cm-editor) {
+  height: 100%;
+}
+
+.wo-params-cm :deep(.cm-scroller) {
+  overflow-y: auto;
 }
 
 /* 占位符列表 */
