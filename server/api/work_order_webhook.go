@@ -332,7 +332,7 @@ func resolveWebhookParams(paramsJSON string, payload map[string]interface{}) map
 // renderPlaceholders 替换 {{key}} 为 payload[key]；支持多个占位符拼接。
 // 整串恰好是单个占位符时保留原始类型（数字、布尔等）；
 // 包含多个占位符或混合文本时，执行字符串替换后返回字符串。
-// 同时处理转义字符（\n、\r\n、\t 等）。
+// 注意：不处理转义字符，因为参数会被序列化为 JSON，转义由 JSON 格式自动处理。
 func renderPlaceholders(tmpl string, payload map[string]interface{}) interface{} {
 	t := strings.TrimSpace(tmpl)
 
@@ -377,28 +377,11 @@ func renderPlaceholders(tmpl string, payload map[string]interface{}) interface{}
 		out = strings.ReplaceAll(out, placeholder, strVal)
 	}
 
-	// 处理转义字符：\n → 换行、\r\n → 回车换行、\t → 制表符、\\ → 反斜杠
-	out = unescapeString(out)
-
+	// 不处理转义字符 - JSON 序列化会自动处理
 	return out
 }
 
 // unescapeString 处理常见转义字符
-func unescapeString(s string) string {
-	// 按顺序处理，避免重复替换
-	replacements := []struct{ old, new string }{
-		{"\\r\\n", "\r\n"}, // Windows 换行
-		{"\\n", "\n"},      // Unix 换行
-		{"\\r", "\r"},      // Mac 旧换行
-		{"\\t", "\t"},      // 制表符
-		{"\\\\", "\\"},     // 反斜杠本身
-	}
-	result := s
-	for _, r := range replacements {
-		result = strings.ReplaceAll(result, r.old, r.new)
-	}
-	return result
-}
 
 func invokeWorkOrderEndpoint(h models.WorkOrderWebhook, params map[string]interface{}) {
 	startTime := time.Now()

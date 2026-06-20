@@ -422,8 +422,15 @@ func expandTemplate(s string, vars map[string]string) string {
 	}
 	// 在静态变量替换之后求值函数调用（{{$func(args)}}）
 	s = evalFunctions(s)
-	// 处理转义字符（\n、\r\n、\t 等）
-	return unescapeString(s)
+	// 注意：不在此处理转义字符（\n、\r\n、\t 等）
+	// 对于 JSON body，转义字符会由 JSON 解析器自动处理
+	// 对于需要转义的场景（如纯文本、URL参数），调用方需显式调用 unescapeString
+	return s
+}
+
+// ExpandTemplateWithUnescape 扩展模板并处理转义字符（用于非 JSON 场景，如纯文本、URL 参数等）
+func ExpandTemplateWithUnescape(s string, vars map[string]string) string {
+	return unescapeString(expandTemplate(s, vars))
 }
 
 // unescapeString 处理常见转义字符（\n → 换行、\r\n → 回车换行、\t → 制表符、\\ → 反斜杠）
