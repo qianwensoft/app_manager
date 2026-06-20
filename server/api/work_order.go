@@ -179,13 +179,14 @@ func GetWorkOrder(c *gin.Context) {
 // CreateWorkOrder 创建工单（Agent device-token 或登录用户）。
 func CreateWorkOrder(c *gin.Context) {
 	var req struct {
-		TypeCode    string `json:"type_code"`
-		DeviceID    uint   `json:"device_id"`
-		Title       string `json:"title"`
-		Description string `json:"description"`
-		Priority    string `json:"priority"`
-		DataJSON    string `json:"data_json"`
-		OtherCodes  string `json:"other_codes"`
+		TypeCode    string   `json:"type_code"`
+		DeviceID    uint     `json:"device_id"`
+		Title       string   `json:"title"`
+		Description string   `json:"description"`
+		Priority    string   `json:"priority"`
+		DataJSON    string   `json:"data_json"`
+		OtherCodes  string   `json:"other_codes"`
+		Tags        []string `json:"tags"` // 支持创建时直接挂标签
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -230,9 +231,51 @@ func CreateWorkOrder(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
+	// 创建时挂载标签（如果有）
+	if len(req.Tags) > 0 {
+		attachInitialTags(wo.ID, req.Tags)
+	}
+
 	addWorkOrderActivity(wo.ID, "create", "", "open", c.GetUint("user_id"), actorLabel(c), wo.Title)
 	dispatchWorkOrderEvent("work_order.created", &wo, actorLabel(c))
 	c.JSON(http.StatusOK, gin.H{"data": wo})
+}
+
+// attachInitialTags 为新建工单挂载初始标签（去重、查字典名）
+func attachInitialTags(woID uint, tagCodes []string) {
+	// 去重
+	seen := make(map[string]bool)
+	unique := make([]string, 0, len(tagCodes))
+	for _, code := range tagCodes {
+		code = strings.TrimSpace(code)
+		if code != "" && !seen[code] {
+			seen[code] = true
+			unique = append(unique, code)
+		}
+	}
+	if len(unique) == 0 {
+		return
+	}
+
+	// 批量查字典名
+	nameByCode := make(map[string]string)
+	var tags []models.WorkOrderTag
+	database.DB.Where("code IN ?", unique).Find(&tags)
+	for _, t := range tags {
+		nameByCode[t.Code] = t.Name
+	}
+
+	// 批量创建关联
+	now := time.Now()
+	for _, code := range unique {
+		database.DB.Create(&models.WorkOrderTagLink{
+			WorkOrderID: woID,
+			TagCode:     code,
+			TagName:     nameByCode[code],
+			CreatedAt:   now,
+		})
+	}
 }
 
 // UpdateWorkOrder 改 title/description/priority/visibility/other_codes，变更记入时间线。
@@ -606,6 +649,83 @@ func GetMyWorkOrder(c *gin.Context) {
 	}
 	database.DB.Where("work_order_id = ?", wo.ID).Order("id ASC").Find(&wo.Items)
 	database.DB.Where("work_order_id = ?", wo.ID).Order("id DESC").Find(&wo.Activities)
+	c.JSON(http.StatusOK, gin.H{"data": enrichWorkOrder(&wo)})
+}
+
+// UpdateMyWorkOrder device-token 修改本设备工单的标题、描述、其他编码等（仅未关闭的工单）。
+func UpdateMyWorkOrder(c *gin.Context) {
+	deviceID := c.GetUint("device_id")
+	var wo models.WorkOrder
+	if err := database.DB.First(&wo, c.Param("id")).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+	// device-token 仅可修改本设备工单
+	if deviceID > 0 && wo.DeviceID != deviceID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+	// 已关闭的工单不允许修改内容
+	if wo.Status == "closed" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "closed work order cannot be updated"})
+		return
+	}
+
+	var req struct {
+		Title       *string `json:"title"`
+		Description *string `json:"description"`
+		OtherCodes  *string `json:"other_codes"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	updates := map[string]interface{}{}
+	actor := actorLabel(c)
+
+	// 标题变更
+	if req.Title != nil {
+		newTitle := strings.TrimSpace(*req.Title)
+		if newTitle == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "title cannot be empty"})
+			return
+		}
+		if newTitle != wo.Title {
+			updates["title"] = newTitle
+			addWorkOrderActivity(wo.ID, "update", wo.Status, wo.Status, 0, actor, fmt.Sprintf("标题：%s → %s", wo.Title, newTitle))
+		}
+	}
+
+	// 描述变更
+	if req.Description != nil {
+		newDesc := strings.TrimSpace(*req.Description)
+		if newDesc != wo.Description {
+			updates["description"] = newDesc
+			detail := "修改了工单描述"
+			if wo.Description == "" {
+				detail = "添加了工单描述"
+			} else if newDesc == "" {
+				detail = "清空了工单描述"
+			}
+			addWorkOrderActivity(wo.ID, "update", wo.Status, wo.Status, 0, actor, detail)
+		}
+	}
+
+	// 其他编码变更
+	if req.OtherCodes != nil {
+		newCodes := normalizeCodes(*req.OtherCodes)
+		if newCodes != wo.OtherCodes {
+			updates["other_codes"] = newCodes
+			addWorkOrderActivity(wo.ID, "update", wo.Status, wo.Status, 0, actor, fmt.Sprintf("其他编码：%s → %s", wo.OtherCodes, newCodes))
+		}
+	}
+
+	if len(updates) > 0 {
+		database.DB.Model(&wo).Updates(updates)
+		dispatchWorkOrderEvent("work_order.updated", &wo, actor)
+	}
+
 	c.JSON(http.StatusOK, gin.H{"data": enrichWorkOrder(&wo)})
 }
 

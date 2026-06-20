@@ -70,7 +70,12 @@
         <el-form-item label="入参映射">
           <div style="width:100%">
             <div class="map-head">
-              <span class="hint">键=目标接口参数，值=事件参数（自动转占位符）或自定义文本。</span>
+              <span class="hint">
+                键=目标接口参数，值=事件参数（占位符格式 <code v-text="placeholderExample"></code>）或自定义文本。
+                <el-button text type="primary" size="small" @click="showParamHelper = true" style="margin-left:8px">
+                  查看所有占位符
+                </el-button>
+              </span>
               <el-button text size="small" @click="paramRawMode = !paramRawMode">
                 {{ paramRawMode ? '切换到表格' : '切换到 JSON' }}
               </el-button>
@@ -103,12 +108,28 @@
                 <span class="map-eq">=</span>
                 <el-select
                   v-model="r.src" filterable allow-create default-first-option
-                  placeholder="事件参数 / 自定义" size="small" class="map-val"
+                  placeholder="占位符 / 自定义文本（支持多参数拼接）" size="small" class="map-val"
                 >
-                  <el-option
-                    v-for="ep in workOrderEventParams" :key="ep.key"
-                    :label="`${ep.label}  {{${ep.key}}}`" :value="`{{${ep.key}}}`"
-                  />
+                  <!-- 按分类分组显示 -->
+                  <template v-for="cat in paramCategories" :key="cat">
+                    <el-option-group :label="cat">
+                      <el-option
+                        v-for="ep in workOrderEventParamsByCategory[cat]" :key="ep.key"
+                        :label="`${ep.label}  {{${ep.key}}}`" :value="`{{${ep.key}}}`"
+                      >
+                        <div style="display: flex; justify-content: space-between;">
+                          <span>{{ ep.label }}</span>
+                          <span style="color: #909399; font-size: 12px;" v-text="`{{${ep.key}}}`"></span>
+                        </div>
+                      </el-option>
+                    </el-option-group>
+                  </template>
+                  <!-- 自定义示例 -->
+                  <el-option-group label="多参数拼接示例">
+                    <el-option label="设备_工单号_状态" value="{{device_name}}_{{code}}_{{status}}" />
+                    <el-option label="设备信息描述" value="设备：{{device_name}}（{{device_serial}}），分组：{{device_group}}" />
+                    <el-option label="提交人信息" value="{{created_by_username}} [{{created_by_role}}]" />
+                  </el-option-group>
                 </el-select>
                 <el-button text size="small" @click="paramRows.splice(i, 1)">删除</el-button>
               </div>
@@ -116,10 +137,13 @@
             </div>
 
             <!-- 原始 JSON 模式 -->
-            <el-input
-              v-else v-model="editing.params_json" type="textarea" :rows="5"
-              placeholder='{"order_no": "{{code}}", "state": "{{status}}"}'
-            />
+            <div v-else>
+              <WorkOrderParamsEditor
+                v-model="editing.params_json"
+                :min-height="300"
+                placeholder='{"order_no": "{{code}}", "device": "{{device_name}}_{{device_serial}}", "reporter": "{{created_by_username}}"}'
+              />
+            </div>
           </div>
         </el-form-item>
         <el-form-item label="排序"><el-input-number v-model="editing.sort_order" :min="0" /></el-form-item>
@@ -129,6 +153,74 @@
         <el-button @click="dialog = false">取消</el-button>
         <el-button type="primary" @click="save">保存</el-button>
       </template>
+    </el-dialog>
+
+    <!-- 占位符帮助对话框 -->
+    <el-dialog v-model="showParamHelper" title="可用占位符参考" width="900px">
+      <el-alert type="info" :closable="false" style="margin-bottom:12px">
+        <span v-html="paramHelperTip"></span>
+      </el-alert>
+      <el-tabs>
+        <el-tab-pane v-for="cat in paramCategories" :key="cat" :label="cat">
+          <div class="param-list">
+            <div v-for="p in workOrderEventParamsByCategory[cat]" :key="p.key" class="param-item">
+              <div class="param-label">{{ p.label }}</div>
+              <el-input
+                :value="`{{${p.key}}}`" readonly size="small"
+                style="width:200px"
+              >
+                <template #append>
+                  <el-button @click="copyToClipboard(`{{${p.key}}}`)">复制</el-button>
+                </template>
+              </el-input>
+            </div>
+          </div>
+        </el-tab-pane>
+        <el-tab-pane label="常用示例">
+          <div class="example-list">
+            <div class="example-item">
+              <div class="example-title">多参数拼接（下划线分隔）</div>
+              <el-input value="{{device_name}}_{{code}}_{{status}}" readonly size="small">
+                <template #append>
+                  <el-button @click="copyToClipboard('{{device_name}}_{{code}}_{{status}}')">复制</el-button>
+                </template>
+              </el-input>
+            </div>
+            <div class="example-item">
+              <div class="example-title">设备信息描述</div>
+              <el-input value="设备：{{device_name}}（{{device_serial}}），分组：{{device_group}}" readonly size="small">
+                <template #append>
+                  <el-button @click="copyToClipboard('设备：{{device_name}}（{{device_serial}}），分组：{{device_group}}')">复制</el-button>
+                </template>
+              </el-input>
+            </div>
+            <div class="example-item">
+              <div class="example-title">提交人信息</div>
+              <el-input value="{{created_by_username}} [{{created_by_role}}]" readonly size="small">
+                <template #append>
+                  <el-button @click="copyToClipboard('{{created_by_username}} [{{created_by_role}}]')">复制</el-button>
+                </template>
+              </el-input>
+            </div>
+            <div class="example-item">
+              <div class="example-title">设备硬件信息</div>
+              <el-input value="型号：{{device_model}}，品牌：{{device_brand}}，系统：Android {{device_os_version}}，电量：{{device_battery}}%" readonly size="small">
+                <template #append>
+                  <el-button @click="copyToClipboard('型号：{{device_model}}，品牌：{{device_brand}}，系统：Android {{device_os_version}}，电量：{{device_battery}}%')">复制</el-button>
+                </template>
+              </el-input>
+            </div>
+            <div class="example-item">
+              <div class="example-title">工单标题（带优先级）</div>
+              <el-input value="【{{priority}}】{{title}}" readonly size="small">
+                <template #append>
+                  <el-button @click="copyToClipboard('【{{priority}}】{{title}}')">复制</el-button>
+                </template>
+              </el-input>
+            </div>
+          </div>
+        </el-tab-pane>
+      </el-tabs>
     </el-dialog>
   </div>
 </template>
@@ -144,7 +236,8 @@ import {
   listOutboundEndpoints, listConnectorInterfaces,
   getEndpointParamSchema, getConnectorInterface
 } from '@/api/outbound'
-import { workOrderEvents, workOrderEventParams } from './workOrderConst'
+import { workOrderEvents, workOrderEventParams, workOrderEventParamsByCategory, paramCategories } from './workOrderConst'
+import WorkOrderParamsEditor from '@/components/WorkOrderParamsEditor.vue'
 
 defineProps({ embedded: { type: Boolean, default: false } })
 
@@ -156,11 +249,27 @@ const loading = ref(false)
 const dialog = ref(false)
 const editing = ref({})
 const selectedEvents = ref([])
+const showParamHelper = ref(false)
+
+// 占位符示例文本（避免模板中的 {{ }} 冲突）
+const placeholderExample = '{{key}}'
+const multiParamExample = '"{{device_name}} - {{code}} - {{status}}"'
+const paramHelperTip = '占位符格式：<code>{{key}}</code>，支持多参数拼接，例如：<code>"{{device_name}} - {{code}} - {{status}}"</code>'
 
 // 入参映射：表格模式 + 原始 JSON 模式
 const paramRawMode = ref(false)
 const paramRows = ref([])        // [{ key, src }]
 const targetParams = ref([])     // 目标接口所需参数 [{ name, type, required }]
+
+// 复制到剪贴板
+const copyToClipboard = async (text) => {
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('已复制到剪贴板')
+  } catch {
+    ElMessage.warning('复制失败，请手动复制')
+  }
+}
 
 // params_json 字符串 → 表格行
 const jsonToRows = (s) => {
@@ -323,4 +432,45 @@ onMounted(async () => {
 .map-key { width: 200px; }
 .map-val { flex: 1; }
 .map-eq { color: #909399; }
+
+/* 占位符帮助对话框样式 */
+.param-list {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+.param-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.param-label {
+  min-width: 120px;
+  font-size: 13px;
+  color: #606266;
+}
+.example-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.example-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.example-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #606266;
+}
+code {
+  background: #f5f7fa;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+  color: #e6a23c;
+}
 </style>

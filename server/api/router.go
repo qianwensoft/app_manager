@@ -493,6 +493,7 @@ func SetupRouter() *gin.Engine {
 		woRuntime.GET("/types", ListWorkOrderTypes)
 		woRuntime.GET("/mine", ListMyWorkOrders)
 		woRuntime.GET("/mine/:id", GetMyWorkOrder)
+		woRuntime.PUT("/mine/:id", UpdateMyWorkOrder)
 		woRuntime.POST("/mine/:id/status", ChangeMyWorkOrderStatus)
 		woRuntime.POST("/:id/items", UploadWorkOrderItem)
 		woRuntime.GET("/:id/items/:item_id/download", DownloadWorkOrderItem)
@@ -511,6 +512,8 @@ func SetupRouter() *gin.Engine {
 		wo.POST("/webhooks", auth.RequireRole("admin", "operator"), CreateWorkOrderWebhook)
 		wo.PUT("/webhooks/:id", auth.RequireRole("admin", "operator"), UpdateWorkOrderWebhook)
 		wo.DELETE("/webhooks/:id", auth.RequireRole("admin", "operator"), DeleteWorkOrderWebhook)
+		wo.GET("/webhooks/logs", auth.RequireRole("admin", "operator"), ListWorkOrderWebhookLogs)
+		wo.GET("/webhooks/logs/:id", auth.RequireRole("admin", "operator"), GetWorkOrderWebhookLog)
 		// 工作流管理（admin/operator）
 		wo.GET("/workflows", auth.RequireRole("admin", "operator"), ListWorkOrderWorkflows)
 		wo.GET("/workflows/:id", auth.RequireRole("admin", "operator"), GetWorkOrderWorkflow)
