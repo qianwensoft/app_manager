@@ -35,6 +35,10 @@ export const createWorkOrderWebhook = (data) => http.post('/work-orders/webhooks
 export const updateWorkOrderWebhook = (id, data) => http.put(`/work-orders/webhooks/${id}`, data)
 export const deleteWorkOrderWebhook = (id) => http.delete(`/work-orders/webhooks/${id}`)
 
+// 外发历史日志
+export const getWorkOrderWebhookLogs = (params = {}) => http.get('/work-orders/webhooks/logs', { params })
+export const getWorkOrderWebhookLog = (id) => http.get(`/work-orders/webhooks/logs/${id}`)
+
 // 标签字典（管理端 CRUD）
 export const listWorkOrderTags = () => http.get('/work-orders/tag-dict')
 export const createWorkOrderTag = (data) => http.post('/work-orders/tag-dict', data)

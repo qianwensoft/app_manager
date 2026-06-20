@@ -12,7 +12,15 @@
         <WorkOrderTags v-if="loaded.tags" embedded />
       </el-tab-pane>
       <el-tab-pane label="外发配置" name="webhooks">
-        <WorkOrderWebhooks v-if="loaded.webhooks" embedded />
+        <div v-if="loaded.webhooks">
+          <div style="padding:0 0 12px 0">
+            <el-button @click="$router.push('/work-orders/webhook-logs')">
+              <el-icon><Document /></el-icon>
+              查看外发历史
+            </el-button>
+          </div>
+          <WorkOrderWebhooks embedded />
+        </div>
       </el-tab-pane>
       <el-tab-pane label="工作流" name="workflows">
         <div v-if="loaded.workflows" style="padding:16px">
@@ -34,6 +42,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { Document } from '@element-plus/icons-vue'
 import WorkOrderTypes from './WorkOrderTypes.vue'
 import WorkOrderTags from './WorkOrderTags.vue'
 import WorkOrderWebhooks from './WorkOrderWebhooks.vue'

@@ -81,6 +81,7 @@ const routes = [
       { path: 'work-orders/settings', name: 'WorkOrderSettings', meta: { title: '工单设置' }, component: () => import('@/views/work-orders/WorkOrderSettings.vue') },
       { path: 'work-orders/workflows', name: 'WorkOrderWorkflows', meta: { title: '工单工作流' }, component: () => import('@/views/work-orders/WorkOrderWorkflows.vue') },
       { path: 'work-orders/workflow-logs', name: 'WorkOrderWorkflowLogs', meta: { title: '工作流日志' }, component: () => import('@/views/work-orders/WorkOrderWorkflowLogs.vue') },
+      { path: 'work-orders/webhook-logs', name: 'WorkOrderWebhookLogs', meta: { title: '外发历史' }, component: () => import('@/views/work-orders/WorkOrderWebhookLogs.vue') },
       // 旧配置入口重定向到「工单设置」对应标签页（保留历史书签）
       { path: 'work-orders/types', redirect: { name: 'WorkOrderSettings', query: { tab: 'types' } } },
       { path: 'work-orders/webhooks', redirect: { name: 'WorkOrderSettings', query: { tab: 'webhooks' } } },
