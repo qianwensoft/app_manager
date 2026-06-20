@@ -783,72 +783,92 @@ const initJsBuilder = async (idx) => {
 
   // Wait for DOM to render
   await nextTick()
+  await nextTick() // Double nextTick to ensure DOM is fully ready
 
   // Initialize Monaco Editor
-  const container = monacoRefs.value[idx]
-  if (container) {
+  setTimeout(() => {
+    const container = monacoRefs.value[idx]
+    if (!container) {
+      console.error('Monaco container not found for action', idx)
+      return
+    }
+
     // Dispose existing editor if any
     if (monacoEditors.value[idx]) {
       monacoEditors.value[idx].dispose()
+      delete monacoEditors.value[idx]
     }
 
-    const editor = monaco.editor.create(container, {
-      value: action.builder.code,
-      language: 'javascript',
-      theme: 'vs',
-      minimap: { enabled: false },
-      lineNumbers: 'on',
-      scrollBeyondLastLine: false,
-      automaticLayout: true,
-      fontSize: 14,
-      tabSize: 2
-    })
+    try {
+      const editor = monaco.editor.create(container, {
+        value: action.builder.code,
+        language: 'javascript',
+        theme: 'vs',
+        minimap: { enabled: false },
+        lineNumbers: 'on',
+        scrollBeyondLastLine: false,
+        automaticLayout: true,
+        fontSize: 14,
+        tabSize: 2,
+        wordWrap: 'on'
+      })
 
-    // Add type definitions for autocomplete
-    monaco.languages.typescript.javascriptDefaults.setCompilerOptions({
-      target: monaco.languages.typescript.ScriptTarget.ES2015,
-      allowNonTsExtensions: true,
-      moduleResolution: monaco.languages.typescript.ModuleResolutionKind.NodeJs,
-      module: monaco.languages.typescript.ModuleKind.CommonJS,
-      noEmit: true,
-      typeRoots: ['node_modules/@types']
-    })
+      // Add type definitions for autocomplete
+      monaco.languages.typescript.javascriptDefaults.setCompilerOptions({
+        target: monaco.languages.typescript.ScriptTarget.ES2015,
+        allowNonTsExtensions: true,
+        moduleResolution: monaco.languages.typescript.ModuleResolutionKind.NodeJs,
+        module: monaco.languages.typescript.ModuleKind.CommonJS,
+        noEmit: true,
+        typeRoots: ['node_modules/@types']
+      })
 
-    // Add custom type definitions for workOrder, ctx, actions
-    const typeDefinitions = `
-      declare const workOrder: {
-        id: number;
-        code: string;
-        title: string;
-        description: string;
-        device_id: string;
-        status: string;
-        priority: string;
-        assignee_id: number;
-        other_codes: string;
-        created_at: string;
-        updated_at: string;
-      };
+      // Build context variable type definitions
+      const ctxFields = contextVars.value.map(c => `  ${c.name}?: any; // ${c.description || ''}`).join('\n')
 
-      declare const ctx: {
-        ${contextVars.value.map(c => `${c.name}: any;`).join('\n        ')}
-      };
+      // Add custom type definitions for workOrder, ctx, actions
+      const typeDefinitions = `
+declare const workOrder: {
+  id: number;
+  code: string;
+  title: string;
+  description: string;
+  device_id: string;
+  status: string;
+  priority: string;
+  assignee_id: number;
+  other_codes: string;
+  created_at: string;
+  updated_at: string;
+};
 
-      declare const actions: Array<{result: any}>;
+declare const ctx: {
+${ctxFields}
+};
 
-      declare function log(...args: any[]): void;
-    `
+declare const actions: Array<{result: any}>;
 
-    monaco.languages.typescript.javascriptDefaults.addExtraLib(typeDefinitions, 'workflow-types.d.ts')
+declare function log(...args: any[]): void;
+`
 
-    // Update config on change
-    editor.onDidChangeModelContent(() => {
-      action.builder.code = editor.getValue()
-      updateJsBuilderJSON(idx)
-    })
+      monaco.languages.typescript.javascriptDefaults.addExtraLib(typeDefinitions, 'workflow-types.d.ts')
 
-    monacoEditors.value[idx] = editor
-  }
+      // Update config on change
+      editor.onDidChangeModelContent(() => {
+        action.builder.code = editor.getValue()
+        updateJsBuilderJSON(idx)
+      })
+
+      monacoEditors.value[idx] = editor
+
+      // Force layout after creation
+      setTimeout(() => {
+        editor.layout()
+      }, 100)
+    } catch (e) {
+      console.error('Failed to create Monaco editor:', e)
+    }
+  }, 200) // Delay to ensure DOM is ready
 }
 
 const updateJsBuilderJSON = (idx) => {
@@ -1244,10 +1264,12 @@ onBeforeUnmount(() => {
   border: 1px solid #dcdfe6;
   border-radius: 4px;
   overflow: hidden;
+  margin-bottom: 8px;
 }
 .monaco-container {
   height: 300px;
   width: 100%;
+  min-height: 300px;
 }
 
 .code-hint {
