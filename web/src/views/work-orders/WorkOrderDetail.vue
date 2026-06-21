@@ -16,7 +16,16 @@
               <el-tag :type="statusType(wo.status)">{{ statusLabel(wo.status) }}</el-tag>
             </el-descriptions-item>
             <el-descriptions-item label="优先级">
-              <el-tag :type="priorityType(wo.priority)" size="small">{{ priorityLabel(wo.priority) }}</el-tag>
+              <el-select
+                :model-value="wo.priority"
+                size="small"
+                style="width: 100px"
+                @change="changePriority"
+              >
+                <el-option label="普通" value="normal" />
+                <el-option label="较高" value="high" />
+                <el-option label="紧急" value="urgent" />
+              </el-select>
             </el-descriptions-item>
             <el-descriptions-item label="类型">{{ wo.type_code || '-' }}</el-descriptions-item>
             <el-descriptions-item label="设备">{{ wo.device_id || '-' }}</el-descriptions-item>
@@ -385,6 +394,13 @@ const setStatus = async (status) => {
 const toggleVisibility = async (val) => {
   await updateWorkOrder(id, { visibility: val ? 'public' : 'private' })
   ElMessage.success('已更新可见性')
+  load()
+}
+
+const changePriority = async (newPriority) => {
+  if (newPriority === wo.value.priority) return
+  await updateWorkOrder(id, { priority: newPriority })
+  ElMessage.success('已更新优先级')
   load()
 }
 

@@ -334,7 +334,16 @@ func UpdateWorkOrder(c *gin.Context) {
 	if req.Priority != nil {
 		if *req.Priority != wo.Priority {
 			updates["priority"] = *req.Priority
-			addWorkOrderActivity(wo.ID, "update", wo.Status, wo.Status, uid, actor, fmt.Sprintf("优先级：%s → %s", wo.Priority, *req.Priority))
+			priorityLabels := map[string]string{"normal": "普通", "high": "较高", "urgent": "紧急"}
+			oldLabel := priorityLabels[wo.Priority]
+			if oldLabel == "" {
+				oldLabel = wo.Priority
+			}
+			newLabel := priorityLabels[*req.Priority]
+			if newLabel == "" {
+				newLabel = *req.Priority
+			}
+			addWorkOrderActivity(wo.ID, "update", wo.Status, wo.Status, uid, actor, fmt.Sprintf("优先级：%s → %s", oldLabel, newLabel))
 		}
 	}
 	// 可见性变更

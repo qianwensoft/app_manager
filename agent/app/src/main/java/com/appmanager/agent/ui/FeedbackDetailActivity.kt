@@ -32,6 +32,7 @@ class FeedbackDetailActivity : AppCompatActivity() {
     private lateinit var container: LinearLayout
     private var currentStatus: String = ""
     private var currentTags: List<String> = emptyList()
+    private var currentPriority: String = "normal"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -72,6 +73,7 @@ class FeedbackDetailActivity : AppCompatActivity() {
     private fun render(wo: JSONObject, base: String, token: String) {
         container.removeAllViews()
         currentStatus = wo.optString("status")
+        currentPriority = wo.optString("priority", "normal")
 
         addText(wo.optString("title"), 20f, 0xFF222222.toInt(), bold = true)
         addText("${wo.optString("code")} · ${statusLabel(currentStatus)}", 14f, statusColor(currentStatus))
@@ -80,9 +82,15 @@ class FeedbackDetailActivity : AppCompatActivity() {
             wo.optString("created_at").takeIf { it.isNotBlank() }?.let { add("提交时间：${it.replace("T", " ").take(16)}") }
             wo.optString("submitter").takeIf { it.isNotBlank() }?.let { add("提交人：$it") }
             wo.optString("device_name").takeIf { it.isNotBlank() }?.let { add("设备：$it") }
-            wo.optString("priority").takeIf { it.isNotBlank() }?.let { add("优先级：$it") }
         }
         meta.forEach { addText(it, 13f, 0xFF888888.toInt()) }
+
+        // 优先级（可点击修改）
+        val priorityText = "优先级：${priorityLabel(currentPriority)}"
+        addText(priorityText, 13f, 0xFF888888.toInt())?.apply {
+            setOnClickListener { changePriority() }
+            setPadding(0, 0, 0, dp(8))
+        }
 
         // 标签
         val tagsArr = wo.optJSONArray("tags") ?: JSONArray()
@@ -159,6 +167,38 @@ class FeedbackDetailActivity : AppCompatActivity() {
         if (currentStatus != "resolved") addOpButton("标记已解决") { changeStatus("resolved", "确认问题已解决？") }
         if (currentStatus != "closed") addOpButton("关闭工单") { changeStatus("closed", "确认关闭该工单？") }
         if (currentStatus == "closed" || currentStatus == "resolved") addOpButton("重新打开") { changeStatus("reopened", "重新打开该工单？") }
+    }
+
+    /** 修改优先级：单选对话框 → 提交更新。 */
+    private fun changePriority() {
+        val priorities = arrayOf("normal", "high", "urgent")
+        val labels = arrayOf("普通", "较高", "紧急")
+        val currentIndex = priorities.indexOf(currentPriority).coerceAtLeast(0)
+
+        AlertDialog.Builder(this)
+            .setTitle("修改优先级")
+            .setSingleChoiceItems(labels, currentIndex) { dialog, which ->
+                val newPriority = priorities[which]
+                if (newPriority != currentPriority) {
+                    thread {
+                        try {
+                            val cfg = AgentConfig.get(this)
+                            val base = ServerUrlUtil.httpBaseFromWs(cfg.serverUrl)
+                            val body = JSONObject().put("priority", newPriority).toString()
+                            AgentCatalogApi.putJson(base, "/api/work-orders/mine/$woId", cfg.deviceToken.trim(), body)
+                            runOnUiThread {
+                                Toast.makeText(this, "优先级已更新", Toast.LENGTH_SHORT).show()
+                                load()
+                            }
+                        } catch (e: Exception) {
+                            runOnUiThread { Toast.makeText(this, "更新失败：${e.message}", Toast.LENGTH_SHORT).show() }
+                        }
+                    }
+                }
+                dialog.dismiss()
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     /** 管理标签：拉取标签字典 → 多选对话框（预勾当前）→ 全量保存。 */
@@ -277,14 +317,16 @@ class FeedbackDetailActivity : AppCompatActivity() {
     }
 
     // ── 视图工具 ──
-    private fun addText(text: String, size: Float, color: Int, bold: Boolean = false, topMarginDp: Int = 4) {
-        if (text.isBlank()) return
-        container.addView(TextView(this).apply {
+    private fun addText(text: String, size: Float, color: Int, bold: Boolean = false, topMarginDp: Int = 4): TextView? {
+        if (text.isBlank()) return null
+        val textView = TextView(this).apply {
             this.text = text; textSize = size; setTextColor(color)
             if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
                 .apply { topMargin = dp(topMarginDp) }
-        })
+        }
+        container.addView(textView)
+        return textView
     }
 
     private fun addSectionTitle(title: String) {
@@ -320,5 +362,8 @@ class FeedbackDetailActivity : AppCompatActivity() {
         "create" -> "创建"; "comment" -> "备注"; "assign" -> "转交"; "status_change" -> "状态变更"
         "close" -> "关闭"; "reopen" -> "重新打开"; "external_update" -> "第三方更新"; "tag_change" -> "标签变更"
         "archive" -> "归档"; "unarchive" -> "取消归档"; else -> a
+    }
+    private fun priorityLabel(p: String) = when (p) {
+        "normal" -> "普通"; "high" -> "较高"; "urgent" -> "紧急"; else -> p
     }
 }
