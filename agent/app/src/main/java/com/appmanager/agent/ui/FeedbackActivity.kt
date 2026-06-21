@@ -29,6 +29,7 @@ import com.appmanager.agent.R
 import com.appmanager.agent.config.AgentConfig
 import com.appmanager.agent.service.FeedbackLogcatCapture
 import com.appmanager.agent.service.FeedbackScreenRecordService
+import com.appmanager.agent.service.AgentService
 import com.appmanager.agent.util.AgentCatalogApi
 import com.appmanager.agent.util.QrPhotoDecoder
 import com.appmanager.agent.util.ServerUrlUtil
@@ -55,6 +56,7 @@ class FeedbackActivity : AppCompatActivity() {
     private lateinit var spinnerType: Spinner
     private lateinit var etTitle: TextInputEditText
     private lateinit var etDesc: TextInputEditText
+    private lateinit var etBusinessNo: TextInputEditText
     private lateinit var etOtherCodes: TextInputEditText
     private lateinit var attachmentList: LinearLayout
     private lateinit var tvTarget: TextView
@@ -87,6 +89,8 @@ class FeedbackActivity : AppCompatActivity() {
     }
 
     private val takePhoto = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        // 拍照完成后立即恢复摄像头流
+        resumeCameraStreams()
         if (r.resultCode == Activity.RESULT_OK) pendingPhoto?.let {
             if (it.exists() && it.length() > 0) {
                 addAttachment(Attachment("photo", it, "image/jpeg"))
@@ -119,6 +123,7 @@ class FeedbackActivity : AppCompatActivity() {
         spinnerType = findViewById(R.id.spinnerType)
         etTitle = findViewById(R.id.etTitle)
         etDesc = findViewById(R.id.etDesc)
+        etBusinessNo = findViewById(R.id.etBusinessNo)
         etOtherCodes = findViewById(R.id.etOtherCodes)
         attachmentList = findViewById(R.id.attachmentList)
         tvTarget = findViewById(R.id.tvTarget)
@@ -224,13 +229,18 @@ class FeedbackActivity : AppCompatActivity() {
 
     // ── 采集 ──
     private fun capturePhoto() {
+        // 拍照前暂停摄像头流，避免占用冲突
+        pauseCameraStreams()
         val f = File(feedbackDir(), "photo_${System.currentTimeMillis()}.jpg")
         pendingPhoto = f
         val i = Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE)
             .putExtra(android.provider.MediaStore.EXTRA_OUTPUT, fileUri(f))
             .addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
         if (i.resolveActivity(packageManager) != null) takePhoto.launch(i)
-        else Toast.makeText(this, "无相机应用", Toast.LENGTH_SHORT).show()
+        else {
+            resumeCameraStreams()  // 无相机应用时也要恢复
+            Toast.makeText(this, "无相机应用", Toast.LENGTH_SHORT).show()
+        }
     }
 
     /** 拍照后台识别照片中的二维码，并入「其他编码」输入框（去重）。无码不打扰。 */
@@ -403,6 +413,7 @@ class FeedbackActivity : AppCompatActivity() {
         if (title.isEmpty()) { Toast.makeText(this, "请填写标题", Toast.LENGTH_SHORT).show(); return }
         val typeCode = types.getOrNull(spinnerType.selectedItemPosition)?.code ?: ""
         val desc = etDesc.text?.toString()?.trim().orEmpty()
+        val businessNo = etBusinessNo.text?.toString()?.trim().orEmpty()
         val otherCodes = etOtherCodes.text?.toString()?.trim().orEmpty()
         val cfg = AgentConfig.get(this)
         val base = ServerUrlUtil.httpBaseFromWs(cfg.serverUrl)
@@ -417,6 +428,7 @@ class FeedbackActivity : AppCompatActivity() {
                     .put("type_code", typeCode)
                     .put("title", title)
                     .put("description", desc)
+                    .put("business_no", businessNo)
                     .put("other_codes", otherCodes)
                 val resp = AgentCatalogApi.postJson(base, "/api/work-orders", token, body.toString())
                 val wo = JSONObject(resp).optJSONObject("data") ?: JSONObject()
@@ -429,7 +441,9 @@ class FeedbackActivity : AppCompatActivity() {
                     dialog.dismiss()
                     Toast.makeText(this, "已提交：${wo.optString("code")}", Toast.LENGTH_LONG).show()
                     attachments.clear(); renderAttachments()
-                    etTitle.setText(""); etDesc.setText(""); etOtherCodes.setText("")
+                    etTitle.setText(""); etDesc.setText(""); etBusinessNo.setText(""); etOtherCodes.setText("")
+                    // 提交成功后重新填充当前类型的默认标题
+                    autoFillTitle(spinnerType.selectedItemPosition)
                 }
             } catch (e: Exception) {
                 runOnUiThread {
@@ -526,5 +540,20 @@ class FeedbackActivity : AppCompatActivity() {
             // ISO8601 → 取到分钟，去掉 T/时区噪声。
             return s.replace("T", " ").take(16)
         }
+    }
+
+    // ── 摄像头流暂停/恢复辅助方法 ──
+    private fun pauseCameraStreams() {
+        ContextCompat.startForegroundService(
+            this,
+            Intent(this, AgentService::class.java).setAction(AgentService.ACTION_PAUSE_CAMERA)
+        )
+    }
+
+    private fun resumeCameraStreams() {
+        ContextCompat.startForegroundService(
+            this,
+            Intent(this, AgentService::class.java).setAction(AgentService.ACTION_RESUME_CAMERA)
+        )
     }
 }
