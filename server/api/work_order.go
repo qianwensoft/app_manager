@@ -313,11 +313,32 @@ func UpdateWorkOrder(c *gin.Context) {
 		newDesc := strings.TrimSpace(*req.Description)
 		if newDesc != wo.Description {
 			updates["description"] = newDesc
-			detail := "修改了工单描述"
+			var detail string
 			if wo.Description == "" {
-				detail = "添加了工单描述"
+				// 添加描述：显示新内容（截取前50字）
+				preview := newDesc
+				if len(preview) > 50 {
+					preview = preview[:50] + "..."
+				}
+				detail = fmt.Sprintf("添加了工单描述：%s", preview)
 			} else if newDesc == "" {
-				detail = "清空了工单描述"
+				// 清空描述：显示原内容（截取前50字）
+				preview := wo.Description
+				if len(preview) > 50 {
+					preview = preview[:50] + "..."
+				}
+				detail = fmt.Sprintf("清空了工单描述（原内容：%s）", preview)
+			} else {
+				// 修改描述：显示新旧内容对比（各截取前30字）
+				oldPreview := wo.Description
+				if len(oldPreview) > 30 {
+					oldPreview = oldPreview[:30] + "..."
+				}
+				newPreview := newDesc
+				if len(newPreview) > 30 {
+					newPreview = newPreview[:30] + "..."
+				}
+				detail = fmt.Sprintf("修改了工单描述：\n旧：%s\n新：%s", oldPreview, newPreview)
 			}
 			addWorkOrderActivity(wo.ID, "update", wo.Status, wo.Status, uid, actor, detail)
 		}
