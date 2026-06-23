@@ -48,7 +48,9 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
-                android:hint="标题">
+                android:hint="标题 *"
+                app:helperText="必填"
+                app:helperTextEnabled="true">
                 <com.google.android.material.textfield.TextInputEditText
                     android:id="@+id/etTitle"
                     android:layout_width="match_parent"
@@ -69,18 +71,50 @@
                     android:gravity="top" />
             </com.google.android.material.textfield.TextInputLayout>
 
-            <com.google.android.material.textfield.TextInputLayout
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:hint="其他编码（拍照可自动识别二维码，多个用逗号分隔）">
-                <com.google.android.material.textfield.TextInputEditText
-                    android:id="@+id/etOtherCodes"
-                    android:layout_width="match_parent"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+                <com.google.android.material.textfield.TextInputLayout
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
                     android:layout_height="wrap_content"
-                    android:minLines="1"
-                    android:gravity="top" />
-            </com.google.android.material.textfield.TextInputLayout>
+                    android:hint="业务单号"
+                    app:endIconMode="custom"
+                    app:endIconDrawable="@android:drawable/ic_menu_camera"
+                    app:endIconContentDescription="扫码">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etBusinessNo"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:maxLines="1" />
+                </com.google.android.material.textfield.TextInputLayout>
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:orientation="horizontal"
+                android:gravity="top">
+                <com.google.android.material.textfield.TextInputLayout
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:hint="其他编码（拍照可自动识别二维码，多个用逗号分隔）"
+                    app:endIconMode="custom"
+                    app:endIconDrawable="@android:drawable/ic_menu_camera"
+                    app:endIconContentDescription="扫码">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/etOtherCodes"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:minLines="1"
+                        android:gravity="top" />
+                </com.google.android.material.textfield.TextInputLayout>
+            </LinearLayout>
 
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:text="采集" android:textStyle="bold" />
             <HorizontalScrollView

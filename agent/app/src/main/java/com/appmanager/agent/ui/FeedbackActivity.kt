@@ -32,10 +32,13 @@ import com.appmanager.agent.service.FeedbackScreenRecordService
 import com.appmanager.agent.service.AgentService
 import com.appmanager.agent.util.AgentCatalogApi
 import com.appmanager.agent.util.QrPhotoDecoder
+import com.appmanager.agent.util.ScanBroadcastHelper
 import com.appmanager.agent.util.ServerUrlUtil
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.tabs.TabLayout
 import com.google.android.material.textfield.TextInputEditText
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -58,6 +61,8 @@ class FeedbackActivity : AppCompatActivity() {
     private lateinit var etDesc: TextInputEditText
     private lateinit var etBusinessNo: TextInputEditText
     private lateinit var etOtherCodes: TextInputEditText
+    private lateinit var tilBusinessNo: com.google.android.material.textfield.TextInputLayout
+    private lateinit var tilOtherCodes: com.google.android.material.textfield.TextInputLayout
     private lateinit var attachmentList: LinearLayout
     private lateinit var tvTarget: TextView
     private lateinit var recyclerMine: RecyclerView
@@ -72,6 +77,50 @@ class FeedbackActivity : AppCompatActivity() {
     private var voiceFile: File? = null
     private var logcat: FeedbackLogcatCapture? = null
     private var logcatFile: String? = null
+
+    // 扫码目标：business_no 或 other_codes
+    private var scanTarget: String = ""
+
+    // ── 硬件扫描广播接收器 ──
+    private val hardwareScanReceiver = object : BroadcastReceiver() {
+        override fun onReceive(ctx: Context, intent: Intent) {
+            val data = ScanBroadcastHelper.SCAN_EXTRA_KEYS
+                .firstNotNullOfOrNull { key -> intent.getStringExtra(key)?.takeIf { it.isNotBlank() } }
+                ?: return
+            runOnUiThread { handleScanResult(data) }
+        }
+    }
+
+    // ── 摄像头扫码 ──
+    private val cameraScanLauncher = registerForActivityResult(ScanContract()) { result ->
+        if (result.contents != null) {
+            handleScanResult(result.contents)
+        }
+    }
+
+    private fun handleScanResult(code: String) {
+        // 硬件扫码模式：根据输入框焦点判断填入目标
+        if (scanTarget.isEmpty()) {
+            val focusedView = currentFocus
+            scanTarget = when (focusedView?.id) {
+                R.id.etBusinessNo -> "business_no"
+                R.id.etOtherCodes -> "other_codes"
+                else -> "business_no"  // 默认填业务单号
+            }
+        }
+
+        when (scanTarget) {
+            "business_no" -> {
+                etBusinessNo.setText(code)
+                Toast.makeText(this, "已填入业务单号", Toast.LENGTH_SHORT).show()
+            }
+            "other_codes" -> {
+                mergeOtherCodes(listOf(code))
+                Toast.makeText(this, "已添加到其他编码", Toast.LENGTH_SHORT).show()
+            }
+        }
+        scanTarget = ""
+    }
 
     // ── 录屏结果广播 ──
     private val recvRec = object : BroadcastReceiver() {
@@ -125,6 +174,8 @@ class FeedbackActivity : AppCompatActivity() {
         etDesc = findViewById(R.id.etDesc)
         etBusinessNo = findViewById(R.id.etBusinessNo)
         etOtherCodes = findViewById(R.id.etOtherCodes)
+        tilBusinessNo = etBusinessNo.parent.parent as com.google.android.material.textfield.TextInputLayout
+        tilOtherCodes = etOtherCodes.parent.parent as com.google.android.material.textfield.TextInputLayout
         attachmentList = findViewById(R.id.attachmentList)
         tvTarget = findViewById(R.id.tvTarget)
         recyclerMine = findViewById(R.id.recyclerMine)
@@ -150,6 +201,11 @@ class FeedbackActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnPickTarget).setOnClickListener { pickTargetApp() }
         findViewById<Button>(R.id.btnSubmit).setOnClickListener { submit() }
 
+        // 设置 TextInputLayout 的 endIcon 点击事件
+        tilBusinessNo.setEndIconOnClickListener { launchScan("business_no") }
+        tilOtherCodes.setEndIconOnClickListener { launchScan("other_codes") }
+
+        updateScanIconsVisibility()
         loadTypes()
     }
 
@@ -157,11 +213,19 @@ class FeedbackActivity : AppCompatActivity() {
         super.onStart()
         ContextCompat.registerReceiver(this, recvRec,
             IntentFilter(FeedbackScreenRecordService.ACTION_RESULT), ContextCompat.RECEIVER_NOT_EXPORTED)
+
+        // 注册硬件扫描广播（如果是硬件扫描模式）
+        val scanMode = AgentConfig.get(this).scanMode
+        if (scanMode == "hardware") {
+            val filter = ScanBroadcastHelper.createScanIntentFilter(this)
+            ContextCompat.registerReceiver(this, hardwareScanReceiver, filter, ContextCompat.RECEIVER_EXPORTED)
+        }
     }
 
     override fun onStop() {
         super.onStop()
         try { unregisterReceiver(recvRec) } catch (_: Exception) {}
+        try { unregisterReceiver(hardwareScanReceiver) } catch (_: Exception) {}
     }
 
     private fun feedbackDir(): File = File(getExternalFilesDir(null), "feedback").apply { mkdirs() }
@@ -378,6 +442,57 @@ class FeedbackActivity : AppCompatActivity() {
 
     private fun updateTargetLabel() {
         tvTarget.text = "目标应用：" + (if (targetPackage.isBlank()) "全设备" else "$targetLabel ($targetPackage)")
+    }
+
+    // ── 扫码功能 ──
+    private fun launchScan(target: String) {
+        scanTarget = target
+        val scanMode = AgentConfig.get(this).scanMode
+
+        if (scanMode == "hardware") {
+            Toast.makeText(this, "请使用扫描枪扫描", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // 摄像头扫描模式
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.CAMERA)
+            == PackageManager.PERMISSION_GRANTED
+        ) {
+            startCameraScan()
+        } else {
+            // 请求相机权限后再扫码
+            androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+            Toast.makeText(this, "需要相机权限才能扫码", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun startCameraScan() {
+        val options = ScanOptions().apply {
+            setDesiredBarcodeFormats(
+                ScanOptions.QR_CODE,
+                ScanOptions.CODE_128,
+                ScanOptions.CODE_39,
+                ScanOptions.EAN_13,
+                ScanOptions.EAN_8
+            )
+            setPrompt("扫描条码或二维码")
+            setCameraId(0)
+            setBeepEnabled(true)
+            setOrientationLocked(false)
+        }
+        cameraScanLauncher.launch(options)
+    }
+
+    private fun updateScanIconsVisibility() {
+        val scanMode = AgentConfig.get(this).scanMode
+        // 硬件模式隐藏摄像头图标
+        if (scanMode == "hardware") {
+            tilBusinessNo.endIconMode = com.google.android.material.textfield.TextInputLayout.END_ICON_NONE
+            tilOtherCodes.endIconMode = com.google.android.material.textfield.TextInputLayout.END_ICON_NONE
+        } else {
+            tilBusinessNo.endIconMode = com.google.android.material.textfield.TextInputLayout.END_ICON_CUSTOM
+            tilOtherCodes.endIconMode = com.google.android.material.textfield.TextInputLayout.END_ICON_CUSTOM
+        }
     }
 
     // ── 附件列表 ──

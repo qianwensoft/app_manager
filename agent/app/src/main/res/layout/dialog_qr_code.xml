@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:padding="24dp">
+
+    <ImageView
+        android:id="@+id/imageQr"
+        android:layout_width="280dp"
+        android:layout_height="280dp"
+        android:contentDescription="二维码"
+        android:scaleType="fitCenter" />
+
+    <TextView
+        android:id="@+id/tvQrText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:gravity="center"
+        android:textColor="?android:textColorPrimary"
+        android:textSize="14sp" />
+
+    <Button
+        android:id="@+id/btnClose"
+        style="@style/Widget.Material3.Button"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="关闭" />
+</LinearLayout>

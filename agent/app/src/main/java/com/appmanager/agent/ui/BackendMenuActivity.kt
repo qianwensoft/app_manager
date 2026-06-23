@@ -11,6 +11,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import com.appmanager.agent.AgentMenuStore
+import com.appmanager.agent.MainActivity
 import com.appmanager.agent.R
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.card.MaterialCardView
@@ -82,10 +83,8 @@ class BackendMenuActivity : AppCompatActivity() {
     }
 
     private fun buildBackendPushedMenus() {
-        val menus = AgentMenuStore.getAllMenuItems(this).filter { m ->
-            val home = m["show_on_agent_home"] as? Boolean ?: false
-            !home
-        }
+        val menus = AgentMenuStore.getAllMenuItems(this)
+        // 显示所有下发的菜单，不限制 show_on_agent_home
         if (menus.isEmpty()) return
 
         // 显示标题
@@ -159,8 +158,48 @@ class BackendMenuActivity : AppCompatActivity() {
     }
 
     private fun openMenuInternal(menu: Map<String, Any?>) {
-        when (menu["target_type"] as? String) {
+        val targetType = menu["target_type"] as? String
+        android.util.Log.d("BackendMenuActivity", "openMenuInternal: targetType=$targetType, menu=$menu")
+
+        when (targetType) {
             "form_app_entry" -> AgentMenuStore.launchFormAppEntry(this, menu, newTask = true)
+            "agent_native" -> {
+                // agent_native 类型：根据 intent_action 启动对应的 Activity
+                val intentAction = (menu["intent_action"] as? String)?.trim()
+                android.util.Log.d("BackendMenuActivity", "agent_native intent_action=$intentAction")
+
+                if (intentAction.isNullOrEmpty()) {
+                    android.widget.Toast.makeText(this, "菜单配置错误：缺少 intent_action", android.widget.Toast.LENGTH_SHORT).show()
+                    return
+                }
+
+                // 使用显式 Intent 避免 exported=false 问题
+                val intent = when (intentAction) {
+                    "com.appmanager.agent.WORK_ORDER_LIST" -> {
+                        android.util.Log.d("BackendMenuActivity", "Creating intent for WorkOrderListActivity")
+                        Intent(this, WorkOrderListActivity::class.java)
+                    }
+                    "com.appmanager.agent.MY_WORK_ORDER_LIST" -> {
+                        android.util.Log.d("BackendMenuActivity", "Creating intent for MyWorkOrderListActivity")
+                        Intent(this, MyWorkOrderListActivity::class.java)
+                    }
+                    "com.appmanager.agent.ACTION_OPEN_WIRELESS_ADB" ->
+                        Intent(this, MainActivity::class.java) // 无线ADB在MainActivity处理
+                    else -> {
+                        // 其他 intent_action 尝试隐式启动
+                        Intent(intentAction)
+                    }
+                }
+
+                try {
+                    android.util.Log.d("BackendMenuActivity", "Starting activity with intent: $intent")
+                    startActivity(intent)
+                    android.util.Log.d("BackendMenuActivity", "Activity started successfully")
+                } catch (e: Exception) {
+                    android.widget.Toast.makeText(this, "打开失败: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+                    android.util.Log.e("BackendMenuActivity", "Failed to open menu with intent: $intentAction", e)
+                }
+            }
             else -> {
                 val url = AgentMenuStore.resolveMenuUrl(this, menu) ?: return
                 startActivity(

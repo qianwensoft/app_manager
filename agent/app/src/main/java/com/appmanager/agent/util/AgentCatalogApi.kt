@@ -36,6 +36,28 @@ object AgentCatalogApi {
         }
     }
 
+    /**
+     * GET 请求，支持 JWT Bearer token 认证
+     */
+    @Throws(IOException::class)
+    fun getJsonWithJWT(httpBase: String, path: String, jwtToken: String): String {
+        val base = httpBase.trim().trimEnd('/')
+        val p = if (path.startsWith("/")) path else "/$path"
+        val url = base + p
+        val req = Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer $jwtToken")
+            .get()
+            .build()
+        client.newCall(req).execute().use { resp ->
+            val body = resp.body?.string() ?: ""
+            if (!resp.isSuccessful) {
+                throw IOException("HTTP ${resp.code}: ${body.take(200)}")
+            }
+            return body
+        }
+    }
+
     private val jsonMedia = "application/json; charset=utf-8".toMediaType()
 
     @Throws(IOException::class)
@@ -68,6 +90,46 @@ object AgentCatalogApi {
             .url(url)
             .header("X-Device-Token", deviceToken)
             .put(body)
+            .build()
+        client.newCall(req).execute().use { resp ->
+            val respBody = resp.body?.string() ?: ""
+            if (!resp.isSuccessful) {
+                throw IOException("HTTP ${resp.code}: ${respBody.take(200)}")
+            }
+            return respBody
+        }
+    }
+
+    @Throws(IOException::class)
+    fun putJsonWithJWT(httpBase: String, path: String, jwtToken: String, jsonBody: String = "{}"): String {
+        val base = httpBase.trim().trimEnd('/')
+        val p = if (path.startsWith("/")) path else "/$path"
+        val url = base + p
+        val body = jsonBody.toRequestBody(jsonMedia)
+        val req = Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer $jwtToken")
+            .put(body)
+            .build()
+        client.newCall(req).execute().use { resp ->
+            val respBody = resp.body?.string() ?: ""
+            if (!resp.isSuccessful) {
+                throw IOException("HTTP ${resp.code}: ${respBody.take(200)}")
+            }
+            return respBody
+        }
+    }
+
+    @Throws(IOException::class)
+    fun postJsonWithJWT(httpBase: String, path: String, jwtToken: String, jsonBody: String = "{}"): String {
+        val base = httpBase.trim().trimEnd('/')
+        val p = if (path.startsWith("/")) path else "/$path"
+        val url = base + p
+        val body = jsonBody.toRequestBody(jsonMedia)
+        val req = Request.Builder()
+            .url(url)
+            .header("Authorization", "Bearer $jwtToken")
+            .post(body)
             .build()
         client.newCall(req).execute().use { resp ->
             val respBody = resp.body?.string() ?: ""

@@ -46,15 +46,34 @@
                         android:textColor="?android:textColorSecondary"
                         android:textSize="13sp" />
 
-                    <TextView
-                        android:id="@+id/tvTitle"
+                    <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
-                        android:text="工单标题"
-                        android:textColor="?android:textColorPrimary"
-                        android:textSize="18sp"
-                        android:textStyle="bold" />
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <TextView
+                            android:id="@+id/tvTitle"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="工单标题"
+                            android:textColor="?android:textColorPrimary"
+                            android:textSize="18sp"
+                            android:textStyle="bold" />
+
+                        <ImageButton
+                            android:id="@+id/btnEditTitle"
+                            style="@style/Widget.Material3.Button.IconButton"
+                            android:layout_width="28dp"
+                            android:layout_height="28dp"
+                            android:padding="6dp"
+                            android:scaleType="fitCenter"
+                            android:contentDescription="编辑标题"
+                            android:src="@android:drawable/ic_menu_edit"
+                            android:visibility="gone" />
+                    </LinearLayout>
 
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -71,21 +90,52 @@
 
                         <TextView
                             android:id="@+id/tvPriority"
-                            android:layout_width="wrap_content"
+                            android:layout_width="0dp"
                             android:layout_height="wrap_content"
+                            android:layout_weight="1"
                             android:layout_marginStart="16dp"
                             android:text="优先级: 普通"
                             android:textSize="13sp" />
+
+                        <ImageButton
+                            android:id="@+id/btnEditPriority"
+                            style="@style/Widget.Material3.Button.IconButton"
+                            android:layout_width="28dp"
+                            android:layout_height="28dp"
+                            android:padding="6dp"
+                            android:scaleType="fitCenter"
+                            android:contentDescription="编辑优先级"
+                            android:src="@android:drawable/ic_menu_edit"
+                            android:visibility="gone" />
                     </LinearLayout>
 
-                    <TextView
-                        android:id="@+id/tvDescription"
+                    <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="12dp"
-                        android:text="工单描述"
-                        android:textColor="?android:textColorPrimary"
-                        android:textSize="14sp" />
+                        android:orientation="horizontal"
+                        android:gravity="top">
+
+                        <TextView
+                            android:id="@+id/tvDescription"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="工单描述"
+                            android:textColor="?android:textColorPrimary"
+                            android:textSize="14sp" />
+
+                        <ImageButton
+                            android:id="@+id/btnEditDescription"
+                            style="@style/Widget.Material3.Button.IconButton"
+                            android:layout_width="28dp"
+                            android:layout_height="28dp"
+                            android:padding="6dp"
+                            android:scaleType="fitCenter"
+                            android:contentDescription="编辑描述"
+                            android:src="@android:drawable/ic_menu_edit"
+                            android:visibility="gone" />
+                    </LinearLayout>
 
                     <TextView
                         android:id="@+id/tvCreatedAt"
@@ -106,13 +156,246 @@
                         android:textSize="12sp" />
 
                     <TextView
-                        android:id="@+id/tvTags"
+                        android:id="@+id/tvSubmitter"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="提交人: 用户名"
+                        android:textColor="?android:textColorSecondary"
+                        android:textSize="12sp" />
+
+                    <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
-                        android:text="标签: 标签1 标签2"
-                        android:textColor="?android:textColorSecondary"
-                        android:textSize="12sp" />
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <TextView
+                            android:id="@+id/tvBusinessNo"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="业务单号: 无"
+                            android:textColor="?android:textColorSecondary"
+                            android:textSize="12sp" />
+
+                        <ImageButton
+                            android:id="@+id/btnEditBusinessNo"
+                            style="@style/Widget.Material3.Button.IconButton"
+                            android:layout_width="28dp"
+                            android:layout_height="28dp"
+                            android:padding="6dp"
+                            android:scaleType="fitCenter"
+                            android:contentDescription="编辑业务单号"
+                            android:src="@android:drawable/ic_menu_edit" />
+
+                        <ImageButton
+                            android:id="@+id/btnQrBusinessNo"
+                            style="@style/Widget.Material3.Button.IconButton"
+                            android:layout_width="28dp"
+                            android:layout_height="28dp"
+                            android:padding="6dp"
+                            android:scaleType="fitCenter"
+                            android:contentDescription="显示业务单号二维码"
+                            android:src="@android:drawable/ic_menu_view"
+                            android:visibility="gone" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <TextView
+                            android:id="@+id/tvOtherCodes"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="其他编码: 无"
+                            android:textColor="?android:textColorSecondary"
+                            android:textSize="12sp" />
+
+                        <ImageButton
+                            android:id="@+id/btnEditOtherCodes"
+                            style="@style/Widget.Material3.Button.IconButton"
+                            android:layout_width="28dp"
+                            android:layout_height="28dp"
+                            android:padding="6dp"
+                            android:scaleType="fitCenter"
+                            android:contentDescription="编辑其他编码"
+                            android:src="@android:drawable/ic_menu_edit" />
+
+                        <ImageButton
+                            android:id="@+id/btnQrOtherCodes"
+                            style="@style/Widget.Material3.Button.IconButton"
+                            android:layout_width="28dp"
+                            android:layout_height="28dp"
+                            android:padding="6dp"
+                            android:scaleType="fitCenter"
+                            android:contentDescription="显示其他编码二维码"
+                            android:src="@android:drawable/ic_menu_view"
+                            android:visibility="gone" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:orientation="vertical">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="标签: "
+                                android:textColor="?android:textColorSecondary"
+                                android:textSize="12sp" />
+
+                            <HorizontalScrollView
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:scrollbars="none">
+
+                                <LinearLayout
+                                    android:id="@+id/llTags"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:orientation="horizontal" />
+                            </HorizontalScrollView>
+
+                            <ImageButton
+                                android:id="@+id/btnEditTags"
+                                style="@style/Widget.Material3.Button.IconButton"
+                                android:layout_width="28dp"
+                                android:layout_height="28dp"
+                                android:padding="6dp"
+                                android:scaleType="fitCenter"
+                                android:contentDescription="编辑标签"
+                                android:src="@android:drawable/ic_menu_edit"
+                                android:visibility="gone" />
+                        </LinearLayout>
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- 状态操作卡片 (仅用户登录时可见) -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/cardStatusActions"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:visibility="gone"
+                app:cardCornerRadius="8dp"
+                app:cardElevation="2dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="工单操作"
+                        android:textColor="?android:textColorPrimary"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:orientation="horizontal">
+
+                        <Button
+                            android:id="@+id/btnStartProcessing"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="0dp"
+                            android:layout_height="40dp"
+                            android:layout_marginEnd="8dp"
+                            android:layout_weight="1"
+                            android:textSize="13sp"
+                            android:text="开始处理" />
+
+                        <Button
+                            android:id="@+id/btnMarkResolved"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="0dp"
+                            android:layout_height="40dp"
+                            android:layout_weight="1"
+                            android:textSize="13sp"
+                            android:text="标记解决" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:orientation="horizontal">
+
+                        <Button
+                            android:id="@+id/btnClose"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="0dp"
+                            android:layout_height="40dp"
+                            android:layout_marginEnd="8dp"
+                            android:layout_weight="1"
+                            android:textSize="13sp"
+                            android:text="关闭工单" />
+
+                        <Button
+                            android:id="@+id/btnReopen"
+                            style="@style/Widget.Material3.Button.OutlinedButton"
+                            android:layout_width="0dp"
+                            android:layout_height="40dp"
+                            android:layout_weight="1"
+                            android:textSize="13sp"
+                            android:text="重新打开"
+                            android:visibility="gone" />
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <!-- 附件列表 -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/cardAttachments"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:visibility="gone"
+                app:cardCornerRadius="8dp"
+                app:cardElevation="2dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="工单附件"
+                        android:textColor="?android:textColorPrimary"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+
+                    <androidx.recyclerview.widget.RecyclerView
+                        android:id="@+id/recyclerAttachments"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:nestedScrollingEnabled="false" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 

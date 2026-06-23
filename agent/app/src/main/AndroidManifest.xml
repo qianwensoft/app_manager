@@ -234,6 +234,12 @@
             android:configChanges="orientation|screenSize|keyboardHidden" />
 
         <activity
+            android:name=".ui.ImagePreviewActivity"
+            android:exported="false"
+            android:label="图片预览"
+            android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
+
+        <activity
             android:name=".ui.FeedbackActivity"
             android:exported="false"
             android:label="@string/main_tile_feedback"
@@ -246,6 +252,37 @@
             android:label="工单详情"
             android:theme="@style/Theme.AppManagerMain"
             android:parentActivityName=".ui.FeedbackActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
+
+        <activity
+            android:name=".ui.WorkOrderListActivity"
+            android:exported="false"
+            android:label="工单处理"
+            android:theme="@style/Theme.AppManagerMain"
+            android:configChanges="orientation|screenSize|keyboardHidden">
+            <intent-filter>
+                <action android:name="com.appmanager.agent.WORK_ORDER_LIST" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".ui.MyWorkOrderListActivity"
+            android:exported="false"
+            android:label="我的工单"
+            android:theme="@style/Theme.AppManagerMain"
+            android:configChanges="orientation|screenSize|keyboardHidden">
+            <intent-filter>
+                <action android:name="com.appmanager.agent.MY_WORK_ORDER_LIST" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".ui.WorkOrderDetailActivity"
+            android:exported="false"
+            android:label="工单详情"
+            android:theme="@style/Theme.AppManagerMain"
             android:configChanges="orientation|screenSize|keyboardHidden" />
 
         <service

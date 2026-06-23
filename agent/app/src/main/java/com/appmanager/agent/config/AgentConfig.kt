@@ -38,6 +38,8 @@ data class AgentConfig(
     val userName: String = "",
     /** 登录用户角色（admin / operator / viewer）。 */
     val userRole: String = "",
+    /** 后台下发的自定义扫描广播事件 JSON 数组（["action1","action2"]）。 */
+    val customScanActionsJson: String = "",
 ) {
     companion object {
         private const val PREFS_NAME = "agent_config"
@@ -83,6 +85,7 @@ data class AgentConfig(
                 userToken = prefs.getString("user_token", "") ?: "",
                 userName = prefs.getString("user_name", "") ?: "",
                 userRole = prefs.getString("user_role", "") ?: "",
+                customScanActionsJson = prefs.getString("custom_scan_actions_json", "") ?: "",
             )
         }
 
@@ -106,6 +109,7 @@ data class AgentConfig(
                 putString("user_token", config.userToken)
                 putString("user_name", config.userName)
                 putString("user_role", config.userRole)
+                putString("custom_scan_actions_json", config.customScanActionsJson)
                 apply()
             }
         }

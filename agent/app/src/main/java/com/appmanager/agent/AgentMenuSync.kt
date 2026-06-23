@@ -47,7 +47,17 @@ object AgentMenuSync {
         val base = serverUrl.trim().trimEnd('/')
         val tok = deviceToken.trim()
         if (base.isEmpty() || tok.isEmpty()) return
-        val since = AgentMenuStore.revision(context)
+
+        // 如果距离上次同步超过 30 分钟，强制全量拉取（since=0）
+        // 防止长时间离线后因本地 revision 过期或服务器重启导致菜单未更新
+        val timeSinceLastSync = AgentMenuStore.timeSinceLastSync(context)
+        val forceFullSync = timeSinceLastSync > 30 * 60 * 1000L // 30 分钟
+
+        val since = if (forceFullSync) 0L else AgentMenuStore.revision(context)
+        if (forceFullSync) {
+            Log.i(TAG, "Force full menu sync (last sync: ${timeSinceLastSync / 1000}s ago)")
+        }
+
         val url = "$base/api/agent/menu-manifest?since=$since"
         val req = Request.Builder()
             .url(url)

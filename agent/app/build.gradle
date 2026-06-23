@@ -15,8 +15,8 @@ android {
         applicationId "com.appmanager.agent"
         minSdk 21
         targetSdk 34
-        versionCode 221
-        versionName "2.2.86"
+        versionCode 224
+        versionName "2.2.89"
     }
 
     signingConfigs {
@@ -60,6 +60,11 @@ dependencies {
     implementation 'com.google.code.gson:gson:2.10.1'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
     implementation 'io.github.webrtc-sdk:android:125.6422.07'
+
+    // STOMP WebSocket client
+    implementation 'com.github.NaikSoftware:StompProtocolAndroid:1.6.6'
+    implementation 'io.reactivex.rxjava2:rxjava:2.2.21'
+    implementation 'io.reactivex.rxjava2:rxandroid:2.1.1'
 
     // QR code scanning
     implementation 'com.journeyapps:zxing-android-embedded:4.3.0'

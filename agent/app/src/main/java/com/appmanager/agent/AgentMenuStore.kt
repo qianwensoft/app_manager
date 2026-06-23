@@ -15,6 +15,7 @@ object AgentMenuStore {
     private const val KEY_MENUS = "menus_json"
     private const val KEY_BUNDLE = "bundle_json"
     private const val KEY_REVISION = "revision"
+    private const val KEY_LAST_SYNC = "last_sync_time"
 
     private val listType = object : TypeToken<List<Map<String, Any?>>>() {}.type
 
@@ -23,6 +24,7 @@ object AgentMenuStore {
             .putLong(KEY_REVISION, revision)
             .putString(KEY_MENUS, menusJson)
             .putString(KEY_BUNDLE, bundleJson)
+            .putLong(KEY_LAST_SYNC, System.currentTimeMillis())
             .apply()
     }
 
@@ -31,6 +33,13 @@ object AgentMenuStore {
 
     fun bundleJSON(context: Context): String? =
         context.getSharedPreferences(PREF, Context.MODE_PRIVATE).getString(KEY_BUNDLE, null)
+
+    /** 距离上次同步的时间（毫秒）。 */
+    fun timeSinceLastSync(context: Context): Long {
+        val lastSync = context.getSharedPreferences(PREF, Context.MODE_PRIVATE).getLong(KEY_LAST_SYNC, 0L)
+        if (lastSync == 0L) return Long.MAX_VALUE
+        return System.currentTimeMillis() - lastSync
+    }
 
     private fun loadList(context: Context): List<Map<String, Any?>> {
         val json = context.getSharedPreferences(PREF, Context.MODE_PRIVATE)

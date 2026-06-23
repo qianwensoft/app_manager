@@ -265,6 +265,33 @@ class MainActivity : AppCompatActivity() {
     private fun openMenuInternal(menu: Map<String, Any?>) {
         when (menu["target_type"] as? String) {
             "form_app_entry" -> AgentMenuStore.launchFormAppEntry(this, menu, newTask = true)
+            "agent_native" -> {
+                // agent_native 类型：根据 intent_action 启动对应的 Activity
+                val intentAction = (menu["intent_action"] as? String)?.trim()
+                if (intentAction.isNullOrEmpty()) {
+                    Toast.makeText(this, "菜单配置错误：缺少 intent_action", Toast.LENGTH_SHORT).show()
+                    return
+                }
+
+                // 使用显式 Intent
+                val intent = when (intentAction) {
+                    "com.appmanager.agent.WORK_ORDER_LIST" ->
+                        Intent(this, com.appmanager.agent.ui.WorkOrderListActivity::class.java)
+                    "com.appmanager.agent.MY_WORK_ORDER_LIST" ->
+                        Intent(this, com.appmanager.agent.ui.MyWorkOrderListActivity::class.java)
+                    else -> {
+                        // 其他 intent_action 尝试隐式启动
+                        Intent(intentAction)
+                    }
+                }
+
+                try {
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    Toast.makeText(this, "打开失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                    android.util.Log.e("MainActivity", "Failed to open menu with intent: $intentAction", e)
+                }
+            }
             else -> openScadaUrl(AgentMenuStore.resolveMenuUrl(this, menu))
         }
     }
