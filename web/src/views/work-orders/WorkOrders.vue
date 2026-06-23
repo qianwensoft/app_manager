@@ -168,6 +168,7 @@
                   @click="onCardClick(element.id)"
                   @keydown.enter.prevent="onCardClick(element.id)"
                   @keydown.space.prevent="onCardClick(element.id)"
+                  @contextmenu.prevent="onCardContextMenu($event, element)"
                 >
                   <!-- 类型配置了卡片模板则按模板渲染，否则用默认布局 -->
                   <template v-if="cardTemplate(element.type_code)">
@@ -210,6 +211,60 @@
         </div>
       </div>
     </div>
+
+    <!-- 右键菜单快捷编辑 Dialog -->
+    <el-dialog
+      v-model="contextMenuDialog.visible"
+      :title="`快捷编辑 - ${contextMenuDialog.wo?.code || ''}`"
+      width="500px"
+      :close-on-click-modal="false"
+    >
+      <el-form v-if="contextMenuDialog.wo" label-width="90px">
+        <el-form-item label="优先级">
+          <el-select v-model="contextMenuDialog.priority" style="width:100%">
+            <el-option label="普通" value="normal" />
+            <el-option label="较高" value="high" />
+            <el-option label="紧急" value="urgent" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="业务单号">
+          <el-input v-model="contextMenuDialog.businessNo" placeholder="请输入业务单号" clearable />
+        </el-form-item>
+        <el-form-item label="其他编码">
+          <el-input
+            v-model="contextMenuDialog.otherCodes"
+            type="textarea"
+            :rows="2"
+            placeholder="多个编码用逗号或换行分隔"
+          />
+        </el-form-item>
+        <el-form-item label="标签">
+          <el-select
+            v-model="contextMenuDialog.tags"
+            multiple
+            filterable
+            collapse-tags
+            collapse-tags-tooltip
+            placeholder="选择标签"
+            style="width:100%"
+          >
+            <el-option
+              v-for="t in tagDict"
+              :key="t.code"
+              :label="t.name"
+              :value="t.code"
+            >
+              <span :style="t.color ? `display:inline-block;width:8px;height:8px;border-radius:50%;background:${t.color};margin-right:6px` : ''" />
+              {{ t.name }}
+            </el-option>
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="contextMenuDialog.visible = false">取消</el-button>
+        <el-button type="primary" @click="saveContextMenuChanges">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -219,7 +274,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
 import { Grid } from '@element-plus/icons-vue'
 import draggable from 'vuedraggable'
-import { getWorkOrders, getWorkOrderTypes, changeWorkOrderStatus, getWorkOrderTagDict, batchArchiveWorkOrders } from '@/api/workOrder'
+import { getWorkOrders, getWorkOrderTypes, changeWorkOrderStatus, getWorkOrderTagDict, batchArchiveWorkOrders, updateWorkOrder, setWorkOrderTags } from '@/api/workOrder'
 import { statusOptions, statusLabel, statusType, priorityType, priorityLabel } from './workOrderConst'
 import { useAuthStore } from '@/stores/auth'
 import { createWorkOrdersStomp } from '@/utils/workOrdersStomp'
@@ -540,6 +595,79 @@ const applyEventToList = (p) => {
   } else if (p.event === 'work_order.created' && page.value === 1) {
     rows.value.unshift(eventToRow(p, null))
     total.value += 1
+  }
+}
+
+// ── 看板卡片右键菜单 ────────────────────────────────────────────────────
+const contextMenuDialog = ref({
+  visible: false,
+  wo: null,
+  priority: '',
+  businessNo: '',
+  otherCodes: '',
+  tags: []
+})
+
+const onCardContextMenu = (event, wo) => {
+  if (!auth.isOperator) return // 只有管理员和操作员可以快捷编辑
+
+  contextMenuDialog.value = {
+    visible: true,
+    wo: wo,
+    priority: wo.priority || 'normal',
+    businessNo: wo.business_no || '',
+    otherCodes: wo.other_codes || '',
+    tags: wo.tags ? [...wo.tags] : []
+  }
+}
+
+const saveContextMenuChanges = async () => {
+  const wo = contextMenuDialog.value.wo
+  if (!wo) return
+
+  try {
+    // 构建更新数据
+    const updates = {}
+    let changed = false
+
+    if (contextMenuDialog.value.priority !== wo.priority) {
+      updates.priority = contextMenuDialog.value.priority
+      changed = true
+    }
+
+    if (contextMenuDialog.value.businessNo !== (wo.business_no || '')) {
+      updates.business_no = contextMenuDialog.value.businessNo
+      changed = true
+    }
+
+    if (contextMenuDialog.value.otherCodes !== (wo.other_codes || '')) {
+      updates.other_codes = contextMenuDialog.value.otherCodes
+      changed = true
+    }
+
+    // 更新基本字段
+    if (changed) {
+      await updateWorkOrder(wo.id, updates)
+    }
+
+    // 更新标签（单独接口）
+    const oldTags = wo.tags || []
+    const newTags = contextMenuDialog.value.tags
+    if (JSON.stringify(oldTags.sort()) !== JSON.stringify(newTags.sort())) {
+      await setWorkOrderTags(wo.id, newTags)
+    }
+
+    ElMessage.success('更新成功')
+    contextMenuDialog.value.visible = false
+
+    // 刷新看板数据
+    if (view.value === 'board') {
+      loadBoard()
+    } else {
+      load()
+    }
+  } catch (e) {
+    ElMessage.error(e.message || '更新失败')
   }
 }
 
