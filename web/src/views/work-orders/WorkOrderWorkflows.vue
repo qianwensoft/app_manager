@@ -43,7 +43,7 @@
       </el-table>
     </el-card>
 
-    <el-dialog v-model="dialog" :title="form.id ? '编辑工作流' : '新建工作流'" width="800px" destroy-on-close>
+    <el-dialog v-model="dialog" :title="form.id ? '编辑工作流' : '新建工作流'" width="800px" destroy-on-close @opened="onDialogOpened">
       <el-form :model="form" label-width="100px">
         <el-form-item label="名称">
           <el-input v-model="form.name" placeholder="工作流名称" />
@@ -163,7 +163,7 @@
                     <el-input
                       v-model="action.builder.params[param.name]"
                       placeholder="输入值或模板变量 {{field}}"
-                      @input="updateBuilderJSON(idx)"
+                      @input="updateEndpointBuilderJSON(idx)"
                     >
                       <template #append>
                         <el-dropdown @command="cmd => insertTemplate(idx, param.name, cmd)" trigger="click">
@@ -180,6 +180,7 @@
                               <el-dropdown-item command="{{status}}">{{status}} - 工单状态</el-dropdown-item>
                               <el-dropdown-item command="{{priority}}">{{priority}} - 优先级</el-dropdown-item>
                               <el-dropdown-item command="{{assignee_id}}">{{assignee_id}} - 指派人ID</el-dropdown-item>
+                              <el-dropdown-item command="{{business_no}}">{{business_no}} - 业务编码</el-dropdown-item>
                               <el-dropdown-item command="{{other_codes}}">{{other_codes}} - 其他编码</el-dropdown-item>
                               <el-dropdown-item divided disabled v-if="contextVars.length > 0">上下文变量</el-dropdown-item>
                               <el-dropdown-item
@@ -212,7 +213,7 @@
               <el-input
                 v-model="action.builder.saveToContext"
                 placeholder="变量名，如：api_response"
-                @input="updateBuilderJSON(idx)"
+                @input="updateEndpointBuilderJSON(idx)"
               >
                 <template #prepend>ctx.</template>
               </el-input>
@@ -633,7 +634,6 @@ const testForm = ref({ workflowId: null, workOrderId: null, event: 'work_order.t
 
 // Monaco editors for JavaScript actions
 const monacoEditors = ref({})
-const monacoRefs = ref({})
 
 const availableEvents = [
   { label: '创建', value: 'work_order.created' },
@@ -686,9 +686,10 @@ const openEdit = (row) => {
     // Ignore
   }
 
-  actions.value = acts.map(a => {
-    const action = { type: a.type, configJSON: JSON.stringify(a.config, null, 2), useBuilder: false, builder: {} }
-    // Check if this is a call_endpoint action
+  actions.value = acts.map((a, idx) => {
+    const action = { type: a.type, configJSON: JSON.stringify(a.config, null, 2), useBuilder: true, builder: {} }
+
+    // Initialize builder based on action type
     if (a.type === 'call_endpoint' && a.config?.endpoint_id) {
       action.builder = {
         endpointId: a.config.endpoint_id,
@@ -696,15 +697,43 @@ const openEdit = (row) => {
         saveToContext: a.config.save_to_context || '',
         paramList: null
       }
-    }
-    // Check if this is a call_data_interface action
-    if (a.type === 'call_data_interface' && a.config?.interface_id) {
+    } else if (a.type === 'call_data_interface' && a.config?.interface_id) {
       action.builder = {
         interfaceId: a.config.interface_id,
         params: a.config.params || {},
         paramList: null
       }
+    } else if (a.type === 'execute_js' && a.config?.code) {
+      action.builder = {
+        code: a.config.code || ''
+      }
+      // Monaco 编辑器将在对话框打开后初始化（@opened 事件）
+    } else if (a.type === 'update_work_order') {
+      action.builder = { updateTarget: 'current', workOrderId: '', updateFields: [] }
+      if (a.config.work_order_id) {
+        action.builder.updateTarget = 'specified'
+        action.builder.workOrderId = a.config.work_order_id
+      }
+      if (a.config.updates) {
+        action.builder.updateFields = Object.entries(a.config.updates).map(([name, value]) => ({
+          name,
+          value: String(value)
+        }))
+      }
+    } else if (a.type === 'create_work_order') {
+      action.builder = { typeCode: '', createFields: [], saveToContext: '' }
+      if (a.config.fields) {
+        action.builder.typeCode = a.config.fields.type_code || ''
+        action.builder.createFields = Object.entries(a.config.fields)
+          .filter(([name]) => name !== 'type_code')
+          .map(([name, value]) => ({ name, value: String(value) }))
+      }
+      action.builder.saveToContext = a.config.save_to_context || ''
+    } else {
+      // 不支持可视化的类型，使用 JSON 模式
+      action.useBuilder = false
     }
+
     return action
   })
   dialog.value = true
@@ -744,6 +773,19 @@ const saveContextVar = () => {
   contextDialog.value = false
 }
 
+const onDialogOpened = () => {
+  // 对话框打开后，初始化所有 execute_js 类型的 Monaco 编辑器
+  nextTick(() => {
+    actions.value.forEach((action, idx) => {
+      if (action.type === 'execute_js' && action.useBuilder) {
+        setTimeout(() => {
+          initJsBuilder(idx)
+        }, 100)
+      }
+    })
+  })
+}
+
 const removeContextVar = (idx) => {
   contextVars.value.splice(idx, 1)
 }
@@ -752,26 +794,32 @@ const removeContextVar = (idx) => {
 const onActionTypeChange = (idx) => {
   const action = actions.value[idx]
   if (action.type === 'call_endpoint') {
-    action.useBuilder = false
+    action.useBuilder = true
     action.builder = { endpointId: null, params: {}, saveToContext: '', paramList: null }
+    action.configJSON = '{}'
   } else if (action.type === 'call_data_interface') {
-    action.useBuilder = false
+    action.useBuilder = true
     action.builder = { interfaceId: null, params: {}, paramList: null }
+    action.configJSON = '{}'
   } else if (action.type === 'execute_js') {
-    action.useBuilder = false
+    action.useBuilder = true
     action.builder = { code: '' }
+    action.configJSON = '{"code": ""}'
+    // 自动初始化 Monaco 编辑器
+    nextTick(() => {
+      initJsBuilder(idx)
+    })
   } else if (action.type === 'update_work_order') {
-    action.useBuilder = false
+    action.useBuilder = true
     action.builder = { updateTarget: 'current', workOrderId: '', updateFields: [] }
+    action.configJSON = '{}'
   } else if (action.type === 'create_work_order') {
-    action.useBuilder = false
+    action.useBuilder = true
     action.builder = { typeCode: '', createFields: [], saveToContext: '' }
-  }
-}
-
-const setMonacoRef = (idx, el) => {
-  if (el) {
-    monacoRefs.value[idx] = el
+    action.configJSON = '{"fields": {}}'
+  } else {
+    action.useBuilder = false
+    action.configJSON = '{}'
   }
 }
 
@@ -791,49 +839,65 @@ const initJsBuilder = async (idx) => {
   await nextTick()
   await nextTick() // Double nextTick to ensure DOM is fully ready
 
-  // Initialize Monaco Editor
+  // Initialize Monaco Editor with additional delay
   setTimeout(() => {
-    const container = monacoRefs.value[idx]
+    const container = document.getElementById(`monaco-editor-${idx}`)
     if (!container) {
       console.error('Monaco container not found for action', idx)
       return
     }
 
-    // Dispose existing editor if any
-    if (monacoEditors.value[idx]) {
-      monacoEditors.value[idx].dispose()
-      delete monacoEditors.value[idx]
+    // Check if container has dimensions
+    const rect = container.getBoundingClientRect()
+    if (rect.width === 0 || rect.height === 0) {
+      console.warn('Monaco container has zero dimensions, retrying...')
+      // Retry after another delay
+      setTimeout(() => initMonacoEditor(idx, container), 300)
+      return
     }
 
-    try {
-      const editor = monaco.editor.create(container, {
-        value: action.builder.code,
-        language: 'javascript',
-        theme: 'vs',
-        minimap: { enabled: false },
-        lineNumbers: 'on',
-        scrollBeyondLastLine: false,
-        automaticLayout: true,
-        fontSize: 14,
-        tabSize: 2,
-        wordWrap: 'on'
-      })
+    initMonacoEditor(idx, container)
+  }, 200)
+}
 
-      // Add type definitions for autocomplete
-      monaco.languages.typescript.javascriptDefaults.setCompilerOptions({
-        target: monaco.languages.typescript.ScriptTarget.ES2015,
-        allowNonTsExtensions: true,
-        moduleResolution: monaco.languages.typescript.ModuleResolutionKind.NodeJs,
-        module: monaco.languages.typescript.ModuleKind.CommonJS,
-        noEmit: true,
-        typeRoots: ['node_modules/@types']
-      })
+const initMonacoEditor = (idx, container) => {
+  const action = actions.value[idx]
 
-      // Build context variable type definitions
-      const ctxFields = contextVars.value.map(c => `  ${c.name}?: any; // ${c.description || ''}`).join('\n')
+  // Dispose existing editor if any
+  if (monacoEditors.value[idx]) {
+    monacoEditors.value[idx].dispose()
+    delete monacoEditors.value[idx]
+  }
 
-      // Add custom type definitions for workOrder, ctx, actions
-      const typeDefinitions = `
+  try {
+    const editor = monaco.editor.create(container, {
+      value: action.builder.code,
+      language: 'javascript',
+      theme: 'vs',
+      minimap: { enabled: false },
+      lineNumbers: 'on',
+      scrollBeyondLastLine: false,
+      automaticLayout: true,
+      fontSize: 14,
+      tabSize: 2,
+      wordWrap: 'on'
+    })
+
+    // Add type definitions for autocomplete
+    monaco.languages.typescript.javascriptDefaults.setCompilerOptions({
+      target: monaco.languages.typescript.ScriptTarget.ES2015,
+      allowNonTsExtensions: true,
+      moduleResolution: monaco.languages.typescript.ModuleResolutionKind.NodeJs,
+      module: monaco.languages.typescript.ModuleKind.CommonJS,
+      noEmit: true,
+      typeRoots: ['node_modules/@types']
+    })
+
+    // Build context variable type definitions
+    const ctxFields = contextVars.value.map(c => `  ${c.name}?: any; // ${c.description || ''}`).join('\n')
+
+    // Add custom type definitions for workOrder, ctx, actions
+    const typeDefinitions = `
 declare const workOrder: {
   id: number;
   code: string;
@@ -855,26 +919,30 @@ ${ctxFields}
 declare const actions: Array<{result: any}>;
 
 declare function log(...args: any[]): void;
+declare const console: Console;
 `
 
-      monaco.languages.typescript.javascriptDefaults.addExtraLib(typeDefinitions, 'workflow-types.d.ts')
+    monaco.languages.typescript.javascriptDefaults.addExtraLib(typeDefinitions, 'workflow-types.d.ts')
 
-      // Update config on change
-      editor.onDidChangeModelContent(() => {
-        action.builder.code = editor.getValue()
-        updateJsBuilderJSON(idx)
-      })
+    // Update config on change
+    editor.onDidChangeModelContent(() => {
+      action.builder.code = editor.getValue()
+      updateJsBuilderJSON(idx)
+    })
 
-      monacoEditors.value[idx] = editor
+    monacoEditors.value[idx] = editor
 
-      // Force layout after creation
-      setTimeout(() => {
-        editor.layout()
-      }, 100)
-    } catch (e) {
-      console.error('Failed to create Monaco editor:', e)
-    }
-  }, 200) // Delay to ensure DOM is ready
+    // Force layout after creation with multiple attempts
+    setTimeout(() => {
+      editor.layout()
+    }, 100)
+
+    setTimeout(() => {
+      editor.layout()
+    }, 500)
+  } catch (e) {
+    console.error('Failed to create Monaco editor:', e)
+  }
 }
 
 const updateJsBuilderJSON = (idx) => {
@@ -1279,6 +1347,7 @@ onBeforeUnmount(() => {
 .no-params { text-align: center; color: #909399; padding: 20px; }
 
 .monaco-editor-wrapper {
+  width: 100%;
   border: 1px solid #dcdfe6;
   border-radius: 4px;
   overflow: hidden;

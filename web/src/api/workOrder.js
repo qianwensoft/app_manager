@@ -57,3 +57,22 @@ export const deleteWorkOrderWorkflow = (id) => http.delete(`/work-orders/workflo
 export const testWorkOrderWorkflow = (id, workOrderId, event) =>
   http.post(`/work-orders/workflows/${id}/test`, { work_order_id: workOrderId, event })
 export const getWorkOrderWorkflowLogs = (params = {}) => http.get('/work-orders/workflow-logs', { params })
+
+// 识别工单附件中的二维码/条形码
+export const recognizeWorkOrderItemBarcode = (itemId) => http.post(`/work-orders/items/${itemId}/recognize-barcode`)
+
+// 工单进展
+export const getWorkOrderProgress = (id) => http.get(`/work-orders/${id}/progress`)
+export const createWorkOrderProgress = (id, content) => http.post(`/work-orders/${id}/progress`, { content })
+export const uploadWorkOrderProgressAttachment = (progressId, file, kind, metaJSON) => {
+  const formData = new FormData()
+  formData.append('file', file)
+  formData.append('kind', kind)
+  if (metaJSON) formData.append('meta_json', metaJSON)
+  return http.post(`/work-orders/progress/${progressId}/attachments`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  })
+}
+export const workOrderProgressAttachmentDownloadUrl = (attId) =>
+  `/api/work-orders/progress/attachments/${attId}/download?token=${encodeURIComponent(localStorage.getItem('token') || '')}`
+

@@ -25,6 +25,13 @@
         </el-button-group>
         <div class="spacer" />
         <el-button
+          :loading="recognizing"
+          @click="recognizeBarcode"
+        >
+          <el-icon><View /></el-icon>
+          识别二维码/条形码
+        </el-button>
+        <el-button
           v-if="rotationAngle !== 0"
           type="primary"
           :loading="saving"
@@ -55,9 +62,9 @@
 
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue'
-import { ElMessage } from 'element-plus'
-import { RefreshLeft, RefreshRight, Refresh, Check, ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
-import { updateWorkOrderItem } from '@/api/workOrder'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { RefreshLeft, RefreshRight, Refresh, Check, ArrowLeft, ArrowRight, View } from '@element-plus/icons-vue'
+import { updateWorkOrderItem, recognizeWorkOrderItemBarcode } from '@/api/workOrder'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -65,7 +72,7 @@ const props = defineProps({
   initialIndex: { type: Number, default: 0 }
 })
 
-const emit = defineEmits(['update:modelValue', 'saved'])
+const emit = defineEmits(['update:modelValue', 'saved', 'set-other-codes'])
 
 const visible = computed({
   get: () => props.modelValue,
@@ -214,6 +221,51 @@ const saveRotated = async () => {
     ElMessage.error('保存失败：' + (error.response?.data?.error || error.message))
   } finally {
     saving.value = false
+  }
+}
+
+const recognizing = ref(false)
+
+const recognizeBarcode = async () => {
+  if (!currentImage.value) return
+
+  try {
+    recognizing.value = true
+    const response = await recognizeWorkOrderItemBarcode(currentImage.value.id)
+
+    const codes = response.data.codes || []
+    const message = response.data.message || ''
+
+    if (codes.length === 0) {
+      ElMessage.warning(message || '未识别到二维码或条形码')
+      return
+    }
+
+    // 展示识别结果并提供设置选项
+    const codesList = codes.map((code, idx) => `${idx + 1}. ${code}`).join('\n')
+
+    await ElMessageBox.confirm(
+      `识别到 ${codes.length} 个编码：\n\n${codesList}\n\n是否设置为工单的"其他编码"？`,
+      '识别结果',
+      {
+        confirmButtonText: '设置到其他编码',
+        cancelButtonText: '取消',
+        type: 'success',
+        distinguishCancelAndClose: true
+      }
+    )
+
+    // 用户确认后，将编码设置到工单
+    emit('set-other-codes', codes.join(','))
+    ElMessage.success('已设置到其他编码')
+
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      console.error('识别失败:', error)
+      ElMessage.error('识别失败：' + (error.response?.data?.error || error.message))
+    }
+  } finally {
+    recognizing.value = false
   }
 }
 
