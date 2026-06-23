@@ -1,6 +1,6 @@
 <template>
   <div v-loading="loading">
-    <el-page-header :content="wo.code || '工单详情'" @back="$router.push('/work-orders')" style="margin-bottom:16px" />
+    <el-page-header :content="wo.code || '工单详情'" @back="goBack" style="margin-bottom:16px" />
 
     <el-row :gutter="16">
       <el-col :span="16">
@@ -29,6 +29,33 @@
             </el-descriptions-item>
             <el-descriptions-item label="类型">{{ wo.type_code || '-' }}</el-descriptions-item>
             <el-descriptions-item label="设备">{{ wo.device_id || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="业务单号" :span="2">
+              <div v-if="!editBusinessNo" class="business-no-view">
+                <template v-if="wo.business_no">
+                  <span>{{ wo.business_no }}</span>
+                  <el-popover placement="top" :width="180" trigger="click" @show="renderCodeQr(wo.business_no)">
+                    <template #reference>
+                      <el-button text size="small" title="生成二维码" style="padding:2px 4px;margin-left:8px">
+                        <el-icon><Grid /></el-icon>
+                      </el-button>
+                    </template>
+                    <div class="qr-pop">
+                      <img v-if="qrCache[wo.business_no]" :src="qrCache[wo.business_no]" :alt="wo.business_no" class="qr-img" />
+                      <div class="qr-text">{{ wo.business_no }}</div>
+                    </div>
+                  </el-popover>
+                </template>
+                <span v-else>-</span>
+                <el-button text type="primary" size="small" @click="startEditBusinessNo">编辑</el-button>
+              </div>
+              <div v-else class="business-no-edit">
+                <el-input v-model="businessNoDraft" placeholder="请输入业务单号" style="max-width:300px" />
+                <div style="margin-top:6px">
+                  <el-button type="primary" size="small" @click="saveBusinessNo">保存</el-button>
+                  <el-button size="small" @click="editBusinessNo = false">取消</el-button>
+                </div>
+              </div>
+            </el-descriptions-item>
             <el-descriptions-item label="公开">
               <el-switch
                 :model-value="wo.visibility === 'public'"
@@ -90,7 +117,7 @@
               </div>
               <img
                 v-if="it.kind === 'photo'"
-                :src="dlUrl(it.id)"
+                :src="`${dlUrl(it.id)}&t=${imageRefreshKey}`"
                 fit="contain"
                 class="item-img"
                 @click="openImagePreview(it.id)"
@@ -147,6 +174,40 @@
             <el-button type="info" :disabled="wo.status==='closed'" @click="setStatus('closed')">关闭工单</el-button>
             <el-button v-if="wo.status==='closed'" type="warning" @click="setStatus('reopened')">重新打开</el-button>
             <el-button @click="assignDialog = true">转交</el-button>
+          </div>
+        </el-card>
+
+        <el-card shadow="never" style="margin-bottom:16px">
+          <template #header>
+            <div class="card-head">
+              <b>工单进展（{{ progressList.length }}）</b>
+              <el-button text type="primary" size="small" @click="openProgressAdd">新增进展</el-button>
+            </div>
+          </template>
+          <el-empty v-if="!progressList.length" description="暂无进展" />
+          <div v-else class="progress-list">
+            <div v-for="p in progressList" :key="p.id" class="progress-item">
+              <div class="progress-head">
+                <span class="progress-creator">{{ p.creator_name }}</span>
+                <span class="progress-time">{{ p.created_at }}</span>
+              </div>
+              <div class="progress-content">{{ p.content }}</div>
+              <div v-if="p.attachments?.length" class="progress-attachments">
+                <div v-for="att in p.attachments" :key="att.id" class="progress-att-item">
+                  <el-tag size="small" style="margin-right:6px">{{ progressAttKindLabel(att.kind) }}</el-tag>
+                  <span class="att-name">{{ att.file_name }}</span>
+                  <el-link :href="progressAttDownloadUrl(att.id)" target="_blank" type="primary" size="small">下载</el-link>
+                  <img
+                    v-if="att.kind === 'photo'"
+                    :src="progressAttDownloadUrl(att.id)"
+                    class="progress-att-img"
+                    @click="openProgressImagePreview(att.id)"
+                  />
+                  <video v-else-if="att.kind === 'video' || att.kind === 'screen_record'" :src="progressAttDownloadUrl(att.id)" controls class="progress-att-video" />
+                  <audio v-else-if="att.kind === 'voice' || att.kind === 'audio'" :src="progressAttDownloadUrl(att.id)" controls class="progress-att-audio" />
+                </div>
+              </div>
+            </div>
           </div>
         </el-card>
 
@@ -218,6 +279,32 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="progressDialog" title="新增工单进展" width="560px">
+      <el-form label-width="80px">
+        <el-form-item label="进展内容" required>
+          <el-input v-model="progressContent" type="textarea" :rows="4" placeholder="填写处理进展或补充说明" />
+        </el-form-item>
+        <el-form-item label="附件">
+          <el-upload
+            :file-list="progressFiles"
+            :auto-upload="false"
+            multiple
+            :on-change="(file, fileList) => progressFiles = fileList"
+            :on-remove="(file, fileList) => progressFiles = fileList"
+          >
+            <el-button size="small">选择文件</el-button>
+            <template #tip>
+              <div style="font-size:12px;color:#909399;margin-top:4px">支持图片、视频、音频</div>
+            </template>
+          </el-upload>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="progressDialog = false">取消</el-button>
+        <el-button type="primary" @click="saveProgress">保存</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="previewDialog" :title="previewItem?.file_name || '预览'" width="70%" align-center destroy-on-close>
       <video v-if="previewItem && (previewItem.kind === 'video' || previewItem.kind === 'screen_record')"
         :src="dlUrl(previewItem.id)" controls autoplay style="width:100%;max-height:70vh" />
@@ -229,26 +316,40 @@
       :image-list="imageList"
       :initial-index="imagePreviewIndex"
       @saved="handleImageSaved"
+      @set-other-codes="handleSetOtherCodes"
     />
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Grid } from '@element-plus/icons-vue'
 import QRCode from 'qrcode'
 import {
   getWorkOrder, updateWorkOrder, assignWorkOrder, changeWorkOrderStatus,
   getWorkOrderTypes, workOrderItemDownloadUrl,
-  getWorkOrderTagDict, setWorkOrderTags
+  getWorkOrderTagDict, setWorkOrderTags,
+  getWorkOrderProgress, createWorkOrderProgress, uploadWorkOrderProgressAttachment, workOrderProgressAttachmentDownloadUrl
 } from '@/api/workOrder'
 import { statusLabel, statusType, priorityType, priorityLabel } from './workOrderConst'
 import ImagePreviewWithRotate from '@/components/ImagePreviewWithRotate.vue'
 
 const route = useRoute()
+const router = useRouter()
 const id = route.params.id
+
+// 返回列表，如果有 from 参数则返回原页面（保持筛选状态），否则默认返回列表首页
+const goBack = () => {
+  const from = route.query.from
+  if (from) {
+    router.push(from)
+  } else {
+    router.push('/work-orders')
+  }
+}
+
 const wo = ref({})
 const types = ref([])
 const loading = ref(false)
@@ -297,6 +398,18 @@ const saveCodes = async () => {
   ElMessage.success('已更新其他编码')
   load()
 }
+
+// 业务单号
+const editBusinessNo = ref(false)
+const businessNoDraft = ref('')
+const startEditBusinessNo = () => { businessNoDraft.value = wo.value.business_no || ''; editBusinessNo.value = true }
+const saveBusinessNo = async () => {
+  await updateWorkOrder(id, { business_no: businessNoDraft.value })
+  editBusinessNo.value = false
+  ElMessage.success('已更新业务单号')
+  load()
+}
+
 // 编码 → 二维码 dataURL 缓存（点击按钮时按需生成）
 const qrCache = ref({})
 const renderCodeQr = async (code) => {
@@ -332,24 +445,46 @@ const saveTagEdit = async () => {
 }
 
 const photoItems = computed(() => (wo.value.items || []).filter(it => it.kind === 'photo'))
+const imageRefreshKey = ref(0) // 用于强制刷新图片缓存
 const imageList = computed(() => photoItems.value.map(it => ({
   id: it.id,
-  url: `${dlUrl(it.id)}&t=${Date.now()}`, // 添加时间戳避免缓存
+  url: `${dlUrl(it.id)}&t=${imageRefreshKey.value}`, // 使用响应式刷新键
   name: it.file_name,
   workOrderId: id
 })))
 const imagePreviewVisible = ref(false)
 const imagePreviewIndex = ref(0)
 const openImagePreview = (itemId) => {
+  console.log('openImagePreview called, itemId:', itemId)
+  console.log('photoItems:', photoItems.value)
+  console.log('imageList:', imageList.value)
   imagePreviewIndex.value = photoItems.value.findIndex(it => it.id === itemId)
+  console.log('imagePreviewIndex:', imagePreviewIndex.value)
   if (imagePreviewIndex.value >= 0) {
     imagePreviewVisible.value = true
+    console.log('imagePreviewVisible set to true')
+  } else {
+    console.log('itemId not found in photoItems')
   }
 }
-const handleImageSaved = () => {
+const handleImageSaved = async () => {
   // 图片保存后重新加载工单数据，更新显示
   imagePreviewVisible.value = false
-  load()
+  await load()
+  // 更新刷新键，强制重新加载所有图片（破坏浏览器缓存）
+  imageRefreshKey.value = Date.now()
+}
+const handleSetOtherCodes = async (codes) => {
+  try {
+    const currentOtherCodes = wo.value.other_codes || ''
+    const newCodes = currentOtherCodes ? `${currentOtherCodes},${codes}` : codes
+    await updateWorkOrder(id, { other_codes: newCodes })
+    await load()
+    ElMessage.success('其他编码已更新')
+  } catch (error) {
+    console.error('更新其他编码失败:', error)
+    ElMessage.error('更新失败：' + (error.response?.data?.error || error.message))
+  }
 }
 const openPreview = (it) => { previewItem.value = it; previewDialog.value = true }
 
@@ -373,14 +508,84 @@ const load = async () => {
   try {
     const res = await getWorkOrder(id)
     wo.value = res.data
+    loadProgress()
   } finally {
     loading.value = false
   }
 }
 
+// ── 工单进展 ──────────────────────────────────────────────────
+const progressList = ref([])
+const progressDialog = ref(false)
+const progressContent = ref('')
+const progressFiles = ref([])
+
+const loadProgress = async () => {
+  try {
+    const res = await getWorkOrderProgress(id)
+    progressList.value = res.data || []
+  } catch (e) {
+    console.error('加载进展失败:', e)
+  }
+}
+
+const openProgressAdd = () => {
+  progressContent.value = ''
+  progressFiles.value = []
+  progressDialog.value = true
+}
+
+const handleProgressFileChange = (fileList) => {
+  progressFiles.value = fileList
+}
+
+const saveProgress = async () => {
+  if (!progressContent.value.trim()) {
+    ElMessage.warning('请填写进展内容')
+    return
+  }
+  try {
+    const res = await createWorkOrderProgress(id, progressContent.value)
+    const progressId = res.data.id
+
+    // 上传附件
+    if (progressFiles.value.length > 0) {
+      for (const file of progressFiles.value) {
+        const kind = detectFileKind(file.raw)
+        await uploadWorkOrderProgressAttachment(progressId, file.raw, kind, '')
+      }
+    }
+
+    ElMessage.success('进展已添加')
+    progressDialog.value = false
+    loadProgress()
+  } catch (e) {
+    ElMessage.error(e.message || '添加进展失败')
+  }
+}
+
+const detectFileKind = (file) => {
+  const type = file.type || ''
+  if (type.startsWith('image/')) return 'photo'
+  if (type.startsWith('video/')) return 'video'
+  if (type.startsWith('audio/')) return 'audio'
+  return 'photo'
+}
+
+const progressAttDownloadUrl = (attId) => workOrderProgressAttachmentDownloadUrl(attId)
+
+const progressAttKindLabel = (kind) => {
+  const labels = { photo: '图片', video: '视频', audio: '音频', screen_record: '录屏', voice: '录音', logcat: '日志' }
+  return labels[kind] || kind
+}
+
+const openProgressImagePreview = (attId) => {
+  window.open(progressAttDownloadUrl(attId), '_blank')
+}
+
 const setStatus = async (status) => {
   let comment = ''
-  if (status === 'closed' || status === 'resolved') {
+  if (status === 'closed' || status === 'resolved' || status === 'reopened') {
     try {
       const r = await ElMessageBox.prompt('处理备注（可选）', actionLabel(status), { inputType: 'textarea', confirmButtonText: '确定', cancelButtonText: '取消' })
       comment = r.value || ''
@@ -389,6 +594,7 @@ const setStatus = async (status) => {
   await changeWorkOrderStatus(id, status, comment)
   ElMessage.success('已更新')
   load()
+  loadProgress() // 刷新进展列表，显示新增的状态变更进展
 }
 
 const toggleVisibility = async (val) => {
@@ -444,4 +650,18 @@ onMounted(async () => {
 .tags-box { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .tags-empty { font-size: 13px; color: #c0c4cc; }
 .card-head { display: flex; align-items: center; justify-content: space-between; }
+
+/* 工单进展 */
+.progress-list { display: flex; flex-direction: column; gap: 16px; }
+.progress-item { padding: 12px; background: #f9fafb; border-radius: 6px; border: 1px solid #e4e7ed; }
+.progress-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.progress-creator { font-weight: 600; font-size: 13px; color: #303133; }
+.progress-time { font-size: 12px; color: #909399; }
+.progress-content { font-size: 14px; color: #606266; white-space: pre-wrap; margin-bottom: 8px; }
+.progress-attachments { display: flex; flex-direction: column; gap: 10px; }
+.progress-att-item { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px; background: #fff; border-radius: 4px; border: 1px solid #e4e7ed; }
+.att-name { font-size: 13px; color: #606266; flex: 1; min-width: 120px; }
+.progress-att-img { width: 100%; max-width: 320px; margin-top: 6px; border-radius: 4px; cursor: zoom-in; }
+.progress-att-video { width: 100%; max-width: 400px; margin-top: 6px; border-radius: 4px; }
+.progress-att-audio { width: 100%; max-width: 300px; margin-top: 6px; }
 </style>

@@ -1,8 +1,6 @@
 package api
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -12,6 +10,7 @@ import (
 	"time"
 
 	"app-manager/agent"
+	"app-manager/barcode"
 	"app-manager/database"
 	"app-manager/models"
 	"app-manager/storage"
@@ -26,10 +25,35 @@ var workOrderStatuses = map[string]bool{
 	"open": true, "in_progress": true, "resolved": true, "closed": true, "reopened": true,
 }
 
-func genWorkOrderCode() string {
-	b := make([]byte, 4)
-	_, _ = rand.Read(b)
-	return fmt.Sprintf("WO-%s-%s", time.Now().Format("20060102"), hex.EncodeToString(b))
+// genWorkOrderCode 生成工单编号：类型编码 + 日期(YYMMDD) + 4位流水号。
+// 例如：typeCode="Y" → Y2606220001
+// typeCode 为空时使用 "WO" 作为默认前缀。
+func genWorkOrderCode(typeCode string) string {
+	prefix := typeCode
+	if prefix == "" {
+		prefix = "WO"
+	}
+	today := time.Now().Format("060102") // YYMMDD
+	codePrefix := prefix + today
+
+	// 查询当天该类型已有的最大流水号
+	var lastCode string
+	err := database.DB.Model(&models.WorkOrder{}).
+		Where("code LIKE ?", codePrefix+"%").
+		Order("code DESC").
+		Limit(1).
+		Pluck("code", &lastCode).Error
+
+	seq := 1
+	if err == nil && lastCode != "" && len(lastCode) >= len(codePrefix)+4 {
+		// 提取后4位流水号
+		seqStr := lastCode[len(codePrefix) : len(codePrefix)+4]
+		if n, err := strconv.Atoi(seqStr); err == nil {
+			seq = n + 1
+		}
+	}
+
+	return fmt.Sprintf("%s%04d", codePrefix, seq)
 }
 
 // normalizeCodes 规整「其他编码」：按逗号拆分、去空白、去重，再用逗号拼接。
@@ -97,6 +121,9 @@ func ListWorkOrders(c *gin.Context) {
 	if v := c.Query("visibility"); v != "" {
 		q = q.Where("visibility = ?", v)
 	}
+	if bn := strings.TrimSpace(c.Query("business_no")); bn != "" {
+		q = q.Where("business_no LIKE ?", "%"+bn+"%")
+	}
 	// 标签多选筛选：命中任一选中标签即可（OR 语义），用 link 表子查询避免 join 去重。
 	if t := strings.TrimSpace(c.Query("tags")); t != "" {
 		codes := make([]string, 0)
@@ -110,6 +137,12 @@ func ListWorkOrders(c *gin.Context) {
 				Select("work_order_id").Where("tag_code IN ?", codes)
 			q = q.Where("id IN (?)", sub)
 		}
+	}
+	// 关键词搜索：OR 查询工单编号、业务单号、其他编码、标题、描述。
+	if searchKey := strings.TrimSpace(c.Query("search_key")); searchKey != "" {
+		pattern := "%" + searchKey + "%"
+		q = q.Where("code LIKE ? OR business_no LIKE ? OR other_codes LIKE ? OR title LIKE ? OR description LIKE ?",
+			pattern, pattern, pattern, pattern, pattern)
 	}
 
 	// 非管理员：仅公开 或 自己创建/被指派的工单。
@@ -184,6 +217,7 @@ func CreateWorkOrder(c *gin.Context) {
 		Title       string   `json:"title"`
 		Description string   `json:"description"`
 		Priority    string   `json:"priority"`
+		BusinessNo  string   `json:"business_no"`
 		DataJSON    string   `json:"data_json"`
 		OtherCodes  string   `json:"other_codes"`
 		Tags        []string `json:"tags"` // 支持创建时直接挂标签
@@ -205,13 +239,14 @@ func CreateWorkOrder(c *gin.Context) {
 		priority = "normal"
 	}
 	wo := models.WorkOrder{
-		Code:        genWorkOrderCode(),
+		Code:        genWorkOrderCode(req.TypeCode),
 		TypeCode:    req.TypeCode,
 		DeviceID:    deviceID,
 		Title:       strings.TrimSpace(req.Title),
 		Description: req.Description,
 		Status:      "open",
 		Priority:    priority,
+		BusinessNo:  strings.TrimSpace(req.BusinessNo),
 		Visibility:  "private",
 		DataJSON:    req.DataJSON,
 		OtherCodes:  normalizeCodes(req.OtherCodes),
@@ -238,7 +273,7 @@ func CreateWorkOrder(c *gin.Context) {
 	}
 
 	addWorkOrderActivity(wo.ID, "create", "", "open", c.GetUint("user_id"), actorLabel(c), wo.Title)
-	dispatchWorkOrderEvent("work_order.created", &wo, actorLabel(c))
+	dispatchWorkOrderEvent("work_order.created", &wo, actorLabel(c), "")
 	c.JSON(http.StatusOK, gin.H{"data": wo})
 }
 
@@ -290,6 +325,7 @@ func UpdateWorkOrder(c *gin.Context) {
 		Description *string `json:"description"`
 		Priority    *string `json:"priority"`
 		Visibility  *string `json:"visibility"`
+		BusinessNo  *string `json:"business_no"`
 		OtherCodes  *string `json:"other_codes"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -351,6 +387,22 @@ func UpdateWorkOrder(c *gin.Context) {
 			addWorkOrderActivity(wo.ID, "update", wo.Status, wo.Status, uid, actor, fmt.Sprintf("其他编码：%s → %s", wo.OtherCodes, newCodes))
 		}
 	}
+	// 业务单号变更
+	if req.BusinessNo != nil {
+		newBusinessNo := strings.TrimSpace(*req.BusinessNo)
+		if newBusinessNo != wo.BusinessNo {
+			updates["business_no"] = newBusinessNo
+			var detail string
+			if wo.BusinessNo == "" {
+				detail = fmt.Sprintf("添加业务单号：%s", newBusinessNo)
+			} else if newBusinessNo == "" {
+				detail = fmt.Sprintf("清空业务单号（原：%s）", wo.BusinessNo)
+			} else {
+				detail = fmt.Sprintf("业务单号：%s → %s", wo.BusinessNo, newBusinessNo)
+			}
+			addWorkOrderActivity(wo.ID, "update", wo.Status, wo.Status, uid, actor, detail)
+		}
+	}
 	// 优先级变更
 	if req.Priority != nil {
 		if *req.Priority != wo.Priority {
@@ -383,7 +435,7 @@ func UpdateWorkOrder(c *gin.Context) {
 	if len(updates) > 0 {
 		database.DB.Model(&wo).Updates(updates)
 		// 触发更新事件
-		dispatchWorkOrderEvent("work_order.updated", &wo, actor)
+		dispatchWorkOrderEvent("work_order.updated", &wo, actor, "")
 	}
 	c.JSON(http.StatusOK, gin.H{"data": wo})
 }
@@ -456,11 +508,24 @@ func applyWorkOrderStatus(c *gin.Context, wo *models.WorkOrder, status, comment 
 	wo.Status = status
 	addWorkOrderActivity(wo.ID, action, from, status, actorUserID, actor, comment)
 
+	// 如果状态变更有说明，自动创建工单进展
+	if strings.TrimSpace(comment) != "" {
+		statusLabel := workOrderStatusLabel(status)
+		progressContent := fmt.Sprintf("[状态变更：%s] %s", statusLabel, strings.TrimSpace(comment))
+		progress := models.WorkOrderProgress{
+			WorkOrderID: wo.ID,
+			Content:     progressContent,
+			CreatedBy:   actorUserID,
+			CreatorName: actor,
+		}
+		database.DB.Create(&progress)
+	}
+
 	evt := "work_order.status_changed"
 	if status == "closed" {
 		evt = "work_order.closed"
 	}
-	dispatchWorkOrderEvent(evt, wo, actor)
+	dispatchWorkOrderEvent(evt, wo, actor, comment)
 
 	// 实时推送状态变更到发起设备（复用 show_device_message，agent 端已处理）。
 	pushWorkOrderStatusToDevice(wo, from, status)
@@ -704,6 +769,7 @@ func UpdateMyWorkOrder(c *gin.Context) {
 	var req struct {
 		Title       *string `json:"title"`
 		Description *string `json:"description"`
+		BusinessNo  *string `json:"business_no"`
 		OtherCodes  *string `json:"other_codes"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -751,9 +817,26 @@ func UpdateMyWorkOrder(c *gin.Context) {
 		}
 	}
 
+	// 业务单号变更
+	if req.BusinessNo != nil {
+		newBusinessNo := strings.TrimSpace(*req.BusinessNo)
+		if newBusinessNo != wo.BusinessNo {
+			updates["business_no"] = newBusinessNo
+			var detail string
+			if wo.BusinessNo == "" {
+				detail = fmt.Sprintf("添加业务单号：%s", newBusinessNo)
+			} else if newBusinessNo == "" {
+				detail = fmt.Sprintf("清空业务单号（原：%s）", wo.BusinessNo)
+			} else {
+				detail = fmt.Sprintf("业务单号：%s → %s", wo.BusinessNo, newBusinessNo)
+			}
+			addWorkOrderActivity(wo.ID, "update", wo.Status, wo.Status, 0, actor, detail)
+		}
+	}
+
 	if len(updates) > 0 {
 		database.DB.Model(&wo).Updates(updates)
-		dispatchWorkOrderEvent("work_order.updated", &wo, actor)
+		dispatchWorkOrderEvent("work_order.updated", &wo, actor, "")
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": enrichWorkOrder(&wo)})
@@ -946,14 +1029,14 @@ func UpdateWorkOrderType(c *gin.Context) {
 		return
 	}
 	database.DB.Model(&t).Updates(map[string]interface{}{
-		"name":          req.Name,
-		"description":   req.Description,
-		"form_app_code": req.FormAppCode,
-		"form_page_key": req.FormPageKey,
-		"default_title": req.DefaultTitle,
+		"name":                req.Name,
+		"description":         req.Description,
+		"form_app_code":       req.FormAppCode,
+		"form_page_key":       req.FormPageKey,
+		"default_title":       req.DefaultTitle,
 		"board_card_template": req.BoardCardTemplate,
-		"enabled":       req.Enabled,
-		"sort_order":    req.SortOrder,
+		"enabled":             req.Enabled,
+		"sort_order":          req.SortOrder,
 	})
 	c.JSON(http.StatusOK, gin.H{"data": t})
 }
@@ -1212,3 +1295,168 @@ func TestWorkOrderWorkflow(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "workflow dispatched"})
 }
 
+// RecognizeWorkOrderItemBarcode 识别工单附件中的二维码/条形码
+func RecognizeWorkOrderItemBarcode(c *gin.Context) {
+	itemID := c.Param("item_id")
+	var item models.WorkOrderItem
+	if err := database.DB.First(&item, itemID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "item not found"})
+		return
+	}
+
+	// 只支持图片类型
+	if item.Kind != "photo" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "只支持识别图片类型的附件"})
+		return
+	}
+
+	// 获取文件路径（FilePath 已经是完整路径）
+	filePath := item.FilePath
+
+	// 调用 barcode 包的识别函数
+	codes, err := barcode.RecognizeFromFile(filePath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("识别失败: %v", err)})
+		return
+	}
+
+	if len(codes) == 0 {
+		c.JSON(http.StatusOK, gin.H{"codes": []string{}, "message": "未识别到二维码或条形码"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"codes": codes})
+}
+
+// ── 工单进展 API ────────────────────────────────────────────────────
+
+// ListWorkOrderProgress 获取工单进展列表（含附件）
+func ListWorkOrderProgress(c *gin.Context) {
+	woID := c.Param("id")
+	var list []models.WorkOrderProgress
+	if err := database.DB.Where("work_order_id = ?", woID).Order("id DESC").Find(&list).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 批量查询所有进展的附件
+	progressIDs := make([]uint, 0, len(list))
+	for _, p := range list {
+		progressIDs = append(progressIDs, p.ID)
+	}
+	attachmentsByProgress := make(map[uint][]models.WorkOrderProgressAttachment)
+	if len(progressIDs) > 0 {
+		var attachments []models.WorkOrderProgressAttachment
+		database.DB.Where("progress_id IN ?", progressIDs).Order("id ASC").Find(&attachments)
+		for _, att := range attachments {
+			attachmentsByProgress[att.ProgressID] = append(attachmentsByProgress[att.ProgressID], att)
+		}
+	}
+
+	type progressRow struct {
+		models.WorkOrderProgress
+		Attachments []models.WorkOrderProgressAttachment `json:"attachments"`
+	}
+	out := make([]progressRow, 0, len(list))
+	for _, p := range list {
+		atts := attachmentsByProgress[p.ID]
+		if atts == nil {
+			atts = []models.WorkOrderProgressAttachment{}
+		}
+		out = append(out, progressRow{WorkOrderProgress: p, Attachments: atts})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": out})
+}
+
+// CreateWorkOrderProgress 新增工单进展（Web端/App端通用）
+func CreateWorkOrderProgress(c *gin.Context) {
+	woID := c.Param("id")
+	var req struct {
+		Content string `json:"content"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if strings.TrimSpace(req.Content) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "进展内容不能为空"})
+		return
+	}
+
+	// 验证工单存在
+	var wo models.WorkOrder
+	if err := database.DB.First(&wo, woID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "工单不存在"})
+		return
+	}
+
+	progress := models.WorkOrderProgress{
+		WorkOrderID: wo.ID,
+		Content:     strings.TrimSpace(req.Content),
+		CreatedBy:   c.GetUint("user_id"), // 0 表示设备端提交
+		CreatorName: actorLabel(c),
+	}
+	if err := database.DB.Create(&progress).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": progress})
+}
+
+// UploadWorkOrderProgressAttachment 上传进展附件（支持 photo|video|audio|screen_record|voice|logcat）
+func UploadWorkOrderProgressAttachment(c *gin.Context) {
+	progressID := c.Param("progress_id")
+	var progress models.WorkOrderProgress
+	if err := database.DB.First(&progress, progressID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "进展记录不存在"})
+		return
+	}
+
+	file, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no file uploaded"})
+		return
+	}
+	kind := c.PostForm("kind") // photo|video|audio|screen_record|voice|logcat
+	if kind == "" {
+		kind = "photo"
+	}
+	metaJSON := c.PostForm("meta_json") // 可选扩展信息
+
+	// 保存文件到 uploads/work_order_progress/ 目录
+	destPath, err := storage.SaveFile(file, "work_order_progress")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	attachment := models.WorkOrderProgressAttachment{
+		ProgressID:  progress.ID,
+		FileName:    file.Filename,
+		FilePath:    destPath,
+		FileSize:    file.Size,
+		Kind:        kind,
+		ContentType: file.Header.Get("Content-Type"),
+		MetaJSON:    metaJSON,
+	}
+	if err := database.DB.Create(&attachment).Error; err != nil {
+		os.Remove(destPath)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": attachment})
+}
+
+// DownloadWorkOrderProgressAttachment 下载进展附件
+func DownloadWorkOrderProgressAttachment(c *gin.Context) {
+	attID := c.Param("att_id")
+	var att models.WorkOrderProgressAttachment
+	if err := database.DB.First(&att, attID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "附件不存在"})
+		return
+	}
+	c.FileAttachment(att.FilePath, att.FileName)
+}
