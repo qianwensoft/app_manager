@@ -30,9 +30,9 @@ mqtt:
     client_id: app-manager
     qos: 1
 claude:
-    api_key: ***REMOVED***
+    api_key: ""  # Set via CLAUDE_API_KEY environment variable
     model: claude-sonnet-4-6
-    base_url: ***REMOVED***
+    base_url: ""  # Optional: set custom API base URL
 channel:
     kafka:
         brokers: []
