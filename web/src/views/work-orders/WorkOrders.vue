@@ -15,10 +15,12 @@
     <!-- 右侧主区 -->
     <div class="main">
       <div class="toolbar">
+        <el-input v-model="filters.search_key" placeholder="搜索工单号/业务单号/标题/其他编码" clearable style="width:280px" @keyup.enter="reload" @clear="reload" />
         <el-select v-model="filters.status" placeholder="状态" clearable style="width:130px" @change="reload">
           <el-option v-for="s in statusOptions" :key="s.value" :label="s.label" :value="s.value" />
         </el-select>
         <el-input v-model="filters.device_id" placeholder="设备ID" clearable style="width:120px" @keyup.enter="reload" />
+        <el-input v-model="filters.business_no" placeholder="业务单号" clearable style="width:150px" @keyup.enter="reload" />
         <el-select
           v-model="filters.tags"
           multiple
@@ -89,6 +91,14 @@
           <el-table-column label="设备" width="140" show-overflow-tooltip>
             <template #default="{ row }">{{ row.device_name_snap || row.device_name || row.device_id || '-' }}</template>
           </el-table-column>
+          <el-table-column label="业务单号" width="140" show-overflow-tooltip>
+            <template #default="{ row }">
+              <QRCodePopover v-if="row.business_no" :text="row.business_no">
+                <span class="qr-trigger">{{ row.business_no }}</span>
+              </QRCodePopover>
+              <span v-else>-</span>
+            </template>
+          </el-table-column>
           <el-table-column label="其他编码" min-width="140" show-overflow-tooltip>
             <template #default="{ row }">{{ row.other_codes || '-' }}</template>
           </el-table-column>
@@ -107,7 +117,7 @@
           <el-table-column prop="created_at" label="提交时间" width="180" />
           <el-table-column label="操作" width="100" fixed="right">
             <template #default="{ row }">
-              <el-button size="small" @click="$router.push(`/work-orders/${row.id}`)">详情</el-button>
+              <el-button size="small" @click="goToDetail(row.id)">详情</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -175,6 +185,12 @@
                       <el-tag :type="priorityType(element.priority)" size="small">{{ priorityLabel(element.priority) }}</el-tag>
                     </div>
                     <div class="board-card-sub">{{ typeName(element.type_code) }} · 设备{{ element.device_id || '-' }}</div>
+                    <div v-if="element.business_no" class="board-card-business">
+                      <span>业务单号：{{ element.business_no }}</span>
+                      <QRCodePopover :text="element.business_no" placement="right">
+                        <el-icon class="qr-icon" :size="16"><Grid /></el-icon>
+                      </QRCodePopover>
+                    </div>
                     <div v-if="element.other_codes" class="board-card-codes" :title="element.other_codes">
                       编码：{{ element.other_codes }}
                     </div>
@@ -201,11 +217,13 @@
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, ElNotification } from 'element-plus'
+import { Grid } from '@element-plus/icons-vue'
 import draggable from 'vuedraggable'
 import { getWorkOrders, getWorkOrderTypes, changeWorkOrderStatus, getWorkOrderTagDict, batchArchiveWorkOrders } from '@/api/workOrder'
 import { statusOptions, statusLabel, statusType, priorityType, priorityLabel } from './workOrderConst'
 import { useAuthStore } from '@/stores/auth'
 import { createWorkOrdersStomp } from '@/utils/workOrdersStomp'
+import QRCodePopover from '@/components/QRCodePopover.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -223,7 +241,7 @@ const page = ref(1)
 const limit = ref(20)
 const loading = ref(false)
 const view = ref('list')
-const filters = ref({ status: '', type_code: '', device_id: '', tags: [] })
+const filters = ref({ status: '', type_code: '', device_id: '', business_no: '', tags: [], search_key: '' })
 
 const onTagFilter = () => { page.value = 1; syncQuery(); load() }
 
@@ -292,8 +310,14 @@ const onCardClick = (id) => {
   if (boardFullscreen.value && document.fullscreenElement) {
     window.open(router.resolve(`/work-orders/${id}`).href, '_blank')
   } else {
-    router.push(`/work-orders/${id}`)
+    goToDetail(id)
   }
+}
+
+// 跳转工单详情，携带返回地址
+const goToDetail = (id) => {
+  const returnUrl = route.fullPath
+  router.push({ path: `/work-orders/${id}`, query: { from: returnUrl } })
 }
 
 const typeName = (code) => types.value.find(t => t.code === code)?.name || code || '-'
@@ -333,6 +357,8 @@ const buildQuery = () => {
   if (view.value !== 'list') q.view = view.value
   if (filters.value.status) q.status = filters.value.status
   if (filters.value.device_id) q.device_id = filters.value.device_id
+  if (filters.value.business_no) q.business_no = filters.value.business_no
+  if (filters.value.search_key) q.search_key = filters.value.search_key
   if (filters.value.tags.length) q.tags = filters.value.tags.join(',')
   if (noneOnly.value) q.type_code = '__none__'
   else if (filters.value.type_code) q.type_code = filters.value.type_code
@@ -348,6 +374,8 @@ const restoreFromQuery = () => {
   view.value = q.view === 'board' ? 'board' : 'list'
   filters.value.status = q.status || ''
   filters.value.device_id = q.device_id || ''
+  filters.value.business_no = q.business_no || ''
+  filters.value.search_key = q.search_key || ''
   filters.value.tags = q.tags ? String(q.tags).split(',').filter(Boolean) : []
   if (q.type_code === '__none__') {
     noneOnly.value = true
@@ -367,9 +395,10 @@ const load = async () => {
     if (view.value === 'board') {
       await loadBoard()
     } else {
-      const params = { status: filters.value.status, device_id: filters.value.device_id, page: page.value, limit: limit.value }
+      const params = { status: filters.value.status, device_id: filters.value.device_id, business_no: filters.value.business_no, page: page.value, limit: limit.value }
       if (filters.value.type_code) params.type_code = filters.value.type_code
       if (filters.value.tags.length) params.tags = filters.value.tags.join(',')
+      if (filters.value.search_key) params.search_key = filters.value.search_key
       const res = await getWorkOrders(params)
       rows.value = filterNone(res.data || [])
       total.value = res.total || 0
@@ -389,6 +418,7 @@ const loadBoard = async () => {
   if (filters.value.type_code) params.type_code = filters.value.type_code
   if (filters.value.device_id) params.device_id = filters.value.device_id
   if (filters.value.tags.length) params.tags = filters.value.tags.join(',')
+  if (filters.value.search_key) params.search_key = filters.value.search_key
   const res = await getWorkOrders(params)
   let data = filterNone(res.data || [])
   const next = { pending: [], in_progress: [], resolved: [], closed: [] }
@@ -551,9 +581,14 @@ onUnmounted(() => {
 .board-card-meta { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .board-card-meta span { font-size: 12px; color: #909399; }
 .board-card-sub { font-size: 12px; color: #c0c4cc; margin-top: 4px; }
+.board-card-business { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #909399; margin-top: 4px; }
 .board-card-codes { font-size: 12px; color: #909399; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .board-card-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .board-empty { text-align: center; color: #c0c4cc; font-size: 13px; padding: 16px 0; }
+.qr-trigger { cursor: pointer; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }
+.qr-trigger:hover { color: var(--el-color-primary); }
+.qr-icon { cursor: pointer; color: #909399; transition: color .2s ease; }
+.qr-icon:hover { color: var(--el-color-primary); }
 /* 可点击标签：统一指针 + 间距，hover 提供反馈 */
 .wo-tag-clickable { cursor: pointer; margin: 2px; transition: opacity .2s ease; }
 .wo-tag-clickable:hover { opacity: .82; }
