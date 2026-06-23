@@ -205,8 +205,11 @@
                   </template>
                 </div>
               </template>
+              <!-- 空状态提示作为默认插槽，确保拖放区域始终可用 -->
+              <template #footer>
+                <div v-if="!boardData[col.key].length" class="board-empty">暂无工单</div>
+              </template>
             </draggable>
-            <div v-if="!boardData[col.key].length" class="board-empty">暂无工单</div>
           </div>
         </div>
       </div>
@@ -701,7 +704,7 @@ onUnmounted(() => {
 .board-col { flex: 1; min-width: 0; background: #f5f7fa; border-radius: 6px; padding: 8px; }
 .board-col-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; padding: 0 4px; }
 .board-count { font-size: 12px; color: #909399; }
-.board-list { min-height: 120px; display: flex; flex-direction: column; gap: 8px; }
+.board-list { min-height: 200px; display: flex; flex-direction: column; gap: 8px; }
 .board-card { background: #fff; border: 1px solid #ebeef5; border-radius: 4px; padding: 10px; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.04); transition: box-shadow .2s ease, border-color .2s ease; }
 .board-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.1); border-color: #c6e2ff; }
 .board-card:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: 2px; }
