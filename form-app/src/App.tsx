@@ -11,6 +11,7 @@ import GeneratedFormAppPage from '@/pages/GeneratedFormAppPage'
 import MultiPageRuntimePage from '@/pages/MultiPageRuntimePage'
 import SkillsPage from '@/pages/SkillsPage'
 import ProfilePage from '@/pages/ProfilePage'
+import TestPage from '@/pages/TestPage'
 
 export default function App() {
   return (
@@ -30,6 +31,7 @@ export default function App() {
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/skills" element={<SkillsPage />} />
         <Route path="/schema" element={<SchemaPage />} />
+        <Route path="/test" element={<TestPage />} />
       </Routes>
     </BrowserRouter>
   )

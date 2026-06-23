@@ -1,13 +1,23 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
+import patchReactVersion from './vite-plugin-patch-react-version.js'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const backend = env.VITE_PROXY_TARGET || 'http://127.0.0.1:8080'
 
   return {
-    plugins: [react()],
+    plugins: [react(), patchReactVersion()],
+    define: {
+      'process.env': JSON.stringify({}),
+      'process.version': JSON.stringify('v16.0.0'),
+      'process.versions': JSON.stringify({ node: '16.0.0' }),
+      'process.platform': JSON.stringify('browser'),
+      'process.browser': JSON.stringify(true),
+      // 修复某些库读取 React.version 的问题
+      '__REACT_VERSION__': JSON.stringify('18.0.0'),
+    },
     resolve: {
       alias: [
         { find: '@', replacement: path.resolve(__dirname, 'src') },
@@ -64,6 +74,16 @@ export default defineConfig(({ mode }) => {
       outDir: 'dist',
       sourcemap: false,
       target: ['es2015', 'chrome67'],
+      rollupOptions: {
+        output: {
+          // 强制生成新的文件名（添加时间戳避免缓存）
+          entryFileNames: `assets/[name]-[hash]-${Date.now()}.js`,
+          chunkFileNames: `assets/[name]-[hash]-${Date.now()}.js`,
+          assetFileNames: `assets/[name]-[hash].[ext]`,
+          // 暂时禁用代码分割，将所有代码打包成一个文件，避免模块加载顺序问题
+          manualChunks: undefined,
+        },
+      },
     },
   }
 })

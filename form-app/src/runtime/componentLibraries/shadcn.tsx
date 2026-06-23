@@ -56,18 +56,20 @@ const FormilyTextarea = connect(
 
 /**
  * shadcn Select 适配 Formily
- * props.dataSource: FieldOption[] 格式 { label, value }
+ * Formily 会将 schema 的 enum 传递为 field.dataSource，
+ * 我们需要用 mapProps 将 dataSource 映射为组件的 options
  */
 const FormilySelect = connect(
   (props: any) => {
-    const { value, onChange, dataSource = [], placeholder } = props
+    const { value, onChange, options = [], placeholder } = props
+    console.log('[FormilySelect] props:', { value, options, placeholder, allProps: props })
     return (
       <Select value={value ? String(value) : undefined} onValueChange={onChange}>
         <SelectTrigger>
           <SelectValue placeholder={placeholder || '请选择'} />
         </SelectTrigger>
         <SelectContent>
-          {dataSource.map((opt: any) => (
+          {options.map((opt: any) => (
             <SelectItem key={String(opt.value)} value={String(opt.value)}>
               {opt.label}
             </SelectItem>
@@ -76,9 +78,12 @@ const FormilySelect = connect(
       </Select>
     )
   },
+  mapProps({
+    dataSource: 'options',
+  }),
   mapReadPretty((props: any) => {
-    const { value, dataSource = [] } = props
-    const item = dataSource.find((opt: any) => String(opt.value) === String(value))
+    const { value, options = [] } = props
+    const item = options.find((opt: any) => String(opt.value) === String(value))
     return <span>{item?.label || value || '-'}</span>
   })
 )
