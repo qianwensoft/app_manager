@@ -192,6 +192,8 @@ var migrateGroups = [][]interface{}{
 		&models.WorkOrderActivity{},
 		&models.WorkOrderTag{},
 		&models.WorkOrderTagLink{},
+		&models.WorkOrderProgress{},
+		&models.WorkOrderProgressAttachment{},
 	},
 }
 

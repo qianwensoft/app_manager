@@ -12,6 +12,7 @@ import (
 	"app-manager/models"
 	"app-manager/outbound"
 	"app-manager/stomp"
+	"app-manager/workflow"
 
 	"github.com/gin-gonic/gin"
 )
@@ -207,7 +208,7 @@ func workOrderPriorityName(priority string) string {
 }
 
 // workOrderEventPayload 构造外发/占位符可用的扁平字段。
-func workOrderEventPayload(event string, wo *models.WorkOrder, actor string) map[string]interface{} {
+func workOrderEventPayload(event string, wo *models.WorkOrder, actor string, changeComment string) map[string]interface{} {
 	// cleanString 清理字符串中的控制字符，避免破坏 JSON 格式
 	cleanString := func(s string) string {
 		// 移除或替换控制字符（ASCII 0-31，除了制表符）
@@ -234,6 +235,7 @@ func workOrderEventPayload(event string, wo *models.WorkOrder, actor string) map
 		"description":         cleanString(wo.Description),
 		"status":              wo.Status,
 		"priority":            wo.Priority,
+		"business_no":         cleanString(wo.BusinessNo),
 		"visibility":          wo.Visibility,
 		"external_ref":        cleanString(wo.ExternalRef),
 		"other_codes":         cleanString(wo.OtherCodes),
@@ -246,6 +248,7 @@ func workOrderEventPayload(event string, wo *models.WorkOrder, actor string) map
 		"status_name":         workOrderStatusName(wo.Status),
 		"priority_name":       workOrderPriorityName(wo.Priority),
 		"actor":               actor,
+		"change_comment":      cleanString(changeComment), // 状态变更/操作说明
 		"data_json":           wo.DataJSON,
 		"created_at":          wo.CreatedAt,
 		"updated_at":          wo.UpdatedAt,
@@ -276,7 +279,7 @@ func workOrderEventPayload(event string, wo *models.WorkOrder, actor string) map
 		var dev models.Device
 		if err := database.DB.First(&dev, wo.DeviceID).Error; err == nil {
 			payload["device_serial"] = dev.Serial
-			payload["device_name_current"] = dev.Name        // 当前设备名（区别于快照 device_name）
+			payload["device_name_current"] = dev.Name // 当前设备名（区别于快照 device_name）
 			payload["device_alias_server_current"] = dev.ServerAlias
 			payload["device_alias_agent_current"] = dev.AgentAlias
 			payload["device_group_current"] = dev.GroupName
@@ -337,9 +340,10 @@ func workOrderEventPayload(event string, wo *models.WorkOrder, actor string) map
 // dispatchWorkOrderEvent 工单事件统一出口：
 //  1. STOMP 实时推送（web 后台 / Agent 进度页）；
 //  2. 触发既有出站连接器（trigger_type=system_event）；
-//  3. 调用工单专属 webhook 配置（指向第三方接口或连接器接口，可多条，按 type 过滤）。
-func dispatchWorkOrderEvent(event string, wo *models.WorkOrder, actor string) {
-	payload := workOrderEventPayload(event, wo, actor)
+//  3. 调用工单专属 webhook 配置（指向第三方接口或连接器接口，可多条，按 type 过滤）；
+//  4. 触发工作流引擎（workflow engine）。
+func dispatchWorkOrderEvent(event string, wo *models.WorkOrder, actor string, changeComment string) {
+	payload := workOrderEventPayload(event, wo, actor, changeComment)
 	b, _ := json.Marshal(payload)
 	s := string(b)
 
@@ -352,6 +356,9 @@ func dispatchWorkOrderEvent(event string, wo *models.WorkOrder, actor string) {
 
 	// 3. 工单专属 webhook（异步，逐条调用）
 	go fireWorkOrderWebhooks(event, wo, payload)
+
+	// 4. 工作流引擎（异步执行）
+	go fireWorkOrderWorkflows(event, wo, actor)
 }
 
 func fireWorkOrderWebhooks(event string, wo *models.WorkOrder, payload map[string]interface{}) {
@@ -652,4 +659,9 @@ func truncateString(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "...(truncated)"
+}
+
+// fireWorkOrderWorkflows 触发工作流引擎
+func fireWorkOrderWorkflows(event string, wo *models.WorkOrder, actor string) {
+	workflow.DefaultEngine.Dispatch(event, wo, actor)
 }

@@ -51,11 +51,19 @@ func SetupRouter() *gin.Engine {
 	}
 	r.Static("/scada-editor", scadaEditorDir)
 	// form-app: 优先 web/dist/form-app（make 构建后），fallback 到 form-app/dist（开发模式）
+	// 禁用缓存以避免浏览器加载旧版本的 JavaScript 文件
 	formAppDir := "./web/dist/form-app"
 	if _, err := os.Stat(formAppDir); os.IsNotExist(err) {
 		formAppDir = "../form-app/dist"
 	}
-	r.Static("/form-app", formAppDir)
+	formAppGroup := r.Group("/form-app")
+	formAppGroup.Use(func(c *gin.Context) {
+		c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+		c.Header("Pragma", "no-cache")
+		c.Header("Expires", "0")
+		c.Next()
+	})
+	formAppGroup.StaticFS("", gin.Dir(formAppDir, false))
 
 	// Prometheus（内网抓取；生产请用防火墙或反向代理限制访问）
 	r.GET("/metrics", PrometheusMetrics)
@@ -82,6 +90,7 @@ func SetupRouter() *gin.Engine {
 	r.GET("/api/agent/menu-manifest", AgentMenuManifest)
 	r.POST("/api/agent/menu-execution/report", AgentMenuExecutionReport)
 	r.GET("/api/agent/update/check", AgentUpdateCheck)
+	r.GET("/api/agent/work-orders", AgentListWorkOrders)
 
 	// 免登录：组态分享
 	r.GET("/api/scada/info/share/:token", GetScadaInfoByShareToken)
@@ -498,6 +507,12 @@ func SetupRouter() *gin.Engine {
 		woRuntime.POST("/:id/items", UploadWorkOrderItem)
 		woRuntime.GET("/:id/items/:item_id/download", DownloadWorkOrderItem)
 		woRuntime.PUT("/:id/items/:item_id", UpdateWorkOrderItem)
+		woRuntime.POST("/items/:item_id/recognize-barcode", RecognizeWorkOrderItemBarcode)
+		// 工单进展：web(JWT) 与 app(device-token) 共用
+		woRuntime.GET("/:id/progress", ListWorkOrderProgress)
+		woRuntime.POST("/:id/progress", CreateWorkOrderProgress)
+		woRuntime.POST("/progress/:progress_id/attachments", UploadWorkOrderProgressAttachment)
+		woRuntime.GET("/progress/attachments/:att_id/download", DownloadWorkOrderProgressAttachment)
 		// 标签字典读取 + 工单标签维护：web(JWT) 与 app(device-token) 共用
 		woRuntime.GET("/tags", ListWorkOrderTagDict)
 		woRuntime.PUT("/:id/tags", SetWorkOrderTags)

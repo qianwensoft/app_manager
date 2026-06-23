@@ -12,15 +12,15 @@ type WorkOrderType struct {
 	FormAppCode string `gorm:"size:100" json:"form_app_code"`
 	FormPageKey string `gorm:"size:64;default:'form'" json:"form_page_key"`
 	// DefaultTitle 选择该类型时自动带出的默认工单标题（提交端标题为空时填充）。
-	DefaultTitle string    `gorm:"size:200" json:"default_title"`
+	DefaultTitle string `gorm:"size:200" json:"default_title"`
 	// BoardCardTemplate 看板卡片正文模板：多行，每行一段，支持 {{field}} 占位符
 	// （field 取工单行字段，如 title/code/priority/status/device_name/tags/other_codes）。
 	// 空表示用默认卡片布局。
-	BoardCardTemplate string `gorm:"type:text" json:"board_card_template"`
-	Enabled      bool      `gorm:"default:true" json:"enabled"`
-	SortOrder   int       `gorm:"default:0" json:"sort_order"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	BoardCardTemplate string    `gorm:"type:text" json:"board_card_template"`
+	Enabled           bool      `gorm:"default:true" json:"enabled"`
+	SortOrder         int       `gorm:"default:0" json:"sort_order"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 func (WorkOrderType) TableName() string { return "work_order_types" }
@@ -73,15 +73,17 @@ type WorkOrder struct {
 	Archived   bool       `gorm:"index;default:false" json:"archived"`
 	ArchivedAt *time.Time `json:"archived_at"`
 	ArchivedBy *uint      `json:"archived_by"`
+	// BusinessNo 业务单号（内部业务流程编号，可由用户输入或系统生成）。
+	BusinessNo string `gorm:"size:128;index" json:"business_no"`
 	// ExternalRef 第三方系统回写的工单号（对账/幂等）。
 	ExternalRef string `gorm:"size:128;index" json:"external_ref"`
 	// OtherCodes 其他编码（App 拍照识别二维码等填入），多个用逗号分隔。
 	OtherCodes string `gorm:"type:text" json:"other_codes"`
 	// 设备信息快照：提交时刻冻结，便于审计/对账，不随设备改名而变。
-	DeviceName        string `gorm:"size:100" json:"device_name_snap"`
-	DeviceAliasServer string `gorm:"size:100" json:"device_alias_server"`
-	DeviceAliasAgent  string `gorm:"size:100" json:"device_alias_agent"`
-	DeviceGroup       string `gorm:"size:100" json:"device_group"`
+	DeviceName        string    `gorm:"size:100" json:"device_name_snap"`
+	DeviceAliasServer string    `gorm:"size:100" json:"device_alias_server"`
+	DeviceAliasAgent  string    `gorm:"size:100" json:"device_alias_agent"`
+	DeviceGroup       string    `gorm:"size:100" json:"device_group"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
 
@@ -123,6 +125,36 @@ type WorkOrderActivity struct {
 
 func (WorkOrderActivity) TableName() string { return "work_order_activities" }
 
+// WorkOrderProgress 工单进展记录（Web端维护、App端补充说明/催单）。
+// 不记入 activities 时间线，独立展示。
+type WorkOrderProgress struct {
+	ID          uint   `gorm:"primaryKey" json:"id"`
+	WorkOrderID uint   `gorm:"index" json:"work_order_id"`
+	Content     string `gorm:"type:text;not null" json:"content"` // 进展内容
+	// CreatedBy 创建人 user_id；0 表示设备/系统。
+	CreatedBy   uint      `gorm:"index" json:"created_by"`
+	CreatorName string    `gorm:"size:120" json:"creator_name"` // 创建人名称快照
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+func (WorkOrderProgress) TableName() string { return "work_order_progress" }
+
+// WorkOrderProgressAttachment 工单进展附件（图片、视频、音频、录屏、录音、日志）。
+type WorkOrderProgressAttachment struct {
+	ID         uint   `gorm:"primaryKey" json:"id"`
+	ProgressID uint   `gorm:"index" json:"progress_id"`
+	FileName   string `gorm:"size:255" json:"file_name"`
+	FilePath   string `gorm:"size:500" json:"-"`
+	FileSize   int64  `json:"file_size"`
+	// Kind 附件类型：photo|video|audio|screen_record|voice|logcat
+	Kind        string    `gorm:"size:32" json:"kind"`
+	ContentType string    `gorm:"size:128" json:"content_type"`
+	MetaJSON    string    `gorm:"type:text" json:"meta_json"` // 扩展信息（时长、分辨率等）
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+func (WorkOrderProgressAttachment) TableName() string { return "work_order_progress_attachments" }
+
 // WorkOrderTag 工单标签字典。
 type WorkOrderTag struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
@@ -139,9 +171,9 @@ func (WorkOrderTag) TableName() string { return "work_order_tags" }
 
 // WorkOrderTagLink 工单-标签关联（多对多）。
 type WorkOrderTagLink struct {
-	ID          uint      `gorm:"primaryKey" json:"id"`
-	WorkOrderID uint      `gorm:"index:idx_wo_tag,unique,priority:1" json:"work_order_id"`
-	TagCode     string    `gorm:"size:64;index:idx_wo_tag,unique,priority:2" json:"tag_code"`
+	ID          uint   `gorm:"primaryKey" json:"id"`
+	WorkOrderID uint   `gorm:"index:idx_wo_tag,unique,priority:1" json:"work_order_id"`
+	TagCode     string `gorm:"size:64;index:idx_wo_tag,unique,priority:2" json:"tag_code"`
 	// TagName 挂载时刻的标签名称快照：字典改名后历史关联仍保留当时名称。
 	TagName   string    `gorm:"size:120" json:"tag_name"`
 	CreatedAt time.Time `json:"created_at"`
@@ -171,8 +203,8 @@ func (WorkOrderWorkflow) TableName() string { return "work_order_workflows" }
 
 // WorkOrderWorkflowLog 工作流执行日志。
 type WorkOrderWorkflowLog struct {
-	ID         uint      `gorm:"primaryKey" json:"id"`
-	WorkflowID uint      `gorm:"index" json:"workflow_id"`
+	ID         uint `gorm:"primaryKey" json:"id"`
+	WorkflowID uint `gorm:"index" json:"workflow_id"`
 	// WorkOrderID 触发工单 ID。
 	WorkOrderID uint   `gorm:"index" json:"work_order_id"`
 	Event       string `gorm:"size:64" json:"event"`
@@ -181,9 +213,11 @@ type WorkOrderWorkflowLog struct {
 	// Status 执行状态：success | partial | failed。
 	Status string `gorm:"size:32" json:"status"`
 	// ErrorMsg 错误信息（失败时）。
-	ErrorMsg  string    `gorm:"type:text" json:"error_msg"`
-	DurationMs int64     `json:"duration_ms"`
-	CreatedAt time.Time `json:"created_at"`
+	ErrorMsg string `gorm:"type:text" json:"error_msg"`
+	// ExecutionLogs JS 执行日志（JSON 数组）。
+	ExecutionLogs string    `gorm:"type:text" json:"execution_logs"`
+	DurationMs    int64     `json:"duration_ms"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 func (WorkOrderWorkflowLog) TableName() string { return "work_order_workflow_logs" }

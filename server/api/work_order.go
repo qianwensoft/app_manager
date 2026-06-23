@@ -1076,6 +1076,85 @@ func findWorkOrderByCode(code string) (*models.WorkOrder, error) {
 
 // ── 开放 API（第三方 X-API-Key） ──────────────────────────────────────────
 
+// AgentListWorkOrders GET /api/agent/work-orders
+// Agent 端（device token 认证）工单列表，支持搜索和分页。
+func AgentListWorkOrders(c *gin.Context) {
+	token := strings.TrimSpace(c.GetHeader("X-Device-Token"))
+	if token == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing X-Device-Token"})
+		return
+	}
+	var dev models.Device
+	err := database.DB.Table("devices").Where("agent_token = ?", token).First(&dev).Error
+	if err != nil {
+		fmt.Printf("[AgentListWorkOrders] Token validation failed: token=%s, err=%v\n", token, err)
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+		return
+	}
+	fmt.Printf("[AgentListWorkOrders] Device authenticated: id=%d, name=%s\n", dev.ID, dev.Name)
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 200 {
+		limit = 50
+	}
+
+	q := database.DB.Model(&models.WorkOrder{})
+	// 默认仅未归档
+	q = q.Where("archived = ? OR archived IS NULL", false)
+
+	// 设备 ID 过滤（"我的工单"场景）
+	if c.Query("my") == "1" {
+		q = q.Where("device_id = ?", dev.ID)
+	}
+
+	// 状态过滤
+	if s := c.Query("status"); s != "" {
+		q = q.Where("status = ?", s)
+	}
+
+	// 关键词搜索：编号、业务单号、其他编码、标题
+	if searchKey := strings.TrimSpace(c.Query("search_key")); searchKey != "" {
+		pattern := "%" + searchKey + "%"
+		q = q.Where("code LIKE ? OR business_no LIKE ? OR other_codes LIKE ? OR title LIKE ?",
+			pattern, pattern, pattern, pattern)
+	}
+
+	var total int64
+	q.Count(&total)
+
+	var rows []models.WorkOrder
+	q.Order("id DESC").Offset((page - 1) * limit).Limit(limit).Find(&rows)
+
+	// 批量补标签
+	ids := make([]uint, 0, len(rows))
+	for i := range rows {
+		ids = append(ids, rows[i].ID)
+	}
+	tagsByWO := map[uint][]string{}
+	if len(ids) > 0 {
+		var links []models.WorkOrderTagLink
+		database.DB.Where("work_order_id IN ?", ids).Find(&links)
+		for _, l := range links {
+			tagsByWO[l.WorkOrderID] = append(tagsByWO[l.WorkOrderID], l.TagCode)
+		}
+	}
+
+	type listRow struct {
+		models.WorkOrder
+		Tags []string `json:"tags"`
+	}
+	out := make([]listRow, 0, len(rows))
+	for _, wo := range rows {
+		out = append(out, listRow{WorkOrder: wo, Tags: tagsByWO[wo.ID]})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": out, "total": total})
+}
+
 // OpenGetWorkOrder GET /api/open/v1/work-orders/:code
 func OpenGetWorkOrder(c *gin.Context) {
 	wo, err := findWorkOrderByCode(c.Param("code"))

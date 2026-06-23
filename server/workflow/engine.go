@@ -9,6 +9,7 @@ import (
 
 	"app-manager/database"
 	"app-manager/models"
+	"app-manager/outbound"
 
 	"github.com/dop251/goja"
 	"gorm.io/gorm"
@@ -34,6 +35,7 @@ type WorkflowContext struct {
 	Event     string                 `json:"event"`
 	Actor     string                 `json:"actor"`
 	Variables map[string]interface{} `json:"variables"` // JS 执行时的共享变量
+	Logs      []string               `json:"logs"`      // JS 执行日志
 }
 
 // Dispatch 分发工单事件到匹配的工作流。
@@ -99,6 +101,7 @@ func (e *Engine) executeWorkflow(wf *models.WorkOrderWorkflow, event string, wo 
 		Event:     event,
 		Actor:     actor,
 		Variables: make(map[string]interface{}),
+		Logs:      make([]string, 0),
 	}
 
 	executed := 0
@@ -123,6 +126,13 @@ func (e *Engine) executeWorkflow(wf *models.WorkOrderWorkflow, event string, wo 
 	} else {
 		log.Status = "success"
 	}
+
+	// 保存执行日志
+	if len(ctx.Logs) > 0 {
+		logsJSON, _ := json.Marshal(ctx.Logs)
+		log.ExecutionLogs = string(logsJSON)
+	}
+
 	database.DB.Create(&log)
 }
 
@@ -137,9 +147,14 @@ func (e *Engine) executeAction(ctx *WorkflowContext, action *WorkflowAction) err
 		return e.createWorkOrder(ctx, action.Config)
 	case "query_work_orders":
 		return e.queryWorkOrders(ctx, action.Config)
+	case "call_endpoint":
+		return e.callEndpoint(ctx, action.Config)
+	case "call_connector":
+		return e.callConnector(ctx, action.Config)
+	case "call_data_interface":
+		return e.callDataInterface(ctx, action.Config)
 	default:
-		// 其他类型（call_endpoint/call_connector/call_data_interface）暂不实现
-		return fmt.Errorf("动作类型 %s 暂不支持，请使用 execute_js 调用", action.Type)
+		return fmt.Errorf("未知的动作类型: %s", action.Type)
 	}
 }
 
@@ -157,17 +172,50 @@ func (e *Engine) executeJS(ctx *WorkflowContext, cfg map[string]interface{}) err
 	vm.Set("actor", ctx.Actor)
 	vm.Set("variables", ctx.Variables)
 
+	// 创建 ctx 对象（包含上下文变量）
+	ctxObj := vm.NewObject()
+	for k, v := range ctx.Variables {
+		ctxObj.Set(k, v)
+	}
+	vm.Set("ctx", ctxObj)
+
 	// 提供工具函数
 	vm.Set("log", func(msg string) {
-		// 简单日志，生产环境可写入专门的日志表
+		ctx.Logs = append(ctx.Logs, msg)
 		fmt.Printf("[Workflow JS] %s\n", msg)
 	})
 	vm.Set("setVariable", func(key string, val interface{}) {
 		ctx.Variables[key] = val
+		// 同步更新到 ctx 对象
+		ctxObj.Set(key, val)
 	})
 	vm.Set("getVariable", func(key string) interface{} {
 		return ctx.Variables[key]
 	})
+
+	// 提供 console 对象
+	consoleObj := vm.NewObject()
+	consoleObj.Set("log", func(args ...interface{}) {
+		msg := fmt.Sprint(args...)
+		ctx.Logs = append(ctx.Logs, msg)
+		fmt.Printf("[Workflow JS] %s\n", msg)
+	})
+	consoleObj.Set("info", func(args ...interface{}) {
+		msg := fmt.Sprint(args...)
+		ctx.Logs = append(ctx.Logs, "[INFO] "+msg)
+		fmt.Printf("[Workflow JS INFO] %s\n", msg)
+	})
+	consoleObj.Set("warn", func(args ...interface{}) {
+		msg := fmt.Sprint(args...)
+		ctx.Logs = append(ctx.Logs, "[WARN] "+msg)
+		fmt.Printf("[Workflow JS WARN] %s\n", msg)
+	})
+	consoleObj.Set("error", func(args ...interface{}) {
+		msg := fmt.Sprint(args...)
+		ctx.Logs = append(ctx.Logs, "[ERROR] "+msg)
+		fmt.Printf("[Workflow JS ERROR] %s\n", msg)
+	})
+	vm.Set("console", consoleObj)
 
 	// 执行
 	_, err := vm.RunString(code)
@@ -308,4 +356,98 @@ func getUint(m map[string]interface{}, key string, def uint) uint {
 func genWorkOrderCode() string {
 	// 复用工单编码生成逻辑
 	return fmt.Sprintf("WO-%s-%d", time.Now().Format("20060102"), time.Now().UnixNano()%10000)
+}
+
+// callEndpoint 调用第三方接口。
+func (e *Engine) callEndpoint(ctx *WorkflowContext, cfg map[string]interface{}) error {
+	endpointID, ok := cfg["endpoint_id"].(float64)
+	if !ok {
+		return fmt.Errorf("缺少 endpoint_id")
+	}
+
+	params, _ := cfg["params"].(map[string]interface{})
+	if params == nil {
+		params = make(map[string]interface{})
+	}
+
+	// 展开占位符
+	params = expandPlaceholders(params, ctx)
+
+	// 加载 endpoint
+	var ep models.OutboundEndpoint
+	if err := database.DB.Preload("App").First(&ep, uint(endpointID)).Error; err != nil {
+		return fmt.Errorf("endpoint not found: %w", err)
+	}
+
+	if !ep.Enabled || ep.App == nil || !ep.App.Enabled {
+		return fmt.Errorf("endpoint or app disabled")
+	}
+
+	// 构造变量映射，转换为 {{key}} 格式
+	sampleVars := make(map[string]string, len(params))
+	for k, v := range params {
+		switch val := v.(type) {
+		case string:
+			sampleVars["{{"+k+"}}"] = val
+		default:
+			b, _ := json.Marshal(val)
+			sampleVars["{{"+k+"}}"] = string(b)
+		}
+	}
+
+	// 调用 endpoint
+	trace, _, _, _, _, err := outbound.DebugHTTPEndpoint(database.DB, ep.App, ep, sampleVars, ep.TimeoutMS, nil)
+
+	if err != nil {
+		return fmt.Errorf("endpoint call failed: %w", err)
+	}
+
+	// 保存结果到上下文
+	if saveKey, ok := cfg["save_to_context"].(string); ok && saveKey != "" {
+		result := map[string]interface{}{
+			"status": trace.Response.Status,
+			"body":   trace.Response.Body,
+		}
+		ctx.Variables[saveKey] = result
+	}
+
+	return nil
+}
+
+// callConnector 调用连接器接口。
+func (e *Engine) callConnector(ctx *WorkflowContext, cfg map[string]interface{}) error {
+	_, ok := cfg["connector_code"].(string)
+	if !ok {
+		return fmt.Errorf("缺少 connector_code")
+	}
+
+	// 展开占位符（未来使用）
+	// params, _ := cfg["params"].(map[string]interface{})
+	// if params == nil {
+	// 	params = make(map[string]interface{})
+	// }
+	// params = expandPlaceholders(params, ctx)
+
+	// 暂时不支持，因为需要 api 包的 executeConnectorInterface 函数
+	// 用户可以使用 webhook 配置或 execute_js 调用
+	return fmt.Errorf("call_connector 暂不支持，请使用工单 webhook 配置或 execute_js 调用")
+}
+
+// callDataInterface 调用数据接口。
+func (e *Engine) callDataInterface(ctx *WorkflowContext, cfg map[string]interface{}) error {
+	_, ok := cfg["interface_id"].(float64)
+	if !ok {
+		return fmt.Errorf("缺少 interface_id")
+	}
+
+	// 展开占位符（未来使用）
+	// params, _ := cfg["params"].(map[string]interface{})
+	// if params == nil {
+	// 	params = make(map[string]interface{})
+	// }
+	// params = expandPlaceholders(params, ctx)
+
+	// 暂时不支持，因为需要 api 包的相关函数
+	// 用户可以使用 webhook 配置或 execute_js 调用
+	return fmt.Errorf("call_data_interface 暂不支持，请使用工单 webhook 配置或 execute_js 调用")
 }

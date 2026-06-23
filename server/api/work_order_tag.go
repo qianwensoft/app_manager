@@ -180,7 +180,7 @@ func SetWorkOrderTags(c *gin.Context) {
 	addWorkOrderActivity(wo.ID, "tag_change", wo.Status, wo.Status, c.GetUint("user_id"), actorLabel(c), detail)
 
 	// 触发标签变更事件
-	dispatchWorkOrderEvent("work_order.tags_changed", &wo, actorLabel(c))
+	dispatchWorkOrderEvent("work_order.tags_changed", &wo, actorLabel(c), detail)
 
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"tags": workOrderTagCodes(wo.ID)}})
 }

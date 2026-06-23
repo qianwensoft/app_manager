@@ -73,8 +73,8 @@ func resolveKeyToID(key string, allowNumericID bool) (uint, bool) {
 	var d models.Device
 	// 静默查询模式：探测性查询不记录"record not found"日志
 	sess := database.DB.Session(&gorm.Session{
-		NewDB:                true,
-		Logger:               database.DB.Config.Logger.LogMode(logger.Silent),
+		NewDB:  true,
+		Logger: database.DB.Config.Logger.LogMode(logger.Silent),
 	})
 
 	if allowNumericID && isNumericID(key) {

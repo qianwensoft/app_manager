@@ -4,8 +4,8 @@ import (
 	"app-manager/config"
 	"app-manager/database"
 	"app-manager/models"
-	"app-manager/storage"
 	"app-manager/stomp"
+	"app-manager/storage"
 	"encoding/json"
 	"mime/multipart"
 	"net/http"
@@ -328,16 +328,16 @@ func saveScadaResourceFile(file *multipart.FileHeader, category string) (string,
 // publishScadaEvent 发布组态事件到 STOMP topic
 func publishScadaEvent(event string, scada models.ScadaInfo) {
 	payload := map[string]interface{}{
-		"event":              event,
-		"id":                 scada.ID,
-		"scada_code":         scada.ScadaCode,
-		"scada_name":         scada.ScadaName,
-		"group_id":           scada.GroupID,
-		"description":        scada.Description,
-		"preview_image":      scada.PreviewImage,
-		"publish_status":     scada.PublishStatus,
-		"content_version":    scada.ContentVersion,
-		"updated_at":         scada.UpdatedAt.Format(time.RFC3339),
+		"event":           event,
+		"id":              scada.ID,
+		"scada_code":      scada.ScadaCode,
+		"scada_name":      scada.ScadaName,
+		"group_id":        scada.GroupID,
+		"description":     scada.Description,
+		"preview_image":   scada.PreviewImage,
+		"publish_status":  scada.PublishStatus,
+		"content_version": scada.ContentVersion,
+		"updated_at":      scada.UpdatedAt.Format(time.RFC3339),
 	}
 	if body, err := json.Marshal(payload); err == nil {
 		stomp.DefaultHub.PublishJSON("/topic/scada-events", string(body))
