@@ -169,6 +169,7 @@ export type EventSource =
   | { kind: 'state_change'; scope: StateScopeKind; field: string }
   | { kind: 'page_enter' }
   | { kind: 'page_exit' }
+  | { kind: 'timer'; delay: number; interval?: number; repeat?: number }
 
 // ── 页面事件 ────────────────────────────────────────────────────────
 export interface PageEvent {

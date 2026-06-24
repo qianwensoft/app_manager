@@ -400,6 +400,46 @@ export function setupPageEvents(
     }
   }
 
+  // timer：定时器事件
+  for (const ev of events) {
+    if (ev.source.kind !== 'timer') continue
+    const { delay, interval, repeat } = ev.source
+    let count = 0
+    let timerId: any
+
+    const execute = () => {
+      const ctx = makeCtx(deps, {})
+      if (!evalCondition(ev.when, ctx)) return
+      void runActions(ev, ctx, deps)
+      count++
+      // 达到重复次数后停止
+      if (repeat && count >= repeat && timerId) {
+        clearInterval(timerId)
+      }
+    }
+
+    if (interval) {
+      // 重复定时器：delay 后首次执行，然后每 interval 重复
+      const firstTimer = setTimeout(() => {
+        execute()
+        // 首次执行后启动重复定时器
+        if (!repeat || count < repeat) {
+          timerId = setInterval(() => {
+            execute()
+          }, interval)
+          disposers.push(() => clearInterval(timerId))
+        }
+      }, delay)
+      disposers.push(() => clearTimeout(firstTimer))
+    } else {
+      // 单次定时器：仅 delay 后执行一次
+      timerId = setTimeout(() => {
+        execute()
+      }, delay)
+      disposers.push(() => clearTimeout(timerId))
+    }
+  }
+
   return {
     cleanup: () => { disposers.forEach(d => d()) },
     triggerButton,

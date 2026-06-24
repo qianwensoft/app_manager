@@ -3,6 +3,7 @@
  * 每个事件：事件源（扫码/自定义事件/按钮/字段变更）+ 触发条件 + 动作链。
  * 动作支持：设字段 / 调接口 / 打印 / 跳页 / 提示。
  */
+import React from 'react'
 import { Button, Input, Select, Collapse, Space, Tooltip, AutoComplete } from 'antd'
 import type { FieldDef } from '@/runtime/types'
 import type { PrinterTemplate } from '@/runtime/printerTypes'
@@ -57,6 +58,20 @@ function schemaToDemo(schema: any, depth = 0): any {
   }
 }
 
+/** 从 param_contract_json 提取参数名列表（JSON 数组格式：[{name, type, required}]） */
+function extractParamNames(paramContractJson: string | undefined): string[] {
+  if (!paramContractJson) return []
+  try {
+    const contract = JSON.parse(paramContractJson)
+    if (Array.isArray(contract)) {
+      return contract.filter(p => p.name).map(p => p.name)
+    }
+  } catch {
+    return []
+  }
+  return []
+}
+
 /** 解析 JSON Schema 字符串，返回点路径列表和 demo JSON 字符串 */
 function parseSchema(schemaJson: string | undefined): { paths: string[]; demo: string } {
   if (!schemaJson) return { paths: [], demo: '' }
@@ -82,6 +97,9 @@ export default function EventsConfigSection({
   interfaceSchemas = {},
   thirdPartySchemas = {},
   connectorSchemas = {},
+  interfaceParamSchemas = {},
+  thirdPartyParamSchemas = {},
+  connectorParamSchemas = {},
 }: {
   events: PageEvent[]
   onChange: (next: PageEvent[]) => void
@@ -93,6 +111,9 @@ export default function EventsConfigSection({
   interfaceSchemas?: Record<string, string>
   thirdPartySchemas?: Record<string, string>
   connectorSchemas?: Record<string, string>
+  interfaceParamSchemas?: Record<string, string>
+  thirdPartyParamSchemas?: Record<string, string>
+  connectorParamSchemas?: Record<string, string>
 }) {
   const fieldOptions = fields.map(f => ({ value: f.field, label: f.label || f.field }))
 
@@ -116,6 +137,16 @@ export default function EventsConfigSection({
     onChange(events.map((e, i) => (i === idx ? { ...e, ...patch } : e)))
   const removeEvent = (idx: number) =>
     onChange(events.filter((_, i) => i !== idx))
+  const copyEvent = (idx: number) => {
+    const source = events[idx]
+    const copied: PageEvent = {
+      ...JSON.parse(JSON.stringify(source)), // 深拷贝
+      id: genId('ev'),
+      name: `${source.name} (副本)`,
+    }
+    // 在原事件后面插入
+    onChange([...events.slice(0, idx + 1), copied, ...events.slice(idx + 1)])
+  }
 
   return (
     <div style={{ background: '#f8fafc', borderRadius: 8, padding: 14, border: '1px solid #e2e8f0' }}>
@@ -137,8 +168,12 @@ export default function EventsConfigSection({
               key={ev.id}
               header={<span style={{ fontSize: 12, color: '#374151' }}>{ev.name || ev.id}（{sourceLabel(ev.source)}）</span>}
               extra={
-                <span onClick={e => { e.stopPropagation(); removeEvent(idx) }}
-                  style={{ color: '#ef4444', fontSize: 12, cursor: 'pointer' }}>删除</span>
+                <Space size={8} onClick={e => e.stopPropagation()}>
+                  <span onClick={() => copyEvent(idx)}
+                    style={{ color: '#3b82f6', fontSize: 12, cursor: 'pointer' }}>复制</span>
+                  <span onClick={() => removeEvent(idx)}
+                    style={{ color: '#ef4444', fontSize: 12, cursor: 'pointer' }}>删除</span>
+                </Space>
               }
             >
               <Space direction="vertical" size={10} style={{ width: '100%' }}>
@@ -178,6 +213,9 @@ export default function EventsConfigSection({
                   interfaceSchemas={interfaceSchemas}
                   thirdPartySchemas={thirdPartySchemas}
                   connectorSchemas={connectorSchemas}
+                  interfaceParamSchemas={interfaceParamSchemas}
+                  thirdPartyParamSchemas={thirdPartyParamSchemas}
+                  connectorParamSchemas={connectorParamSchemas}
                 />
               </Space>
             </Collapse.Panel>
@@ -197,6 +235,7 @@ function sourceLabel(s: EventSource): string {
     case 'state_change': return `状态变更:${s.scope === 'app' ? '应用' : '页面'}.${s.field || '?'}`
     case 'page_enter': return '进入页面'
     case 'page_exit': return '退出页面'
+    case 'timer': return `定时器:${s.delay}ms${s.interval ? ` / ${s.interval}ms` : ''}`
   }
 }
 
@@ -218,6 +257,7 @@ function SourceEditor({ source, fields, onChange }: {
               : kind === 'state_change' ? { kind: 'state_change', scope: 'app', field: '' }
               : kind === 'page_enter' ? { kind: 'page_enter' }
               : kind === 'page_exit' ? { kind: 'page_exit' }
+              : kind === 'timer' ? { kind: 'timer', delay: 1000 }
               : { kind: 'field_change', field: '' }
             onChange(next)
           }}
@@ -229,6 +269,7 @@ function SourceEditor({ source, fields, onChange }: {
             { value: 'state_change', label: '状态变更' },
             { value: 'page_enter', label: '进入页面' },
             { value: 'page_exit', label: '退出页面' },
+            { value: 'timer', label: '定时器' },
           ]}
         />
         <div style={{ flex: 1 }}>
@@ -268,6 +309,33 @@ function SourceEditor({ source, fields, onChange }: {
                 <Input size="small" style={{ flex: 1 }} placeholder="状态字段名（$app.字段）"
                   value={source.field} onChange={e => onChange({ kind: 'state_change', scope: 'app', field: e.target.value })} />
               )}
+            </div>
+          )}
+          {source.kind === 'timer' && (
+            <div style={{ display: 'flex', gap: 6, flexDirection: 'column' }}>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <span style={{ fontSize: 12, color: '#64748b', minWidth: 60 }}>初次延迟</span>
+                <Input size="small" type="number" style={{ flex: 1 }} placeholder="毫秒"
+                  value={source.delay} onChange={e => onChange({ ...source, delay: Number(e.target.value) || 0 })} />
+                <span style={{ fontSize: 11, color: '#94a3b8' }}>ms</span>
+              </div>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <span style={{ fontSize: 12, color: '#64748b', minWidth: 60 }}>重复间隔</span>
+                <Input size="small" type="number" style={{ flex: 1 }} placeholder="不填=仅执行一次"
+                  value={source.interval || ''} onChange={e => onChange({ ...source, interval: e.target.value ? Number(e.target.value) : undefined })} />
+                <span style={{ fontSize: 11, color: '#94a3b8' }}>ms</span>
+              </div>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <span style={{ fontSize: 12, color: '#64748b', minWidth: 60 }}>重复次数</span>
+                <Input size="small" type="number" style={{ flex: 1 }} placeholder="不填=无限重复"
+                  value={source.repeat || ''} onChange={e => onChange({ ...source, repeat: e.target.value ? Number(e.target.value) : undefined })} />
+                <span style={{ fontSize: 11, color: '#94a3b8' }}>次</span>
+              </div>
+              <div style={{ fontSize: 11, color: '#94a3b8' }}>
+                首次执行：页面挂载后 {source.delay}ms。
+                {source.interval ? ` 之后每 ${source.interval}ms 重复` : ' 之后不再执行。'}
+                {source.repeat && source.interval ? ` 最多重复 ${source.repeat} 次。` : ''}
+              </div>
             </div>
           )}
         </div>
@@ -393,7 +461,7 @@ function SrcInput({ value, onChange, fields, style }: {
 // ── 动作链 ──────────────────────────────────────────────────────────
 function ActionsEditor({
   actions, onChange, fieldOptions, customEventNames = [], printers, interfaceOptions, thirdPartyEndpointOptions, connectorInterfaceOptions,
-  interfaceSchemas, thirdPartySchemas, connectorSchemas,
+  interfaceSchemas, thirdPartySchemas, connectorSchemas, interfaceParamSchemas, thirdPartyParamSchemas, connectorParamSchemas,
 }: {
   actions: EventAction[]
   onChange: (a: EventAction[]) => void
@@ -406,32 +474,123 @@ function ActionsEditor({
   interfaceSchemas: Record<string, string>
   thirdPartySchemas: Record<string, string>
   connectorSchemas: Record<string, string>
+  interfaceParamSchemas: Record<string, string>
+  thirdPartyParamSchemas: Record<string, string>
+  connectorParamSchemas: Record<string, string>
 }) {
+  const [expandedActions, setExpandedActions] = React.useState<Set<number>>(
+    new Set(actions.map((_, i) => i))
+  )
+
+  const toggleExpand = (i: number) => {
+    const next = new Set(expandedActions)
+    if (next.has(i)) {
+      next.delete(i)
+    } else {
+      next.add(i)
+    }
+    setExpandedActions(next)
+  }
+
   const fields = fieldOptions.map(o => ({ field: o.value, label: o.label } as FieldDef))
-  const add = (a: EventAction) => onChange([...actions, a])
+  const add = (a: EventAction) => {
+    const newIndex = actions.length
+    onChange([...actions, a])
+    // 自动展开新添加的动作
+    setExpandedActions(prev => new Set([...prev, newIndex]))
+  }
   const upd = (i: number, patch: any) => onChange(actions.map((a, idx) => (idx === i ? { ...a, ...patch } : a)) as EventAction[])
-  const remove = (i: number) => onChange(actions.filter((_, idx) => idx !== i))
+  const remove = (i: number) => {
+    onChange(actions.filter((_, idx) => idx !== i))
+    // 移除展开状态
+    const next = new Set(expandedActions)
+    next.delete(i)
+    // 重新索引后面的动作
+    const reindexed = new Set<number>()
+    next.forEach(idx => {
+      if (idx > i) reindexed.add(idx - 1)
+      else reindexed.add(idx)
+    })
+    setExpandedActions(reindexed)
+  }
+  const copy = (i: number) => {
+    const source = actions[i]
+    const copied = JSON.parse(JSON.stringify(source)) // 深拷贝
+    // 在原动作后面插入
+    onChange([...actions.slice(0, i + 1), copied, ...actions.slice(i + 1)])
+    // 更新展开状态索引
+    const next = new Set<number>()
+    expandedActions.forEach(idx => {
+      if (idx <= i) next.add(idx)
+      else next.add(idx + 1)
+    })
+    next.add(i + 1) // 新复制的动作自动展开
+    setExpandedActions(next)
+  }
   const move = (i: number, dir: -1 | 1) => {
     const j = i + dir
     if (j < 0 || j >= actions.length) return
     const n = [...actions]
     ;[n[i], n[j]] = [n[j], n[i]]
     onChange(n)
+    // 更新展开状态
+    const next = new Set(expandedActions)
+    const iExpanded = expandedActions.has(i)
+    const jExpanded = expandedActions.has(j)
+    if (iExpanded) { next.delete(i); next.add(j) }
+    if (jExpanded) { next.delete(j); next.add(i) }
+    setExpandedActions(next)
   }
 
   return (
     <div>
       <label style={labelStyle}>动作链（按顺序执行）</label>
-      {actions.map((a, i) => (
-        <div key={i} style={{ background: '#f8fafc', padding: 8, borderRadius: 6, marginBottom: 6 }}>
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
-            <Select size="small" style={{ width: 110 }} value={a.type}
-              onChange={(t) => {
-                const def: Record<string, EventAction> = {
-                  set_field: { type: 'set_field', field: '', value_src: '$scan' },
-                  call_interface: { type: 'call_interface', interface_type: 'internal', param_map: [], result_map: [] },
-                  print: { type: 'print', printer_template_id: '' },
-                  navigate: { type: 'navigate', to_page_key: '' },
+      {actions.map((a, i) => {
+        const isExpanded = expandedActions.has(i)
+        const actionLabel = {
+          set_field: '设字段',
+          set_field_prop: '设属性',
+          call_interface: '调接口',
+          print: '打印',
+          navigate: '跳页',
+          speak: '语音播报',
+          emit_event: '触发事件',
+          run_script: '运行脚本',
+          toast: '提示',
+        }[a.type] || a.type
+
+        return (
+          <div key={i} style={{ background: '#f8fafc', padding: 8, borderRadius: 6, marginBottom: 6 }}>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: isExpanded ? 6 : 0 }}>
+              <Button
+                size="small"
+                type="text"
+                style={{ padding: '0 4px', color: '#64748b' }}
+                onClick={() => toggleExpand(i)}
+              >
+                {isExpanded ? '▼' : '▶'}
+              </Button>
+              <span style={{ fontSize: 12, color: '#374151', fontWeight: 500 }}>
+                {i + 1}. {actionLabel}
+              </span>
+              <span style={{ flex: 1 }} />
+              <Button size="small" type="text" style={{ padding: '0 4px' }} onClick={() => move(i, -1)}>↑</Button>
+              <Button size="small" type="text" style={{ padding: '0 4px' }} onClick={() => move(i, 1)}>↓</Button>
+              <Button size="small" type="text" style={{ padding: '0 4px', color: '#3b82f6' }} onClick={() => copy(i)}>复制</Button>
+              <Button size="small" danger type="text" onClick={() => remove(i)}>×</Button>
+            </div>
+
+            {isExpanded && (
+              <>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+                  <span style={{ fontSize: 11, color: '#94a3b8', minWidth: 50 }}>类型</span>
+                  <Select size="small" style={{ width: 110 }} value={a.type}
+                    onChange={(t) => {
+                      const def: Record<string, EventAction> = {
+                        set_field: { type: 'set_field', field: '', value_src: '$scan' },
+                        call_interface: { type: 'call_interface', interface_type: 'internal', param_map: [], result_map: [] },
+                        print: { type: 'print', printer_template_id: '' },
+                        navigate: { type: 'navigate', to_page_key: '' },
                   toast: { type: 'toast', message_src: '' },
                   set_field_prop: { type: 'set_field_prop', field: '', prop: 'visible', value_src: '' },
                   speak: { type: 'speak', text_src: '' },
@@ -451,11 +610,7 @@ function ActionsEditor({
                 { value: 'run_script', label: '运行脚本' },
                 { value: 'toast', label: '提示' },
               ]} />
-            <span style={{ flex: 1 }} />
-            <Button size="small" type="text" style={{ padding: '0 4px' }} onClick={() => move(i, -1)}>↑</Button>
-            <Button size="small" type="text" style={{ padding: '0 4px' }} onClick={() => move(i, 1)}>↓</Button>
-            <Button size="small" danger type="text" onClick={() => remove(i)}>×</Button>
-          </div>
+            </div>
 
           {/* 单动作执行条件：不满足则跳过该动作，继续后续动作 */}
           <div style={{ marginBottom: 6 }}>
@@ -517,7 +672,8 @@ function ActionsEditor({
             <CallInterfaceEditor action={a} onChange={patch => upd(i, patch)} fields={fields}
               fieldOptions={fieldOptions} interfaceOptions={interfaceOptions}
               thirdPartyEndpointOptions={thirdPartyEndpointOptions} connectorInterfaceOptions={connectorInterfaceOptions}
-              interfaceSchemas={interfaceSchemas} thirdPartySchemas={thirdPartySchemas} connectorSchemas={connectorSchemas} />
+              interfaceSchemas={interfaceSchemas} thirdPartySchemas={thirdPartySchemas} connectorSchemas={connectorSchemas}
+              interfaceParamSchemas={interfaceParamSchemas} thirdPartyParamSchemas={thirdPartyParamSchemas} connectorParamSchemas={connectorParamSchemas} />
           )}
 
           {a.type === 'print' && (
@@ -571,8 +727,11 @@ function ActionsEditor({
               </div>
             </div>
           )}
+              </>
+            )}
         </div>
-      ))}
+        )
+      })}
       <Space wrap size={4}>
         <Button size="small" onClick={() => add({ type: 'set_field', field: '', value_src: '$scan' })}>+设字段</Button>
         <Button size="small" onClick={() => add({ type: 'set_field_prop', field: '', prop: 'visible', value_src: '' })}>+设属性</Button>
@@ -591,7 +750,7 @@ function ActionsEditor({
 // ── 调接口动作 ──────────────────────────────────────────────────────
 function CallInterfaceEditor({
   action, onChange, fields, fieldOptions, interfaceOptions, thirdPartyEndpointOptions, connectorInterfaceOptions,
-  interfaceSchemas, thirdPartySchemas, connectorSchemas,
+  interfaceSchemas, thirdPartySchemas, connectorSchemas, interfaceParamSchemas, thirdPartyParamSchemas, connectorParamSchemas,
 }: {
   action: Extract<EventAction, { type: 'call_interface' }>
   onChange: (patch: any) => void
@@ -603,17 +762,27 @@ function CallInterfaceEditor({
   interfaceSchemas: Record<string, string>
   thirdPartySchemas: Record<string, string>
   connectorSchemas: Record<string, string>
+  interfaceParamSchemas: Record<string, string>
+  thirdPartyParamSchemas: Record<string, string>
+  connectorParamSchemas: Record<string, string>
 }) {
   const type: InterfaceType = action.interface_type || 'internal'
   const paramMap = action.param_map || []
   const resultMap = action.result_map || []
 
-  // 当前选中接口的 schema
+  // 当前选中接口的输出 schema
   const currentSchemaJson =
     type === 'connector' ? connectorSchemas[action.connector_interface_code || '']
     : type === 'third_party' ? thirdPartySchemas[String(action.third_party_endpoint_id || '')]
     : interfaceSchemas[action.interface_code || '']
   const { paths: schemaPaths, demo: schemaDemo } = parseSchema(currentSchemaJson)
+
+  // 当前选中接口的输入参数 schema
+  const currentParamSchemaJson =
+    type === 'connector' ? connectorParamSchemas[action.connector_interface_code || '']
+    : type === 'third_party' ? thirdPartyParamSchemas[String(action.third_party_endpoint_id || '')]
+    : interfaceParamSchemas[action.interface_code || '']
+  const paramNames = extractParamNames(currentParamSchemaJson)
 
   return (
     <Space direction="vertical" size={6} style={{ width: '100%' }}>
@@ -644,15 +813,17 @@ function CallInterfaceEditor({
       <MapEditor
         label="入参映射" leftPlaceholder="参数名" rightIsSrc rows={paramMap.map(p => ({ left: p.key, right: p.src }))}
         fields={fields}
+        leftOptions={paramNames.map(p => ({ value: p, label: p }))}
         onChange={rows => onChange({ param_map: rows.map(r => ({ key: r.left, src: r.right })) })}
       />
 
       {/* 结果回填 */}
       <MapEditor
-        label="结果回填" leftPlaceholder="返回字段(点路径)" rightField fieldOptions={fieldOptions}
+        label="结果回填" leftPlaceholder="返回字段(点路径)" rightField
         rows={resultMap.map(r => ({ left: r.response_field, right: r.form_field }))}
         fields={fields}
         leftOptions={schemaPaths.map(p => ({ value: p, label: p }))}
+        rightOptions={fieldOptions}
         onChange={rows => onChange({ result_map: rows.map(r => ({ response_field: r.left, form_field: r.right })) })}
       />
 
@@ -675,7 +846,7 @@ function filterOpt(input: string, opt: any): boolean {
 
 // 通用键值映射编辑器
 function MapEditor({
-  label, leftPlaceholder, rightIsSrc, rightField, fieldOptions, rows, fields, onChange, leftOptions,
+  label, leftPlaceholder, rightIsSrc, rightField, fieldOptions, rows, fields, onChange, leftOptions, rightOptions,
 }: {
   label: string
   leftPlaceholder: string
@@ -686,6 +857,7 @@ function MapEditor({
   fields: FieldDef[]
   onChange: (rows: Array<{ left: string; right: string }>) => void
   leftOptions?: IfaceOpt[]
+  rightOptions?: IfaceOpt[] // 右侧也支持选择器
 }) {
   const add = () => onChange([...rows, { left: '', right: '' }])
   const upd = (i: number, patch: Partial<{ left: string; right: string }>) =>
@@ -700,6 +872,7 @@ function MapEditor({
       </div>
       {rows.map((r, i) => (
         <div key={i} style={{ display: 'flex', gap: 6, marginTop: 4, alignItems: 'center' }}>
+          {/* 左侧：支持选择或输入 */}
           {leftOptions ? (
             <AutoComplete
               size="small" style={{ flex: 1 }}
@@ -713,11 +886,23 @@ function MapEditor({
             <Input size="small" style={{ flex: 1 }} placeholder={leftPlaceholder} value={r.left} onChange={e => upd(i, { left: e.target.value })} />
           )}
           <span style={{ color: '#94a3b8' }}>{rightField ? '→' : '←'}</span>
+          {/* 右侧：支持选择或输入 */}
           {rightIsSrc ? (
             <SrcInput style={{ flex: 1 }} value={r.right} fields={fields} onChange={v => upd(i, { right: v })} />
           ) : rightField ? (
-            <Select size="small" style={{ flex: 1 }} placeholder="填入字段" value={r.right || undefined}
-              onChange={v => upd(i, { right: v })} options={fieldOptions} allowClear />
+            rightOptions ? (
+              <AutoComplete
+                size="small" style={{ flex: 1 }}
+                placeholder="填入字段"
+                value={r.right}
+                onChange={v => upd(i, { right: v || '' })}
+                options={rightOptions}
+                filterOption={(input, opt) => !!opt?.value?.toString().includes(input)}
+              />
+            ) : (
+              <Select size="small" style={{ flex: 1 }} placeholder="填入字段" value={r.right || undefined}
+                onChange={v => upd(i, { right: v })} options={fieldOptions} allowClear />
+            )
           ) : (
             <Input size="small" style={{ flex: 1 }} value={r.right} onChange={e => upd(i, { right: e.target.value })} />
           )}
