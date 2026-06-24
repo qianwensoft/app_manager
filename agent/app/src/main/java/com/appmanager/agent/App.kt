@@ -13,14 +13,23 @@ class App : Application() {
         instance = this
 
         // WebRTC 要求进程内只初始化一次，重复调用易 native 闪退
-        PeerConnectionFactory.initialize(
-            PeerConnectionFactory.InitializationOptions.builder(this).createInitializationOptions()
-        )
+        try {
+            PeerConnectionFactory.initialize(
+                PeerConnectionFactory.InitializationOptions.builder(this).createInitializationOptions()
+            )
+        } catch (e: Exception) {
+            android.util.Log.e("App", "WebRTC initialization failed", e)
+            // WebRTC 初始化失败不影响其他功能继续运行
+        }
 
         // 有配置则自动启动 Service
-        if (AgentConfig.get(this).serverUrl.isNotEmpty()) {
-            val intent = Intent(this, AgentService::class.java)
-            startForegroundService(intent)
+        try {
+            if (AgentConfig.get(this).serverUrl.isNotEmpty()) {
+                val intent = Intent(this, AgentService::class.java)
+                startForegroundService(intent)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("App", "Failed to start AgentService", e)
         }
     }
 
