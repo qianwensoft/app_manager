@@ -1,14 +1,29 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
+import legacy from '@vitejs/plugin-legacy'
 import path from 'path'
 import patchReactVersion from './vite-plugin-patch-react-version.js'
+import { visualizer } from 'rollup-plugin-visualizer'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const backend = env.VITE_PROXY_TARGET || 'http://127.0.0.1:8080'
 
   return {
-    plugins: [react(), patchReactVersion()],
+    plugins: [
+      react(),
+      legacy({
+        targets: ['chrome >= 67', 'android >= 5'],
+        modernPolyfills: true,
+      }),
+      patchReactVersion(),
+      visualizer({
+        filename: './dist/stats.html',
+        open: false,
+        gzipSize: true,
+        brotliSize: false,
+      }),
+    ],
     define: {
       'process.env': JSON.stringify({}),
       'process.version': JSON.stringify('v16.0.0'),
@@ -73,15 +88,25 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: 'dist',
       sourcemap: false,
-      target: ['es2015', 'chrome67'],
       rollupOptions: {
         output: {
           // 强制生成新的文件名（添加时间戳避免缓存）
           entryFileNames: `assets/[name]-[hash]-${Date.now()}.js`,
           chunkFileNames: `assets/[name]-[hash]-${Date.now()}.js`,
           assetFileNames: `assets/[name]-[hash].[ext]`,
-          // 暂时禁用代码分割，将所有代码打包成一个文件，避免模块加载顺序问题
-          manualChunks: undefined,
+          // 简化的代码分割策略：React 核心 + 其他所有库
+          manualChunks: (id) => {
+            if (id.includes('node_modules')) {
+              // React 核心（包含完整的 react 和 react-dom 包）
+              if (id.includes('node_modules/react/') ||
+                  id.includes('node_modules/react-dom/') ||
+                  id.includes('node_modules/scheduler/')) {
+                return 'vendor-react'
+              }
+              // 其他所有库合并，避免循环依赖
+              return 'vendor'
+            }
+          },
         },
       },
     },
