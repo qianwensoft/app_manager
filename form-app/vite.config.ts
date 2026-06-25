@@ -99,19 +99,9 @@ export default defineConfig(({ mode }) => {
           entryFileNames: `assets/[name]-[hash]-${Date.now()}.js`,
           chunkFileNames: `assets/[name]-[hash]-${Date.now()}.js`,
           assetFileNames: `assets/[name]-[hash].[ext]`,
-          // 简化的代码分割策略：React 核心 + 其他所有库
-          manualChunks: (id) => {
-            if (id.includes('node_modules')) {
-              // React 核心（包含完整的 react 和 react-dom 包）
-              if (id.includes('node_modules/react/') ||
-                  id.includes('node_modules/react-dom/') ||
-                  id.includes('node_modules/scheduler/')) {
-                return 'vendor-react'
-              }
-              // 其他所有库合并，避免循环依赖
-              return 'vendor'
-            }
-          },
+          // 禁用代码分割，将所有代码打成一个 bundle 强制 Babel 转译
+          manualChunks: undefined,
+          inlineDynamicImports: true,
         },
       },
     },
