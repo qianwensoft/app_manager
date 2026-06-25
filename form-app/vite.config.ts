@@ -15,6 +15,8 @@ export default defineConfig(({ mode }) => {
       legacy({
         targets: ['chrome >= 67', 'android >= 5'],
         modernPolyfills: true,
+        // 禁用现代浏览器检测脚本，Android 9 WebView 对 import.meta 支持不完整
+        renderModernChunks: false,
       }),
       patchReactVersion(),
       visualizer({
