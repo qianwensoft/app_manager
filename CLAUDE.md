@@ -74,6 +74,13 @@ Entry point: **http://localhost:3001** (web/Vue 3)
 | `:5175` | form-app (Vite) | Form designer dev server |
 | `:8080` | server (Go) | Backend API |
 
+### Bridge (USB Scanner)
+```bash
+cd bridge && go build -o app-manager-bridge .
+./app-manager-bridge     # listens on ws://127.0.0.1:17175, local-only loopback
+```
+Bridge discovers USB-connected Android devices via ADB and pushes them to the browser for one-click registration. Only listens on `127.0.0.1`.
+
 ### Release Packaging
 ```bash
 make release             # web + server + agent → dist/release/app-manager-<VERSION>/
@@ -106,6 +113,22 @@ jwt:
 Env overrides: `JWT_SECRET`, `ADB_PATH`, `FFMPEG_PATH`.
 
 Default admin: `admin / admin123` (auto-created on first run).
+
+### MQTT (optional)
+
+Custom events can forward to MQTT broker:
+
+```yaml
+mqtt:
+  enabled: true
+  broker: tcp://localhost:1883
+  username: ""
+  password: ""
+  client_id: app-manager
+  qos: 1
+```
+
+Event groups and individual events can define MQTT topics in the UI; events are forwarded on publish.
 
 ## Architecture
 
@@ -141,6 +164,16 @@ Android Agent (OkHttp WebSocket, persistent connection)
 
 Agent sends binary WebSocket frames: `[0x01][width 2B BE][height 2B BE][JPEG...]`. Server identifies them by `data[0] == 0x01 && len(data) >= 6`, then fans out to all browser viewers via `ScreenHub`.
 
+### Camera Streaming (WebRTC)
+
+Device front/back camera streams via WebRTC from the screen viewer page. Supports floating window and sidebar layouts with hover-overlay showing resolution/fps/bitrate.
+
+### Recording & Screenshots
+
+- **Server-side recording**: ffmpeg synthesizes screen frames into MP4 (requires `ffmpeg.path` in config).
+- **Device-side recording**: Agent captures audio/video and auto-uploads to server for playback.
+- **Screenshots**: ADB or agent screenshot, saved to server with rename support.
+
 ### Install Task Flow
 
 `POST /api/apps/:id/install` → creates DB record → `task.Q.Submit(taskID)` → worker runs:
@@ -151,11 +184,29 @@ Agent sends binary WebSocket frames: `[0x01][width 2B BE][height 2B BE][JPEG...]
 
 JSON messages over WebSocket with fields: `type`, `action`, `commandId`, `data`. Android `CommandDispatcher` routes by action to `AppCommandHandler`, `SystemCommandHandler`, `FsCommandHandler`. Results sent back with matching `commandId`.
 
+### Outbound Pipeline (外部应用集成)
+
+Configure external HTTP services that receive event-triggered pushes. Supports:
+- Static headers/cookies
+- Dynamic Bearer token (server auto-fetches/refreshes)
+- Phase-based pipeline stages
+- Debug logging for delivery tracking
+
+Routes in `server/api/outbound.go`. UI in web under "出站集成" section.
+
+### Agent Menu Catalog (Agent 菜单目录)
+
+Configurable custom shortcuts in the agent app. Server pushes intents/commands to create quick-access menu entries on device. Agent exposes catalog list and listen state via WebSocket commands.
+
 ### Server Package Layout
 
-Flat packages by domain (no `internal/`): `api/`, `agent/`, `screen/`, `auth/`, `adb/`, `task/`, `models/`, `database/`, `config/`, `storage/`, `event/`, `logcat/`, `shell/`, `stomp/`, `audit/`, `custompreset/`, `migrations/`.
+Flat packages by domain (no `internal/`): `api/`, `agent/`, `screen/`, `auth/`, `adb/`, `task/`, `models/`, `database/`, `config/`, `storage/`, `event/`, `logcat/`, `shell/`, `stomp/`, `audit/`, `custompreset/`, `migrations/`, `scada/`, `datastack/`, `dbdriver/`, `outbound/`.
 
 Singletons initialized in `main.go` and used directly: `database.DB`, `agent.AgentHub`, `screen.ScreenHub`, `task.Q`, `config.C`.
+
+### Bridge Package
+
+`bridge/` — standalone Go binary for local USB device discovery. Connects to ADB, enumerates devices, exposes WebSocket at `:17175` for browser-based scanner. No server dependency.
 
 ### Data stack (datasets / open interfaces)
 
