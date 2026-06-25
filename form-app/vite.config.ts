@@ -57,6 +57,9 @@ export default defineConfig(({ mode }) => {
       target: 'es2015',
     },
     optimizeDeps: {
+      // 禁用依赖发现和预构建，让 legacy plugin 处理所有转译
+      noDiscovery: true,
+      include: [],
       esbuildOptions: {
         target: 'es2015',
       },
