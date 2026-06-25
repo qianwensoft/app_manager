@@ -3,31 +3,60 @@ import { Button } from '@/components/ui/button'
 import { createBehavior, createResource } from '@designable/core'
 import type { DnFC } from '@designable/react'
 
-/** 设计态共用的按钮文本/类型属性（中文标签由 designerLocales 处理） */
-const commonButtonProps: Record<string, any> = {
+/** 创建 void field schema（与标准 Formily 组件一致） */
+const createVoidFieldSchema = (component: any) => {
+  return {
+    type: 'object',
+    properties: {
+      'field-group': {
+        type: 'void',
+        'x-component': 'CollapseItem',
+        properties: {
+          name: {
+            type: 'string',
+            'x-decorator': 'FormItem',
+            'x-component': 'Input',
+          },
+          title: {
+            type: 'string',
+            'x-decorator': 'FormItem',
+            'x-component': 'Input',
+          },
+        },
+      },
+      'component-group': component && {
+        type: 'void',
+        'x-component': 'CollapseItem',
+        properties: {
+          'x-component-props': component,
+        },
+      },
+    },
+  }
+}
+
+/** 设计态共用的按钮文本/类型属性 */
+const commonButtonProps = {
   text: {
     type: 'string',
-    title: '按钮文本',
     'x-decorator': 'FormItem',
     'x-component': 'Input',
   },
   variant: {
     type: 'string',
-    title: '按钮样式',
     'x-decorator': 'FormItem',
     'x-component': 'Select',
     enum: [
-      { label: '默认(default)', value: 'default' },
-      { label: '次要(secondary)', value: 'secondary' },
-      { label: '轮廓(outline)', value: 'outline' },
-      { label: '幽灵(ghost)', value: 'ghost' },
-      { label: '链接(link)', value: 'link' },
-      { label: '危险(destructive)', value: 'destructive' },
+      { label: '默认', value: 'default' },
+      { label: '次要', value: 'secondary' },
+      { label: '轮廓', value: 'outline' },
+      { label: '幽灵', value: 'ghost' },
+      { label: '链接', value: 'link' },
+      { label: '危险', value: 'destructive' },
     ],
   },
   block: {
     type: 'boolean',
-    title: '撑满整行',
     'x-decorator': 'FormItem',
     'x-component': 'Switch',
   },
@@ -53,87 +82,90 @@ ActionButton.Behavior = createBehavior({
   extends: ['Field'],
   selector: node => node.props?.['x-component'] === 'ActionButton',
   designerProps: {
-    propsSchema: {
+    propsSchema: createVoidFieldSchema({
       type: 'object',
       properties: {
-        'x-component-props': {
-          type: 'object',
-          properties: {
-            ...commonButtonProps,
-            action: {
-              type: 'string',
-              title: '动作类型',
-              'x-decorator': 'FormItem',
-              'x-component': 'Select',
-              enum: [
-                { label: '提交表单', value: 'submit' },
-                { label: '触发事件', value: 'event' },
-                { label: '跳转页面', value: 'navigate' },
-                { label: '调用接口', value: 'interface' },
-              ],
-            },
-            buttonId: {
-              type: 'string',
-              title: '事件按钮ID（action=触发事件）',
-              'x-decorator': 'FormItem',
-              'x-component': 'Input',
-              'x-reactions': {
-                dependencies: ['.action'],
-                fulfill: { state: { visible: '{{$deps[0] === "event"}}' } },
-              },
-            },
-            targetPage: {
-              type: 'string',
-              title: '目标页面 key（action=跳转）',
-              'x-decorator': 'FormItem',
-              'x-component': 'Input',
-              'x-reactions': {
-                dependencies: ['.action'],
-                fulfill: { state: { visible: '{{$deps[0] === "navigate"}}' } },
-              },
-            },
-            interfaceType: {
-              type: 'string',
-              title: '接口类型（action=调用接口）',
-              'x-decorator': 'FormItem',
-              'x-component': 'Select',
-              enum: [
-                { label: '内部接口', value: 'internal' },
-                { label: '第三方接口', value: 'third_party' },
-                { label: '连接器接口', value: 'connector' },
-              ],
-              'x-reactions': {
-                dependencies: ['.action'],
-                fulfill: { state: { visible: '{{$deps[0] === "interface"}}' } },
-              },
-            },
-            interfaceCode: {
-              type: 'string',
-              title: '接口编码（action=调用接口）',
-              'x-decorator': 'FormItem',
-              'x-component': 'Input',
-              'x-reactions': {
-                dependencies: ['.action'],
-                fulfill: { state: { visible: '{{$deps[0] === "interface"}}' } },
-              },
-            },
-            successText: {
-              type: 'string',
-              title: '调用成功提示（可选）',
-              'x-decorator': 'FormItem',
-              'x-component': 'Input',
-              'x-reactions': {
-                dependencies: ['.action'],
-                fulfill: { state: { visible: '{{$deps[0] === "interface"}}' } },
-              },
-            },
+        ...commonButtonProps,
+        action: {
+          type: 'string',
+          'x-decorator': 'FormItem',
+          'x-component': 'Select',
+          enum: [
+            { label: '提交表单', value: 'submit' },
+            { label: '触发事件', value: 'event' },
+            { label: '跳转页面', value: 'navigate' },
+            { label: '调用接口', value: 'interface' },
+          ],
+        },
+        buttonId: {
+          type: 'string',
+          'x-decorator': 'FormItem',
+          'x-component': 'Input',
+          'x-reactions': {
+            dependencies: ['.action'],
+            fulfill: { state: { visible: '{{$deps[0] === "event"}}' } },
+          },
+        },
+        targetPage: {
+          type: 'string',
+          'x-decorator': 'FormItem',
+          'x-component': 'Input',
+          'x-reactions': {
+            dependencies: ['.action'],
+            fulfill: { state: { visible: '{{$deps[0] === "navigate"}}' } },
+          },
+        },
+        interfaceType: {
+          type: 'string',
+          'x-decorator': 'FormItem',
+          'x-component': 'Select',
+          enum: [
+            { label: '内部接口', value: 'internal' },
+            { label: '第三方接口', value: 'third_party' },
+            { label: '连接器接口', value: 'connector' },
+          ],
+          'x-reactions': {
+            dependencies: ['.action'],
+            fulfill: { state: { visible: '{{$deps[0] === "interface"}}' } },
+          },
+        },
+        interfaceCode: {
+          type: 'string',
+          'x-decorator': 'FormItem',
+          'x-component': 'Input',
+          'x-reactions': {
+            dependencies: ['.action'],
+            fulfill: { state: { visible: '{{$deps[0] === "interface"}}' } },
+          },
+        },
+        successText: {
+          type: 'string',
+          'x-decorator': 'FormItem',
+          'x-component': 'Input',
+          'x-reactions': {
+            dependencies: ['.action'],
+            fulfill: { state: { visible: '{{$deps[0] === "interface"}}' } },
           },
         },
       },
-    },
+    }),
   },
   designerLocales: {
-    'zh-CN': { title: '动作按钮' },
+    'zh-CN': {
+      title: '动作按钮',
+      settings: {
+        'x-component-props': '按钮属性',
+        'x-component-props.text': '按钮文本',
+        'x-component-props.variant': '按钮样式',
+        'x-component-props.block': '撑满整行',
+        'x-component-props.action': '动作类型',
+        'x-component-props.buttonId': '事件按钮ID',
+        'x-component-props.targetPage': '目标页面key',
+        'x-component-props.interfaceType': '接口类型',
+        'x-component-props.interfaceCode': '接口编码',
+        'x-component-props.successText': '成功提示',
+      },
+    },
     'en-US': { title: 'ActionButton' },
   },
 })
@@ -178,27 +210,29 @@ EventButton.Behavior = createBehavior({
   extends: ['Field'],
   selector: node => node.props?.['x-component'] === 'EventButton',
   designerProps: {
-    propsSchema: {
+    propsSchema: createVoidFieldSchema({
       type: 'object',
       properties: {
-        'x-component-props': {
-          type: 'object',
-          properties: {
-            ...commonButtonProps,
-            buttonId: {
-              type: 'string',
-              title: '事件按钮ID',
-              description: '匹配「事件系统」中 source=按钮、按钮ID 相同的事件链',
-              'x-decorator': 'FormItem',
-              'x-component': 'Input',
-            },
-          },
+        ...commonButtonProps,
+        buttonId: {
+          type: 'string',
+          'x-decorator': 'FormItem',
+          'x-component': 'Input',
         },
       },
-    },
+    }),
   },
   designerLocales: {
-    'zh-CN': { title: '事件触发按钮' },
+    'zh-CN': {
+      title: '事件触发按钮',
+      settings: {
+        'x-component-props': '按钮属性',
+        'x-component-props.text': '按钮文本',
+        'x-component-props.variant': '按钮样式',
+        'x-component-props.block': '撑满整行',
+        'x-component-props.buttonId': '事件按钮ID',
+      },
+    },
     'en-US': { title: 'EventButton' },
   },
 })
@@ -242,26 +276,29 @@ NavigateButton.Behavior = createBehavior({
   extends: ['Field'],
   selector: node => node.props?.['x-component'] === 'NavigateButton',
   designerProps: {
-    propsSchema: {
+    propsSchema: createVoidFieldSchema({
       type: 'object',
       properties: {
-        'x-component-props': {
-          type: 'object',
-          properties: {
-            ...commonButtonProps,
-            targetPage: {
-              type: 'string',
-              title: '目标页面 key',
-              'x-decorator': 'FormItem',
-              'x-component': 'Input',
-            },
-          },
+        ...commonButtonProps,
+        targetPage: {
+          type: 'string',
+          'x-decorator': 'FormItem',
+          'x-component': 'Input',
         },
       },
-    },
+    }),
   },
   designerLocales: {
-    'zh-CN': { title: '跳转按钮' },
+    'zh-CN': {
+      title: '跳转按钮',
+      settings: {
+        'x-component-props': '按钮属性',
+        'x-component-props.text': '按钮文本',
+        'x-component-props.variant': '按钮样式',
+        'x-component-props.block': '撑满整行',
+        'x-component-props.targetPage': '目标页面key',
+      },
+    },
     'en-US': { title: 'NavigateButton' },
   },
 })
