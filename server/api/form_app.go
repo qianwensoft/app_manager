@@ -937,8 +937,16 @@ func FormRuntimeMatchEvent(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"matched": false})
 }
 
-func inferFormComponentByColumn(colName string) string {
-	name := strings.ToLower(strings.TrimSpace(colName))
+func inferFormComponentByColumn(col dbdriver.ColumnInfo) string {
+	name := strings.ToLower(strings.TrimSpace(col.Name))
+	dataType := strings.ToLower(strings.TrimSpace(col.DataType))
+
+	// JSON/JSONB 类型使用 ArrayTable（适用于 PostgreSQL、MySQL 8.0+）
+	if strings.Contains(dataType, "json") {
+		return "ArrayTable"
+	}
+
+	// 根据列名推断
 	switch {
 	case strings.Contains(name, "time"), strings.Contains(name, "date"):
 		return "DatePicker"
@@ -965,7 +973,7 @@ func buildGeneratedDesignSchema(cols []dbdriver.ColumnInfo, pk string) map[strin
 			"type":        "string",
 			"title":       strings.ToUpper(name),
 			"x-decorator": "FormItem",
-			"x-component": inferFormComponentByColumn(name),
+			"x-component": inferFormComponentByColumn(c),
 			"x-index":     order,
 		}
 		order++
@@ -1226,7 +1234,7 @@ func GenerateFormAppPagesFromTable(c *gin.Context) {
 		if name == "" || name == pk {
 			continue
 		}
-		comp := inferFormComponentByColumn(name)
+		comp := inferFormComponentByColumn(c)
 		fieldDefs = append(fieldDefs, map[string]interface{}{
 			"field":     name,
 			"label":     strings.ToUpper(name),
@@ -1349,9 +1357,28 @@ func GenerateFormAppPagesFromTable(c *gin.Context) {
 		}
 	}
 
+	// 构建 runtime_schema：将页面级配置提升到应用级，供 mergeRuntimeSchemaParams 读取
+	runtimeSchema := map[string]interface{}{
+		"pages": map[string]interface{}{
+			"list": map[string]interface{}{
+				"pagination": map[string]interface{}{
+					"enabled":         true,
+					"pageParam":       "page",
+					"pageSizeParam":   "page_size",
+					"limitParam":      "limit",
+					"offsetParam":     "offset",
+					"defaultPageSize": 10,
+				},
+				"query_conditions": conditions,
+			},
+		},
+	}
+	runtimeSchemaBytes, _ := json.Marshal(runtimeSchema)
+
 	if err := tx.Model(&app).Updates(map[string]interface{}{
 		"data_source_id":  body.DataSourceID,
 		"entry_page_key":  "form",
+		"runtime_schema":  string(runtimeSchemaBytes),
 		"content_version": app.ContentVersion + 1,
 	}).Error; err != nil {
 		tx.Rollback()
@@ -1529,7 +1556,7 @@ func RegenerateSinglePage(c *gin.Context) {
 			fieldDefs = append(fieldDefs, map[string]interface{}{
 				"field":     name,
 				"label":     strings.ToUpper(name),
-				"component": inferFormComponentByColumn(name),
+				"component": inferFormComponentByColumn(c),
 				"required":  false,
 			})
 		}

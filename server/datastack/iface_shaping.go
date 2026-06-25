@@ -118,7 +118,8 @@ func ValidateParams(specs []ParamSpec, params map[string]interface{}) error {
 		v, present := params[name]
 		if !present || v == nil || (isStringVal(v) && strings.TrimSpace(v.(string)) == "") {
 			// 缺失：默认值（Default 或 ParamDefaultsJSON）在后续步骤补；此处仅判必填。
-			if sp.Required && sp.Default == nil {
+			// 特殊处理：id 参数允许为空（新增记录时无 id，更新时有 id）
+			if sp.Required && sp.Default == nil && name != "id" {
 				return fmt.Errorf("缺少必填参数 %q", name)
 			}
 			continue

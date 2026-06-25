@@ -15,6 +15,8 @@ const COMP_MAP: Record<string, string> = {
   Checkbox: 'Checkbox',
   Radio: 'Radio',
   PrintButton: 'PrintButton',
+  ArrayTable: 'ArrayTable',
+  ArrayCards: 'ArrayCards',
 }
 
 /** Formily 组件名 → 字段组件名（反向映射） */
@@ -28,6 +30,8 @@ const REVERSE_COMP_MAP: Record<string, string> = {
   Slider: 'Slider',
   Checkbox: 'Checkbox',
   Radio: 'Radio',
+  ArrayTable: 'ArrayTable',
+  ArrayCards: 'ArrayCards',
 }
 
 /**

@@ -34,6 +34,7 @@ import { ScanTrigger } from '@/designable/ScanTrigger'
 import { CardList } from '@/designable/CardList'
 import { TableList } from '@/designable/TableList'
 import { ActionButton, EventButton, NavigateButton } from '@/designable/ActionButtons'
+import { CustomButton } from '@/designable/Button'
 import { PageHeader, Section, Divider as LayoutDivider, StaticImage, StaticText } from '@/designable/LayoutComponents'
 import { Button, message, Modal, Tag, Drawer, Tabs, Select as AntSelect, Radio as AntRadio, Alert } from 'antd'
 import JsonEditor from './JsonEditor'
@@ -63,7 +64,7 @@ const componentMap = {
   Upload, Switch, Text, Card, ArrayCards, ArrayTable, Space, FormTab,
   FormCollapse, FormGrid, FormLayout, ObjectContainer, SubmitButton,
   ConfirmDialogButton, ScanTrigger, CardList, Table: TableList,
-  ActionButton, EventButton, NavigateButton,
+  ActionButton, EventButton, NavigateButton, CustomButton,
   PageHeader, Section, Divider: LayoutDivider, StaticImage, StaticText,
   DesignableForm: Form, DesignableField: Field,
 }
@@ -391,7 +392,7 @@ export default function PageDesignerPage() {
               />
               <ResourceWidget title="布局" sources={[Card, FormGrid, FormTab, FormLayout, FormCollapse, Space]} />
               <ResourceWidget title="数组" sources={[ArrayCards, ArrayTable]} />
-              <ResourceWidget title="按钮" sources={[SubmitButton, ActionButton, EventButton, NavigateButton, ConfirmDialogButton]} />
+              <ResourceWidget title="按钮" sources={[CustomButton, SubmitButton, ActionButton, EventButton, NavigateButton, ConfirmDialogButton]} />
               <ResourceWidget title="展示" sources={[Text]} />
               <ResourceWidget title="业务组件" sources={[ScanTrigger, CardList]} />
             </CompositeItem>
