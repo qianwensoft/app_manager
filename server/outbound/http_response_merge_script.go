@@ -2,6 +2,7 @@ package outbound
 
 import (
 	"fmt"
+	"strings"
 
 	"app-manager/models"
 
@@ -34,6 +35,7 @@ func tryLoadOutboundAppForEndpoint(db *gorm.DB, endpointID uint) (*models.Outbou
 //
 // after_response 脚本若调用 ctx.setResponseBody / ctx.setResponseStatus，执行完后用新值重新写入 vars
 // （覆盖之前 MergeHTTPResponseContext / MergeHTTPResponseBodyToContext 写入的占位符）。
+// afterScriptOrder 非空时按指定序列执行（方案 B）；nil 时退化旧行为。
 func mergeHTTPResponseIntoVarsAndRunAfterResponse(
 	vars map[string]string,
 	app *models.OutboundApp,
@@ -44,6 +46,8 @@ func mergeHTTPResponseIntoVarsAndRunAfterResponse(
 	afterScriptOpt *ExtensionScriptRunOptions,
 	runAfterResponseOnNon2xx bool,
 	mergeHTTPStepChain bool,
+	endpointAfterScriptsJSON string,
+	afterScriptOrder []AfterScriptOrderEntry,
 ) error {
 	if app == nil {
 		return fmt.Errorf("应用为空")
@@ -53,8 +57,18 @@ func mergeHTTPResponseIntoVarsAndRunAfterResponse(
 			return nil
 		}
 		env := &ScriptEnv{RespStatus: httpStatus, RespBody: clipScriptResponseBody(body)}
-		if err := RunAppExtensionScriptWithOptions(AppScriptHookAfterResponse, app, vars, env, afterScriptOpt); err != nil {
-			return err
+		if len(afterScriptOrder) > 0 {
+			if err := RunAfterResponseOrdered(afterScriptOrder, app, endpointAfterScriptsJSON, vars, env, nil); err != nil {
+				return err
+			}
+		} else {
+			if err := RunAppExtensionScriptWithOptions(AppScriptHookAfterResponse, app, vars, env, afterScriptOpt); err != nil {
+				return err
+			}
+			applyScriptOutResp(vars, stepIDForHTTPChain, env)
+			if err := runEndpointAfterScripts(vars, stepIDForHTTPChain, env, httpStatus, body, endpointAfterScriptsJSON); err != nil {
+				return err
+			}
 		}
 		applyScriptOutResp(vars, stepIDForHTTPChain, env)
 		return nil
@@ -65,10 +79,52 @@ func mergeHTTPResponseIntoVarsAndRunAfterResponse(
 	MergeHTTPResponseBodyToContext(vars, connectorStep, body)
 	MergePaginationContext(vars, body)
 	env := &ScriptEnv{RespStatus: httpStatus, RespBody: clipScriptResponseBody(body)}
-	if err := RunAppExtensionScriptWithOptions(AppScriptHookAfterResponse, app, vars, env, afterScriptOpt); err != nil {
-		return err
+	if len(afterScriptOrder) > 0 {
+		if err := RunAfterResponseOrdered(afterScriptOrder, app, endpointAfterScriptsJSON, vars, env, nil); err != nil {
+			return err
+		}
+	} else {
+		if err := RunAppExtensionScriptWithOptions(AppScriptHookAfterResponse, app, vars, env, afterScriptOpt); err != nil {
+			return err
+		}
+		applyScriptOutResp(vars, stepIDForHTTPChain, env)
+		if err := runEndpointAfterScripts(vars, stepIDForHTTPChain, env, httpStatus, body, endpointAfterScriptsJSON); err != nil {
+			return err
+		}
 	}
 	applyScriptOutResp(vars, stepIDForHTTPChain, env)
+	return nil
+}
+
+// runEndpointAfterScripts 在应用级 after_response 之后执行接口级 after_response 脚本。
+// 接口级脚本看到的状态码/响应体取「应用级脚本改写后的最新值」（appEnv.OutResp* 优先），
+// 改写结果同样经 applyScriptOutResp 写回 vars 占位符（覆盖应用级写入）。
+func runEndpointAfterScripts(vars map[string]string, stepID uint, appEnv *ScriptEnv, httpStatus int, body []byte, endpointAfterScriptsJSON string) error {
+	if strings.TrimSpace(endpointAfterScriptsJSON) == "" {
+		return nil
+	}
+	status := httpStatus
+	if appEnv != nil && appEnv.OutRespStatus != nil {
+		status = *appEnv.OutRespStatus
+	}
+	respBody := clipScriptResponseBody(body)
+	if appEnv != nil && appEnv.OutRespBody != nil {
+		respBody = *appEnv.OutRespBody
+	}
+	env := &ScriptEnv{RespStatus: status, RespBody: respBody}
+	if err := RunAfterResponseScriptsJSON(endpointAfterScriptsJSON, vars, env, nil); err != nil {
+		return err
+	}
+	applyScriptOutResp(vars, stepID, env)
+	// 把接口级的改写并入 appEnv，供调用方反映到 trace/最终结果
+	if appEnv != nil {
+		if env.OutRespStatus != nil {
+			appEnv.OutRespStatus = env.OutRespStatus
+		}
+		if env.OutRespBody != nil {
+			appEnv.OutRespBody = env.OutRespBody
+		}
+	}
 	return nil
 }
 

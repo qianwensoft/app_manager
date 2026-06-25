@@ -62,15 +62,15 @@ func publishOutboundConnectorTraceTick(db *gorm.DB, d *models.OutboundDelivery) 
 		}
 	}
 	payload := map[string]interface{}{
-		"type":          outboundTraceStompType,
-		"connector_id":  d.ConnectorID,
-		"device_id":     devID,
-		"delivery_id":   d.ID,
-		"phase_id":      d.PhaseID,
-		"step_id":       d.StepID,
-		"step_type":     strings.TrimSpace(d.StepType),
-		"endpoint_id":   d.EndpointID,
-		"status":        strings.TrimSpace(d.Status),
+		"type":            outboundTraceStompType,
+		"connector_id":    d.ConnectorID,
+		"device_id":       devID,
+		"delivery_id":     d.ID,
+		"phase_id":        d.PhaseID,
+		"step_id":         d.StepID,
+		"step_type":       strings.TrimSpace(d.StepType),
+		"endpoint_id":     d.EndpointID,
+		"status":          strings.TrimSpace(d.Status),
 		"device_event_id": d.DeviceEventID,
 	}
 	if !d.CreatedAt.IsZero() {

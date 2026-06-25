@@ -1,6 +1,7 @@
 import { defineConfig, loadEnv, createLogger } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import path from 'path'
+import monacoEditorPlugin from 'vite-plugin-monaco-editor'
 
 /** 关闭页签、HMR、后端重启时 /ws 代理常被 RST，Vite 会打 ECONNRESET —— 多为噪声 */
 function isBenignWsProxyLog(msg) {
@@ -30,12 +31,21 @@ export default defineConfig(({ mode }) => {
   const backend = env.VITE_PROXY_TARGET || 'http://127.0.0.1:8080'
   // scada-editor dev server；生产不走此代理（build 产物直接由后端静态托管）
   const scadaDev = env.VITE_SCADA_DEV || 'http://127.0.0.1:5174'
+  const formAppDev = env.VITE_FORM_APP_DEV || 'http://127.0.0.1:5175'
 
   return {
     customLogger: createFilteredLogger(),
-    plugins: [vue()],
+    plugins: [
+      vue(),
+      monacoEditorPlugin({
+        languageWorkers: ['editorWorkerService', 'json', 'css', 'html', 'typescript']
+      })
+    ],
     resolve: {
       alias: { '@': path.resolve(__dirname, 'src') }
+    },
+    optimizeDeps: {
+      include: ['monaco-editor']
     },
     server: {
       host: '0.0.0.0',
@@ -52,6 +62,13 @@ export default defineConfig(({ mode }) => {
           target: scadaDev,
           changeOrigin: true,
           secure: false,
+          ws: true,
+        },
+        '/form-app': {
+          target: formAppDev,
+          changeOrigin: true,
+          secure: false,
+          ws: true,
         },
         // STOMP / 屏幕等 WebSocket：target 必须用 http(s)，不能写 ws://，否则升级握手常失败
         '/ws': {

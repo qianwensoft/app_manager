@@ -1,0 +1,484 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1776433431183,
+  "projectRoot": "/Volumes/data/workspace/qianwen/app-manager/server",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Go",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "go.mod"
+        ]
+      }
+    ],
+    "frameworks": [],
+    "packageManager": "go",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": null,
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [],
+    "gitBranches": null
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "adb": {
+      "path": "adb",
+      "purpose": null,
+      "fileCount": 4,
+      "lastAccessed": 1776433431162,
+      "keyFiles": [
+        "apk.go",
+        "client.go",
+        "info.go",
+        "packages.go"
+      ]
+    },
+    "agent": {
+      "path": "agent",
+      "purpose": null,
+      "fileCount": 12,
+      "lastAccessed": 1776433431162,
+      "keyFiles": [
+        "device_info_push_wait.go",
+        "device_key.go",
+        "device_profile_notify.go",
+        "fs_list_wait.go",
+        "fs_upload_wait.go"
+      ]
+    },
+    "api": {
+      "path": "api",
+      "purpose": "API routes",
+      "fileCount": 51,
+      "lastAccessed": 1776433431162,
+      "keyFiles": [
+        "adb_keepalive.go",
+        "agent_catalog.go",
+        "agent_fs.go",
+        "agent_install_apk.go",
+        "agent_menu.go"
+      ]
+    },
+    "audit": {
+      "path": "audit",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1776433431162,
+      "keyFiles": []
+    },
+    "auth": {
+      "path": "auth",
+      "purpose": null,
+      "fileCount": 3,
+      "lastAccessed": 1776433431163,
+      "keyFiles": [
+        "jwt.go",
+        "middleware.go",
+        "scopes.go"
+      ]
+    },
+    "config": {
+      "path": "config",
+      "purpose": "Configuration files",
+      "fileCount": 1,
+      "lastAccessed": 1776433431163,
+      "keyFiles": [
+        "config.go"
+      ]
+    },
+    "custompreset": {
+      "path": "custompreset",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1776433431163,
+      "keyFiles": [
+        "pda_scan.go"
+      ]
+    },
+    "data": {
+      "path": "data",
+      "purpose": "Data files",
+      "fileCount": 1,
+      "lastAccessed": 1776433431163,
+      "keyFiles": [
+        "app-manager.db"
+      ]
+    },
+    "database": {
+      "path": "database",
+      "purpose": null,
+      "fileCount": 6,
+      "lastAccessed": 1776433431164,
+      "keyFiles": [
+        "db.go",
+        "migrate_data_stack_code.go",
+        "migrate_device_android_serial.go",
+        "migrate_outbound_phases.go",
+        "seed.go"
+      ]
+    },
+    "datastack": {
+      "path": "datastack",
+      "purpose": null,
+      "fileCount": 8,
+      "lastAccessed": 1776433431164,
+      "keyFiles": [
+        "buffer_http.go",
+        "buffer_meta.go",
+        "buffer_poll.go",
+        "dataset_meta.go",
+        "dataset_meta_test.go"
+      ]
+    },
+    "dbdriver": {
+      "path": "dbdriver",
+      "purpose": null,
+      "fileCount": 8,
+      "lastAccessed": 1776433431164,
+      "keyFiles": [
+        "columns.go",
+        "driver.go",
+        "normalize.go",
+        "open.go",
+        "pool.go"
+      ]
+    },
+    "event": {
+      "path": "event",
+      "purpose": null,
+      "fileCount": 3,
+      "lastAccessed": 1776433431164,
+      "keyFiles": [
+        "device_display.go",
+        "outbound_trace_stomp.go",
+        "stomp_publish.go"
+      ]
+    },
+    "logcat": {
+      "path": "logcat",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1776433431164,
+      "keyFiles": [
+        "hub.go",
+        "session.go"
+      ]
+    },
+    "migrations": {
+      "path": "migrations",
+      "purpose": "Database migrations",
+      "fileCount": 0,
+      "lastAccessed": 1776433431164,
+      "keyFiles": []
+    },
+    "models": {
+      "path": "models",
+      "purpose": "Data models",
+      "fileCount": 9,
+      "lastAccessed": 1776433431165,
+      "keyFiles": [
+        "agent_menu.go",
+        "agent_update.go",
+        "custom_event.go",
+        "data_stack.go",
+        "models.go"
+      ]
+    },
+    "mqtt": {
+      "path": "mqtt",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1776433431165,
+      "keyFiles": [
+        "client.go"
+      ]
+    },
+    "outbound": {
+      "path": "outbound",
+      "purpose": null,
+      "fileCount": 29,
+      "lastAccessed": 1776433431165,
+      "keyFiles": [
+        "agent_step.go",
+        "app_script_step.go",
+        "apptoken.go",
+        "debounce.go",
+        "device_connector_state.go"
+      ]
+    },
+    "scada": {
+      "path": "scada",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1776433431165,
+      "keyFiles": [
+        "sim.go"
+      ]
+    },
+    "screen": {
+      "path": "screen",
+      "purpose": null,
+      "fileCount": 3,
+      "lastAccessed": 1776433431165,
+      "keyFiles": [
+        "capture_state.go",
+        "hub.go",
+        "server_recorder.go"
+      ]
+    },
+    "shell": {
+      "path": "shell",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1776433431165,
+      "keyFiles": [
+        "hub.go",
+        "session.go"
+      ]
+    },
+    "stomp": {
+      "path": "stomp",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1776433431166,
+      "keyFiles": [
+        "frame.go",
+        "hub.go"
+      ]
+    },
+    "storage": {
+      "path": "storage",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1776433431166,
+      "keyFiles": [
+        "storage.go"
+      ]
+    },
+    "task": {
+      "path": "task",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1776433431166,
+      "keyFiles": [
+        "queue.go"
+      ]
+    },
+    "uploads": {
+      "path": "uploads",
+      "purpose": null,
+      "fileCount": 19,
+      "lastAccessed": 1776433431166,
+      "keyFiles": [
+        "1774772215_展厅综合软件-平板-V1.0.2512.23.apk",
+        "1774772299_展厅综合软件-平板-V1.0.2512.23.apk",
+        "1774996325_app-debug.apk",
+        "1775055781_app-debug.apk",
+        "1775056259_app-debug.apk"
+      ]
+    },
+    "webrtc": {
+      "path": "webrtc",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1776433431167,
+      "keyFiles": [
+        "hub.go"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "api/data_stack.go",
+      "accessCount": 79,
+      "lastAccessed": 1776472522697,
+      "type": "directory"
+    },
+    {
+      "path": "api/outbound.go",
+      "accessCount": 39,
+      "lastAccessed": 1776450919493,
+      "type": "file"
+    },
+    {
+      "path": "outbound/apptoken.go",
+      "accessCount": 38,
+      "lastAccessed": 1776450905929,
+      "type": "file"
+    },
+    {
+      "path": "api/router.go",
+      "accessCount": 10,
+      "lastAccessed": 1776471960763,
+      "type": "file"
+    },
+    {
+      "path": "models/data_stack.go",
+      "accessCount": 9,
+      "lastAccessed": 1776454927536,
+      "type": "file"
+    },
+    {
+      "path": "",
+      "accessCount": 7,
+      "lastAccessed": 1776448396089,
+      "type": "directory"
+    },
+    {
+      "path": "outbound/template_params.go",
+      "accessCount": 6,
+      "lastAccessed": 1776449885811,
+      "type": "file"
+    },
+    {
+      "path": "outbound/http_exec.go",
+      "accessCount": 5,
+      "lastAccessed": 1776448456420,
+      "type": "file"
+    },
+    {
+      "path": "api/outbound_app_token.go",
+      "accessCount": 5,
+      "lastAccessed": 1776449958938,
+      "type": "file"
+    },
+    {
+      "path": "models/outbound.go",
+      "accessCount": 4,
+      "lastAccessed": 1776448343442,
+      "type": "file"
+    },
+    {
+      "path": "outbound",
+      "accessCount": 4,
+      "lastAccessed": 1776448387279,
+      "type": "directory"
+    },
+    {
+      "path": "models",
+      "accessCount": 3,
+      "lastAccessed": 1776448337436,
+      "type": "directory"
+    },
+    {
+      "path": "datastack/webhook_push.go",
+      "accessCount": 3,
+      "lastAccessed": 1776451350685,
+      "type": "file"
+    },
+    {
+      "path": "datastack/event_bound_meta.go",
+      "accessCount": 2,
+      "lastAccessed": 1776437689634,
+      "type": "file"
+    },
+    {
+      "path": "outbound/phased_runner.go",
+      "accessCount": 2,
+      "lastAccessed": 1776448370583,
+      "type": "file"
+    },
+    {
+      "path": "api/outbound_webhook.go",
+      "accessCount": 2,
+      "lastAccessed": 1776448386257,
+      "type": "file"
+    },
+    {
+      "path": "outbound/dispatch.go",
+      "accessCount": 2,
+      "lastAccessed": 1776448409830,
+      "type": "file"
+    },
+    {
+      "path": "api",
+      "accessCount": 2,
+      "lastAccessed": 1776448564592,
+      "type": "directory"
+    },
+    {
+      "path": "api/data_stack_ddl.go",
+      "accessCount": 2,
+      "lastAccessed": 1776451348935,
+      "type": "file"
+    },
+    {
+      "path": "datastack/event_bound_ingest.go",
+      "accessCount": 2,
+      "lastAccessed": 1776451349901,
+      "type": "file"
+    },
+    {
+      "path": "datastack/buffer_http.go",
+      "accessCount": 2,
+      "lastAccessed": 1776451351667,
+      "type": "file"
+    },
+    {
+      "path": "datastack/buffer_poll.go",
+      "accessCount": 2,
+      "lastAccessed": 1776451368074,
+      "type": "file"
+    },
+    {
+      "path": "api/outbound_delivery.go",
+      "accessCount": 1,
+      "lastAccessed": 1776438112024,
+      "type": "file"
+    },
+    {
+      "path": "api/outbound_trace.go",
+      "accessCount": 1,
+      "lastAccessed": 1776438112836,
+      "type": "file"
+    },
+    {
+      "path": "database/db.go",
+      "accessCount": 1,
+      "lastAccessed": 1776438142339,
+      "type": "file"
+    },
+    {
+      "path": "outbound/render.go",
+      "accessCount": 1,
+      "lastAccessed": 1776448304885,
+      "type": "file"
+    },
+    {
+      "path": "outbound/retry.go",
+      "accessCount": 1,
+      "lastAccessed": 1776448410537,
+      "type": "file"
+    },
+    {
+      "path": "dbdriver/columns.go",
+      "accessCount": 1,
+      "lastAccessed": 1776452275905,
+      "type": "file"
+    },
+    {
+      "path": "database/migrate_data_stack_code.go",
+      "accessCount": 1,
+      "lastAccessed": 1776454337640,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}

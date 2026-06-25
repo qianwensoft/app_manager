@@ -255,18 +255,18 @@ func setNested(v interface{}, parts []string, val interface{}) {
 // literals in non-ASCII languages continue to work.
 func sanitizeJS(code string) string {
 	replacer := strings.NewReplacer(
-		"\u2018", "'",  // left single quotation mark
-		"\u2019", "'",  // right single quotation mark
+		"\u2018", "'", // left single quotation mark
+		"\u2019", "'", // right single quotation mark
 		"\u201C", "\"", // left double quotation mark
 		"\u201D", "\"", // right double quotation mark
-		"\u2013", "-",  // en dash
-		"\u2014", "-",  // em dash
-		"\u00A0", " ",  // non-breaking space
-		"\u3000", " ",  // ideographic space
-		"\uFEFF", "",   // BOM
-		"\u200B", "",   // zero-width space
-		"\u200C", "",   // zero-width non-joiner
-		"\u200D", "",   // zero-width joiner
+		"\u2013", "-", // en dash
+		"\u2014", "-", // em dash
+		"\u00A0", " ", // non-breaking space
+		"\u3000", " ", // ideographic space
+		"\uFEFF", "", // BOM
+		"\u200B", "", // zero-width space
+		"\u200C", "", // zero-width non-joiner
+		"\u200D", "", // zero-width joiner
 		"\u2028", "\n", // line separator — illegal in ES5 string literals
 		"\u2029", "\n", // paragraph separator — illegal in ES5 string literals
 	)

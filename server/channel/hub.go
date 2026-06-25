@@ -111,10 +111,10 @@ func (h *ChannelHub) ServeWS(conn wsConn) {
 // ── Kafka consumer (via REST proxy) ──────────────────────────────────────────
 
 type KafkaConfig struct {
-	Enabled          bool
-	GroupID          string
-	Topics           []string
-	RestProxyURL     string
+	Enabled      bool
+	GroupID      string
+	Topics       []string
+	RestProxyURL string
 }
 
 type KafkaConsumer struct {

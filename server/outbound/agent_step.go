@@ -117,6 +117,9 @@ func ExecuteAgentOutboundStep(db *gorm.DB, connector models.OutboundConnector, s
 			}
 			ex[k] = v
 		}
+		if _, ok := ex[OutboundBroadcastMarkerExtra]; !ok {
+			ex[OutboundBroadcastMarkerExtra] = "1"
+		}
 		data := map[string]interface{}{
 			"action": strings.TrimSpace(m.Action),
 			"extras": ex,
@@ -136,6 +139,7 @@ func ExecuteAgentOutboundStep(db *gorm.DB, connector models.OutboundConnector, s
 		d.DurationMS = time.Since(t0).Milliseconds()
 		d.DetailJSON = MarshalAgentDeliveryDetail(st, rawCfg, cmdID, msg, "")
 		_ = db.Create(&d).Error
+		RecordConnectorLoopCooldown(connector.ID, rec.DeviceID, connector.LoopCooldownMS)
 		return d
 	case "message":
 		var m struct {
@@ -186,6 +190,130 @@ func ExecuteAgentOutboundStep(db *gorm.DB, connector models.OutboundConnector, s
 				"body":        body,
 				"duration_ms": dur,
 			},
+		}
+		_ = agent.AgentHub.Send(key, msg)
+		d.Status = "success"
+		d.Error = ""
+		d.DurationMS = time.Since(t0).Milliseconds()
+		d.DetailJSON = MarshalAgentDeliveryDetail(st, rawCfg, cmdID, msg, "")
+		_ = db.Create(&d).Error
+		return d
+	case "keyboard_hid":
+		var m struct {
+			Text        string   `json:"text"`
+			Keys        []string `json:"keys"`
+			DelayMs     int      `json:"delay_ms"`
+			TargetApp   string   `json:"target_app"`
+			InputMethod string   `json:"input_method"`
+		}
+		if err := json.Unmarshal([]byte(rawCfg), &m); err != nil {
+			d.Error = "config_json: " + err.Error()
+			d.DurationMS = time.Since(t0).Milliseconds()
+			d.DetailJSON = MarshalAgentDeliveryDetail(st, rawCfg, "", nil, d.Error)
+			_ = db.Create(&d).Error
+			return d
+		}
+		method := strings.TrimSpace(m.InputMethod)
+		if method == "" {
+			method = "text"
+		}
+		if method == "text" || method == "mixed" {
+			if strings.TrimSpace(m.Text) == "" && len(m.Keys) == 0 {
+				d.Error = "text 和 keys 不能同时为空"
+				d.DurationMS = time.Since(t0).Milliseconds()
+				d.DetailJSON = MarshalAgentDeliveryDetail(st, rawCfg, "", nil, d.Error)
+				_ = db.Create(&d).Error
+				return d
+			}
+		} else if method == "keys" {
+			if len(m.Keys) == 0 {
+				d.Error = "keys 模式下必须提供按键序列"
+				d.DurationMS = time.Since(t0).Milliseconds()
+				d.DetailJSON = MarshalAgentDeliveryDetail(st, rawCfg, "", nil, d.Error)
+				_ = db.Create(&d).Error
+				return d
+			}
+		}
+		delayMs := m.DelayMs
+		if delayMs < 0 {
+			delayMs = 50
+		}
+		if delayMs > 5000 {
+			delayMs = 5000
+		}
+		data := map[string]interface{}{
+			"input_method": method,
+			"delay_ms":     delayMs,
+		}
+		if m.Text != "" {
+			data["text"] = m.Text
+		}
+		if len(m.Keys) > 0 {
+			data["keys"] = m.Keys
+		}
+		if m.TargetApp != "" {
+			data["target_app"] = strings.TrimSpace(m.TargetApp)
+		}
+		msg := map[string]interface{}{
+			"type":       "command",
+			"action":     "keyboard_input",
+			"command_id": cmdID,
+			"data":       data,
+		}
+		_ = agent.AgentHub.Send(key, msg)
+		d.Status = "success"
+		d.Error = ""
+		d.DurationMS = time.Since(t0).Milliseconds()
+		d.DetailJSON = MarshalAgentDeliveryDetail(st, rawCfg, cmdID, msg, "")
+		_ = db.Create(&d).Error
+		return d
+	case "print":
+		var m struct {
+			Protocol  string        `json:"protocol"`
+			Transport string        `json:"transport"`
+			Mac       string        `json:"mac"`
+			GenSide   string        `json:"gen_side"`
+			Content   []interface{} `json:"content"`
+			RawBase64 string        `json:"raw_base64"`
+		}
+		if err := json.Unmarshal([]byte(rawCfg), &m); err != nil {
+			d.Error = "config_json: " + err.Error()
+			d.DurationMS = time.Since(t0).Milliseconds()
+			d.DetailJSON = MarshalAgentDeliveryDetail(st, rawCfg, "", nil, d.Error)
+			_ = db.Create(&d).Error
+			return d
+		}
+		if len(m.Content) == 0 && strings.TrimSpace(m.RawBase64) == "" {
+			d.Error = "缺少 content 或 raw_base64"
+			d.DurationMS = time.Since(t0).Milliseconds()
+			d.DetailJSON = MarshalAgentDeliveryDetail(st, rawCfg, "", nil, d.Error)
+			_ = db.Create(&d).Error
+			return d
+		}
+		data := map[string]interface{}{}
+		if p := strings.TrimSpace(m.Protocol); p != "" {
+			data["protocol"] = p
+		}
+		if t := strings.TrimSpace(m.Transport); t != "" {
+			data["transport"] = t
+		}
+		if mac := strings.TrimSpace(m.Mac); mac != "" {
+			data["mac"] = mac
+		}
+		if g := strings.TrimSpace(m.GenSide); g != "" {
+			data["gen_side"] = g
+		}
+		if len(m.Content) > 0 {
+			data["content"] = m.Content
+		}
+		if b := strings.TrimSpace(m.RawBase64); b != "" {
+			data["raw_base64"] = b
+		}
+		msg := map[string]interface{}{
+			"type":       "command",
+			"action":     "print",
+			"command_id": cmdID,
+			"data":       data,
 		}
 		_ = agent.AgentHub.Send(key, msg)
 		d.Status = "success"

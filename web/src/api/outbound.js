@@ -48,6 +48,15 @@ export const getOutboundTemplateDemo = () => http.get('/outbound/template-demo')
 export const postOutboundTemplateExpand = (data) => http.post('/outbound/template-expand', data)
 export const getOutboundTemplateVars = () => http.get('/outbound/template-vars')
 export const postOutboundPhasePreview = (data) => http.post('/outbound/phase-preview', data)
+export const postOutboundInterfaceDebug = (data) => http.post('/outbound/interface-debug', data)
+
+// 导出导入
+export const exportOutboundApp = (id, includeSecrets = false) =>
+  http.get(`/outbound/apps/${id}/export`, { params: { include_secrets: includeSecrets } })
+
+export const importOutboundApp = (data) => http.post('/outbound/apps/import', data)
+
+export const validateImportData = (data) => http.post('/outbound/apps/import/validate', data)
 
 export const listOutboundDeliveries = (params) => http.get('/outbound/deliveries', { params })
 export const getOutboundDelivery = (id) => http.get(`/outbound/deliveries/${id}`)
@@ -66,3 +75,20 @@ export const listWebhookEventTypes = (webhookId) => http.get(`/outbound/webhooks
 export const createWebhookEventType = (webhookId, data) => http.post(`/outbound/webhooks/${webhookId}/event-types`, data)
 export const updateWebhookEventType = (webhookId, etid, data) => http.put(`/outbound/webhooks/${webhookId}/event-types/${etid}`, data)
 export const deleteWebhookEventType = (webhookId, etid) => http.delete(`/outbound/webhooks/${webhookId}/event-types/${etid}`)
+
+// 连接器接口模式
+export const listConnectorInterfaces = (params) => http.get('/outbound/connector-interfaces', { params })
+export const getConnectorInterface = (code) => http.get(`/outbound/connector-interfaces/${code}`)
+export const callConnectorInterface = (data) => http.post('/outbound/connector-interfaces/call', data)
+export const callConnectorInterfaceByCode = (code, method, params) => {
+  const config = {
+    method: method.toLowerCase(),
+    url: `/outbound/connector-interfaces/${code}/invoke`
+  }
+  if (method === 'GET') {
+    config.params = params
+  } else {
+    config.data = params
+  }
+  return http.request(config)
+}

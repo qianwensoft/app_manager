@@ -39,6 +39,11 @@ interface EditorStore {
   // clipboard (in-memory, not persisted)
   _clipboard: CanvasElement[]
 
+  // canvas element ref — registered by CanvasBoard, read by EditorHeader for snapshot
+  _canvasEl: HTMLCanvasElement | null
+  registerCanvasEl: (el: HTMLCanvasElement | null) => void
+  getSnapshot: (maxWidth?: number) => string | null
+
   // actions - project
   loadProject: (scadaId: number, project: CanvasProject) => void
   resetProject: () => void
@@ -52,6 +57,7 @@ interface EditorStore {
   addCanvas: (canvas: CanvasData) => void
   updateCanvas: (id: number, updates: Partial<CanvasData>) => void
   deleteCanvas: (id: number) => void
+  fitCanvasToContent: (id: number, padding?: number) => void
 
   // actions - elements
   addElement: (el: CanvasElement) => void
@@ -83,11 +89,19 @@ interface EditorStore {
   sendBackward: (id: string) => void
   bringToFront: (id: string) => void
   sendToBack: (id: string) => void
+  /** 按图层面板显示顺序（前=顶层）重排 zIndex */
+  reorderLayersByDisplay: (displayOrder: string[]) => void
 
   // actions - editor
   setTool: (tool: DrawingTool) => void
   setZoom: (zoom: number) => void
   setPanOffset: (offset: { x: number; y: number }) => void
+
+  // ui prefs — persisted to localStorage
+  liveDataOn: boolean
+  toggleLiveData: () => void
+  layerCollapsed: boolean
+  toggleLayerCollapsed: () => void
 }
 
 const initialProject: CanvasProject = {
@@ -112,6 +126,25 @@ export const useEditorStore = create<EditorStore>()(
     zoom: 1,
     panOffset: { x: 0, y: 0 },
     _clipboard: [],
+    _canvasEl: null,
+    liveDataOn: localStorage.getItem('scada:liveDataOn') === 'true',
+    layerCollapsed: localStorage.getItem('scada:layerCollapsed') === 'true',
+    registerCanvasEl: (el) => set(() => ({ _canvasEl: el })),
+    getSnapshot: (maxWidth = 480) => {
+      const el = get()._canvasEl
+      if (!el) return null
+      try {
+        if (maxWidth && el.width > maxWidth) {
+          const scale = maxWidth / el.width
+          const off = document.createElement('canvas')
+          off.width = maxWidth
+          off.height = Math.round(el.height * scale)
+          off.getContext('2d')!.drawImage(el, 0, 0, off.width, off.height)
+          return off.toDataURL('image/jpeg', 0.82)
+        }
+        return el.toDataURL('image/jpeg', 0.82)
+      } catch { return null }
+    },
 
     loadProject: (scadaId, project) =>
       set((s) => { s.scadaId = scadaId; s.project = project; s.isDirty = false }),
@@ -147,10 +180,29 @@ export const useEditorStore = create<EditorStore>()(
         s.isDirty = true
       }),
 
+    fitCanvasToContent: (id, padding = 20) =>
+      set((s) => {
+        const c = s.project.canvases[id]
+        if (!c || !c.elements.length) return
+        const maxX = Math.max(...c.elements.map((e) => e.x + e.width))
+        const maxY = Math.max(...c.elements.map((e) => e.y + e.height))
+        c.width = Math.max(1, maxX + padding)
+        c.height = Math.max(1, maxY + padding)
+        s.isDirty = true
+      }),
+
     addElement: (el) =>
       set((s) => {
         const c = s.project.canvases[s.project.activeCanvasId]
-        if (c) { c.elements.push(el); s.isDirty = true }
+        if (c) {
+          c.elements.push(el)
+          s.isDirty = true
+          if (c.adaptiveMode === 'fit' && c.elements.length) {
+            const pad = 20
+            c.width = Math.max(c.width, Math.max(...c.elements.map((e) => e.x + e.width)) + pad)
+            c.height = Math.max(c.height, Math.max(...c.elements.map((e) => e.y + e.height)) + pad)
+          }
+        }
       }),
 
     updateElement: (id, updates) =>
@@ -184,6 +236,11 @@ export const useEditorStore = create<EditorStore>()(
         }
         Object.assign(el, updates)
         s.isDirty = true
+        if (c.adaptiveMode === 'fit' && c.elements.length) {
+          const pad = 20
+          c.width = Math.max(...c.elements.map((e) => e.x + e.width)) + pad
+          c.height = Math.max(...c.elements.map((e) => e.y + e.height)) + pad
+        }
       }),
 
     deleteElements: (ids) =>
@@ -210,6 +267,11 @@ export const useEditorStore = create<EditorStore>()(
           })
         }
         el.x = x; el.y = y; s.isDirty = true
+        if (c.adaptiveMode === 'fit' && c.elements.length) {
+          const pad = 20
+          c.width = Math.max(...c.elements.map((e) => e.x + e.width)) + pad
+          c.height = Math.max(...c.elements.map((e) => e.y + e.height)) + pad
+        }
       }),
 
     reorderElements: (ids) =>
@@ -408,8 +470,11 @@ export const useEditorStore = create<EditorStore>()(
         if (!c) return
         const el = c.elements.find((e) => e.id === id)
         if (!el) return
-        const next = c.elements.find((e) => e.zIndex === el.zIndex + 1)
-        if (next) { next.zIndex -= 1; el.zIndex += 1 }
+        // 找 zIndex 比当前大的最小元素
+        const next = c.elements
+          .filter((e) => e.id !== id && e.zIndex > el.zIndex)
+          .sort((a, b) => a.zIndex - b.zIndex)[0]
+        if (next) { const tmp = next.zIndex; next.zIndex = el.zIndex; el.zIndex = tmp }
         s.isDirty = true
       }),
 
@@ -418,9 +483,12 @@ export const useEditorStore = create<EditorStore>()(
         const c = s.project.canvases[s.project.activeCanvasId]
         if (!c) return
         const el = c.elements.find((e) => e.id === id)
-        if (!el || el.zIndex === 0) return
-        const prev = c.elements.find((e) => e.zIndex === el.zIndex - 1)
-        if (prev) { prev.zIndex += 1; el.zIndex -= 1 }
+        if (!el) return
+        // 找 zIndex 比当前小的最大元素
+        const prev = c.elements
+          .filter((e) => e.id !== id && e.zIndex < el.zIndex)
+          .sort((a, b) => b.zIndex - a.zIndex)[0]
+        if (prev) { const tmp = prev.zIndex; prev.zIndex = el.zIndex; el.zIndex = tmp }
         s.isDirty = true
       }),
 
@@ -446,8 +514,34 @@ export const useEditorStore = create<EditorStore>()(
         s.isDirty = true
       }),
 
+    reorderLayersByDisplay: (displayOrder) =>
+      set((s) => {
+        const c = s.project.canvases[s.project.activeCanvasId]
+        if (!c || displayOrder.length < 2) return
+        const zPool = displayOrder
+          .map((id) => c.elements.find((e) => e.id === id))
+          .filter((e): e is CanvasElement => !!e)
+          .map((e) => e.zIndex)
+          .sort((a, b) => b - a)
+        displayOrder.forEach((id, i) => {
+          const el = c.elements.find((e) => e.id === id)
+          if (el && zPool[i] !== undefined) el.zIndex = zPool[i]
+        })
+        s.isDirty = true
+      }),
+
     setTool: (tool) => set((s) => { s.activeTool = tool }),
     setZoom: (zoom) => set((s) => { s.zoom = Math.max(0.1, Math.min(5, zoom)) }),
     setPanOffset: (offset) => set((s) => { s.panOffset = offset }),
+    toggleLiveData: () => set((s) => {
+      const next = !s.liveDataOn
+      s.liveDataOn = next
+      localStorage.setItem('scada:liveDataOn', String(next))
+    }),
+    toggleLayerCollapsed: () => set((s) => {
+      const next = !s.layerCollapsed
+      s.layerCollapsed = next
+      localStorage.setItem('scada:layerCollapsed', String(next))
+    }),
   }))
 )

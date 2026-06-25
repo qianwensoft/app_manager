@@ -170,6 +170,177 @@ type ExtensionScriptRunOptions struct {
 	AfterResponseOnlyIndex *int
 }
 
+// AfterScriptOrderEntry 执行序列中的一个步骤（方案 B）。
+type AfterScriptOrderEntry struct {
+	Scope string `json:"scope"` // "app" | "endpoint"
+	Index int    `json:"index"` // 对应数组（default 优先排序后）的下标
+}
+
+// ScriptLog 脚本执行期间 console.* 产生的一条日志。
+type ScriptLog struct {
+	Scope string `json:"scope"` // "app" | "endpoint" | "inline"
+	Index int    `json:"index"` // 在对应数组中的下标
+	Name  string `json:"name"`  // 脚本名称
+	Level string `json:"level"` // "log" | "info" | "warn" | "error" | "debug"
+	Line  string `json:"line"`  // 日志内容
+}
+
+// ParseAfterScriptOrder 解析 AfterScriptOrderJSON；空或无效时返回 nil（退化旧行为）。
+func ParseAfterScriptOrder(raw string) []AfterScriptOrderEntry {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "null" || raw == "[]" {
+		return nil
+	}
+	var order []AfterScriptOrderEntry
+	if err := json.Unmarshal([]byte(raw), &order); err != nil {
+		return nil
+	}
+	return order
+}
+
+// RunAfterResponseOrdered 按 order 序列执行 after_response 脚本（方案 B 统一执行器）。
+// order 为 nil/空时退化为旧行为：应用级全部 → 接口级全部。
+// logs 非 nil 时收集每条脚本的 console.* 输出（调试模式）；生产路径传 nil。
+func RunAfterResponseOrdered(
+	order []AfterScriptOrderEntry,
+	app *models.OutboundApp,
+	endpointAfterScriptsJSON string,
+	vars map[string]string,
+	env *ScriptEnv,
+	logs *[]ScriptLog,
+) error {
+	if len(order) == 0 {
+		// 退化旧行为
+		if err := RunAppExtensionScriptWithLogs(AppScriptHookAfterResponse, app, vars, env, nil, logs, "app"); err != nil {
+			return err
+		}
+		return runEndpointAfterScriptsWithLogs(endpointAfterScriptsJSON, vars, env, nil, logs)
+	}
+
+	appPlan := ParseExtensionScriptsPlan("")
+	if app != nil {
+		appPlan = ParseExtensionScriptsPlan(app.ExtensionScriptsJSON)
+	}
+	epPlan := ParseExtensionScriptsPlan(endpointAfterScriptsJSON)
+
+	for _, entry := range order {
+		switch entry.Scope {
+		case "app":
+			if entry.Index < 0 || entry.Index >= len(appPlan.After) {
+				continue
+			}
+			h := appPlan.After[entry.Index]
+			if !h.Enabled {
+				continue
+			}
+			if err := runOneExtensionHookWithLogs(&h, vars, env, "app", entry.Index, logs); err != nil {
+				return err
+			}
+		case "endpoint":
+			if entry.Index < 0 || entry.Index >= len(epPlan.After) {
+				continue
+			}
+			h := epPlan.After[entry.Index]
+			if !h.Enabled {
+				continue
+			}
+			// 接口脚本看到当前 env 中最新的 OutResp* 状态
+			epEnv := &ScriptEnv{
+				RespStatus: env.RespStatus,
+				RespBody:   env.RespBody,
+			}
+			if env.OutRespStatus != nil {
+				epEnv.RespStatus = *env.OutRespStatus
+			}
+			if env.OutRespBody != nil {
+				epEnv.RespBody = *env.OutRespBody
+			}
+			if err := runOneExtensionHookWithLogs(&h, vars, epEnv, "endpoint", entry.Index, logs); err != nil {
+				return err
+			}
+			// 把接口脚本的改写并入主 env
+			if epEnv.OutRespStatus != nil {
+				env.OutRespStatus = epEnv.OutRespStatus
+			}
+			if epEnv.OutRespBody != nil {
+				env.OutRespBody = epEnv.OutRespBody
+			}
+		}
+	}
+	return nil
+}
+
+// RunAppExtensionScriptWithLogs 与 RunAppExtensionScriptWithOptions 相同，但可额外收集日志。
+func RunAppExtensionScriptWithLogs(phase AppScriptHook, app *models.OutboundApp, vars map[string]string, env *ScriptEnv, opt *ExtensionScriptRunOptions, logs *[]ScriptLog, scope string) error {
+	if app == nil {
+		return nil
+	}
+	plan := ParseExtensionScriptsPlan(app.ExtensionScriptsJSON)
+	var list []scriptHookEntry
+	switch phase {
+	case AppScriptHookAfterResponse:
+		list = plan.After
+	default:
+		list = plan.Before
+	}
+	for i := range list {
+		if opt != nil && phase == AppScriptHookAfterResponse && opt.AfterResponseOnlyIndex != nil {
+			if *opt.AfterResponseOnlyIndex != i {
+				continue
+			}
+		}
+		h := &list[i]
+		if err := runOneExtensionHookWithLogs(h, vars, env, scope, i, logs); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func runEndpointAfterScriptsWithLogs(rawJSON string, vars map[string]string, appEnv *ScriptEnv, opt *ExtensionScriptRunOptions, logs *[]ScriptLog) error {
+	if strings.TrimSpace(rawJSON) == "" {
+		return nil
+	}
+	list := ParseExtensionScriptsPlan(rawJSON).After
+	status := 0
+	respBody := ""
+	if appEnv != nil {
+		status = appEnv.RespStatus
+		respBody = appEnv.RespBody
+		if appEnv.OutRespStatus != nil {
+			status = *appEnv.OutRespStatus
+		}
+		if appEnv.OutRespBody != nil {
+			respBody = *appEnv.OutRespBody
+		}
+	}
+	env := &ScriptEnv{RespStatus: status, RespBody: respBody}
+	for i := range list {
+		if opt != nil && opt.AfterResponseOnlyIndex != nil && *opt.AfterResponseOnlyIndex != i {
+			continue
+		}
+		if err := runOneExtensionHookWithLogs(&list[i], vars, env, "endpoint", i, logs); err != nil {
+			return err
+		}
+	}
+	if appEnv != nil {
+		if env.OutRespStatus != nil {
+			appEnv.OutRespStatus = env.OutRespStatus
+		}
+		if env.OutRespBody != nil {
+			appEnv.OutRespBody = env.OutRespBody
+		}
+	}
+	return nil
+}
+
+func runOneExtensionHookWithLogs(hook *scriptHookEntry, vars map[string]string, env *ScriptEnv, scope string, index int, logs *[]ScriptLog) error {
+	if hook == nil || !hook.Enabled {
+		return nil
+	}
+	return runScriptCode(hook.Code, hook.Name, hookTimeoutMS(hook), vars, env, scope, index, logs)
+}
+
 // RunAppExtensionScript 按顺序执行该阶段下所有已启用的扩展脚本（标记 default 的条目先于同阶段其它条目执行）。
 func RunAppExtensionScript(phase AppScriptHook, app *models.OutboundApp, vars map[string]string, env *ScriptEnv) error {
 	return RunAppExtensionScriptWithOptions(phase, app, vars, env, nil)
@@ -201,8 +372,6 @@ func RunAppExtensionScriptWithOptions(phase AppScriptHook, app *models.OutboundA
 	}
 	return nil
 }
-
-// ValidateAfterResponseScriptIndex 校验 after_response 数组下标（接口调试专用）。
 func ValidateAfterResponseScriptIndex(app *models.OutboundApp, idx int) error {
 	if app == nil {
 		return errors.New("应用为空")
@@ -217,11 +386,70 @@ func ValidateAfterResponseScriptIndex(app *models.OutboundApp, idx int) error {
 	return nil
 }
 
+// RunAfterResponseScriptsJSON 执行任意来源（如接口级 after_scripts_json）的 after_response 脚本。
+// rawJSON 形如 {"after_response":[scriptHookEntry...]}（也兼容 ParseExtensionScriptsPlan 支持的旧形态）；
+// 按 default 优先、列表顺序执行已启用脚本，opt 可限制只跑某一下标。与应用级共用 runOneExtensionHook / ScriptEnv，
+// 因此脚本能用同样的 ctx API（含 ctx.setResponseStatus / ctx.setResponseBody 改写整个返回）。
+func RunAfterResponseScriptsJSON(rawJSON string, vars map[string]string, env *ScriptEnv, opt *ExtensionScriptRunOptions) error {
+	if strings.TrimSpace(rawJSON) == "" {
+		return nil
+	}
+	list := ParseExtensionScriptsPlan(rawJSON).After
+	if env == nil {
+		env = &ScriptEnv{}
+	}
+	for i := range list {
+		if opt != nil && opt.AfterResponseOnlyIndex != nil && *opt.AfterResponseOnlyIndex != i {
+			continue
+		}
+		if err := runOneExtensionHook(&list[i], vars, env); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ValidateEndpointAfterScriptIndex 校验接口级 after_scripts_json 的 after_response 下标（接口调试单条执行用）。
+func ValidateEndpointAfterScriptIndex(rawJSON string, idx int) error {
+	plan := ParseExtensionScriptsPlan(rawJSON)
+	if idx < 0 || idx >= len(plan.After) {
+		return fmt.Errorf("after_response_script_index 越界")
+	}
+	if !plan.After[idx].Enabled {
+		return fmt.Errorf("after_response 脚本 #%d 未启用", idx)
+	}
+	return nil
+}
+
 func runOneExtensionHook(hook *scriptHookEntry, vars map[string]string, env *ScriptEnv) error {
 	if hook == nil || !hook.Enabled {
 		return nil
 	}
-	code := strings.TrimSpace(hook.Code)
+	return runScriptCode(hook.Code, hook.Name, hookTimeoutMS(hook), vars, env, "", 0, nil)
+}
+
+// RunInlineScript 执行一段内联 ES5 代码（须含 function main(ctx)），ctx API 与扩展脚本一致。
+// 用于连接器内联脚本步骤、连接器全局返回值脚本等「不挂在某 app 上」的场景。
+// timeoutMS<=0 时用默认超时；vars/env 语义与 runOneExtensionHook 相同。
+func RunInlineScript(code, name string, timeoutMS int, vars map[string]string, env *ScriptEnv) error {
+	if strings.TrimSpace(code) == "" {
+		return nil
+	}
+	ms := timeoutMS
+	if ms <= 0 {
+		ms = defaultExtensionScriptTimeoutMS
+	}
+	if ms > maxExtensionScriptTimeoutMS {
+		ms = maxExtensionScriptTimeoutMS
+	}
+	return runScriptCode(code, name, ms, vars, env, "", 0, nil)
+}
+
+// runScriptCode 装配 goja VM（console + ctx API + context 快照）并执行 code（function main(ctx)）。
+// timeoutMS<=0 表示不设中断；vars 为占位符表（脚本可读写，含 {{context.*}}）；env 提供 body/响应读写。
+// scope/index/logs 用于调试日志收集；生产路径传 "", 0, nil。
+func runScriptCode(code, name string, timeoutMS int, vars map[string]string, env *ScriptEnv, scope string, index int, logs *[]ScriptLog) error {
+	code = strings.TrimSpace(code)
 	if code == "" {
 		return nil
 	}
@@ -236,14 +464,13 @@ func runOneExtensionHook(hook *scriptHookEntry, vars map[string]string, env *Scr
 	}
 
 	vm := goja.New()
-	ms := hookTimeoutMS(hook)
-	if ms > 0 {
-		time.AfterFunc(time.Duration(ms)*time.Millisecond, func() {
+	if timeoutMS > 0 {
+		time.AfterFunc(time.Duration(timeoutMS)*time.Millisecond, func() {
 			vm.Interrupt("timeout")
 		})
 	}
 
-	scriptLabel := strings.TrimSpace(hook.Name)
+	scriptLabel := strings.TrimSpace(name)
 	if scriptLabel == "" {
 		scriptLabel = "extension"
 	}
@@ -259,6 +486,15 @@ func runOneExtensionHook(hook *scriptHookEntry, vars map[string]string, env *Scr
 				line = line[:4000] + "...(truncated)"
 			}
 			log.Printf("outbound extension_script %s [%s]: %s", level, scriptLabel, line)
+			if logs != nil {
+				*logs = append(*logs, ScriptLog{
+					Scope: scope,
+					Index: index,
+					Name:  scriptLabel,
+					Level: level,
+					Line:  line,
+				})
+			}
 			return goja.Undefined()
 		}
 	}
@@ -316,7 +552,7 @@ func runOneExtensionHook(hook *scriptHookEntry, vars map[string]string, env *Scr
 	contextSnapshot := vm.NewObject()
 	for k, v := range vars {
 		if strings.HasPrefix(k, "{{context.") && strings.HasSuffix(k, "}}") {
-			field := k[len("{{context."):len(k)-2]
+			field := k[len("{{context.") : len(k)-2]
 			_ = contextSnapshot.Set(field, v)
 		}
 	}

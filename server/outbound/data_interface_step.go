@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
@@ -31,8 +30,6 @@ type ParamMapping struct {
 	Source string `json:"source"`
 	Value  string `json:"value"`
 }
-
-var reNamedParam = regexp.MustCompile(`:([a-zA-Z_][a-zA-Z0-9_]*)`)
 
 // ParseDataInterfaceStepConfig 从 config_json 解析 data_interface 步骤配置。
 func ParseDataInterfaceStepConfig(configJSON string) (*DataInterfaceStepConfig, error) {
@@ -340,55 +337,9 @@ func execDataIfaceTransaction(dsSrc *models.DataSource, ds *models.Dataset, ifac
 	return result, nil
 }
 
+// rewriteDataIfaceNamedParams 将 {{name}} 占位符转方言占位符（委托 dbdriver 统一实现，缺失参数自动剔除子句）。
 func rewriteDataIfaceNamedParams(dialect, sqlStr string, params map[string]interface{}) (string, []interface{}, error) {
-	if params == nil {
-		params = map[string]interface{}{}
-	}
-	type occ struct {
-		start, end int
-		name       string
-	}
-	var occs []occ
-	idx := 0
-	for {
-		loc := reNamedParam.FindStringSubmatchIndex(sqlStr[idx:])
-		if loc == nil {
-			break
-		}
-		start := idx + loc[0]
-		end := idx + loc[1]
-		name := sqlStr[idx+loc[2] : idx+loc[3]]
-		if start > 0 && sqlStr[start-1] == ':' {
-			idx = end
-			continue
-		}
-		if _, ok := params[name]; !ok {
-			return "", nil, fmt.Errorf("缺少参数 :%s", name)
-		}
-		occs = append(occs, occ{start, end, name})
-		idx = end
-	}
-	if len(occs) == 0 {
-		return sqlStr, nil, nil
-	}
-	var b strings.Builder
-	last := 0
-	n := 0
-	d := strings.ToLower(strings.TrimSpace(dialect))
-	var args []interface{}
-	for _, o := range occs {
-		b.WriteString(sqlStr[last:o.start])
-		if d == "postgres" || d == "postgresql" {
-			n++
-			b.WriteString(fmt.Sprintf("$%d", n))
-		} else {
-			b.WriteString("?")
-		}
-		args = append(args, params[o.name])
-		last = o.end
-	}
-	b.WriteString(sqlStr[last:])
-	return b.String(), args, nil
+	return dbdriver.RewriteNamedSQLParams(dialect, sqlStr, params)
 }
 
 // runDataIfacePreScript 用 goja 执行前脚本，脚本可通过 ctx.setParam/getParam/getVar 操作参数。

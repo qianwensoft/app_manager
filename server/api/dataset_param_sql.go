@@ -4,41 +4,31 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
-	"regexp"
 	"strings"
 	"time"
+
+	"app-manager/dbdriver"
 
 	"github.com/gin-gonic/gin"
 )
 
-var reSQLNamedParam = regexp.MustCompile(`:([a-zA-Z_][a-zA-Z0-9_]*)`)
+// stripMissingInsertParams 对 INSERT INTO t (c1, c2, ...) VALUES ({{p1}}, {{p2}}, ...) 语句，
+// 自动移除 params 中不存在的命名参数对应的列/值对（委托 dbdriver 统一实现）。
+func stripMissingInsertParams(sqlStr string, params map[string]interface{}) string {
+	if params == nil {
+		params = map[string]interface{}{}
+	}
+	if !strings.HasPrefix(strings.ToUpper(strings.TrimSpace(sqlStr)), "INSERT") {
+		return sqlStr
+	}
+	return dbdriver.StripMissingClauses(sqlStr, params)
+}
 
 var mockRand = rand.New(rand.NewSource(time.Now().UnixNano()))
 
-// extractSQLNamedParamNames 从 SQL 中提取所有 :name 参数名（去重，保序）。
+// extractSQLNamedParamNames 从 SQL 中提取所有 {{name}} 占位符名（去重，保序）。
 func extractSQLNamedParamNames(sql string) []string {
-	seen := map[string]bool{}
-	var out []string
-	idx := 0
-	for {
-		loc := reSQLNamedParam.FindStringSubmatchIndex(sql[idx:])
-		if loc == nil {
-			break
-		}
-		start := idx + loc[0]
-		end := idx + loc[1]
-		name := sql[idx+loc[2] : idx+loc[3]]
-		if start > 0 && sql[start-1] == ':' {
-			idx = end
-			continue
-		}
-		if !seen[name] {
-			seen[name] = true
-			out = append(out, name)
-		}
-		idx = end
-	}
-	return out
+	return dbdriver.ExtractPlaceholderNames(sql)
 }
 
 // demoValueForName 根据参数名推断合理的模拟值（带随机性）。
@@ -275,7 +265,6 @@ func parseSchemaJSONKeys(raw string) []string {
 	return nil
 }
 
-
 // parseSchemaJSONItems 从 param_schema 提取完整参数信息（含 type、enum、description、required）。
 func parseSchemaJSONItems(raw string) []InterfaceParamItem {
 	raw = strings.TrimSpace(raw)
@@ -348,56 +337,8 @@ func ParseParamValuesJSON(raw string) (map[string]interface{}, error) {
 	return m, nil
 }
 
-// RewriteNamedSQLParams 将 SQL 中的 :name 转为方言占位符，并生成参数列表（按出现顺序）。
-// PostgreSQL 使用 $1..$n；MySQL / SQLite / SQL Server 使用 ?（mssql 驱动支持位置 ?）。
-// 跳过 PostgreSQL 类型转换中的 ::foo（前一字符为冒号则不匹配——通过扫描修复）。
+// RewriteNamedSQLParams 将 SQL 中的 {{name}} 转为方言占位符并生成参数列表（委托 dbdriver 统一实现）。
+// {{name}} 天生可选：缺失参数所在条件子句/列值对自动剔除；PostgreSQL 用 $1..$n，其余用 ?。
 func RewriteNamedSQLParams(dialect string, sqlStr string, params map[string]interface{}) (outSQL string, args []interface{}, err error) {
-	if params == nil {
-		params = map[string]interface{}{}
-	}
-	d := normalizeSQLDataSourceType(dialect)
-	type occ struct {
-		start, end int
-		name       string
-	}
-	var occs []occ
-	idx := 0
-	for {
-		loc := reSQLNamedParam.FindStringSubmatchIndex(sqlStr[idx:])
-		if loc == nil {
-			break
-		}
-		start := idx + loc[0]
-		end := idx + loc[1]
-		name := sqlStr[idx+loc[2] : idx+loc[3]]
-		if start > 0 && sqlStr[start-1] == ':' {
-			idx = end
-			continue
-		}
-		if _, ok := params[name]; !ok {
-			return "", nil, fmt.Errorf("缺少参数 :%s", name)
-		}
-		occs = append(occs, occ{start, end, name})
-		idx = end
-	}
-	if len(occs) == 0 {
-		return sqlStr, nil, nil
-	}
-	var b strings.Builder
-	last := 0
-	n := 0
-	for _, o := range occs {
-		b.WriteString(sqlStr[last:o.start])
-		switch d {
-		case "postgres":
-			n++
-			b.WriteString(fmt.Sprintf("$%d", n))
-		default:
-			b.WriteString("?")
-		}
-		args = append(args, params[o.name])
-		last = o.end
-	}
-	b.WriteString(sqlStr[last:])
-	return b.String(), args, nil
+	return dbdriver.RewriteNamedSQLParams(dialect, sqlStr, params)
 }

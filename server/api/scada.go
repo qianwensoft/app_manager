@@ -4,7 +4,9 @@ import (
 	"app-manager/config"
 	"app-manager/database"
 	"app-manager/models"
+	"app-manager/stomp"
 	"app-manager/storage"
+	"encoding/json"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -141,13 +143,13 @@ func UpdateScadaInfo(c *gin.Context) {
 	}
 	body.ID = uint(id)
 	if err := database.DB.Model(&cur).Updates(map[string]interface{}{
-		"group_id":        body.GroupID,
-		"scada_name":      body.ScadaName,
-		"scada_code":      body.ScadaCode,
-		"description":     body.Description,
-		"preview_image":   body.PreviewImage,
-		"publish_status":  body.PublishStatus,
-		"share_token":     body.ShareToken,
+		"group_id":          body.GroupID,
+		"scada_name":        body.ScadaName,
+		"scada_code":        body.ScadaCode,
+		"description":       body.Description,
+		"preview_image":     body.PreviewImage,
+		"publish_status":    body.PublishStatus,
+		"share_token":       body.ShareToken,
 		"share_expire_time": body.ShareExpireTime,
 	}).Error; err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -165,6 +167,8 @@ func DeleteScadaInfo(c *gin.Context) {
 		return
 	}
 	database.DB.Delete(&row)
+	// 发布实时事件
+	publishScadaEvent("scada.deleted", row)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
@@ -236,10 +240,10 @@ func PublishScada(c *gin.Context) {
 	row.ShareExpireTime = nil
 	row.ContentVersion++
 	if err := database.DB.Model(&row).Updates(map[string]interface{}{
-		"publish_status":  1,
-		"share_token":     token,
+		"publish_status":    1,
+		"share_token":       token,
 		"share_expire_time": nil,
-		"content_version": row.ContentVersion,
+		"content_version":   row.ContentVersion,
 	}).Error; err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -250,14 +254,24 @@ func PublishScada(c *gin.Context) {
 
 func UnpublishScada(c *gin.Context) {
 	id, _ := strconv.ParseUint(c.Param("scada_id"), 10, 64)
+	var row models.ScadaInfo
+	if err := database.DB.First(&row, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
 	if err := database.DB.Model(&models.ScadaInfo{}).Where("id = ?", id).Updates(map[string]interface{}{
-		"publish_status":  0,
-		"share_token":     "",
+		"publish_status":    0,
+		"share_token":       "",
 		"share_expire_time": nil,
 	}).Error; err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	row.PublishStatus = 0
+	row.ShareToken = ""
+	row.ShareExpireTime = nil
+	// 发布实时事件
+	publishScadaEvent("scada.unpublished", row)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
@@ -309,4 +323,23 @@ func saveScadaResourceFile(file *multipart.FileHeader, category string) (string,
 	rel := strings.TrimPrefix(path, base)
 	rel = strings.TrimPrefix(rel, string(os.PathSeparator))
 	return "/api/scada/resource/" + filepath.ToSlash(rel), nil
+}
+
+// publishScadaEvent 发布组态事件到 STOMP topic
+func publishScadaEvent(event string, scada models.ScadaInfo) {
+	payload := map[string]interface{}{
+		"event":           event,
+		"id":              scada.ID,
+		"scada_code":      scada.ScadaCode,
+		"scada_name":      scada.ScadaName,
+		"group_id":        scada.GroupID,
+		"description":     scada.Description,
+		"preview_image":   scada.PreviewImage,
+		"publish_status":  scada.PublishStatus,
+		"content_version": scada.ContentVersion,
+		"updated_at":      scada.UpdatedAt.Format(time.RFC3339),
+	}
+	if body, err := json.Marshal(payload); err == nil {
+		stomp.DefaultHub.PublishJSON("/topic/scada-events", string(body))
+	}
 }

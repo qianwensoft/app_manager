@@ -33,15 +33,15 @@ func GetDataSourcePoolStats(c *gin.Context) {
 	poolCfg := dbdriver.ParsePoolFromConfigJSON(ds.ConfigJSON)
 
 	c.JSON(http.StatusOK, gin.H{
-		"open_connections":   stats.OpenConnections,
-		"in_use":             stats.InUse,
-		"idle":               stats.Idle,
-		"wait_count":         stats.WaitCount,
-		"wait_duration_ms":   stats.WaitDuration.Milliseconds(),
-		"max_idle_closed":    stats.MaxIdleClosed,
-		"max_lifetime_closed": stats.MaxLifetimeClosed,
-		"config_max_open":    poolCfg.MaxOpen,
-		"config_max_idle":    poolCfg.MaxIdle,
+		"open_connections":        stats.OpenConnections,
+		"in_use":                  stats.InUse,
+		"idle":                    stats.Idle,
+		"wait_count":              stats.WaitCount,
+		"wait_duration_ms":        stats.WaitDuration.Milliseconds(),
+		"max_idle_closed":         stats.MaxIdleClosed,
+		"max_lifetime_closed":     stats.MaxLifetimeClosed,
+		"config_max_open":         poolCfg.MaxOpen,
+		"config_max_idle":         poolCfg.MaxIdle,
 		"config_max_lifetime_sec": poolCfg.ConnMaxLifetime,
 	})
 }

@@ -1,7 +1,13 @@
 <template>
   <el-container class="layout">
     <el-aside width="200px">
-      <div class="logo">AppManager</div>
+      <div class="logo">
+        <img src="@/assets/bedrock-icon.svg" alt="磐石" class="logo-mark" />
+        <div class="logo-text">
+          <span class="logo-cn">磐石</span>
+          <span class="logo-en">BEDROCK</span>
+        </div>
+      </div>
       <el-menu :router="true" :default-active="menuActive" background-color="#1d2935" text-color="#aaa" active-text-color="#fff">
         <el-menu-item index="/">
           <el-icon><Monitor /></el-icon><span>总览</span>
@@ -39,6 +45,9 @@
         <div class="menu-item-external menu-item-flat" @click="openScadaEditor">
           <el-icon><Histogram /></el-icon><span>组态编辑器 ↗</span>
         </div>
+        <div class="menu-item-external menu-item-flat" @click="openFormApp">
+          <el-icon><EditPen /></el-icon><span>表单设计器 ↗</span>
+        </div>
         <el-menu-item index="/agent-menus">
           <el-icon><Menu /></el-icon><span>Agent 菜单</span>
         </el-menu-item>
@@ -48,8 +57,14 @@
         <el-menu-item index="/tasks">
           <el-icon><List /></el-icon><span>任务队列</span>
         </el-menu-item>
+        <el-menu-item index="/work-orders">
+          <el-icon><Tickets /></el-icon><span>工单管理</span>
+        </el-menu-item>
         <el-menu-item index="/apikeys">
           <el-icon><Key /></el-icon><span>授权管理</span>
+        </el-menu-item>
+        <el-menu-item index="/thirdparty">
+          <el-icon><Connection /></el-icon><span>第三方平台</span>
         </el-menu-item>
         <!-- admin 专属 -->
         <template v-if="auth.isAdmin">
@@ -89,7 +104,7 @@
 import { computed, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useRoute, useRouter } from 'vue-router'
-import { Monitor, Phone, VideoCamera, Document, Box, List, Key, Notebook, Connection, Cpu, Bell, Setting, Share, Link, Tools, UserFilled, User, Histogram, Menu } from '@element-plus/icons-vue'
+import { Monitor, Phone, VideoCamera, Document, Box, List, Key, Notebook, Connection, Cpu, Bell, Setting, Share, Link, Tools, UserFilled, User, Histogram, Menu, EditPen, Tickets } from '@element-plus/icons-vue'
 import QuickSearch from './QuickSearch.vue'
 
 const auth = useAuthStore()
@@ -99,6 +114,13 @@ const router = useRouter()
 const openScadaEditor = () => {
   const token = localStorage.getItem('token')
   const base = `${window.location.origin}/scada-editor/`
+  const url = `${base}${token ? `?_token=${encodeURIComponent(token)}` : ''}`
+  window.open(url, '_blank')
+}
+
+const openFormApp = () => {
+  const token = localStorage.getItem('token')
+  const base = `${window.location.origin}/form-app/forms`
   const url = `${base}${token ? `?_token=${encodeURIComponent(token)}` : ''}`
   window.open(url, '_blank')
 }
@@ -114,6 +136,7 @@ const menuActive = computed(() => {
   if (p.startsWith('/outbound')) return '/outbound'
   if (p.startsWith('/data')) return '/data'
   if (p.startsWith('/agent-menus')) return '/agent-menus'
+  if (p.startsWith('/work-orders')) return '/work-orders'
   return p
 })
 
@@ -162,7 +185,11 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
 }
-.logo { color: #fff; font-size: 18px; font-weight: bold; padding: 20px; background: #1d2935; }
+.logo { display: flex; align-items: center; gap: 10px; padding: 16px 20px; background: #1d2935; }
+.logo-mark { width: 34px; height: 34px; border-radius: 8px; flex-shrink: 0; }
+.logo-text { display: flex; flex-direction: column; line-height: 1.15; }
+.logo-cn { color: #fff; font-size: 17px; font-weight: bold; letter-spacing: 2px; }
+.logo-en { color: #3BE0C8; font-size: 10px; font-weight: 600; letter-spacing: 3px; }
 .el-aside { background: #1d2935; overflow-x: hidden; }
 .el-header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #eee; flex-shrink: 0; }
 .route-title { font-size: 16px; font-weight: bold; }

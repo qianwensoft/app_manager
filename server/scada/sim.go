@@ -4,6 +4,7 @@ import (
 	"app-manager/database"
 	"app-manager/models"
 	"app-manager/stomp"
+	"context"
 	"encoding/json"
 	"math"
 	"math/rand"
@@ -14,65 +15,89 @@ import (
 	"gorm.io/gorm"
 )
 
-// pointRuntime 内存态（上次值、正弦相位等）
+// pointRuntime holds per-point mutable simulation state.
 type pointRuntime struct {
-	Last       float64
-	Phase      float64
-	Rand       *rand.Rand
-	LastFireMs int64
+	Last  float64
+	Phase float64
+	Rand  *rand.Rand
+}
+
+// batchItem is sent from per-point goroutines to the batcher.
+type batchItem struct {
+	ScadaCode string
+	LinkName  string
+	V         float64
 }
 
 var (
-	rtMu      sync.Mutex
-	runtimes  = map[uint]*pointRuntime{} // by ScadaSimPoint.ID
-	lastPush  = map[string]map[string]float64{}
-	pushMu    sync.Mutex
+	rtMu     sync.Mutex
+	runtimes = map[uint]*pointRuntime{}
+
+	lastPush = map[string]map[string]float64{}
+	pushMu   sync.Mutex
+
+	batchCh = make(chan batchItem, 65536)
+
+	workerMu  sync.Mutex
+	workerMap = map[uint]context.CancelFunc{}
 )
 
-// StartSimEngine 启动模拟点位调度（全局单例）
+// StartSimEngine starts the batcher goroutine and spawns initial per-point workers.
 func StartSimEngine() {
-	go loop()
+	StartBatcher()
+	ReloadPoints(nil)
 }
 
-func loop() {
-	t := time.NewTicker(200 * time.Millisecond)
-	defer t.Stop()
-	for range t.C {
-		tick()
-	}
-}
-
-func tick() {
+// loadPoints queries enabled points directly from DB.
+func loadPoints() []models.ScadaSimPoint {
 	if database.DB == nil {
-		return
+		return nil
 	}
 	var points []models.ScadaSimPoint
 	if err := database.DB.Where("enabled = ?", true).Find(&points).Error; err != nil {
-		return
+		return nil
 	}
-	now := time.Now().UnixMilli()
-	for _, p := range points {
-		if p.IntervalMs <= 0 {
-			p.IntervalMs = 1000
-		}
-		rtMu.Lock()
-		rt, ok := runtimes[p.ID]
-		if !ok {
-			rt = &pointRuntime{Rand: rand.New(rand.NewSource(now + int64(p.ID)))}
-			runtimes[p.ID] = rt
-		}
-		if now-rt.LastFireMs < int64(p.IntervalMs) {
-			rtMu.Unlock()
-			continue
-		}
-		rt.LastFireMs = now
-		rtMu.Unlock()
+	return points
+}
 
-		v := nextValue(&p, rt)
-		aggregatePush(p.ScadaCode, p.LinkName, v)
+// runWorker is the per-point goroutine. It ticks at p.IntervalMs and sends
+// computed values to batchCh until ctx is cancelled.
+func runWorker(ctx context.Context, p models.ScadaSimPoint) {
+	intervalMs := p.IntervalMs
+	if intervalMs <= 0 {
+		intervalMs = 1000
+	}
+
+	rtMu.Lock()
+	rt, ok := runtimes[p.ID]
+	if !ok {
+		rt = &pointRuntime{Rand: rand.New(rand.NewSource(time.Now().UnixNano() + int64(p.ID)))}
+		runtimes[p.ID] = rt
+	}
+	rtMu.Unlock()
+
+	ticker := time.NewTicker(time.Duration(intervalMs) * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			rtMu.Lock()
+			v := nextValue(&p, rt)
+			rtMu.Unlock()
+
+			select {
+			case batchCh <- batchItem{ScadaCode: p.ScadaCode, LinkName: p.LinkName, V: v}:
+			default:
+				// drop if channel is full to avoid blocking the ticker
+			}
+		}
 	}
 }
 
+// nextValue computes the next simulated value for a point, mutating rt in place.
 func nextValue(p *models.ScadaSimPoint, rt *pointRuntime) float64 {
 	var cfg map[string]float64
 	_ = json.Unmarshal([]byte(p.ParamsJSON), &cfg)
@@ -85,7 +110,7 @@ func nextValue(p *models.ScadaSimPoint, rt *pointRuntime) float64 {
 	minV := get("min", 0)
 	maxV := get("max", 100)
 	step := get("step", 5)
-	amp := get("amplitude", (maxV - minV) / 2)
+	amp := get("amplitude", (maxV-minV)/2)
 	period := get("period", 10)
 	if period <= 0 {
 		period = 10
@@ -127,7 +152,10 @@ func nextValue(p *models.ScadaSimPoint, rt *pointRuntime) float64 {
 	return rt.Last
 }
 
+// aggregatePush records history and publishes the full point-data snapshot via STOMP.
 func aggregatePush(scadaCode, link string, v float64) {
+	RecordHistory(scadaCode, link, v)
+
 	pushMu.Lock()
 	defer pushMu.Unlock()
 	m, ok := lastPush[scadaCode]
@@ -140,8 +168,7 @@ func aggregatePush(scadaCode, link string, v float64) {
 	if err != nil {
 		return
 	}
-	topic := "/topic/scada/point-data/" + scadaCode
-	stomp.DefaultHub.PublishJSON(topic, string(b))
+	stomp.DefaultHub.PublishJSON("/topic/scada/point-data/"+scadaCode, string(b))
 }
 
 // GetLastSnapshot returns the last pushed point-data for a scada code (for HTTP polling).
@@ -159,12 +186,41 @@ func GetLastSnapshot(scadaCode string) map[string]float64 {
 	return cp
 }
 
-// RemoveScadaFromCache 删除组态时清理推送聚合（可选）
+// RemoveScadaFromCache clears the push-aggregation cache for a deleted scada.
 func RemoveScadaFromCache(scadaCode string) {
 	pushMu.Lock()
 	delete(lastPush, scadaCode)
 	pushMu.Unlock()
 }
 
-// ReloadPoints 配置变更时可调用（当前周期自动读库）
-func ReloadPoints(_ *gorm.DB) {}
+// ReloadPoints diffs the current enabled point list against running workers,
+// stops workers for removed/disabled points, and starts workers for new ones.
+func ReloadPoints(_ *gorm.DB) {
+	points := loadPoints()
+
+	// build a set of active point IDs from DB
+	active := make(map[uint]models.ScadaSimPoint, len(points))
+	for _, p := range points {
+		active[p.ID] = p
+	}
+
+	workerMu.Lock()
+	defer workerMu.Unlock()
+
+	// stop workers for points no longer active
+	for id, cancel := range workerMap {
+		if _, ok := active[id]; !ok {
+			cancel()
+			delete(workerMap, id)
+		}
+	}
+
+	// start workers for new points
+	for id, p := range active {
+		if _, running := workerMap[id]; !running {
+			ctx, cancel := context.WithCancel(context.Background())
+			workerMap[id] = cancel
+			go runWorker(ctx, p)
+		}
+	}
+}

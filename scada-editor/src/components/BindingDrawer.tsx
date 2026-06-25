@@ -1,0 +1,1384 @@
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { useEditorStore } from '@/store/editorStore'
+import type { PointBinding, DataBindingMode, InterfaceFieldMapping, InterfaceSourceType, ValueFormatter, ElementType } from '@/types'
+import { getChartSchema, type BindingFieldDef } from '@/schema/chartSchema'
+import { dataBindingApi, type DataInterfaceItem, type OutboundAppItem, type OutboundWebhookItem, type ScadaSimPointItem } from '@/api/dataBinding'
+import type { PointDataMap } from '@/hooks/useStompPointData'
+import SimPointsModal from './SimPointsModal'
+
+interface Props {
+  elementId: string
+  scadaCode?: string
+  pointData?: PointDataMap
+  onClose: () => void
+}
+
+// ── Shared primitives ──────────────────────────────────────────────────────────
+
+const Inp = ({ val, onChange, placeholder = '', type = 'text' }: {
+  val: string; onChange: (v: string) => void; placeholder?: string; type?: string
+}) => (
+  <input
+    value={val}
+    type={type}
+    placeholder={placeholder}
+    onChange={(e) => onChange(e.target.value)}
+    style={{
+      width: '100%', height: 28, background: 'var(--bg-base)',
+      border: '1px solid var(--border)', color: 'var(--text-primary)',
+      padding: '0 8px', borderRadius: 'var(--radius-sm)', fontSize: 12,
+      outline: 'none', fontFamily: 'var(--font-mono)', boxSizing: 'border-box',
+    }}
+    onFocus={(e) => { e.target.style.borderColor = 'var(--accent)' }}
+    onBlur={(e) => { e.target.style.borderColor = 'var(--border)' }}
+  />
+)
+
+const Sel = ({ val, onChange, children }: {
+  val: string; onChange: (v: string) => void; children: React.ReactNode
+}) => (
+  <select
+    value={val}
+    onChange={(e) => onChange(e.target.value)}
+    style={{
+      width: '100%', height: 28, background: 'var(--bg-base)',
+      border: '1px solid var(--border)', color: 'var(--text-primary)',
+      padding: '0 6px', borderRadius: 'var(--radius-sm)', fontSize: 12,
+      outline: 'none', cursor: 'pointer',
+    }}
+  >
+    {children}
+  </select>
+)
+
+const Label = ({ children }: { children: React.ReactNode }) => (
+  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>{children}</div>
+)
+
+const Field = ({ label, optional, children }: {
+  label: string; optional?: boolean; children: React.ReactNode
+}) => (
+  <div style={{ marginBottom: 10 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
+      <Label>{label}</Label>
+      {optional && (
+        <span style={{ fontSize: 9, color: 'var(--text-muted)', background: 'var(--bg-overlay)',
+          padding: '1px 4px', borderRadius: 2, border: '1px solid var(--border)' }}>可选</span>
+      )}
+    </div>
+    {children}
+  </div>
+)
+
+const Hint = ({ children }: { children: React.ReactNode }) => (
+  <div style={{
+    fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.6,
+    background: 'var(--bg-base)', border: '1px solid var(--border)',
+    borderRadius: 'var(--radius-sm)', padding: '5px 8px', marginTop: 4,
+    fontFamily: 'var(--font-mono)',
+  }}>
+    {children}
+  </div>
+)
+
+// ── Mode tab bar ───────────────────────────────────────────────────────────────
+
+const MODES: { id: DataBindingMode; label: string }[] = [
+  { id: 'point', label: '点位数据' },
+  { id: 'static', label: '静态数据' },
+  { id: 'simulation', label: '模拟数据' },
+  { id: 'interface', label: '接口数据' },
+  { id: 'trend', label: '趋势图' },
+]
+
+const TREND_TYPES = new Set(['echarts-trend', 'echarts-line'])
+
+function ModeTabs({ mode, onChange, elType }: { mode: DataBindingMode; onChange: (m: DataBindingMode) => void; elType: ElementType }) {
+  const visibleModes = MODES.filter((m) => m.id !== 'trend' || TREND_TYPES.has(elType))
+  return (
+    <div style={{
+      display: 'flex', gap: 4, padding: '0 20px 12px',
+      borderBottom: '1px solid var(--border)',
+    }}>
+      {visibleModes.map((m) => (
+        <button
+          key={m.id}
+          onClick={() => onChange(m.id)}
+          style={{
+            padding: '4px 12px', fontSize: 12, cursor: 'pointer', borderRadius: 'var(--radius-sm)',
+            border: mode === m.id ? '1px solid var(--accent)' : '1px solid var(--border)',
+            background: mode === m.id ? 'var(--accent-muted)' : 'var(--bg-surface)',
+            color: mode === m.id ? 'var(--accent)' : 'var(--text-secondary)',
+            fontWeight: mode === m.id ? 600 : 400,
+          }}
+        >{m.label}</button>
+      ))}
+    </div>
+  )
+}
+
+// ── Chart binding fields (point mode) ─────────────────────────────────────────
+
+interface ChartBindingState {
+  seriesInputs: string[]
+  categoryInput: string
+}
+
+function initChartState(pb: PointBinding, fieldCount: number): ChartBindingState {
+  const seriesInputs: string[] = []
+  for (let i = 0; i < fieldCount; i++) {
+    seriesInputs.push((pb.chartSeriesKeys?.[i] ?? []).join(', '))
+  }
+  return { seriesInputs, categoryInput: pb.chartCategoryKey ?? '' }
+}
+
+function ChartBindingFields({ fields, state, onChange }: {
+  fields: BindingFieldDef[]; state: ChartBindingState; onChange: (s: ChartBindingState) => void
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      {fields.map((f) => {
+        if (f.kind === 'category') {
+          return (
+            <Field key={f.key} label={f.label} optional={f.optional}>
+              <Inp val={state.categoryInput} onChange={(v) => onChange({ ...state, categoryInput: v })} placeholder={f.placeholder} />
+              {f.hint && <Hint>{f.hint}</Hint>}
+            </Field>
+          )
+        }
+        const idx = f.seriesIndex ?? 0
+        return (
+          <Field key={f.key} label={f.label} optional={f.optional}>
+            <Inp
+              val={state.seriesInputs[idx] ?? ''}
+              onChange={(v) => {
+                const next = [...state.seriesInputs]
+                next[idx] = v
+                onChange({ ...state, seriesInputs: next })
+              }}
+              placeholder={f.placeholder}
+            />
+            {f.hint && <Hint>{f.hint}</Hint>}
+          </Field>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── Formatter panel ───────────────────────────────────────────────────────────
+
+function FormatterPanel({ fmt, onChange }: {
+  fmt: ValueFormatter | undefined
+  onChange: (f: ValueFormatter | undefined) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const f = fmt ?? {}
+  const set = (k: keyof ValueFormatter, v: unknown) => onChange({ ...f, [k]: v })
+  const hasAny = fmt && (
+    fmt.precision !== undefined ||
+    fmt.unit || fmt.prefix || fmt.template ||
+    (fmt.strReplace && fmt.strReplace.length > 0) ||
+    (fmt.rangeMap && fmt.rangeMap.length > 0)
+  )
+
+  const addStrReplace = () => onChange({ ...f, strReplace: [...(f.strReplace ?? []), { from: '', to: '' }] })
+  const setStrReplace = (i: number, k: 'from' | 'to', v: string) => {
+    const arr = [...(f.strReplace ?? [])]
+    arr[i] = { ...arr[i], [k]: v }
+    onChange({ ...f, strReplace: arr })
+  }
+  const removeStrReplace = (i: number) => onChange({ ...f, strReplace: (f.strReplace ?? []).filter((_, idx) => idx !== i) })
+
+  const addRange = () => onChange({ ...f, rangeMap: [...(f.rangeMap ?? []), { min: 0, max: 100, label: '', color: '' }] })
+  const setRange = (i: number, k: keyof NonNullable<ValueFormatter['rangeMap']>[0], v: unknown) => {
+    const arr = [...(f.rangeMap ?? [])]
+    arr[i] = { ...arr[i], [k]: v }
+    onChange({ ...f, rangeMap: arr })
+  }
+  const removeRange = (i: number) => onChange({ ...f, rangeMap: (f.rangeMap ?? []).filter((_, idx) => idx !== i) })
+
+  return (
+    <div style={{ marginTop: 12, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 6, width: '100%',
+          background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+          color: hasAny ? 'var(--accent)' : 'var(--text-muted)',
+        }}
+      >
+        <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}
+          style={{ transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s', flexShrink: 0 }}>
+          <path d="M9 18l6-6-6-6" />
+        </svg>
+        <span style={{ fontSize: 11, fontWeight: 600 }}>渲染格式化</span>
+        {hasAny && (
+          <span style={{
+            fontSize: 9, padding: '1px 5px', borderRadius: 3,
+            background: 'var(--accent-muted)', color: 'var(--accent)',
+            border: '1px solid var(--border-accent)',
+          }}>已配置</span>
+        )}
+        {hasAny && (
+          <button
+            type="button"
+            onMouseDown={e => e.stopPropagation()}
+            onClick={e => { e.stopPropagation(); onChange(undefined) }}
+            style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 0, fontSize: 10 }}
+            title="清除格式化"
+          >清除</button>
+        )}
+      </button>
+
+      {open && (
+        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
+
+          {/* 数字精度 */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>小数位数</span>
+              <input
+                type="number" min={-1} max={10}
+                value={f.precision ?? ''}
+                placeholder="不限"
+                onChange={e => set('precision', e.target.value === '' ? undefined : Number(e.target.value))}
+                style={{ height: 26, padding: '0 6px', fontSize: 11, background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', outline: 'none' }}
+              />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>前缀</span>
+              <input
+                value={f.prefix ?? ''}
+                placeholder="约"
+                onChange={e => set('prefix', e.target.value || undefined)}
+                style={{ height: 26, padding: '0 6px', fontSize: 11, background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', outline: 'none' }}
+              />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>单位后缀</span>
+              <input
+                value={f.unit ?? ''}
+                placeholder="℃ / % / kPa"
+                onChange={e => set('unit', e.target.value || undefined)}
+                style={{ height: 26, padding: '0 6px', fontSize: 11, background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', outline: 'none' }}
+              />
+            </label>
+          </div>
+
+          {/* 模板 */}
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>模板 <code style={{ fontFamily: 'var(--font-mono)', opacity: 0.7 }}>${'{v}'}</code> 为占位符</span>
+            <input
+              value={f.template ?? ''}
+              placeholder="${v} ℃ (正常)"
+              onChange={e => set('template', e.target.value || undefined)}
+              style={{ height: 26, padding: '0 6px', fontSize: 11, background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', outline: 'none', fontFamily: 'var(--font-mono)' }}
+            />
+          </label>
+
+          {/* 字符串替换 */}
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>字符替换</span>
+              <button type="button" onClick={addStrReplace} style={{ fontSize: 10, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', padding: 0 }}>+ 添加</button>
+            </div>
+            {(f.strReplace ?? []).map((r, i) => (
+              <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr auto', gap: 4, marginBottom: 4, alignItems: 'center' }}>
+                <input value={r.from} placeholder="原文" onChange={e => setStrReplace(i, 'from', e.target.value)}
+                  style={{ height: 24, padding: '0 5px', fontSize: 11, background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', outline: 'none' }} />
+                <span style={{ fontSize: 10, color: 'var(--text-muted)', padding: '0 2px' }}>→</span>
+                <input value={r.to} placeholder="替换为" onChange={e => setStrReplace(i, 'to', e.target.value)}
+                  style={{ height: 24, padding: '0 5px', fontSize: 11, background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', outline: 'none' }} />
+                <button type="button" onClick={() => removeStrReplace(i)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 13, lineHeight: 1, padding: 0 }}>×</button>
+              </div>
+            ))}
+          </div>
+
+          {/* 阈值映射 */}
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>阈值文字映射</span>
+              <button type="button" onClick={addRange} style={{ fontSize: 10, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', padding: 0 }}>+ 添加</button>
+            </div>
+            {(f.rangeMap ?? []).map((r, i) => (
+              <div key={i} style={{ display: 'grid', gridTemplateColumns: '60px 60px 1fr 36px auto', gap: 4, marginBottom: 4, alignItems: 'center' }}>
+                <input type="number" value={r.min} placeholder="最小" onChange={e => setRange(i, 'min', Number(e.target.value))}
+                  style={{ height: 24, padding: '0 5px', fontSize: 11, background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', outline: 'none' }} />
+                <input type="number" value={r.max} placeholder="最大" onChange={e => setRange(i, 'max', Number(e.target.value))}
+                  style={{ height: 24, padding: '0 5px', fontSize: 11, background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', outline: 'none' }} />
+                <input value={r.label} placeholder="显示文字" onChange={e => setRange(i, 'label', e.target.value)}
+                  style={{ height: 24, padding: '0 5px', fontSize: 11, background: 'var(--bg-base)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', color: 'var(--text-primary)', outline: 'none' }} />
+                <input type="color" value={r.color || '#4a9eff'} onChange={e => setRange(i, 'color', e.target.value)}
+                  style={{ height: 24, padding: 0, border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', cursor: 'pointer', background: 'none', width: '100%' }}
+                  title="可选：显示颜色" />
+                <button type="button" onClick={() => removeRange(i)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 13, lineHeight: 1, padding: 0 }}>×</button>
+              </div>
+            ))}
+            {(f.rangeMap ?? []).length > 0 && (
+              <div style={{ fontSize: 9, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                数值落在 [最小, 最大] 范围时显示对应文字，优先级高于精度/模板
+              </div>
+            )}
+          </div>
+
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Point mode panel ───────────────────────────────────────────────────────────
+
+function PointModePanel({ draft, setDraft, isChart, schema, chartState, setChartState }: {
+  draft: PointBinding
+  setDraft: (fn: (prev: PointBinding) => PointBinding) => void
+  isChart: boolean
+  schema: ReturnType<typeof getChartSchema>
+  chartState: ChartBindingState
+  setChartState: (s: ChartBindingState) => void
+}) {
+  const update = (patch: Partial<PointBinding>) => setDraft((prev) => ({ ...prev, ...patch }))
+
+  return (
+    <div>
+      <div style={{ display: 'grid', gridTemplateColumns: isChart && schema ? '1fr 1fr' : '1fr', gap: '0 32px' }}>
+        <div>
+          {!isChart && (
+            <Field label="点位键 (pointKey)">
+              <Inp val={draft.pointKey ?? ''} onChange={(v) => update({ pointKey: v })} placeholder="device.tag" />
+              <Hint>对应实时数据 Map 中的 key，如 temp_01</Hint>
+            </Field>
+          )}
+          <Field label="转换表达式 (transform)">
+            <Inp val={draft.transform ?? ''} onChange={(v) => update({ transform: v || undefined })} placeholder="v * 0.01" />
+            <Hint>{'变量 v 为原始值，如：v * 0.01  |  Math.round(v)  |  v > 0 ? 1 : 0'}</Hint>
+          </Field>
+          <Field label="设备编码 (deviceCode)">
+            <Inp val={draft.deviceCode ?? ''} onChange={(v) => update({ deviceCode: v })} placeholder="device_001" />
+          </Field>
+          <Field label="链路名 (linkName)" optional>
+            <Inp val={draft.linkName ?? ''} onChange={(v) => update({ linkName: v || undefined })} placeholder="可选" />
+          </Field>
+        </div>
+        {isChart && schema && (
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent)', marginBottom: 12, paddingBottom: 6, borderBottom: '1px solid var(--border)' }}>
+              {schema.label} 数据绑定
+            </div>
+            <ChartBindingFields fields={schema.bindingFields} state={chartState} onChange={setChartState} />
+          </div>
+        )}
+      </div>
+      {!isChart && (
+        <FormatterPanel fmt={draft.formatter} onChange={(f) => update({ formatter: f })} />
+      )}
+    </div>
+  )
+}
+
+// ── Static mode panel ──────────────────────────────────────────────────────────
+
+function StaticModePanel({ draft, setDraft, isChart, schema }: {
+  draft: PointBinding
+  setDraft: (fn: (prev: PointBinding) => PointBinding) => void
+  isChart: boolean
+  schema: ReturnType<typeof getChartSchema>
+}) {
+  const staticData = (draft.staticData ?? {}) as Record<string, string>
+
+  const updateKey = (key: string, val: string) => {
+    setDraft((prev) => ({
+      ...prev,
+      staticData: { ...(prev.staticData ?? {}), [key]: val },
+    }))
+  }
+
+  if (isChart && schema) {
+    return (
+      <div>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 12 }}>
+          为每个绑定字段直接填写静态 JSON 值（数字、字符串或 JSON 数组）
+        </div>
+        {schema.bindingFields.map((f) => (
+          <Field key={f.key} label={f.label} optional={f.optional}>
+            <Inp
+              val={String(staticData[f.key] ?? '')}
+              onChange={(v) => updateKey(f.key, v)}
+              placeholder={f.kind === 'series' ? '[42, 68, 35]' : f.placeholder}
+            />
+            {f.hint && <Hint>{f.hint}</Hint>}
+          </Field>
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <Field label="静态值">
+        <Inp
+          val={String(staticData['value'] ?? '')}
+          onChange={(v) => updateKey('value', v)}
+          placeholder="42"
+        />
+        <Hint>直接填写数字或字符串，将直接显示在组件上</Hint>
+      </Field>
+    </div>
+  )
+}
+
+// ── Simulation mode panel ──────────────────────────────────────────────────────
+
+function SimModePanel({ draft, setDraft, scadaCode, pointData, onApply, onManage }: {
+  draft: PointBinding
+  setDraft: (fn: (prev: PointBinding) => PointBinding) => void
+  scadaCode?: string
+  pointData?: PointDataMap
+  onApply?: (linkName: string) => void
+  onManage?: () => void
+}) {
+  const [simPoints, setSimPoints] = useState<ScadaSimPointItem[]>([])
+  const [query, setQuery] = useState('')
+  const [open, setOpen] = useState(false)
+  const [lastSeen, setLastSeen] = useState<Record<string, { value: number; time: Date }>>({})
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    dataBindingApi.listSimPoints(scadaCode).then((res) => setSimPoints(res.data ?? [])).catch(() => {})
+  }, [scadaCode])
+
+  // Track live data updates for all sim points
+  useEffect(() => {
+    if (!pointData) return
+    setLastSeen((prev) => {
+      const next = { ...prev }
+      let changed = false
+      for (const [k, v] of Object.entries(pointData)) {
+        if (simPoints.some((p) => p.link_name === k)) {
+          next[k] = { value: v, time: new Date() }
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [pointData, simPoints])
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const update = (patch: Partial<PointBinding>) => setDraft((prev) => ({ ...prev, ...patch }))
+
+  const filtered = simPoints.filter((p) =>
+    !query || p.link_name.toLowerCase().includes(query.toLowerCase()) || p.mode.toLowerCase().includes(query.toLowerCase())
+  )
+
+  const selectedPoint = simPoints.find((p) => p.link_name === draft.simLinkName)
+  const liveEntry = draft.simLinkName ? lastSeen[draft.simLinkName] : undefined
+
+  const selectPoint = (p: ScadaSimPointItem) => {
+    update({ simLinkName: p.link_name })
+    setQuery('')
+    setOpen(false)
+    onApply?.(p.link_name)
+  }
+
+  const modeColor: Record<string, string> = {
+    sine: '#4a9eff', random: '#f59e0b', random_walk: '#a78bfa',
+    ramp: '#34d399', constant: '#94a3b8',
+  }
+
+  return (
+    <div>
+      {/* Search + select */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>选择模拟点位</span>
+        {onManage && (
+          <button
+            onClick={onManage}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 3,
+              height: 22, padding: '0 8px', fontSize: 10, cursor: 'pointer',
+              background: 'var(--bg-surface)', color: 'var(--text-muted)',
+              border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+            }}
+          >
+            <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            管理点位
+          </button>
+        )}
+      </div>
+      <div style={{ marginBottom: 10 }}>
+        <div ref={containerRef} style={{ position: 'relative' }}>
+          {/* Trigger / search input */}
+          <div
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              height: 32, padding: '0 8px',
+              background: 'var(--bg-base)', border: `1px solid ${open ? 'var(--accent)' : 'var(--border)'}`,
+              borderRadius: 'var(--radius-sm)', cursor: 'text',
+            }}
+            onClick={() => setOpen(true)}
+          >
+            <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth={2} strokeLinecap="round" style={{ flexShrink: 0 }}>
+              <circle cx={11} cy={11} r={8} /><path d="m21 21-4.35-4.35" />
+            </svg>
+            <input
+              value={open ? query : (selectedPoint ? selectedPoint.link_name : (draft.simLinkName ?? ''))}
+              onChange={(e) => { setQuery(e.target.value); setOpen(true) }}
+              onFocus={() => setOpen(true)}
+              placeholder="搜索点位名称…"
+              style={{
+                flex: 1, background: 'none', border: 'none', outline: 'none',
+                fontSize: 12, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)',
+              }}
+            />
+            {draft.simLinkName && (
+              <button
+                onMouseDown={(e) => { e.preventDefault(); update({ simLinkName: undefined }); setQuery('') }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 0, lineHeight: 1 }}
+              >
+                <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            )}
+          </div>
+
+          {/* Dropdown */}
+          {open && (
+            <div style={{
+              position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100, marginTop: 4,
+              background: 'var(--bg-panel)', border: '1px solid var(--border-strong)',
+              borderRadius: 'var(--radius-sm)', boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+              maxHeight: 220, overflowY: 'auto',
+            }}>
+              {filtered.length === 0 ? (
+                <div style={{ padding: '12px 12px', fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>
+                  {simPoints.length === 0 ? '暂无模拟点位' : '无匹配点位'}
+                </div>
+              ) : filtered.map((p) => {
+                const live = lastSeen[p.link_name]
+                const isSelected = draft.simLinkName === p.link_name
+                return (
+                  <div
+                    key={p.id}
+                    onMouseDown={(e) => { e.preventDefault(); selectPoint(p) }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      padding: '7px 10px', cursor: 'pointer',
+                      background: isSelected ? 'var(--accent-muted)' : 'transparent',
+                      borderBottom: '1px solid var(--border)',
+                    }}
+                    onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = 'var(--bg-overlay)' }}
+                    onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent' }}
+                  >
+                    {/* mode badge */}
+                    <span style={{
+                      fontSize: 9, fontWeight: 700, padding: '1px 4px', borderRadius: 3,
+                      background: `${modeColor[p.mode] ?? '#64748b'}20`,
+                      color: modeColor[p.mode] ?? '#64748b',
+                      border: `1px solid ${modeColor[p.mode] ?? '#64748b'}40`,
+                      flexShrink: 0, fontFamily: 'var(--font-mono)',
+                    }}>{p.mode.toUpperCase()}</span>
+
+                    {/* name */}
+                    <span style={{ flex: 1, fontSize: 12, fontFamily: 'var(--font-mono)', color: p.enabled ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                      {p.link_name}
+                    </span>
+
+                    {/* interval */}
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 }}>{p.interval_ms}ms</span>
+
+                    {/* live value */}
+                    {live && (
+                      <span style={{
+                        fontSize: 10, fontFamily: 'var(--font-mono)',
+                        color: '#4ade80', background: 'rgba(74,222,128,0.1)',
+                        padding: '1px 5px', borderRadius: 3, flexShrink: 0,
+                      }}>{live.value.toFixed(2)}</span>
+                    )}
+
+                    {/* disabled badge */}
+                    {!p.enabled && (
+                      <span style={{ fontSize: 9, color: 'var(--text-muted)', flexShrink: 0 }}>已禁用</span>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Live data preview for selected point */}
+      {draft.simLinkName && (
+        <div style={{
+          marginTop: 2, padding: '10px 12px',
+          background: 'var(--bg-base)', border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-sm)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: liveEntry ? 8 : 0 }}>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>已绑定</span>
+            <span style={{
+              fontSize: 11, fontWeight: 600, color: 'var(--accent)',
+              fontFamily: 'var(--font-mono)',
+            }}>{draft.simLinkName}</span>
+            {selectedPoint && (
+              <>
+                <span style={{
+                  fontSize: 9, padding: '1px 4px', borderRadius: 3,
+                  background: `${modeColor[selectedPoint.mode] ?? '#64748b'}20`,
+                  color: modeColor[selectedPoint.mode] ?? '#64748b',
+                  border: `1px solid ${modeColor[selectedPoint.mode] ?? '#64748b'}40`,
+                  fontFamily: 'var(--font-mono)',
+                }}>{selectedPoint.mode}</span>
+                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{selectedPoint.interval_ms}ms</span>
+              </>
+            )}
+            {/* live pulse dot */}
+            {liveEntry && (
+              <span style={{
+                marginLeft: 'auto',
+                width: 6, height: 6, borderRadius: '50%',
+                background: '#22c55e', boxShadow: '0 0 5px #22c55e',
+                flexShrink: 0,
+              }} title="数据推送中" />
+            )}
+          </div>
+
+          {liveEntry ? (
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+              <span style={{
+                fontSize: 22, fontWeight: 700, fontFamily: 'var(--font-mono)',
+                color: '#4ade80',
+              }}>{liveEntry.value.toFixed(3)}</span>
+              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                {liveEntry.time.toLocaleTimeString('zh-CN', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              </span>
+            </div>
+          ) : (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+              等待 STOMP 推送… (需开启"加载数据")
+            </div>
+          )}
+        </div>
+      )}
+      <FormatterPanel fmt={draft.formatter} onChange={(f) => update({ formatter: f })} />
+    </div>
+  )
+}
+
+// ── Trend mode panel ───────────────────────────────────────────────────────────
+
+function TrendModePanel({ draft, setDraft, scadaCode }: {
+  draft: PointBinding
+  setDraft: (fn: (prev: PointBinding) => PointBinding) => void
+  scadaCode?: string
+}) {
+  const [simPoints, setSimPoints] = useState<ScadaSimPointItem[]>([])
+  const [query, setQuery] = useState('')
+
+  const update = (patch: Partial<PointBinding>) => setDraft((prev) => ({ ...prev, ...patch }))
+  const selectedKeys: string[] = draft.trendKeys ?? []
+
+  useEffect(() => {
+    dataBindingApi.listSimPoints(scadaCode).then((res) => setSimPoints(res.data ?? [])).catch(() => {})
+  }, [scadaCode])
+
+  const filtered = simPoints.filter((p) =>
+    !query || p.link_name.toLowerCase().includes(query.toLowerCase())
+  )
+
+  const toggle = (linkName: string) => {
+    const next = selectedKeys.includes(linkName)
+      ? selectedKeys.filter((k) => k !== linkName)
+      : [...selectedKeys, linkName]
+    update({ trendKeys: next })
+  }
+
+  return (
+    <div style={{ padding: '12px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <Field label="数据点位（多选）">
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="搜索点位名…"
+          style={{
+            width: '100%', padding: '5px 10px', fontSize: 12, boxSizing: 'border-box',
+            border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+            background: 'var(--bg-base)', color: 'var(--text-primary)', outline: 'none',
+            marginBottom: 6,
+          }}
+        />
+        <div style={{
+          maxHeight: 180, overflowY: 'auto', border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-sm)', background: 'var(--bg-base)',
+        }}>
+          {filtered.length === 0 && (
+            <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--text-muted)' }}>
+              暂无点位{scadaCode ? `（${scadaCode}）` : ''}
+            </div>
+          )}
+          {filtered.map((p) => {
+            const checked = selectedKeys.includes(p.link_name)
+            return (
+              <div
+                key={p.id}
+                onClick={() => toggle(p.link_name)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '6px 12px', cursor: 'pointer', fontSize: 12,
+                  background: checked ? 'var(--accent-muted)' : 'transparent',
+                  borderBottom: '1px solid var(--border)',
+                }}
+              >
+                <span style={{
+                  width: 14, height: 14, borderRadius: 3, flexShrink: 0,
+                  border: checked ? 'none' : '1px solid var(--border)',
+                  background: checked ? 'var(--accent)' : 'transparent',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  {checked && <span style={{ color: '#fff', fontSize: 10 }}>✓</span>}
+                </span>
+                <span style={{ flex: 1, color: checked ? 'var(--accent)' : 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+                  {p.link_name}
+                </span>
+                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{p.mode}</span>
+                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{p.interval_ms}ms</span>
+              </div>
+            )
+          })}
+        </div>
+        {selectedKeys.length > 0 && (
+          <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            {selectedKeys.map((k) => (
+              <span key={k} style={{
+                fontSize: 11, padding: '2px 8px', borderRadius: 10,
+                background: 'var(--accent-muted)', color: 'var(--accent)',
+                border: '1px solid var(--accent)', fontFamily: 'var(--font-mono)',
+                cursor: 'pointer',
+              }} onClick={() => toggle(k)} title="点击移除">
+                {k} ×
+              </span>
+            ))}
+          </div>
+        )}
+      </Field>
+
+      <Field label="最大点数">
+        <input
+          type="number"
+          value={draft.trendMaxPoints ?? 200}
+          min={10} max={2000}
+          onChange={(e) => update({ trendMaxPoints: Math.max(10, parseInt(e.target.value) || 200) })}
+          style={{
+            width: 100, padding: '4px 8px', fontSize: 12,
+            border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+            background: 'var(--bg-base)', color: 'var(--text-primary)', outline: 'none',
+          }}
+        />
+        <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 6 }}>条</span>
+      </Field>
+
+      <Field label="时间窗口">
+        <input
+          type="number"
+          value={draft.trendTimeWindowSec ?? 0}
+          min={0}
+          onChange={(e) => update({ trendTimeWindowSec: Math.max(0, parseInt(e.target.value) || 0) })}
+          style={{
+            width: 100, padding: '4px 8px', fontSize: 12,
+            border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+            background: 'var(--bg-base)', color: 'var(--text-primary)', outline: 'none',
+          }}
+        />
+        <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 6 }}>秒（0=不限）</span>
+      </Field>
+    </div>
+  )
+}
+
+function buildInterfaceTargets(isChart: boolean, schema: ReturnType<typeof getChartSchema>): string[] {
+  if (isChart && schema) {
+    return schema.bindingFields.map((f) => {
+      if (f.kind === 'category') return 'category'
+      return `series:${f.seriesIndex ?? 0}`
+    })
+  }
+  return ['text', 'fill', 'stroke', 'value']
+}
+
+function IfaceModePanel({ draft, setDraft, isChart, schema }: {
+  draft: PointBinding
+  setDraft: (fn: (prev: PointBinding) => PointBinding) => void
+  isChart: boolean
+  schema: ReturnType<typeof getChartSchema>
+}) {
+  const [apps, setApps] = useState<OutboundAppItem[]>([])
+  const [dataIfaces, setDataIfaces] = useState<DataInterfaceItem[]>([])
+  const [webhooks, setWebhooks] = useState<OutboundWebhookItem[]>([])
+
+  const sourceType = draft.ifaceSourceType ?? 'data_iface'
+
+  useEffect(() => {
+    dataBindingApi.listDataInterfaces().then((r) => setDataIfaces(r.data ?? [])).catch(() => {})
+    dataBindingApi.listOutboundApps().then((r) => setApps(r.data ?? [])).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    if (sourceType === 'webhook' && draft.ifaceAppId) {
+      dataBindingApi.listOutboundWebhooks(draft.ifaceAppId).then((r) => setWebhooks(r.data ?? [])).catch(() => {})
+    }
+  }, [sourceType, draft.ifaceAppId])
+
+  const update = (patch: Partial<PointBinding>) => setDraft((prev) => ({ ...prev, ...patch }))
+
+  const setMapping = (idx: number, key: keyof InterfaceFieldMapping, val: string) => {
+    const mappings = [...(draft.ifaceFieldMappings ?? [])]
+    mappings[idx] = { ...(mappings[idx] ?? { target: '', sourceField: '' }), [key]: val }
+    update({ ifaceFieldMappings: mappings })
+  }
+
+  const addMapping = () => {
+    const mappings = [...(draft.ifaceFieldMappings ?? []), { target: '', sourceField: '' }]
+    update({ ifaceFieldMappings: mappings })
+  }
+
+  const removeMapping = (idx: number) => {
+    const mappings = (draft.ifaceFieldMappings ?? []).filter((_, i) => i !== idx)
+    update({ ifaceFieldMappings: mappings })
+  }
+
+  const targets = buildInterfaceTargets(isChart, schema)
+
+  // Parse schema from selected interface to suggest field names
+  const getSchemaFields = (): string[] => {
+    try {
+      if (sourceType === 'data_iface') {
+        const iface = dataIfaces.find((i) => i.id === draft.ifaceId)
+        if (iface?.schema_json) {
+          const s = JSON.parse(iface.schema_json)
+          if (s.properties) return Object.keys(s.properties)
+        }
+      } else if (sourceType === 'webhook') {
+        const wh = webhooks.find((w) => w.id === draft.ifaceId)
+        if (wh?.response_schema) {
+          const s = JSON.parse(wh.response_schema)
+          if (s.properties) return Object.keys(s.properties)
+        }
+      }
+    } catch {}
+    return []
+  }
+
+  const schemaFields = getSchemaFields()
+
+  return (
+    <div>
+      <Field label="数据源类型">
+        <Sel
+          val={sourceType}
+          onChange={(v) => update({ ifaceSourceType: v as InterfaceSourceType, ifaceId: undefined, ifaceCode: undefined, ifaceAppId: undefined, ifaceName: undefined })}
+        >
+          <option value="data_iface">平台数据接口</option>
+          <option value="open_api">外部应用开放接口（预留）</option>
+          <option value="webhook">外部应用 Webhook</option>
+        </Sel>
+      </Field>
+
+      {sourceType === 'data_iface' && (
+        <Field label="选择数据接口">
+          <Sel
+            val={String(draft.ifaceId ?? '')}
+            onChange={(v) => {
+              const iface = dataIfaces.find((i) => i.id === Number(v))
+              update({ ifaceId: Number(v) || undefined, ifaceCode: iface?.code, ifaceName: iface?.name })
+            }}
+          >
+            <option value="">-- 选择接口 --</option>
+            {dataIfaces.filter((i) => i.enabled).map((i) => (
+              <option key={i.id} value={i.id}>{i.name} ({i.code})</option>
+            ))}
+          </Sel>
+          {draft.ifaceCode && <Hint>调用路径：/api/open/v1/data/{draft.ifaceCode}</Hint>}
+        </Field>
+      )}
+
+      {sourceType === 'webhook' && (
+        <>
+          <Field label="选择外部应用">
+            <Sel
+              val={String(draft.ifaceAppId ?? '')}
+              onChange={(v) => update({ ifaceAppId: Number(v) || undefined, ifaceId: undefined, ifaceName: undefined })}
+            >
+              <option value="">-- 选择应用 --</option>
+              {apps.map((a) => (
+                <option key={a.id} value={a.id}>{a.name} ({a.code})</option>
+              ))}
+            </Sel>
+          </Field>
+          {draft.ifaceAppId && (
+            <Field label="选择 Webhook">
+              <Sel
+                val={String(draft.ifaceId ?? '')}
+                onChange={(v) => {
+                  const wh = webhooks.find((w) => w.id === Number(v))
+                  update({ ifaceId: Number(v) || undefined, ifaceName: wh?.name })
+                }}
+              >
+                <option value="">-- 选择 Webhook --</option>
+                {webhooks.filter((w) => w.enabled).map((w) => (
+                  <option key={w.id} value={w.id}>{w.name}</option>
+                ))}
+              </Sel>
+            </Field>
+          )}
+        </>
+      )}
+
+      <Field label="轮询间隔 (ms)" optional>
+        <Inp
+          type="number"
+          val={String(draft.ifaceRefreshMs ?? 5000)}
+          onChange={(v) => update({ ifaceRefreshMs: Number(v) || 5000 })}
+          placeholder="5000"
+        />
+        <Hint>仅对接口数据有效，0 表示不轮询（依赖 Webhook 推送）</Hint>
+      </Field>
+
+      {/* 字段映射 */}
+      <div style={{ marginTop: 4 }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          marginBottom: 8,
+        }}>
+          <Label>字段映射</Label>
+          <button
+            onClick={addMapping}
+            style={{
+              padding: '2px 8px', fontSize: 11, cursor: 'pointer',
+              background: 'var(--accent-muted)', color: 'var(--accent)',
+              border: '1px solid var(--border-accent)', borderRadius: 'var(--radius-sm)',
+            }}
+          >+ 添加映射</button>
+        </div>
+
+        {(draft.ifaceFieldMappings ?? []).length === 0 && (
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>
+            点击"添加映射"将接口返回字段绑定到组件属性
+          </div>
+        )}
+
+        {(draft.ifaceFieldMappings ?? []).map((m, idx) => (
+          <div key={idx} style={{
+            display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 6, marginBottom: 6, alignItems: 'end',
+          }}>
+            <div>
+              {idx === 0 && <Label>目标属性</Label>}
+              <Sel val={m.target} onChange={(v) => setMapping(idx, 'target', v)}>
+                <option value="">-- 目标 --</option>
+                {targets.map((t) => <option key={t} value={t}>{t}</option>)}
+              </Sel>
+            </div>
+            <div>
+              {idx === 0 && <Label>接口字段（点分隔路径）</Label>}
+              {schemaFields.length > 0 ? (
+                <Sel val={m.sourceField} onChange={(v) => setMapping(idx, 'sourceField', v)}>
+                  <option value="">-- 字段 --</option>
+                  {schemaFields.map((f) => <option key={f} value={f}>{f}</option>)}
+                </Sel>
+              ) : (
+                <Inp val={m.sourceField} onChange={(v) => setMapping(idx, 'sourceField', v)} placeholder="data.value" />
+              )}
+            </div>
+            <button
+              onClick={() => removeMapping(idx)}
+              style={{
+                padding: '4px 6px', fontSize: 11, cursor: 'pointer', marginTop: idx === 0 ? 16 : 0,
+                background: 'var(--danger-muted)', color: 'var(--danger)',
+                border: '1px solid rgba(239,68,68,0.25)', borderRadius: 'var(--radius-sm)',
+              }}
+            >×</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ── Main component ─────────────────────────────────────────────────────────────
+
+export default function BindingDrawer({ elementId, scadaCode, pointData, onClose }: Props) {
+  const store = useEditorStore()
+  const canvas = store.activeCanvas()
+  const el = canvas?.elements.find((e) => e.id === elementId)
+  if (!el) return null
+
+  const pb = el.pointBinding ?? { mode: 'point', pointKey: '', deviceCode: '' }
+  const schema = getChartSchema(el.type)
+  const isChart = !!schema
+
+  const maxSeriesIdx = schema
+    ? Math.max(0, ...schema.bindingFields.filter((f) => f.kind !== 'category').map((f) => f.seriesIndex ?? 0))
+    : 0
+
+  const [mode, setMode] = useState<DataBindingMode>(pb.mode ?? 'point')
+  const [draft, setDraft] = useState<PointBinding>({ ...pb })
+  const [chartState, setChartState] = useState<ChartBindingState>(() => initChartState(pb, maxSeriesIdx + 1))
+
+  const handleModeChange = (m: DataBindingMode) => {
+    setMode(m)
+    setDraft((prev) => ({ ...prev, mode: m }))
+  }
+
+  const save = () => {
+    const binding: PointBinding = {
+      ...draft,
+      mode,
+      pointKey: draft.pointKey?.trim() ?? '',
+      deviceCode: draft.deviceCode?.trim() ?? '',
+    }
+    if (mode === 'point' && isChart && schema) {
+      binding.chartSeriesKeys = chartState.seriesInputs.map((s) =>
+        s.split(',').map((k) => k.trim()).filter(Boolean)
+      )
+      binding.chartCategoryKey = chartState.categoryInput.trim() || undefined
+    } else if (mode !== 'point') {
+      // Clear point-mode chart fields to avoid stale keys bleeding into other modes
+      binding.chartSeriesKeys = undefined
+      binding.chartCategoryKey = undefined
+    }
+    store.updateElement(elementId, { pointBinding: binding })
+    onClose()
+  }
+
+  const clear = () => {
+    store.updateElement(elementId, { pointBinding: undefined })
+    onClose()
+  }
+
+  // Immediately bind a simulation point to the element when selected
+  const applySimPoint = (linkName: string) => {
+    const binding: PointBinding = {
+      ...draft,
+      mode: 'simulation',
+      simLinkName: linkName,
+      chartSeriesKeys: undefined,
+      chartCategoryKey: undefined,
+      pointKey: draft.pointKey?.trim() ?? '',
+      deviceCode: draft.deviceCode?.trim() ?? '',
+    }
+    store.updateElement(elementId, { pointBinding: binding })
+  }
+
+  // scadaCode comes from props (passed by CanvasBoard)
+  const [showSimManager, setShowSimManager] = useState(false)
+
+  // ── Display mode: 'bottom' | 'right' | 'float' ────────────────────────────
+  type DisplayMode = 'bottom' | 'right' | 'float'
+  const [displayMode, setDisplayMode] = useState<DisplayMode>(() => {
+    return (localStorage.getItem('scada:bindingDrawerMode') as DisplayMode) ?? 'bottom'
+  })
+  const changeDisplayMode = (m: DisplayMode) => {
+    setDisplayMode(m)
+    localStorage.setItem('scada:bindingDrawerMode', m)
+  }
+
+  // Floating window drag/resize state
+  const [floatPos, setFloatPos] = useState<{ x: number; y: number }>(() => {
+    try {
+      const s = localStorage.getItem('scada:bindingDrawerFloat')
+      if (s) return JSON.parse(s)
+    } catch { /* ignore */ }
+    return { x: Math.max(0, window.innerWidth / 2 - 220), y: 80 }
+  })
+  const [floatSize, setFloatSize] = useState<{ w: number; h: number }>(() => {
+    try {
+      const s = localStorage.getItem('scada:bindingDrawerFloatSize')
+      if (s) return JSON.parse(s)
+    } catch { /* ignore */ }
+    return { w: 440, h: 560 }
+  })
+
+  const floatRef = useRef<HTMLDivElement>(null)
+  const dragState = useRef<{ startX: number; startY: number; ox: number; oy: number } | null>(null)
+  const resizeState = useRef<{ startX: number; startY: number; ow: number; oh: number } | null>(null)
+
+  const onDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    dragState.current = { startX: e.clientX, startY: e.clientY, ox: floatPos.x, oy: floatPos.y }
+    const onMove = (ev: MouseEvent) => {
+      if (!dragState.current) return
+      const nx = dragState.current.ox + ev.clientX - dragState.current.startX
+      const ny = dragState.current.oy + ev.clientY - dragState.current.startY
+      const pos = { x: Math.max(0, nx), y: Math.max(0, ny) }
+      setFloatPos(pos)
+      localStorage.setItem('scada:bindingDrawerFloat', JSON.stringify(pos))
+    }
+    const onUp = () => {
+      dragState.current = null
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [floatPos])
+
+  const onResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    resizeState.current = { startX: e.clientX, startY: e.clientY, ow: floatSize.w, oh: floatSize.h }
+    const onMove = (ev: MouseEvent) => {
+      if (!resizeState.current) return
+      const nw = Math.max(320, resizeState.current.ow + ev.clientX - resizeState.current.startX)
+      const nh = Math.max(320, resizeState.current.oh + ev.clientY - resizeState.current.startY)
+      const sz = { w: nw, h: nh }
+      setFloatSize(sz)
+      localStorage.setItem('scada:bindingDrawerFloatSize', JSON.stringify(sz))
+    }
+    const onUp = () => {
+      resizeState.current = null
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [floatSize])
+
+  // ── Shared inner content ───────────────────────────────────────────────────
+  const ModeIcon = ({ m }: { m: DisplayMode }) => {
+    if (m === 'bottom') return (
+      <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+        <rect x={2} y={14} width={20} height={8} rx={1} />
+        <path d="M2 2h20" opacity={0.3} />
+      </svg>
+    )
+    if (m === 'right') return (
+      <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+        <rect x={14} y={2} width={8} height={20} rx={1} />
+        <path d="M2 2v20" opacity={0.3} />
+      </svg>
+    )
+    return (
+      <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+        <rect x={3} y={3} width={18} height={18} rx={2} />
+        <path d="M9 3v18M3 9h6" opacity={0.4} />
+      </svg>
+    )
+  }
+
+  const panelHeader = (
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      padding: '8px 12px 10px', borderBottom: '1px solid var(--border)',
+      background: 'var(--bg-panel)',
+      ...(displayMode === 'float' ? { cursor: 'move', borderRadius: '10px 10px 0 0' } : {}),
+    }}
+      onMouseDown={displayMode === 'float' ? onDragStart : undefined}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>数据绑定</span>
+        <span style={{
+          fontSize: 9, color: 'var(--text-muted)', background: 'var(--bg-base)',
+          border: '1px solid var(--border)', borderRadius: 3, padding: '1px 4px', fontFamily: 'var(--font-mono)',
+        }}>{el.type}</span>
+        {schema && (
+          <span style={{
+            fontSize: 9, color: 'var(--accent)', background: 'var(--accent-muted)',
+            border: '1px solid var(--border-accent)', borderRadius: 3, padding: '1px 4px',
+          }}>{schema.label}</span>
+        )}
+        {el.name && (
+          <span style={{ fontSize: 11, color: 'var(--text-secondary)', maxWidth: 100, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{el.name}</span>
+        )}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+        {/* Display mode switcher */}
+        {(['bottom', 'right', 'float'] as DisplayMode[]).map((m) => (
+          <button
+            key={m}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => { e.stopPropagation(); changeDisplayMode(m) }}
+            title={m === 'bottom' ? '底部抽屉' : m === 'right' ? '右侧面板' : '浮窗'}
+            style={{
+              width: 22, height: 22, borderRadius: 4, border: 'none',
+              background: displayMode === m ? 'var(--accent-muted)' : 'transparent',
+              color: displayMode === m ? 'var(--accent)' : 'var(--text-muted)',
+              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            <ModeIcon m={m} />
+          </button>
+        ))}
+        <div style={{ width: 1, height: 14, background: 'var(--border)', margin: '0 2px' }} />
+        <button
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={onClose}
+          style={{ width: 22, height: 22, borderRadius: 4, border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round">
+            <path d="M18 6L6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  )
+
+  const panelBody = (
+    <div style={{ flex: 1, overflowY: 'auto', padding: '10px 16px 0' }}>
+      <ModeTabs mode={mode} onChange={handleModeChange} elType={el.type} />
+      <div style={{ paddingTop: 14 }}>
+        {mode === 'point' && (
+          <PointModePanel
+            draft={draft}
+            setDraft={setDraft}
+            isChart={isChart}
+            schema={schema}
+            chartState={chartState}
+            setChartState={setChartState}
+          />
+        )}
+        {mode === 'static' && (
+          <StaticModePanel draft={draft} setDraft={setDraft} isChart={isChart} schema={schema} />
+        )}
+        {mode === 'simulation' && (
+          <SimModePanel draft={draft} setDraft={setDraft} scadaCode={scadaCode} pointData={pointData} onApply={applySimPoint} onManage={() => setShowSimManager(true)} />
+        )}
+        {mode === 'interface' && (
+          <IfaceModePanel draft={draft} setDraft={setDraft} isChart={isChart} schema={schema} />
+        )}
+        {mode === 'trend' && (
+          <TrendModePanel draft={draft} setDraft={setDraft} scadaCode={scadaCode} />
+        )}
+      </div>
+    </div>
+  )
+
+  const panelFooter = (
+    <div style={{
+      display: 'flex', gap: 6, justifyContent: 'flex-end',
+      padding: '10px 16px', borderTop: '1px solid var(--border)',
+      background: 'var(--bg-panel)', flexShrink: 0,
+    }}>
+      <button
+        onClick={clear}
+        style={{
+          padding: '5px 12px', fontSize: 11, cursor: 'pointer',
+          background: 'var(--danger-muted)', color: 'var(--danger)',
+          border: '1px solid rgba(239,68,68,0.25)', borderRadius: 'var(--radius-sm)',
+        }}
+      >清除绑定</button>
+      <button
+        onClick={onClose}
+        style={{
+          padding: '5px 12px', fontSize: 11, cursor: 'pointer',
+          background: 'var(--bg-surface)', color: 'var(--text-secondary)',
+          border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+        }}
+      >取消</button>
+      <button
+        onClick={save}
+        style={{
+          padding: '5px 14px', fontSize: 11, cursor: 'pointer',
+          background: 'var(--accent)', color: '#fff',
+          border: 'none', borderRadius: 'var(--radius-sm)',
+        }}
+      >保存</button>
+    </div>
+  )
+
+  const simManager = showSimManager && scadaCode ? (
+    <SimPointsModal scadaCode={scadaCode} onClose={() => setShowSimManager(false)} />
+  ) : null
+
+  // ── Render by displayMode ──────────────────────────────────────────────────
+
+  if (displayMode === 'right') {
+    return (
+      <>
+        <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 10000 }} />
+        <div style={{
+          position: 'fixed', top: 0, right: 0, bottom: 0, zIndex: 10001,
+          width: 360,
+          background: 'var(--bg-panel)', borderLeft: '1px solid var(--border-strong)',
+          boxShadow: '-8px 0 32px rgba(0,0,0,0.4)',
+          display: 'flex', flexDirection: 'column',
+        }}>
+          {panelHeader}
+          {panelBody}
+          {panelFooter}
+        </div>
+        {simManager}
+      </>
+    )
+  }
+
+  if (displayMode === 'float') {
+    return (
+      <>
+        <div ref={floatRef} style={{
+          position: 'fixed', zIndex: 10001,
+          left: floatPos.x, top: floatPos.y,
+          width: floatSize.w, height: floatSize.h,
+          background: 'var(--bg-panel)',
+          border: '1px solid var(--border-strong)',
+          borderRadius: 10,
+          boxShadow: '0 8px 40px rgba(0,0,0,0.6)',
+          display: 'flex', flexDirection: 'column',
+          overflow: 'hidden',
+        }}>
+          {panelHeader}
+          {panelBody}
+          {panelFooter}
+          {/* Resize handle */}
+          <div
+            onMouseDown={onResizeStart}
+            style={{
+              position: 'absolute', right: 0, bottom: 0, width: 14, height: 14,
+              cursor: 'nwse-resize',
+              background: 'transparent',
+            }}
+          >
+            <svg width={10} height={10} viewBox="0 0 10 10" style={{ position: 'absolute', right: 2, bottom: 2, opacity: 0.3 }}>
+              <path d="M8 2L2 8M5 2L2 5M8 5L5 8" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" />
+            </svg>
+          </div>
+        </div>
+        {simManager}
+      </>
+    )
+  }
+
+  // bottom drawer (default)
+  return (
+    <>
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 10000 }} />
+      <div style={{
+        position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 10001,
+        background: 'var(--bg-panel)', borderTop: '1px solid var(--border-strong)',
+        boxShadow: '0 -8px 32px rgba(0,0,0,0.5)', borderRadius: '12px 12px 0 0',
+        maxHeight: '70vh', display: 'flex', flexDirection: 'column',
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '8px 0 2px', flexShrink: 0 }}>
+          <div style={{ width: 36, height: 4, borderRadius: 2, background: 'var(--border-strong)' }} />
+        </div>
+        {panelHeader}
+        {panelBody}
+        {panelFooter}
+      </div>
+      {simManager}
+    </>
+  )
+}

@@ -77,11 +77,11 @@ func listDepartments(_ json.RawMessage) (any, *RPCError) {
 // ── deploy_scada ──────────────────────────────────────────────────────────────
 
 type deployScadaParams struct {
-	ScadaID    uint     `json:"scada_id"`
-	TargetType string   `json:"target_type"` // device | device_group | department | position | user
-	TargetIDs  []uint   `json:"target_ids"`
-	DeployMode string   `json:"deploy_mode"` // webview | apk
-	RuleName   string   `json:"rule_name"`
+	ScadaID    uint   `json:"scada_id"`
+	TargetType string `json:"target_type"` // device | device_group | department | position | user
+	TargetIDs  []uint `json:"target_ids"`
+	DeployMode string `json:"deploy_mode"` // webview | apk
+	RuleName   string `json:"rule_name"`
 }
 
 func deployScada(raw json.RawMessage) (any, *RPCError) {
@@ -179,12 +179,10 @@ func deployWebview(scada models.ScadaInfo, deviceID uint) error {
 		}
 	}
 
-	// assign menu to device
-	assignment := models.AgentMenuAssignment{MenuID: menu.ID, DeviceID: deviceID}
-	database.DB.Where("device_id = ?", deviceID).Delete(&models.AgentMenuAssignment{})
-	if err := database.DB.Create(&assignment).Error; err != nil {
-		return err
-	}
+	// assign menu to device（追加 upsert，不删除该设备已有的其它菜单）
+	database.DB.
+		Where("menu_id = ? AND device_id = ?", menu.ID, deviceID).
+		FirstOrCreate(&models.AgentMenuAssignment{MenuID: menu.ID, DeviceID: deviceID})
 
 	// increment revision and push via WebSocket
 	database.DB.Model(&models.Device{}).Where("id = ?", deviceID).

@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom'
-import { useEffect, useState } from 'react'
-import { useScadaInfo } from '@/hooks/useScada'
+import { useEffect } from 'react'
+import { useScadaInfo, useSaveCanvas } from '@/hooks/useScada'
 import { useEditorStore } from '@/store/editorStore'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 import EditorHeader from '@/components/EditorHeader'
@@ -56,9 +56,15 @@ export default function EditorPage() {
   const scadaId = Number(id)
   const { data: info, isLoading } = useScadaInfo(scadaId)
   const store = useEditorStore()
-  const [layerCollapsed, setLayerCollapsed] = useState(false)
+  const saveCanvas = useSaveCanvas()
 
-  useKeyboardShortcuts()
+  const doSave = () => {
+    if (!scadaId) return
+    const previewImage = store.getSnapshot(480) ?? undefined
+    saveCanvas.mutate({ id: scadaId, project: store.project, previewImage })
+  }
+
+  useKeyboardShortcuts(doSave)
 
   useEffect(() => {
     if (!info) return
@@ -96,15 +102,16 @@ export default function EditorPage() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg-app)' }}>
       <EditorHeader
         scadaName={info?.scada_name}
+        scadaCode={info?.scada_code}
         publishStatus={info?.publish_status}
         onBack={() => navigate('/')}
         onPreview={() => navigate(`/preview/${scadaId}`)}
       />
-      <CanvasTabs layerCollapsed={layerCollapsed} onToggleLayer={() => setLayerCollapsed(v => !v)} />
+      <CanvasTabs />
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         <Toolbar />
         <WidgetPanel />
-        <LayerPanel collapsed={layerCollapsed} onToggle={() => setLayerCollapsed(v => !v)} />
+        <LayerPanel />
         <CanvasBoard />
         <PropertiesPanel />
       </div>

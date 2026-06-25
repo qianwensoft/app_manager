@@ -1,0 +1,7 @@
+{
+  "tool_name": "Read",
+  "tool_input_preview": "{\"file_path\":\"/Users/frank/.claude/projects/-Volumes-data-workspace-qianwen-app-manager/1f703061-51dd-4d95-9a41-e2d56aca1ddd.jsonl\",\"offset\":2070,\"limit\":30}",
+  "error": "File content (42273 tokens) exceeds maximum allowed tokens (10000). Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file.",
+  "timestamp": "2026-04-17T15:22:52.131Z",
+  "retry_count": 1
+}

@@ -55,7 +55,11 @@ func processDeviceEvent(rec models.DeviceEvent, dev *models.Device) {
 		if DeviceOutboundConnectorPaused(db, c.ID, rec.DeviceID) {
 			continue
 		}
-		if !ConnectorDebouncePass(c, rec.DeviceID, rec.EventType) {
+		if !ConnectorEventPass(c, rec.DeviceID, rec.EventType, rec.EventData) {
+			continue
+		}
+		// 检查前台应用包名过滤
+		if !checkForegroundPackageFilter(db, c, rec.DeviceID) {
 			continue
 		}
 		RunConnectorOutbound(c, rec, dev, &def)

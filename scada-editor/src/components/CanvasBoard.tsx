@@ -5,11 +5,26 @@ import {
   hitTest, hitTestHandle, hitTestMarquee, snapToGrid, generateId,
 } from '@/utils/canvas'
 import { pushHistory } from '@/hooks/useHistory'
-import type { CanvasElement } from '@/types'
+import type { CanvasElement, ChartConfig } from '@/types'
+import type { PointDataMap } from '@/hooks/useStompPointData'
+import { useStompPointData } from '@/hooks/useStompPointData'
+import { useInterfaceBindingData, resolveElementValue } from '@/hooks/useInterfaceBindingData'
+import { useHighFreqTextData } from '@/hooks/useHighFreqTextData'
+import { useScadaInfo } from '@/hooks/useScada'
 import ChartWidget from './ChartWidget'
+import TrendWidget from './TrendWidget'
+import UPlotTrendWidget from './UPlotTrendWidget'
 import ImageWidget from './ImageWidget'
+import TableWidget from './TableWidget'
+import FormFieldWidget from './FormFieldWidget'
+import LayoutCarouselWidget from './LayoutCarouselWidget'
+import LayoutModalWidget from './LayoutModalWidget'
+import LayoutTabsWidget from './LayoutTabsWidget'
+import LayoutCollapseWidget from './LayoutCollapseWidget'
+import AlarmLightWidget from './AlarmLightWidget'
 import { WIDGET_DRAG_TYPE, buildWidgetElement } from './WidgetPanel'
 import type { WidgetDef } from './WidgetPanel'
+import BindingDrawer from './BindingDrawer'
 
 const HANDLE_EDGES: [boolean, boolean, boolean, boolean][] = [
   [true,  true,  false, false],
@@ -42,6 +57,7 @@ type MarqueeRef = {
 
 export default function CanvasBoard() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const overlayCanvasRef = useRef<HTMLCanvasElement>(null)
   const dragRef = useRef<DragRef | null>(null)
   const resizeRef = useRef<ResizeRef | null>(null)
   const drawingRef = useRef<{ startX: number; startY: number } | null>(null)
@@ -49,9 +65,48 @@ export default function CanvasBoard() {
 
   const store = useEditorStore()
   const canvas = store.activeCanvas()
-  const { activeTool, selectedIds, zoom } = store
+  const { activeTool, selectedIds, zoom, liveDataOn } = store
 
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; id: string } | null>(null)
+  const [bindingId, setBindingId] = useState<string | null>(null)
+
+  // Live-data: pointData fed to charts when liveDataOn
+  const [pointData, setPointData] = useState<PointDataMap>({})
+
+  const { data: scadaInfo } = useScadaInfo(store.scadaId ?? 0)
+  const scadaCode = scadaInfo?.scada_code ?? ''
+
+  const handlePointData = useCallback((data: PointDataMap) => {
+    setPointData((prev) => ({ ...prev, ...data }))
+  }, [])
+
+  // STOMP subscribes unconditionally once scadaCode is available — simulation bindings
+  // need live data regardless of the liveDataOn toggle (which only gates interface/HTTP data).
+  useStompPointData({
+    scadaCode,
+    onData: handlePointData,
+    enabled: !!scadaCode,
+  })
+
+  const allElements = canvas?.elements ?? []
+  useInterfaceBindingData({
+    elements: liveDataOn ? allElements : [],
+    onData: handlePointData,
+  })
+
+  // High-frequency text data via binary stream (interval_ms < 1000)
+  const highFreqData = useHighFreqTextData(allElements, scadaCode, !!scadaCode)
+
+  // Clear non-simulation pointData when toggling off
+  useEffect(() => {
+    if (!liveDataOn) setPointData({})
+  }, [liveDataOn])
+
+  // 注册 canvas 元素到 store，供保存时截图
+  useEffect(() => {
+    store.registerCanvasEl(canvasRef.current)
+    return () => store.registerCanvasEl(null)
+  }, [])
 
   const draw = useCallback(() => {
     const el = canvasRef.current
@@ -72,36 +127,59 @@ export default function CanvasBoard() {
       drawElement(ctx, element, zoom)
     }
 
-    // Draw selection indicators
-    if (selectedIds.length === 1) {
-      const selEl = canvas.elements.find((e) => e.id === selectedIds[0])
-      if (selEl) drawSelectionHandles(ctx, selEl, zoom)
-    } else if (selectedIds.length > 1) {
-      const selEls = canvas.elements.filter((e) => selectedIds.includes(e.id))
-      selEls.forEach((e) => {
-        // highlight each selected element with dashed border
-        ctx.save()
-        ctx.strokeStyle = 'rgba(74,158,255,0.5)'
-        ctx.lineWidth = 1
-        ctx.setLineDash([3, 3])
-        ctx.strokeRect(e.x * zoom - 2, e.y * zoom - 2, e.width * zoom + 4, e.height * zoom + 4)
-        ctx.setLineDash([])
-        ctx.restore()
-      })
-      drawMultiSelectBox(ctx, selEls, zoom)
-    }
-
-    // Draw marquee
-    if (marqueeRef.current) {
-      const m = marqueeRef.current
-      drawMarquee(ctx, m.startX, m.startY, m.curX, m.curY)
+    // Draw selection handles on overlay canvas
+    const oc = overlayCanvasRef.current
+    if (oc) {
+      oc.width = el.width
+      oc.height = el.height
+      const octx = oc.getContext('2d')
+      if (octx) {
+        octx.clearRect(0, 0, oc.width, oc.height)
+        if (selectedIds.length === 1) {
+          const selEl = canvas.elements.find((e) => e.id === selectedIds[0])
+          if (selEl) drawSelectionHandles(octx, selEl, zoom)
+        } else if (selectedIds.length > 1) {
+          const selEls = canvas.elements.filter((e) => selectedIds.includes(e.id))
+          selEls.forEach((e) => {
+            octx.save()
+            octx.strokeStyle = 'rgba(74,158,255,0.5)'
+            octx.lineWidth = 1
+            octx.setLineDash([3, 3])
+            octx.strokeRect(e.x * zoom - 2, e.y * zoom - 2, e.width * zoom + 4, e.height * zoom + 4)
+            octx.setLineDash([])
+            octx.restore()
+          })
+          drawMultiSelectBox(octx, selEls, zoom)
+        }
+        if (marqueeRef.current) {
+          const m = marqueeRef.current
+          drawMarquee(octx, m.startX, m.startY, m.curX, m.curY)
+        }
+      }
     }
   }, [canvas, zoom, selectedIds])
 
   useEffect(() => { draw() }, [draw])
 
+  // Trackpad pinch-to-zoom — must be non-passive to call preventDefault
+  const zoomRef = useRef(zoom)
+  useEffect(() => { zoomRef.current = zoom }, [zoom])
+
+  useEffect(() => {
+    const el = overlayCanvasRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return
+      e.preventDefault()
+      const delta = -e.deltaY * 0.01
+      store.setZoom(zoomRef.current + delta)
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
+
   const getCanvasPos = (e: React.MouseEvent) => {
-    const rect = canvasRef.current!.getBoundingClientRect()
+    const rect = overlayCanvasRef.current!.getBoundingClientRect()
     return {
       x: (e.clientX - rect.left),          // canvas pixel coords (already scaled)
       y: (e.clientY - rect.top),
@@ -134,8 +212,8 @@ export default function CanvasBoard() {
         }
       }
 
-      // 2. Hit test element
-      const hit = [...canvas.elements].reverse().find((el) => hitTest(el, mx, my, zoom))
+      // 2. Hit test element — highest zIndex first, skip locked and non-selectable
+      const hit = [...canvas.elements].sort((a, b) => b.zIndex - a.zIndex).find((el) => el.selectable !== false && !el.locked && hitTest(el, mx, my, zoom))
       if (hit) {
         // If hit element belongs to a group, redirect selection to the group
         const parentGroup = canvas.elements.find(
@@ -239,7 +317,7 @@ export default function CanvasBoard() {
 
     if (drawingRef.current && activeTool !== 'select') {
       pushHistory(store.project)
-      const rect = canvasRef.current!.getBoundingClientRect()
+      const rect = overlayCanvasRef.current!.getBoundingClientRect()
       const lx = (e.clientX - rect.left) / zoom
       const ly = (e.clientY - rect.top) / zoom
       const sx = drawingRef.current.startX
@@ -310,7 +388,7 @@ export default function CanvasBoard() {
     e.preventDefault()
     if (!canvas) return
     const { x: mx, y: my } = getCanvasPos(e)
-    const hit = [...canvas.elements].reverse().find((el) => hitTest(el, mx, my, zoom))
+    const hit = [...canvas.elements].sort((a, b) => b.zIndex - a.zIndex).find((el) => el.selectable !== false && !el.locked && hitTest(el, mx, my, zoom))
     if (!hit) { setCtxMenu(null); return }
     const parentGroup = canvas.elements.find(
       (el) => el.type === 'group' && el.children?.includes(hit.id)
@@ -336,6 +414,23 @@ export default function CanvasBoard() {
     el.type === 'image-bg' || el.type === 'image-widget' ||
     el.type === 'image-decoration' || el.type === 'image-border-box'
   ))
+  const layoutElements = canvas.elements.filter((el) => el.visible && (
+    el.type === 'layout-carousel' || el.type === 'layout-modal'
+    || el.type === 'layout-tabs' || el.type === 'layout-collapse'
+  ))
+  const alarmElements = canvas.elements.filter((el) => el.visible && el.type === 'alarm-light')
+  const tableElements = canvas.elements.filter((el) => el.visible && el.type === 'table')
+  const formFieldElements = canvas.elements.filter((el) => el.visible && el.type.startsWith('form-'))
+  // shared mutable ref for form field values (keyed by element id)
+  const formValuesRef = useRef<Record<string, string>>({})
+  // 合并 overlay 元素并按 zIndex 排序，保证层级正确
+  const overlayElements = [...chartElements, ...imageElements, ...layoutElements, ...alarmElements, ...tableElements, ...formFieldElements].sort((a, b) => a.zIndex - b.zIndex)
+
+  // All text/button elements rendered as DOM overlays to ensure correct stacking above image-bg widgets.
+  // Elements with pointBinding show live values; others show el.text.
+  const textButtonElements = canvas.elements.filter((el) =>
+    el.visible && (el.type === 'text' || el.type === 'button')
+  )
 
   return (
     <div
@@ -345,6 +440,7 @@ export default function CanvasBoard() {
       onDrop={handleDrop}
       onClick={closeCtxMenu}
     >
+      {/* canvas wrapper */}
       <div style={{
         position: 'relative',
         display: 'inline-block',
@@ -352,20 +448,82 @@ export default function CanvasBoard() {
         borderRadius: 2,
         flexShrink: 0,
       }}>
+        {/* Content canvas — behind overlay widgets */}
+        <canvas ref={canvasRef} style={{ display: 'block' }} />
+        {/* DOM overlay widgets (image/chart) — interleaved by zIndex */}
+        {overlayElements.map((el) =>
+          el.type === 'echarts-trend'
+            ? ((el.properties?.chartConfig as ChartConfig | undefined)?.renderEngine === 'uplot-canvas' || (el.properties?.chartConfig as ChartConfig | undefined)?.renderEngine === 'uplot-webgl'
+                ? <UPlotTrendWidget key={el.id} el={el} zoom={zoom} pointData={pointData} scadaCode={scadaCode ?? undefined} />
+                : <TrendWidget key={el.id} el={el} zoom={zoom} pointData={pointData} scadaCode={scadaCode ?? undefined} />)
+            : el.type.startsWith('echarts-')
+              ? <ChartWidget key={el.id} el={el} zoom={zoom} pointData={liveDataOn ? pointData : undefined} />
+              : el.type === 'layout-carousel'
+                ? <LayoutCarouselWidget key={el.id} el={el} zoom={zoom} isPreview={false} />
+                : el.type === 'layout-tabs'
+                  ? <LayoutTabsWidget key={el.id} el={el} zoom={zoom} isPreview={false} />
+                  : el.type === 'layout-collapse'
+                    ? <LayoutCollapseWidget key={el.id} el={el} zoom={zoom} isPreview={false} />
+                    : el.type === 'layout-modal'
+                      ? <LayoutModalWidget key={el.id} el={el} zoom={zoom} isPreview={false} />
+                      : el.type === 'alarm-light'
+                        ? <AlarmLightWidget key={el.id} el={el} zoom={zoom} isPreview={false} />
+                        : el.type === 'table'
+                    ? <TableWidget key={el.id} el={el} zoom={zoom} />
+                    : el.type.startsWith('form-')
+                      ? <FormFieldWidget key={el.id} el={el} zoom={zoom} isPreview={false} canvas={canvas} valuesRef={formValuesRef} />
+                      : <ImageWidget key={el.id} el={el} zoom={zoom} />
+        )}
+        {/* Text/button DOM overlays — ensure correct stacking above image-bg regardless of zIndex */}
+        {textButtonElements.map((el) => {
+          const mergedData = { ...pointData, ...highFreqData }
+          const displayText = el.pointBinding ? resolveElementValue(el, mergedData) : el.text
+          return (
+            <div
+              key={`tb-${el.id}`}
+              style={{
+                position: 'absolute',
+                left: el.x * zoom,
+                top: el.y * zoom,
+                width: el.width * zoom,
+                height: el.height * zoom,
+                zIndex: el.zIndex,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent:
+                  el.textAlign === 'left' ? 'flex-start'
+                  : el.textAlign === 'right' ? 'flex-end'
+                  : 'center',
+                color: el.fontColor || '#fff',
+                fontSize: (el.fontSize ?? 14) * zoom,
+                fontFamily: el.fontFamily || 'sans-serif',
+                fontWeight: el.fontWeight === 'bold' ? 'bold' : 'normal',
+                fontStyle: el.fontStyle === 'italic' ? 'italic' : 'normal',
+                pointerEvents: 'none',
+                userSelect: 'none',
+                transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
+                background: el.type === 'button' ? (el.fill || 'transparent') : 'transparent',
+                borderRadius: el.type === 'button' ? ((el.borderRadius ?? 4) * zoom) : undefined,
+                border: el.type === 'button' && el.stroke ? `${(el.strokeWidth ?? 1) * zoom}px solid ${el.stroke}` : undefined,
+              }}
+            >
+              {displayText}
+            </div>
+          )
+        })}
+        {/* Selection/marquee overlay canvas — always on top, receives all mouse events */}
         <canvas
-          ref={canvasRef}
-          style={{ display: 'block', cursor: activeTool === 'select' ? 'default' : 'crosshair' }}
+          ref={overlayCanvasRef}
+          style={{
+            position: 'absolute', inset: 0, display: 'block',
+            zIndex: 9999,
+            cursor: activeTool === 'select' ? 'default' : 'crosshair',
+          }}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onContextMenu={handleContextMenu}
         />
-        {chartElements.map((el) => (
-          <ChartWidget key={el.id} el={el} zoom={zoom} />
-        ))}
-        {imageElements.map((el) => (
-          <ImageWidget key={el.id} el={el} zoom={zoom} />
-        ))}
       </div>
 
       {/* ── Right-click context menu ── */}
@@ -424,6 +582,23 @@ export default function CanvasBoard() {
           ))}
           <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
           <button
+            onClick={() => { setBindingId(ctxMenu.id); closeCtxMenu() }}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              width: '100%', padding: '6px 14px',
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: 'var(--accent)', fontSize: 12, textAlign: 'left',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--accent-muted)' }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'none' }}
+          >
+            <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 6h16M4 12h10M4 18h7M17 15l2 2 4-4" />
+            </svg>
+            数据绑定
+          </button>
+          <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
+          <button
             onClick={() => {
               pushHistory(store.project)
               store.deleteElements([ctxMenu.id])
@@ -446,6 +621,11 @@ export default function CanvasBoard() {
             删除
           </button>
         </div>
+      )}
+
+      {/* ── Data binding drawer ── */}
+      {bindingId && (
+        <BindingDrawer elementId={bindingId} scadaCode={scadaCode} pointData={pointData} onClose={() => setBindingId(null)} />
       )}
     </div>
   )

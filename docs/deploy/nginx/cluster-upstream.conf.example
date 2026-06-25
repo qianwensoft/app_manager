@@ -1,0 +1,72 @@
+# Nginx example for app-manager horizontal scaling (E5).
+# Requires: shared MySQL, cluster.enabled=true, same redis_url on all nodes.
+#
+# Upstreams — replace hostnames/ports with your deployment.
+upstream app_manager_nodes {
+    # Round-robin for REST + STOMP (STOMP events mirror via Redis).
+    server app-manager-1:8080;
+    server app-manager-2:8080;
+}
+
+upstream app_manager_sticky {
+    # Agent WebSocket must stay on one node for the connection lifetime.
+    ip_hash;
+    server app-manager-1:8080;
+    server app-manager-2:8080;
+}
+
+server {
+    listen 80;
+    server_name app-manager.example.com;
+
+    # REST / STOMP — any node
+    location /api/ {
+        proxy_pass http://app_manager_nodes;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    location /ws/stomp {
+        proxy_pass http://app_manager_nodes;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 3600s;
+    }
+
+    # Agent — sticky (required)
+    location ~ ^/ws/agent/ {
+        proxy_pass http://app_manager_sticky;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 3600s;
+    }
+
+    # Screen / Shell / Logcat — two options:
+    #
+    # A) Sticky LB (simple): route same as Agent using ip_hash on device id in URL
+    #    (works when viewer and agent land on same node by hash).
+    #
+    # B) Redis relay (implemented): viewer may connect to any node; frames relay via Redis.
+    #    Use round-robin upstream below. Ensure cluster.enabled=true.
+    location ~ ^/ws/(screen|shell|logcat|camera)/ {
+        proxy_pass http://app_manager_nodes;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 3600s;
+    }
+
+    # Agent route lookup (admin JWT) — for custom LB scripts / OpenResty:
+    # GET /api/settings/cluster/agent-route/:deviceId  →  { "node_id": "host-a", "online": true }
+    #
+    # Prometheus scrape (restrict by firewall in production):
+    # GET /metrics  →  cluster_redis_publish_total, agent_forward_total, screen_relay_publish_total
+
+    location / {
+        proxy_pass http://app_manager_nodes;
+        proxy_set_header Host $host;
+    }
+}

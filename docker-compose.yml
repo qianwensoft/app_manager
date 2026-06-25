@@ -1,0 +1,24 @@
+# App Manager — 默认 SQLite 单容器部署
+# 用法：
+#   export JWT_SECRET=$(openssl rand -hex 32)
+#   docker compose up -d --build
+#   open http://localhost:8080  （默认账号 admin / admin123）
+
+services:
+  app-manager:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: app-manager:local
+    ports:
+      - "${APP_MANAGER_PORT:-8080}:8080"
+    environment:
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+    volumes:
+      - app-data:/app/data
+      - app-uploads:/app/uploads
+    restart: unless-stopped
+
+volumes:
+  app-data:
+  app-uploads:

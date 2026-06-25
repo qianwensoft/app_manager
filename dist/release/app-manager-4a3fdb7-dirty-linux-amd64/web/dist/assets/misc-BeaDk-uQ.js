@@ -1,0 +1,1 @@
+import{B as t}from"./index-BDl-n6mW.js";const s=()=>t.get("/tasks"),o=e=>t.delete(`/tasks/${e}`),c=()=>t.get("/audit"),g=()=>t.get("/auth/scope-catalog"),p=()=>t.get("/auth/apikey"),i=e=>t.post("/auth/apikey",e),k=e=>t.delete(`/auth/apikey/${e}`);export{p as a,g as b,o as c,i as d,c as e,s as g,k as r};

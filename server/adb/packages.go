@@ -55,10 +55,10 @@ func parseAPKWithAndroidBinary(apkPath string) (*APKInfo, error) {
 }
 
 var (
-	rePkg     = regexp.MustCompile(`package: name='([^']+)'`)
-	reVName   = regexp.MustCompile(`versionName='([^']+)'`)
-	reVCode   = regexp.MustCompile(`versionCode='([^']+)'`)
-	reLabel   = regexp.MustCompile(`application-label(?:-en)?:'([^']+)'`)
+	rePkg   = regexp.MustCompile(`package: name='([^']+)'`)
+	reVName = regexp.MustCompile(`versionName='([^']+)'`)
+	reVCode = regexp.MustCompile(`versionCode='([^']+)'`)
+	reLabel = regexp.MustCompile(`application-label(?:-en)?:'([^']+)'`)
 )
 
 func parseAaptOutput(out string) *APKInfo {

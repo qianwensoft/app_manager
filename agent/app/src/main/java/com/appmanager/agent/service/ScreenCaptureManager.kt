@@ -127,8 +127,6 @@ class ScreenCaptureManager(
 
     fun start(resultCode: Int, data: Intent) {
         Log.i(TAG, "start() called, resultCode=$resultCode")
-        val pm = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
-        mediaProjection = pm.getMediaProjection(resultCode, data)
         try {
             _start(data)
         } catch (e: Exception) {
@@ -170,6 +168,11 @@ class ScreenCaptureManager(
         val width = (physW / 2).coerceAtLeast(1)
         val height = (physH / 2).coerceAtLeast(1)
         videoCapturer!!.startCapture(width, height, 15)
+
+        // Android 14+：每个投屏授权令牌只能调用一次 getMediaProjection()，第二次会拿到只能产出黑屏的
+        // projection。因此不自己再 getMediaProjection，而是复用 WebRTC ScreenCapturerAndroid 在
+        // startCapture 内创建并持有的同一个 MediaProjection（供截图路径 captureScreenshotPng 使用）。
+        mediaProjection = (videoCapturer as? ScreenCapturerAndroid)?.mediaProjection
 
         videoTrack = factory!!.createVideoTrack("screen_video", videoSource)
         videoTrack!!.setEnabled(true)
@@ -309,6 +312,15 @@ class ScreenCaptureManager(
             }
         } catch (e: Exception) {
             Log.e(TAG, "handleTouchPayload", e)
+        }
+    }
+
+    /** WebSocket 重连或 Web 再次请求投屏时，补发 screen_meta 便于浏览器恢复画面。 */
+    fun notifyLinkReady() {
+        if (jpegStopped.get() || captureReleased) return
+        mainHandler.post {
+            if (jpegStopped.get() || captureReleased) return@post
+            sendScreenMeta()
         }
     }
 

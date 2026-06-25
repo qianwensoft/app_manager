@@ -1,11 +1,13 @@
 package main
 
 import (
+	"app-manager/agent"
 	"app-manager/api"
 	"app-manager/channel"
+	"app-manager/cluster"
 	"app-manager/config"
-	"app-manager/datastack"
 	"app-manager/database"
+	"app-manager/datastack"
 	"app-manager/event"
 	"app-manager/mqtt"
 	"app-manager/outbound"
@@ -22,8 +24,10 @@ import (
 )
 
 func main() {
+	api.SetStartTime(time.Now())
+
 	// 加载配置
-	cfgPath := "config.yaml"
+	cfgPath := "config.sqlite.yaml"
 	if len(os.Args) > 1 {
 		cfgPath = os.Args[1]
 	}
@@ -45,6 +49,10 @@ func main() {
 	if err := config.Load(cfgPath); err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
+	if err := cluster.Init(config.C.Cluster); err != nil {
+		log.Fatalf("Failed to init cluster: %v", err)
+	}
+	defer cluster.Close()
 
 	// 创建必要目录
 	os.MkdirAll(config.C.Storage.Path, 0755)
@@ -61,7 +69,12 @@ func main() {
 		database.SeedAdmin(database.DB)
 		datastack.StartBufferPollers(database.DB)
 		outbound.InitTriggerManager(database.DB)
+		api.StartMetricsAggregator()
+		api.StartStompStatsPublisher()
 		scada.StartSimEngine()
+		scada.StartBatcher()
+		go scada.StartUDPIngress(9000)
+		agent.StartStaleDeviceReaper()
 		go func() {
 			ticker := time.NewTicker(30 * time.Minute)
 			defer ticker.Stop()
@@ -99,7 +112,7 @@ func main() {
 	// 启动 HTTP 服务
 	r := api.SetupRouter()
 	addr := fmt.Sprintf("%s:%d", config.C.Server.Host, config.C.Server.Port)
-	log.Printf("AppManager Server starting on http://%s", addr)
+	log.Printf("磐石 Bedrock Server starting on http://%s", addr)
 	if err := r.Run(addr); err != nil {
 		log.Fatalf("Server error: %v", err)
 	}

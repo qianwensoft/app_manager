@@ -1,17 +1,63 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     package="com.appmanager.agent">
+
+    <!-- 包可见性（Android 11+ / targetSdk 30+）：
+         语音播报用 TextToSpeech，需绑定独立的 TTS 引擎 Service。未声明该 query 时
+         系统会过滤掉引擎包，TTS 初始化回调返回非 SUCCESS，ttsReady 永远为 false，
+         文本一直堆在 pendingSpeak 里，表现为「不报错但完全没声音」。 -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
+
+    <!-- 包可见性：问题反馈「选择目标应用」需枚举设备上全部应用（含系统应用）。
+         Android 11+ 默认仅可见少量包，未声明则 getInstalledApplications 只返回自身相关包，
+         表现为「选不到大多数应用」。 -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
 
     <!-- 网络 -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
 
+    <!-- TV 兼容：电视/盒子无触摸屏、摄像头、蓝牙、电话等硬件。
+         不声明则 Play/部分应用商店会按 uses-permission 隐式要求这些 feature 而过滤掉 TV，
+         显式 required=false 保证电视端可见可装。 -->
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <uses-feature android:name="android.hardware.faketouch" android:required="false" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+    <uses-feature android:name="android.hardware.location" android:required="false" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+
+    <!-- 蓝牙打印（经典蓝牙 SPP + BLE）：<=30 用旧权限，31+ 用运行时新权限 -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- 不加 neverForLocation：部分整机/定制 ROM 上经典蓝牙 startDiscovery 会因该标记被过滤为空，
+         导致搜索不到周边打印机。经典发现本就依赖位置，去掉该标记可保证扫描结果返回。 -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        tools:targetApi="s" />
+
     <!-- 前台 Service -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <!-- 通知（Android 13+ 运行时权限）：前台服务通知须能展示，否则 FGS 在 14+/16 上不可靠甚至被杀 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- 开机自启 -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -24,6 +70,11 @@
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28" />
+    <!-- Android 11+ 完整文件访问（须在 Manifest 声明后系统设置才会出现授权项） -->
+    <uses-permission
+        android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
+
     <!-- Android 13+ 分类媒体权限 -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
@@ -32,8 +83,17 @@
     <!-- 硬件信息 -->
     <uses-permission android:name="android.permission.BATTERY_STATS" />
 
+    <!-- 前台应用检测（需要在系统设置中手动授权） -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+
     <!-- Logcat 读取（signature/privileged 权限，需通过 adb pm grant 授权） -->
     <uses-permission android:name="android.permission.READ_LOGS" />
+
+    <!-- 安全设置写入（development 权限）：声明后可经 `adb shell pm grant` 授予，
+         用于「无障碍自助授权」——授予后无需用户手动进设置页开启无障碍服务 -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
 
     <!-- 悬浮窗 -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
@@ -49,7 +109,10 @@
     <application
         android:name=".App"
         android:allowBackup="false"
-        android:label="AppManager Agent"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:banner="@drawable/tv_banner"
+        android:label="磐石 Agent"
         android:networkSecurityConfig="@xml/network_security_config"
         android:theme="@style/Theme.MaterialComponents.DayNight.DarkActionBar">
 
@@ -61,12 +124,18 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+                <!-- 电视桌面（Leanback Launcher）只识别此 category，否则装上后 TV 主屏看不到图标 -->
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
             <intent-filter>
                 <action android:name="com.appmanager.agent.ACTION_REQUEST_SCREEN" />
             </intent-filter>
             <intent-filter>
                 <action android:name="com.appmanager.agent.ACTION_OPEN_SCADA_MENU" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.appmanager.agent.ACTION_OPEN_WIRELESS_ADB" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
@@ -79,14 +148,49 @@
             android:parentActivityName=".MainActivity" />
 
         <activity
+            android:name=".ui.ReverseRegisterActivity"
+            android:exported="false"
+            android:label="@string/reverse_register_title"
+            android:theme="@style/Theme.AppManagerMain"
+            android:parentActivityName=".MainActivity" />
+
+        <activity
             android:name=".ui.DeviceInfoActivity"
             android:exported="false"
             android:label="设备信息" />
 
         <activity
+            android:name=".ui.BackendMenuActivity"
+            android:exported="false"
+            android:label="@string/main_tile_backend"
+            android:theme="@style/Theme.AppManagerMain"
+            android:parentActivityName=".MainActivity" />
+
+        <activity
+            android:name=".ui.PersonalCenterActivity"
+            android:exported="false"
+            android:label="@string/personal_center_title"
+            android:theme="@style/Theme.AppManagerMain"
+            android:parentActivityName=".MainActivity" />
+
+        <activity
+            android:name=".ui.LoginActivity"
+            android:exported="false"
+            android:label="@string/login_title"
+            android:theme="@style/Theme.AppManagerMain"
+            android:parentActivityName=".MainActivity" />
+
+        <activity
             android:name=".ui.SettingsActivity"
             android:exported="false"
-            android:label="@string/main_tile_settings"
+            android:label="@string/settings_title"
+            android:theme="@style/Theme.AppManagerMain"
+            android:parentActivityName=".MainActivity" />
+
+        <activity
+            android:name=".ui.PrinterSettingsActivity"
+            android:exported="false"
+            android:label="@string/printer_settings_title"
             android:theme="@style/Theme.AppManagerMain"
             android:parentActivityName=".MainActivity" />
 
@@ -104,12 +208,95 @@
             android:parentActivityName=".MainActivity" />
 
         <activity
+            android:name=".ui.AboutActivity"
+            android:exported="false"
+            android:label="@string/about_title"
+            android:theme="@style/Theme.AppManagerMain"
+            android:parentActivityName=".ui.BackendMenuActivity" />
+
+        <activity
+            android:name=".ui.SystemUpdateActivity"
+            android:exported="false"
+            android:label="@string/system_update_title"
+            android:theme="@style/Theme.AppManagerMain"
+            android:parentActivityName=".ui.BackendMenuActivity" />
+
+        <activity
             android:name=".ui.InAppWebActivity"
             android:exported="false"
             android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
 
+        <activity
+            android:name=".FormAppActivity"
+            android:exported="false"
+            android:label="表单应用"
+            android:theme="@style/Theme.AppManagerMain"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
+
+        <activity
+            android:name=".ui.ImagePreviewActivity"
+            android:exported="false"
+            android:label="图片预览"
+            android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
+
+        <activity
+            android:name=".ui.FeedbackActivity"
+            android:exported="false"
+            android:label="@string/main_tile_feedback"
+            android:theme="@style/Theme.AppManagerMain"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
+
+        <activity
+            android:name=".ui.FeedbackDetailActivity"
+            android:exported="false"
+            android:label="工单详情"
+            android:theme="@style/Theme.AppManagerMain"
+            android:parentActivityName=".ui.FeedbackActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
+
+        <activity
+            android:name=".ui.WorkOrderListActivity"
+            android:exported="false"
+            android:label="工单处理"
+            android:theme="@style/Theme.AppManagerMain"
+            android:configChanges="orientation|screenSize|keyboardHidden">
+            <intent-filter>
+                <action android:name="com.appmanager.agent.WORK_ORDER_LIST" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".ui.MyWorkOrderListActivity"
+            android:exported="false"
+            android:label="我的工单"
+            android:theme="@style/Theme.AppManagerMain"
+            android:configChanges="orientation|screenSize|keyboardHidden">
+            <intent-filter>
+                <action android:name="com.appmanager.agent.MY_WORK_ORDER_LIST" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".ui.WorkOrderDetailActivity"
+            android:exported="false"
+            android:label="工单详情"
+            android:theme="@style/Theme.AppManagerMain"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
+
         <service
             android:name=".service.AgentService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <service
+            android:name=".service.ScreenProjectionForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
+        <service
+            android:name=".service.FeedbackScreenRecordService"
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
 

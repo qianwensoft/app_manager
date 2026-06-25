@@ -15,14 +15,18 @@ import android.os.PowerManager
 import android.util.Log
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
+import android.content.pm.ServiceInfo
 import androidx.lifecycle.LifecycleService
 import com.appmanager.agent.MainActivity
 import com.appmanager.agent.R
 import com.appmanager.agent.command.CommandDispatcher
 import com.appmanager.agent.config.AgentConfig
+import com.appmanager.agent.config.AgentRegistration
 import com.appmanager.agent.util.DisplayUtil
 import com.appmanager.agent.util.AppVersions
 import com.appmanager.agent.util.ServerUrlUtil
+import com.appmanager.agent.CustomEventListenSync
 import com.appmanager.agent.util.CustomEventBroadcastHelper
 import com.appmanager.agent.util.EventReporter
 import com.appmanager.agent.AgentMenuSync
@@ -49,8 +53,52 @@ class AgentService : LifecycleService() {
 
     companion object {
         const val ACTION_START_SCREEN = "START_SCREEN_CAPTURE"
+        const val ACTION_WIRELESS_ADB_ACK = "WIRELESS_ADB_GUIDE_ACK"
+        const val EXTRA_WIRELESS_ADB_DEVICE_ID = "wireless_adb_device_id"
+        const val EXTRA_WIRELESS_ADB_TOKEN_MATCHED = "wireless_adb_token_matched"
         const val EXTRA_RESULT_CODE = "resultCode"
         const val EXTRA_DATA = "data"
+
+        /** 强制重连（设置页「重新连接」触发，丢弃现有连接立即重建）。 */
+        const val ACTION_FORCE_RECONNECT = "FORCE_RECONNECT"
+
+        /** 暂停摄像头流（工单拍照前）。 */
+        const val ACTION_PAUSE_CAMERA = "PAUSE_CAMERA"
+
+        /** 恢复摄像头流（工单拍照后）。 */
+        const val ACTION_RESUME_CAMERA = "RESUME_CAMERA"
+
+        /** 连接状态变更广播，供 UI 实时刷新。 */
+        const val ACTION_CONN_STATE = "com.appmanager.agent.CONN_STATE"
+        const val EXTRA_CONN_STATE = "conn_state"
+        const val EXTRA_CONN_DETAIL = "conn_detail"
+
+        const val STATE_CONNECTING = "connecting"
+        const val STATE_CONNECTED = "connected"
+        const val STATE_DISCONNECTED = "disconnected"
+        const val STATE_ERROR = "error"
+
+        /** 当前连接状态（进程内全局，供设置页直接读取初值）。 */
+        @Volatile
+        var connState: String = STATE_DISCONNECTED
+            private set
+        @Volatile
+        var connDetail: String = ""
+            private set
+
+        fun forceReconnect(context: android.content.Context) {
+            context.startForegroundService(Intent(context, AgentService::class.java).apply {
+                action = ACTION_FORCE_RECONNECT
+            })
+        }
+
+        fun reportWirelessAdbGuideAck(context: android.content.Context, scannedDeviceId: Long, tokenMatched: Boolean) {
+            context.startForegroundService(Intent(context, AgentService::class.java).apply {
+                action = ACTION_WIRELESS_ADB_ACK
+                putExtra(EXTRA_WIRELESS_ADB_DEVICE_ID, scannedDeviceId)
+                putExtra(EXTRA_WIRELESS_ADB_TOKEN_MATCHED, tokenMatched)
+            })
+        }
         @Volatile
         private var installCallbackRef: java.lang.ref.WeakReference<AgentService>? = null
 
@@ -88,15 +136,23 @@ class AgentService : LifecycleService() {
     private val NOTIF_ID = 1001
 
     lateinit var webSocket: AgentWebSocket
-        private set
 
     private lateinit var heartbeatManager: HeartbeatManager
     private lateinit var deviceInfoCollector: DeviceInfoCollector
+    private var foregroundAppMonitor: ForegroundAppMonitor? = null
     private var screenCaptureManager: ScreenCaptureManager? = null
     private var cameraStreamManager: CameraStreamManager? = null
     private var shellManager: ShellManager? = null
     private var logcatManager: LogcatManager? = null
+    private var autoUpdateManager: AutoUpdateManager? = null
     private var deviceToken: String = ""
+
+    /** 暂停前保存的摄像头状态，用于恢复 */
+    private val pausedCameraStates = mutableMapOf<String, List<Map<String, Any>>?>()
+
+    /** 当前 WebSocket / 上报使用的设备连接键（机器码或 Token）。 */
+    val connectionDeviceToken: String
+        get() = deviceToken
 
     /** 当前 WebSocket 建立时使用的地址与 Token；与 SharedPreferences 不一致时需重连 */
     private var activeWsServerUrl: String = ""
@@ -118,6 +174,40 @@ class AgentService : LifecycleService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
 
+        if (intent?.action == ACTION_WIRELESS_ADB_ACK) {
+            val scannedId = intent.getLongExtra(EXTRA_WIRELESS_ADB_DEVICE_ID, 0L)
+            val tokenMatched = intent.getBooleanExtra(EXTRA_WIRELESS_ADB_TOKEN_MATCHED, true)
+            if (::webSocket.isInitialized) {
+                reportWirelessAdbGuideAck(scannedId, tokenMatched)
+            }
+            return START_STICKY
+        }
+
+        // 暂停摄像头流（工单拍照前）
+        if (intent?.action == ACTION_PAUSE_CAMERA) {
+            pauseCameraStreams()
+            return START_STICKY
+        }
+
+        // 恢复摄像头流（工单拍照后）
+        if (intent?.action == ACTION_RESUME_CAMERA) {
+            resumeCameraStreams()
+            return START_STICKY
+        }
+
+        // 设置页「重新连接」：丢弃现有连接，强制立即重建
+        if (intent?.action == ACTION_FORCE_RECONNECT) {
+            startForegroundSafely("连接中...")
+            if (::webSocket.isInitialized) {
+                Log.i(TAG, "Force reconnect requested")
+                reconnectForNewEndpoint()
+                setConnState(STATE_CONNECTING)
+                webSocket.connect()
+                return START_STICKY
+            }
+            // 未初始化则继续走下方正常建连流程
+        }
+
         // 处理屏幕录制授权回调
         if (intent?.action == ACTION_START_SCREEN) {
             val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, -1)
@@ -136,9 +226,9 @@ class AgentService : LifecycleService() {
             return START_STICKY
         }
 
-        startForeground(NOTIF_ID, buildNotification("连接中..."))
+        startForegroundSafely("连接中...")
 
-        val config = AgentConfig.get(this)
+        val config = AgentRegistration.ensureMachineCodeConfig(this)
         val url = config.serverUrl.trim()
         val tok = config.deviceToken.trim()
         if (url.isEmpty()) {
@@ -163,16 +253,55 @@ class AgentService : LifecycleService() {
             deviceToken = tok,
             onMessage = { msg -> CommandDispatcher.dispatch(msg, this) },
             onConnected = {
-                updateNotification("已连接")
+                setConnState(STATE_CONNECTED)
                 heartbeatManager.start()
                 deviceInfoCollector.start()
+
+                // 启动前台应用监听器（实时上报前台应用变化）
+                if (foregroundAppMonitor == null) {
+                    foregroundAppMonitor = ForegroundAppMonitor(this@AgentService) { packageName ->
+                        // 前台应用变化时立即上报
+                        if (::webSocket.isInitialized) {
+                            webSocket.send(
+                                DeviceInfoMessage(
+                                    deviceId = tok,
+                                    data = collectDeviceInfoData(this@AgentService).copy(
+                                        foregroundPackage = packageName
+                                    )
+                                )
+                            )
+                        }
+                    }
+                }
+                foregroundAppMonitor?.start()
+
+                webSocket.send(
+                    DeviceInfoMessage(
+                        deviceId = tok,
+                        data = collectDeviceInfoData(this@AgentService)
+                    )
+                )
+                screenCaptureManager?.notifyLinkReady()
                 EventReporter.init(webSocket, tok)
+                com.appmanager.agent.util.CustomEventProbeHelper.bind(webSocket, tok)
                 AgentMenuSync.fetchManifestAsync(serviceScope, this@AgentService, url, tok)
+                CustomEventListenSync.syncFromServerAsync(serviceScope, this@AgentService, url, tok)
+
+                // 后台自动更新：每 10 分钟校验，发现更高 versionCode 自动下载并安装
+                if (autoUpdateManager == null) {
+                    autoUpdateManager = AutoUpdateManager(this@AgentService)
+                }
+                autoUpdateManager?.start()
             },
             onDisconnected = {
-                updateNotification("重连中...")
+                setConnState(STATE_DISCONNECTED)
                 heartbeatManager.stop()
                 deviceInfoCollector.stop()
+                foregroundAppMonitor?.stop()
+            },
+            onError = { reason ->
+                // 把失败原因显示到通知 + 广播给 UI，方便真机无 adb 时定位
+                setConnState(STATE_ERROR, reason)
             }
         )
 
@@ -184,6 +313,7 @@ class AgentService : LifecycleService() {
 
         acquireCpuWakeLock()
         attachInstallCallback(this)
+        setConnState(STATE_CONNECTING)
         webSocket.connect()
 
         return START_STICKY
@@ -201,11 +331,14 @@ class AgentService : LifecycleService() {
         // stopSelf() 若在初始化前触发（如未配置 serverUrl），lateinit 未赋值会崩溃
         if (::heartbeatManager.isInitialized) heartbeatManager.stop()
         if (::deviceInfoCollector.isInitialized) deviceInfoCollector.stop()
+        foregroundAppMonitor?.stop()
         screenCaptureManager?.stop()
         cameraStreamManager?.stopAll()
         shellManager?.stop()
         logcatManager?.stop()
+        autoUpdateManager?.stop()
         CustomEventBroadcastHelper.stop(this)
+        com.appmanager.agent.util.CustomEventProbeHelper.stop(this)
         com.appmanager.agent.MenuIntentReceiver.unregister(this)
         if (::webSocket.isInitialized) webSocket.disconnect()
         activeWsServerUrl = ""
@@ -243,6 +376,7 @@ class AgentService : LifecycleService() {
     /** 切换服务器或 Token：停子模块、断旧 WebSocket，便于下面重新 new AgentWebSocket */
     private fun reconnectForNewEndpoint() {
         CustomEventBroadcastHelper.stop(this)
+        com.appmanager.agent.util.CustomEventProbeHelper.stop(this)
         if (::heartbeatManager.isInitialized) heartbeatManager.stop()
         if (::deviceInfoCollector.isInitialized) deviceInfoCollector.stop()
         stopScreenCapture()
@@ -257,6 +391,8 @@ class AgentService : LifecycleService() {
 
     // ─── 屏幕采集 ────────────────────────────────────────────────────────────
     fun startScreenCapture(resultCode: Int, data: Intent, deviceToken: String) {
+        // Android 14：必须先把 FGS 类型升级为 mediaProjection，再开始采集，否则系统拒绝。
+        promoteToProjectionForeground()
         screenCaptureManager = ScreenCaptureManager(this, webSocket, deviceToken)
         screenCaptureManager?.start(resultCode, data)
     }
@@ -264,13 +400,14 @@ class AgentService : LifecycleService() {
     fun stopScreenCapture() {
         screenCaptureManager?.stop()
         screenCaptureManager = null
+        demoteFromProjectionForeground()
     }
 
-    fun startCamera(cameraId: String) {
+    fun startCamera(cameraId: String, iceServers: List<Map<String, Any>>? = null) {
         if (cameraStreamManager == null) {
             cameraStreamManager = CameraStreamManager(this, webSocket)
         }
-        cameraStreamManager?.startCamera(cameraId)
+        cameraStreamManager?.startCamera(cameraId, iceServers)
     }
 
     fun stopCamera(cameraId: String) {
@@ -289,6 +426,37 @@ class AgentService : LifecycleService() {
     fun handleWebRTCSignal(data: Map<String, Any>) {
         screenCaptureManager?.handleSignal(data)
             ?: Log.d(TAG, "handleWebRTCSignal: ignored (screen capture not started yet)")
+    }
+
+    /** 暂停所有摄像头流（工单拍照前临时释放摄像头资源）。 */
+    fun pauseCameraStreams() {
+        val manager = cameraStreamManager ?: return
+        synchronized(pausedCameraStates) {
+            // 保存当前活跃的摄像头（暂不保存 ICE servers，恢复时服务端会重新下发）
+            pausedCameraStates.clear()
+            // CameraStreamManager 内部用 sessions map 跟踪活跃摄像头，但这是私有字段
+            // 暂时简化：假设只有 front/back 两个可能，尝试停止它们
+            listOf(CameraStreamManager.CAMERA_BACK, CameraStreamManager.CAMERA_FRONT).forEach { cameraId ->
+                // stopCamera 是幂等的，不存在的不会报错
+                pausedCameraStates[cameraId] = null  // 标记尝试暂停
+            }
+            manager.stopAll()
+            Log.i(TAG, "Camera streams paused for photo capture")
+        }
+    }
+
+    /** 恢复之前暂停的摄像头流（工单拍照后）。 */
+    fun resumeCameraStreams() {
+        synchronized(pausedCameraStates) {
+            if (pausedCameraStates.isEmpty()) {
+                Log.d(TAG, "No camera streams to resume")
+                return
+            }
+            // 简化实现：通知服务端重新启动（服务端会收到 webrtc_stop_camera 后重连）
+            // 实际上 Web 控制台会自动检测到流断开并尝试重连，所以这里只需清空状态
+            pausedCameraStates.clear()
+            Log.i(TAG, "Camera streams resume marker cleared (client will auto-reconnect)")
+        }
     }
 
     /**
@@ -502,9 +670,9 @@ class AgentService : LifecycleService() {
     }
 
     // ─── Logcat ───────────────────────────────────────────────────────────────
-    fun startLogcat(filter: String = "") {
+    fun startLogcat(filters: List<String> = emptyList()) {
         logcatManager = LogcatManager(webSocket, deviceToken)
-        logcatManager?.start(filter)
+        logcatManager?.start(filters)
     }
 
     fun stopLogcat() {
@@ -670,6 +838,128 @@ class AgentService : LifecycleService() {
     private fun updateNotification(status: String) {
         val manager = getSystemService(NotificationManager::class.java)
         manager.notify(NOTIF_ID, buildNotification(status))
+    }
+
+    /** 更新连接状态：写全局态 + 刷新通知 + 广播给 UI。 */
+    private fun setConnState(state: String, detail: String = "") {
+        connState = state
+        connDetail = detail
+        val text = when (state) {
+            STATE_CONNECTED -> "已连接"
+            STATE_CONNECTING -> "连接中..."
+            STATE_ERROR -> "连接失败：$detail"
+            else -> "重连中..."
+        }
+        updateNotification(text)
+        sendBroadcast(Intent(ACTION_CONN_STATE).apply {
+            setPackage(packageName) // 限本应用内，等价私有广播
+            putExtra(EXTRA_CONN_STATE, state)
+            putExtra(EXTRA_CONN_DETAIL, detail)
+        })
+    }
+
+    /** 当前前台服务是否已包含 mediaProjection 类型（投屏中）。 */
+    @Volatile
+    private var projectionForegroundActive = false
+
+    /**
+     * 以「数据同步」类型进入前台。Android 14 起 mediaProjection 型 FGS 必须先有投屏授权，
+     * 因此平时连接后端只用 DATA_SYNC，避免无授权时 startForeground 抛异常导致服务崩溃、连不上后端。
+     */
+    private fun startForegroundSafely(status: String) {
+        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+        } else {
+            0
+        }
+        try {
+            ServiceCompat.startForeground(this, NOTIF_ID, buildNotification(status), type)
+        } catch (e: Exception) {
+            // 极端情况下（厂商 ROM 限制）退回无类型调用，至少保证服务存活
+            Log.e(TAG, "startForeground(dataSync) failed: ${e.message}", e)
+            try {
+                ServiceCompat.startForeground(this, NOTIF_ID, buildNotification(status), 0)
+            } catch (e2: Exception) {
+                Log.e(TAG, "startForeground(fallback) failed: ${e2.message}", e2)
+            }
+        }
+    }
+
+    /**
+     * 投屏授权拿到后，启动专用 mediaProjection 前台服务。
+     * Android 14 要求 mediaProjection 型 FGS 从 Activity 的 onActivityResult 上下文启动，
+     * AgentService 保持 dataSync 类型不变，由 ScreenProjectionForegroundService 持有投屏类型。
+     */
+    fun promoteToProjectionForeground() {
+        try {
+            startForegroundService(Intent(this, ScreenProjectionForegroundService::class.java))
+            projectionForegroundActive = true
+        } catch (e: Exception) {
+            Log.e(TAG, "promoteToProjectionForeground failed: ${e.message}", e)
+        }
+    }
+
+    /** 投屏结束后停止专用 mediaProjection 前台服务。 */
+    fun demoteFromProjectionForeground() {
+        if (!projectionForegroundActive) return
+        projectionForegroundActive = false
+        try {
+            stopService(Intent(this, ScreenProjectionForegroundService::class.java))
+        } catch (e: Exception) {
+            Log.e(TAG, "demoteFromProjectionForeground failed: ${e.message}", e)
+        }
+    }
+
+    /**
+     * Web 打开屏幕查看时下发 start_screen：已在采集则刷新 meta，否则走系统授权。
+     */
+    fun requestScreenCapture() {
+        if (screenCaptureManager != null) {
+            screenCaptureManager?.notifyLinkReady()
+            return
+        }
+        promptScreenCapturePermission()
+    }
+
+    fun openWirelessAdbSettings() {
+        Handler(Looper.getMainLooper()).post {
+            com.appmanager.agent.util.WirelessAdbHelper.openWirelessDebugSettings(applicationContext)
+        }
+    }
+
+    fun triggerAgentMenuIntent(intentAction: String) {
+        Handler(Looper.getMainLooper()).post {
+            val action = intentAction.trim()
+            if (action.isEmpty()) return@post
+            if (action == com.appmanager.agent.util.WirelessAdbHelper.ACTION_OPEN ||
+                action == com.appmanager.agent.MainActivity.ACTION_OPEN_WIRELESS_ADB
+            ) {
+                com.appmanager.agent.util.WirelessAdbHelper.openWirelessDebugSettings(applicationContext)
+                return@post
+            }
+            val launch = Intent(this, com.appmanager.agent.MainActivity::class.java).apply {
+                this.action = action
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            }
+            try {
+                startActivity(launch)
+            } catch (e: Exception) {
+                Log.e(TAG, "triggerAgentMenuIntent startActivity failed action=$action", e)
+            }
+        }
+    }
+
+    fun reportWirelessAdbGuideAck(scannedDeviceId: Long, tokenMatched: Boolean) {
+        if (!::webSocket.isInitialized) return
+        webSocket.send(
+            mapOf(
+                "type" to "wireless_adb_guide_ack",
+                "data" to mapOf(
+                    "device_id" to scannedDeviceId,
+                    "token_matched" to tokenMatched
+                )
+            )
+        )
     }
 
     /**

@@ -16,13 +16,21 @@ import (
 
 var stompDestDeviceRecording = regexp.MustCompile(`^/topic/device/(\d+)/recording$`)
 var stompDestDeviceEvents = regexp.MustCompile(`^/topic/device/(\d+)/events$`)
+var stompDestDeviceWirelessAdb = regexp.MustCompile(`^/topic/device/(\d+)/wireless-adb$`)
+var stompDestDeviceEventAnalysis = regexp.MustCompile(`^/topic/device/(\d+)/event-analysis$`)
 var stompDestScadaPointData = regexp.MustCompile(`^/topic/scada/point-data/([^/]+)$`)
 var stompDestOutboundConnectorTrace = regexp.MustCompile(`^/topic/outbound/connectors/(\d+)/execution-trace$`)
 var stompDestOutboundWebhookDebug = regexp.MustCompile(`^/topic/outbound/webhooks/(\d+)/debug$`)
+var stompDestMonitorAgentConnections = regexp.MustCompile(`^/topic/monitor/agent-connections$`)
+var stompDestMonitorStompStats = regexp.MustCompile(`^/topic/monitor/stomp-stats$`)
 
 const stompDestDevices = "/topic/devices"
 const stompDestEvents = "/topic/events"
 const stompDestOutboundWebhookList = "/topic/outbound/webhooks/list"
+const stompDestWorkOrders = "/topic/work-orders"
+
+// 单工单事件流：/topic/work-orders/{id}
+var stompDestWorkOrderByID = regexp.MustCompile(`^/topic/work-orders/(\d+)$`)
 
 // StompWS STOMP 1.2 over WebSocket（需先经 StompWSAuth；浏览器用 query token=JWT）。订阅录屏进度：/topic/device/{id}/recording
 func StompWS(c *gin.Context) {
@@ -64,10 +72,10 @@ func StompWS(c *gin.Context) {
 		switch cmd {
 		case "STOMP", "CONNECT":
 			send(stomp.EncodeFrame("CONNECTED", map[string]string{
-				"version":     "1.2",
-				"heart-beat":  "0,0",
-				"server":      "app-manager",
-				"session":     c.GetString("username"),
+				"version":    "1.2",
+				"heart-beat": "0,0",
+				"server":     "app-manager",
+				"session":    c.GetString("username"),
 			}, ""))
 		case "SUBSCRIBE":
 			dest := headers["destination"]
@@ -81,10 +89,27 @@ func StompWS(c *gin.Context) {
 				continue
 			}
 			switch dest {
-			case stompDestDevices, stompDestEvents, stompDestOutboundWebhookList:
+			case stompDestDevices, stompDestEvents, stompDestOutboundWebhookList, stompDestWorkOrders:
 				unsubs[subID] = stomp.DefaultHub.Subscribe(dest, subID, send)
 				log.Printf("STOMP SUBSCRIBE user=%d dest=%s sub=%s", c.GetUint("user_id"), dest, subID)
 			default:
+				if stompDestWorkOrderByID.MatchString(dest) {
+					unsubs[subID] = stomp.DefaultHub.Subscribe(dest, subID, send)
+					log.Printf("STOMP SUBSCRIBE user=%d dest=%s sub=%s", c.GetUint("user_id"), dest, subID)
+					continue
+				}
+				if mMon := stompDestMonitorAgentConnections.FindStringSubmatch(dest); mMon != nil {
+					unsubs[subID] = stomp.DefaultHub.Subscribe(dest, subID, send)
+					log.Printf("STOMP SUBSCRIBE user=%d dest=%s sub=%s", c.GetUint("user_id"), dest, subID)
+					continue
+				}
+				if stompDestMonitorStompStats.MatchString(dest) {
+					unsubs[subID] = stomp.DefaultHub.Subscribe(dest, subID, send)
+					log.Printf("STOMP SUBSCRIBE user=%d dest=%s sub=%s", c.GetUint("user_id"), dest, subID)
+					// send current snapshot immediately on subscribe
+					go publishStompStats()
+					continue
+				}
 				if mSc := stompDestScadaPointData.FindStringSubmatch(dest); mSc != nil {
 					if mSc[1] != "" {
 						unsubs[subID] = stomp.DefaultHub.Subscribe(dest, subID, send)
@@ -113,6 +138,24 @@ func StompWS(c *gin.Context) {
 				mEv := stompDestDeviceEvents.FindStringSubmatch(dest)
 				if mEv != nil {
 					if _, err := strconv.ParseUint(mEv[1], 10, 64); err != nil {
+						send(stomp.EncodeFrame("ERROR", map[string]string{"message": "invalid device id"}, ""))
+						continue
+					}
+					unsubs[subID] = stomp.DefaultHub.Subscribe(dest, subID, send)
+					log.Printf("STOMP SUBSCRIBE user=%d dest=%s sub=%s", c.GetUint("user_id"), dest, subID)
+					continue
+				}
+				if mWa := stompDestDeviceWirelessAdb.FindStringSubmatch(dest); mWa != nil {
+					if _, err := strconv.ParseUint(mWa[1], 10, 64); err != nil {
+						send(stomp.EncodeFrame("ERROR", map[string]string{"message": "invalid device id"}, ""))
+						continue
+					}
+					unsubs[subID] = stomp.DefaultHub.Subscribe(dest, subID, send)
+					log.Printf("STOMP SUBSCRIBE user=%d dest=%s sub=%s", c.GetUint("user_id"), dest, subID)
+					continue
+				}
+				if mEa := stompDestDeviceEventAnalysis.FindStringSubmatch(dest); mEa != nil {
+					if _, err := strconv.ParseUint(mEa[1], 10, 64); err != nil {
 						send(stomp.EncodeFrame("ERROR", map[string]string{"message": "invalid device id"}, ""))
 						continue
 					}

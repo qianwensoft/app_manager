@@ -13,36 +13,53 @@
         android:layout_height="wrap_content"
         android:orientation="vertical">
 
-        <!-- 顶栏：品牌 + 版本 -->
-        <LinearLayout
+        <!-- 顶栏 -->
+        <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:background="@drawable/bg_main_header"
-            android:orientation="vertical"
             android:paddingStart="24dp"
             android:paddingTop="28dp"
-            android:paddingEnd="24dp"
+            android:paddingEnd="16dp"
             android:paddingBottom="24dp">
 
-            <TextView
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="@string/main_header_title"
-                android:textColor="@android:color/white"
-                android:textSize="24sp"
-                android:letterSpacing="0.02"
-                android:textStyle="bold" />
+                android:orientation="vertical"
+                android:paddingEnd="48dp">
 
-            <TextView
-                android:id="@+id/tvAppVersion"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:alpha="0.88"
-                android:textColor="@android:color/white"
-                android:textSize="13sp"
-                tools:text="Agent 版本：2.1.13" />
-        </LinearLayout>
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/main_header_title"
+                    android:textColor="@android:color/white"
+                    android:textSize="24sp"
+                    android:letterSpacing="0.02"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvAppVersion"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:alpha="0.88"
+                    android:textColor="@android:color/white"
+                    android:textSize="13sp"
+                    tools:text="Agent 版本：2.1.17" />
+            </LinearLayout>
+
+            <ImageButton
+                android:id="@+id/btnMainScanQr"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_gravity="top|end"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/btn_scan_qr"
+                android:padding="8dp"
+                android:src="@android:drawable/ic_menu_camera"
+                android:tint="@android:color/white" />
+        </FrameLayout>
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -52,7 +69,7 @@
             android:paddingEnd="16dp"
             android:paddingBottom="24dp">
 
-            <!-- 设备概况 -->
+            <!-- 设备概况卡片 -->
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -81,241 +98,81 @@
                         android:lineSpacingExtra="4dp"
                         android:textColor="@color/agent_text_primary"
                         android:textSize="14sp"
-                        tools:text="分组: 默认\n别名: 测试机\n设备号: xxx" />
+                        tools:text="分组: 默认\n别名: 测试机\n机器码: xxx" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
+            <!-- 设备注册入口：无摄像头端（电视/盒子）无法扫码时改用反向注册；
+                 手机/平板也可随时用（换服务器、重新归属）。focusable 便于遥控器聚焦。 -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnReverseRegister"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:focusable="true"
+                android:text="@string/reverse_register_entry"
+                android:textSize="16sp"
+                app:icon="@android:drawable/ic_menu_share"
+                app:iconGravity="textStart" />
+
+            <!-- 前台应用区域标题 -->
             <TextView
                 style="@style/AppManagerSectionTitle"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="20dp"
                 android:layout_marginBottom="8dp"
-                android:text="@string/main_section_shortcuts" />
+                android:text="@string/main_section_front" />
 
-            <!-- 3×3 快捷入口 -->
+            <!-- 动态前台磁贴区：个人中心（固定）+ 推送的前台菜单（运行时填充） -->
             <LinearLayout
+                android:id="@+id/container_front_tiles"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical">
+                android:orientation="vertical" />
+
+            <!-- 进入后台 -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/card_backend_entry"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                app:cardCornerRadius="12dp"
+                app:cardElevation="2dp"
+                app:strokeWidth="0dp">
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal">
+                    android:orientation="horizontal"
+                    android:padding="16dp"
+                    android:gravity="center_vertical">
 
-                    <com.google.android.material.card.MaterialCardView
-                        android:id="@+id/card_tile_personal"
-                        style="@style/AppManagerGridTile"
+                    <ImageView
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:src="@android:drawable/ic_menu_manage"
+                        android:contentDescription="@string/main_tile_backend"
+                        app:tint="@color/agent_tile_icon_tint" />
+
+                    <TextView
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
-                        android:layout_weight="1">
+                        android:layout_weight="1"
+                        android:layout_marginStart="12dp"
+                        android:text="@string/main_tile_backend"
+                        android:textColor="@color/agent_text_primary"
+                        android:textSize="15sp" />
 
-                        <LinearLayout style="@style/AppManagerGridTileInner">
-
-                            <ImageView
-                                android:layout_width="32dp"
-                                android:layout_height="32dp"
-                                android:contentDescription="@string/main_tile_personal"
-                                android:src="@android:drawable/ic_menu_myplaces"
-                                app:tint="@color/agent_tile_icon_tint" />
-
-                            <TextView
-                                style="@style/AppManagerGridTileLabel"
-                                android:text="@string/main_tile_personal" />
-                        </LinearLayout>
-                    </com.google.android.material.card.MaterialCardView>
-
-                    <com.google.android.material.card.MaterialCardView
-                        android:id="@+id/card_tile_runtime_perm"
-                        style="@style/AppManagerGridTile"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1">
-
-                        <LinearLayout style="@style/AppManagerGridTileInner">
-
-                            <ImageView
-                                android:layout_width="32dp"
-                                android:layout_height="32dp"
-                                android:contentDescription="@string/main_tile_runtime_perm"
-                                android:src="@android:drawable/ic_lock_idle_lock"
-                                app:tint="@color/agent_tile_icon_tint" />
-
-                            <TextView
-                                style="@style/AppManagerGridTileLabel"
-                                android:text="@string/main_tile_runtime_perm" />
-                        </LinearLayout>
-                    </com.google.android.material.card.MaterialCardView>
-
-                    <com.google.android.material.card.MaterialCardView
-                        android:id="@+id/card_tile_settings"
-                        style="@style/AppManagerGridTile"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1">
-
-                        <LinearLayout style="@style/AppManagerGridTileInner">
-
-                            <ImageView
-                                android:layout_width="32dp"
-                                android:layout_height="32dp"
-                                android:contentDescription="@string/main_tile_settings"
-                                android:src="@android:drawable/ic_menu_preferences"
-                                app:tint="@color/agent_tile_icon_tint" />
-
-                            <TextView
-                                style="@style/AppManagerGridTileLabel"
-                                android:text="@string/main_tile_settings" />
-                        </LinearLayout>
-                    </com.google.android.material.card.MaterialCardView>
+                    <ImageView
+                        android:layout_width="20dp"
+                        android:layout_height="20dp"
+                        android:src="@android:drawable/ic_media_next"
+                        android:contentDescription=""
+                        app:tint="@color/agent_tile_icon_tint"
+                        android:alpha="0.5" />
                 </LinearLayout>
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal">
-
-                    <com.google.android.material.card.MaterialCardView
-                        android:id="@+id/card_tile_app_list"
-                        style="@style/AppManagerGridTile"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1">
-
-                        <LinearLayout style="@style/AppManagerGridTileInner">
-
-                            <ImageView
-                                android:layout_width="32dp"
-                                android:layout_height="32dp"
-                                android:contentDescription="@string/main_tile_app_list"
-                                android:src="@android:drawable/ic_menu_sort_by_size"
-                                app:tint="@color/agent_tile_icon_tint" />
-
-                            <TextView
-                                android:id="@+id/tv_tile_scada_label"
-                                style="@style/AppManagerGridTileLabel"
-                                android:text="@string/main_tile_scada" />
-                        </LinearLayout>
-                    </com.google.android.material.card.MaterialCardView>
-
-                    <com.google.android.material.card.MaterialCardView
-                        android:id="@+id/card_tile_device_info"
-                        style="@style/AppManagerGridTile"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1">
-
-                        <LinearLayout style="@style/AppManagerGridTileInner">
-
-                            <ImageView
-                                android:layout_width="32dp"
-                                android:layout_height="32dp"
-                                android:contentDescription="@string/main_tile_device"
-                                android:src="@android:drawable/ic_menu_info_details"
-                                app:tint="@color/agent_tile_icon_tint" />
-
-                            <TextView
-                                style="@style/AppManagerGridTileLabel"
-                                android:text="@string/main_tile_device" />
-                        </LinearLayout>
-                    </com.google.android.material.card.MaterialCardView>
-
-                    <com.google.android.material.card.MaterialCardView
-                        android:id="@+id/card_tile_perm_mgmt"
-                        style="@style/AppManagerGridTile"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1">
-
-                        <LinearLayout style="@style/AppManagerGridTileInner">
-
-                            <ImageView
-                                android:layout_width="32dp"
-                                android:layout_height="32dp"
-                                android:contentDescription="@string/main_tile_perm_mgmt"
-                                android:src="@android:drawable/ic_menu_manage"
-                                app:tint="@color/agent_tile_icon_tint" />
-
-                            <TextView
-                                style="@style/AppManagerGridTileLabel"
-                                android:text="@string/main_tile_perm_mgmt" />
-                        </LinearLayout>
-                    </com.google.android.material.card.MaterialCardView>
-                </LinearLayout>
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal">
-
-                    <com.google.android.material.card.MaterialCardView
-                        android:id="@+id/card_tile_outbound"
-                        style="@style/AppManagerGridTile"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1">
-
-                        <LinearLayout style="@style/AppManagerGridTileInner">
-
-                            <ImageView
-                                android:layout_width="32dp"
-                                android:layout_height="32dp"
-                                android:contentDescription="@string/main_tile_outbound"
-                                android:src="@android:drawable/ic_menu_share"
-                                app:tint="@color/agent_tile_icon_tint" />
-
-                            <TextView
-                                style="@style/AppManagerGridTileLabel"
-                                android:text="@string/main_tile_outbound" />
-                        </LinearLayout>
-                    </com.google.android.material.card.MaterialCardView>
-
-                    <com.google.android.material.card.MaterialCardView
-                        android:id="@+id/card_tile_custom_events"
-                        style="@style/AppManagerGridTile"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1">
-
-                        <LinearLayout style="@style/AppManagerGridTileInner">
-
-                            <ImageView
-                                android:layout_width="32dp"
-                                android:layout_height="32dp"
-                                android:contentDescription="@string/main_tile_custom_events"
-                                android:src="@android:drawable/ic_menu_sort_by_size"
-                                app:tint="@color/agent_tile_icon_tint" />
-
-                            <TextView
-                                style="@style/AppManagerGridTileLabel"
-                                android:text="@string/main_tile_custom_events" />
-                        </LinearLayout>
-                    </com.google.android.material.card.MaterialCardView>
-
-                    <com.google.android.material.card.MaterialCardView
-                        android:id="@+id/card_tile_listen_state"
-                        style="@style/AppManagerGridTile"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1">
-
-                        <LinearLayout style="@style/AppManagerGridTileInner">
-
-                            <ImageView
-                                android:layout_width="32dp"
-                                android:layout_height="32dp"
-                                android:contentDescription="@string/main_tile_listen_state"
-                                android:src="@android:drawable/ic_lock_idle_alarm"
-                                app:tint="@color/agent_tile_icon_tint" />
-
-                            <TextView
-                                style="@style/AppManagerGridTileLabel"
-                                android:text="@string/main_tile_listen_state" />
-                        </LinearLayout>
-                    </com.google.android.material.card.MaterialCardView>
-                </LinearLayout>
-            </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
 
         </LinearLayout>
     </LinearLayout>

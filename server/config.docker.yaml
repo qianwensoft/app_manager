@@ -1,0 +1,27 @@
+# Docker 默认配置（SQLite + 绝对路径，配合卷挂载）
+server:
+  port: 8080
+  host: 0.0.0.0
+  mode: release
+
+database:
+  type: sqlite
+  dsn: /app/data/app-manager.db
+
+storage:
+  path: /app/uploads
+  max_size_mb: 500
+
+adb:
+  path: adb
+  timeout: 30
+
+ffmpeg:
+  path: ""
+
+jwt:
+  secret: change-me-in-production
+  expire_hour: 24
+
+mqtt:
+  enabled: false

@@ -1,0 +1,143 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1776440466324,
+  "projectRoot": "/Volumes/data/workspace/qianwen/app-manager/web",
+  "techStack": {
+    "languages": [
+      {
+        "name": "JavaScript/TypeScript",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "package.json"
+        ]
+      },
+      {
+        "name": "C/C++",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "Makefile"
+        ]
+      }
+    ],
+    "frameworks": [
+      {
+        "name": "vue",
+        "version": "3.4.0",
+        "category": "frontend"
+      },
+      {
+        "name": "vite",
+        "version": "5.0.11",
+        "category": "build"
+      }
+    ],
+    "packageManager": "npm",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": "npm run build",
+    "testCommand": "make test",
+    "lintCommand": null,
+    "devCommand": "npm run dev",
+    "scripts": {
+      "dev": "vite",
+      "build": "vite build",
+      "preview": "vite preview"
+    }
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": "ES modules",
+    "testPattern": null,
+    "fileOrganization": "type-based"
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "src"
+    ],
+    "gitBranches": null
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "dist": {
+      "path": "dist",
+      "purpose": "Distribution/build output",
+      "fileCount": 1,
+      "lastAccessed": 1776440466300,
+      "keyFiles": [
+        "index.html"
+      ]
+    },
+    "src": {
+      "path": "src",
+      "purpose": "Source code",
+      "fileCount": 2,
+      "lastAccessed": 1776440466301,
+      "keyFiles": [
+        "App.vue",
+        "main.js"
+      ]
+    },
+    "dist/assets": {
+      "path": "dist/assets",
+      "purpose": "Static assets",
+      "fileCount": 77,
+      "lastAccessed": 1776440466305,
+      "keyFiles": [
+        "AgentMenus-B8iR12_3.css",
+        "AgentMenus-a8j88OZu.js",
+        "ApiKeys-C53cRUNR.js"
+      ]
+    },
+    "src/api": {
+      "path": "src/api",
+      "purpose": "API routes",
+      "fileCount": 13,
+      "lastAccessed": 1776440466305,
+      "keyFiles": [
+        "agentMenus.js",
+        "agentUpdate.js",
+        "app.js"
+      ]
+    },
+    "src/components": {
+      "path": "src/components",
+      "purpose": "UI components",
+      "fileCount": 7,
+      "lastAccessed": 1776440466306,
+      "keyFiles": [
+        "AdbBridgeScan.vue",
+        "CreateTableColumnDesigner.vue",
+        "ExtensionScriptEditor.vue"
+      ]
+    },
+    "src/utils": {
+      "path": "src/utils",
+      "purpose": "Utility functions",
+      "fileCount": 7,
+      "lastAccessed": 1776440466306,
+      "keyFiles": [
+        "createTableDdl.js",
+        "customEventsStomp.js",
+        "deviceProfileStompHub.js"
+      ]
+    },
+    "src/views": {
+      "path": "src/views",
+      "purpose": "View templates",
+      "fileCount": 25,
+      "lastAccessed": 1776440466306,
+      "keyFiles": [
+        "ApiKeys.vue",
+        "Apps.vue",
+        "AuditLog.vue"
+      ]
+    }
+  },
+  "hotPaths": [],
+  "userDirectives": []
+}

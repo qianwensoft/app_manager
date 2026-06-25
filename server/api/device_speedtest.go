@@ -125,10 +125,10 @@ func DeviceSpeedTest(c *gin.Context) {
 		"type":   "command",
 		"action": "speed_test_throughput",
 		"data": map[string]interface{}{
-			"request_id":     ridTp,
-			"download_path":  "/api/agent/speed-test/download?size=262144",
-			"upload_path":    "/api/agent/speed-test/upload",
-			"payload_bytes":  262144,
+			"request_id":    ridTp,
+			"download_path": "/api/agent/speed-test/download?size=262144",
+			"upload_path":   "/api/agent/speed-test/upload",
+			"payload_bytes": 262144,
 		},
 	})
 
@@ -142,13 +142,13 @@ func DeviceSpeedTest(c *gin.Context) {
 			return
 		}
 		out := gin.H{
-			"rtt_ms":          rttMs,
-			"download_ms":     rep.DownloadMs,
-			"download_bytes":  rep.DownloadBytes,
-			"upload_ms":       rep.UploadMs,
-			"upload_bytes":    rep.UploadBytes,
-			"download_mbps":   speedMbps(rep.DownloadBytes, rep.DownloadMs),
-			"upload_mbps":     speedMbps(rep.UploadBytes, rep.UploadMs),
+			"rtt_ms":         rttMs,
+			"download_ms":    rep.DownloadMs,
+			"download_bytes": rep.DownloadBytes,
+			"upload_ms":      rep.UploadMs,
+			"upload_bytes":   rep.UploadBytes,
+			"download_mbps":  speedMbps(rep.DownloadBytes, rep.DownloadMs),
+			"upload_mbps":    speedMbps(rep.UploadBytes, rep.UploadMs),
 		}
 		c.JSON(http.StatusOK, out)
 	case <-time.After(120 * time.Second):

@@ -144,6 +144,20 @@ func rawAppParams(raw string) interface{} {
 	return arr
 }
 
+// normalizeRawJSONArray 规范化 JSON 数组字段：空/null 返回空串，否则返回紧凑 JSON。
+func normalizeRawJSONArray(raw json.RawMessage) string {
+	s := strings.TrimSpace(string(raw))
+	if s == "" || s == "null" {
+		return ""
+	}
+	var arr []json.RawMessage
+	if err := json.Unmarshal([]byte(s), &arr); err != nil {
+		return ""
+	}
+	b, _ := json.Marshal(arr)
+	return string(b)
+}
+
 func extensionScriptsJSONFromRequest(raw json.RawMessage, prev string, isCreate bool) (string, error) {
 	s := strings.TrimSpace(string(raw))
 	if s == "" || s == "null" {
@@ -177,6 +191,31 @@ func commonHeadersJSONFromRequest(m map[string]interface{}, prev string, isCreat
 		return prev, nil
 	}
 	return headersToJSON(m)
+}
+
+// customScriptJSONFromRaw 将连接器自定义脚本请求体（对象）规整为存库字符串；
+// 不传/为 null 时保留 prev（更新场景）或返回空对象（创建场景，prev 为空）。
+func customScriptJSONFromRaw(raw json.RawMessage, prev string) string {
+	s := strings.TrimSpace(string(raw))
+	if s == "" || s == "null" {
+		if strings.TrimSpace(prev) == "" {
+			return "{}"
+		}
+		return prev
+	}
+	var v interface{}
+	if err := json.Unmarshal(raw, &v); err != nil {
+		// 非法 JSON：保守保留原值
+		if strings.TrimSpace(prev) == "" {
+			return "{}"
+		}
+		return prev
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
 }
 
 func ensureAppCode(a *models.OutboundApp) {
@@ -386,10 +425,15 @@ type outboundEndpointIn struct {
 	BodyTemplate   string                 `json:"body_template"`
 	ParamSchema    string                 `json:"param_schema"`
 	ResponseSchema string                 `json:"response_schema"`
+	DemoParams     string                 `json:"demo_params"`
 	ContentType    string                 `json:"content_type"`
 	TimeoutMS      int                    `json:"timeout_ms"`
 	RetryMax       int                    `json:"retry_max"`
 	Enabled        *bool                  `json:"enabled"`
+	// AfterScripts 接口级「响应后脚本」，结构 {"after_response":[{name,enabled,default,code,timeout_ms}...]}；不传则保留原值。
+	AfterScripts json.RawMessage `json:"after_scripts"`
+	// AfterScriptOrder 执行序列（方案 B），结构 [{"scope":"app"|"endpoint","index":N}...]；不传则保留原值；传空数组则清除。
+	AfterScriptOrder json.RawMessage `json:"after_script_order"`
 }
 
 func headersToJSON(h map[string]interface{}) (string, error) {
@@ -433,23 +477,38 @@ func endpointToJSON(ep models.OutboundEndpoint) gin.H {
 	if ep.App != nil {
 		appName = ep.App.Name
 	}
+	var afterScripts interface{}
+	_ = json.Unmarshal([]byte(ep.AfterScriptsJSON), &afterScripts)
+	if afterScripts == nil {
+		afterScripts = map[string]interface{}{}
+	}
+	var afterScriptOrder interface{}
+	if s := strings.TrimSpace(ep.AfterScriptOrderJSON); s != "" && s != "null" && s != "[]" {
+		_ = json.Unmarshal([]byte(s), &afterScriptOrder)
+	}
+	if afterScriptOrder == nil {
+		afterScriptOrder = []interface{}{}
+	}
 	return gin.H{
-		"id":              ep.ID,
-		"app_id":          ep.AppID,
-		"app_name":        appName,
-		"name":            ep.Name,
-		"method":          ep.Method,
-		"path":            ep.Path,
-		"headers":         hdr,
-		"body_template":   ep.BodyTemplate,
-		"param_schema":    ep.ParamSchema,
-		"response_schema": ep.ResponseSchema,
-		"content_type":    ep.ContentType,
-		"timeout_ms":      ep.TimeoutMS,
-		"retry_max":       ep.RetryMax,
-		"enabled":         en,
-		"created_at":      ep.CreatedAt,
-		"updated_at":      ep.UpdatedAt,
+		"id":                 ep.ID,
+		"app_id":             ep.AppID,
+		"app_name":           appName,
+		"name":               ep.Name,
+		"method":             ep.Method,
+		"path":               ep.Path,
+		"headers":            hdr,
+		"body_template":      ep.BodyTemplate,
+		"param_schema":       ep.ParamSchema,
+		"response_schema":    ep.ResponseSchema,
+		"demo_params":        ep.DemoParams,
+		"content_type":       ep.ContentType,
+		"timeout_ms":         ep.TimeoutMS,
+		"retry_max":          ep.RetryMax,
+		"after_scripts":      afterScripts,
+		"after_script_order": afterScriptOrder,
+		"enabled":            en,
+		"created_at":         ep.CreatedAt,
+		"updated_at":         ep.UpdatedAt,
 	}
 }
 
@@ -483,18 +542,22 @@ var reTemplatePlaceholder = regexp.MustCompile(`\{\{([^}]+)\}\}`)
 
 type EndpointParamItem struct {
 	Name        string `json:"name"`
-	Source      string `json:"source"`      // "template" | "schema"
-	Type        string `json:"type"`        // string, integer, number, boolean, object, array
+	Source      string `json:"source"` // "template" | "schema"
+	Type        string `json:"type"`   // string, integer, number, boolean, object, array
 	Description string `json:"description"`
 	Required    bool   `json:"required"`
 }
 
 func GetEndpointParamSchema(c *gin.Context) {
 	var ep models.OutboundEndpoint
-	if err := database.DB.First(&ep, c.Param("id")).Error; err != nil {
+	if err := database.DB.Preload("App").First(&ep, c.Param("id")).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		return
 	}
+
+	// 当所属应用以 dynamic_bearer + token_in=json_body 模式自动注入 token 时，
+	// 这些字段/占位符由服务端托管，不应作为调用方入参暴露。
+	hidden := outbound.AutoInjectedBodyParamNames(ep.App)
 
 	seen := map[string]bool{}
 	var params []EndpointParamItem
@@ -503,7 +566,7 @@ func GetEndpointParamSchema(c *gin.Context) {
 	for _, src := range []string{ep.Path, ep.BodyTemplate} {
 		for _, m := range reTemplatePlaceholder.FindAllStringSubmatch(src, -1) {
 			name := strings.TrimSpace(m[1])
-			if name == "" || seen[name] {
+			if name == "" || seen[name] || hidden[name] {
 				continue
 			}
 			seen[name] = true
@@ -514,7 +577,7 @@ func GetEndpointParamSchema(c *gin.Context) {
 	// merge param_schema entries (schema wins for type/description/required)
 	for _, k := range parseSchemaJSONKeys(ep.ParamSchema) {
 		k = strings.TrimSpace(k)
-		if k == "" {
+		if k == "" || hidden[k] {
 			continue
 		}
 		if seen[k] {
@@ -571,19 +634,28 @@ func CreateOutboundEndpoint(c *gin.Context) {
 	if req.Enabled != nil {
 		en = *req.Enabled
 	}
+	afterScriptsJSON, err := extensionScriptsJSONFromRequest(req.AfterScripts, "", true)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "after_scripts: " + err.Error()})
+		return
+	}
+	afterScriptOrderJSON := normalizeRawJSONArray(req.AfterScriptOrder)
 	ep := models.OutboundEndpoint{
-		AppID:          req.AppID,
-		Name:           strings.TrimSpace(req.Name),
-		Method:         method,
-		Path:           strings.TrimSpace(req.Path),
-		HeadersJSON:    hj,
-		BodyTemplate:   req.BodyTemplate,
-		ParamSchema:    req.ParamSchema,
-		ResponseSchema: req.ResponseSchema,
-		ContentType:    strings.TrimSpace(req.ContentType),
-		TimeoutMS:      req.TimeoutMS,
-		RetryMax:       req.RetryMax,
-		Enabled:        en,
+		AppID:                req.AppID,
+		Name:                 strings.TrimSpace(req.Name),
+		Method:               method,
+		Path:                 strings.TrimSpace(req.Path),
+		HeadersJSON:          hj,
+		BodyTemplate:         req.BodyTemplate,
+		ParamSchema:          req.ParamSchema,
+		ResponseSchema:       req.ResponseSchema,
+		DemoParams:           req.DemoParams,
+		ContentType:          strings.TrimSpace(req.ContentType),
+		TimeoutMS:            req.TimeoutMS,
+		RetryMax:             req.RetryMax,
+		AfterScriptsJSON:     afterScriptsJSON,
+		AfterScriptOrderJSON: afterScriptOrderJSON,
+		Enabled:              en,
 	}
 	if err := database.DB.Create(&ep).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -629,9 +701,19 @@ func UpdateOutboundEndpoint(c *gin.Context) {
 	ep.BodyTemplate = req.BodyTemplate
 	ep.ParamSchema = req.ParamSchema
 	ep.ResponseSchema = req.ResponseSchema
+	ep.DemoParams = req.DemoParams
 	ep.ContentType = strings.TrimSpace(req.ContentType)
 	ep.TimeoutMS = req.TimeoutMS
 	ep.RetryMax = req.RetryMax
+	afterScriptsJSON, err := extensionScriptsJSONFromRequest(req.AfterScripts, ep.AfterScriptsJSON, false)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "after_scripts: " + err.Error()})
+		return
+	}
+	ep.AfterScriptsJSON = afterScriptsJSON
+	if len(req.AfterScriptOrder) > 0 {
+		ep.AfterScriptOrderJSON = normalizeRawJSONArray(req.AfterScriptOrder)
+	}
 	if req.Enabled != nil {
 		ep.Enabled = *req.Enabled
 	}
@@ -743,6 +825,8 @@ type outboundConnectorIn struct {
 	DefaultRetryMax     int                    `json:"default_retry_max"`
 	DebounceSameEventMS int                    `json:"debounce_same_event_ms"`
 	DebounceDiffEventMS int                    `json:"debounce_diff_event_ms"`
+	DebounceSameScanMS  int                    `json:"debounce_same_scan_ms"`
+	LoopCooldownMS      int                    `json:"loop_cooldown_ms"`
 	Priority            int                    `json:"priority"`
 	Enabled             *bool                  `json:"enabled"`
 	DefinitionIDs       []uint                 `json:"definition_ids"`
@@ -752,6 +836,12 @@ type outboundConnectorIn struct {
 	TriggerType         string                 `json:"trigger_type"`
 	TriggerConfig       map[string]interface{} `json:"trigger_config"`
 	WebhookID           uint                   `json:"webhook_id"`
+	InterfaceMode       bool                   `json:"interface_mode"`
+	InterfaceCode       string                 `json:"interface_code"`
+	InputParamsJSON     string                 `json:"input_params_json"`
+	OutputSchemaJSON    string                 `json:"output_schema_json"`
+	OutputMappingsJSON  string                 `json:"output_mappings_json"`
+	CustomScript        json.RawMessage        `json:"custom_script"` // 连接器全局自定义脚本 {steps,result}；不传保留原值
 }
 
 func validateStepContextMerge(pi, si int, stepType string, cfg map[string]interface{}) error {
@@ -845,9 +935,12 @@ func validateConnectorIn(req *outboundConnectorIn) error {
 	if tt == "" {
 		tt = "device_event"
 	}
-	// device_event 触发器需要绑定事件定义；其他触发器不强制要求
-	if tt == "device_event" && len(req.DefinitionIDs) == 0 {
+	// device_event 触发器需要绑定事件定义；接口模式与其他触发器不强制要求
+	if !req.InterfaceMode && tt == "device_event" && len(req.DefinitionIDs) == 0 {
 		return errors.New("definition_ids 不能为空")
+	}
+	if err := outbound.ValidateTriggerConfig(tt, outbound.ParseTriggerConfig(marshalTriggerConfig(req.TriggerConfig))); err != nil {
+		return err
 	}
 	if len(req.Phases) == 0 {
 		return errors.New("phases 不能为空（可传 endpoint_ids 作为单阶段兼容）")
@@ -906,6 +999,35 @@ func validateConnectorIn(req *outboundConnectorIn) error {
 				}
 				if body == "" {
 					return fmt.Errorf("阶段 %d 步骤 %d：message 须在 config 中提供 body、text 或 message 之一", pi, si)
+				}
+			case "keyboard_hid":
+				if st.Config == nil {
+					return fmt.Errorf("阶段 %d 步骤 %d：keyboard_hid 须在 config 中提供 text 或 keys", pi, si)
+				}
+				method := strings.TrimSpace(strings.ToLower(fmt.Sprint(st.Config["input_method"])))
+				if method == "" || method == "<nil>" {
+					method = "text"
+				}
+				text := strings.TrimSpace(fmt.Sprint(st.Config["text"]))
+				if text == "<nil>" {
+					text = ""
+				}
+				keysArr, _ := st.Config["keys"].([]interface{})
+				hasKeys := false
+				for _, k := range keysArr {
+					if strings.TrimSpace(fmt.Sprint(k)) != "" {
+						hasKeys = true
+						break
+					}
+				}
+				if method == "keys" {
+					if !hasKeys {
+						return fmt.Errorf("阶段 %d 步骤 %d：keyboard_hid 按键序列模式下须提供 keys", pi, si)
+					}
+				} else {
+					if text == "" && !hasKeys {
+						return fmt.Errorf("阶段 %d 步骤 %d：keyboard_hid 的 text 与 keys 不能同时为空", pi, si)
+					}
 				}
 			case "app_script":
 				if st.Config == nil {
@@ -966,6 +1088,18 @@ func validateConnectorIn(req *outboundConnectorIn) error {
 				database.DB.Model(&models.DataInterface{}).Where("id = ? AND enabled = ?", ifaceID, true).Count(&n)
 				if n == 0 {
 					return fmt.Errorf("阶段 %d 步骤 %d：interface_id=%d 不存在或未启用", pi, si, ifaceID)
+				}
+			case "print":
+				if st.Config == nil {
+					return fmt.Errorf("阶段 %d 步骤 %d：print 须在 config 中提供 content 或 raw_base64", pi, si)
+				}
+				printContent, _ := st.Config["content"].([]interface{})
+				printRaw := strings.TrimSpace(fmt.Sprint(st.Config["raw_base64"]))
+				if printRaw == "<nil>" {
+					printRaw = ""
+				}
+				if len(printContent) == 0 && printRaw == "" {
+					return fmt.Errorf("阶段 %d 步骤 %d：print 的 content 与 raw_base64 不能同时为空", pi, si)
 				}
 			default:
 				return fmt.Errorf("阶段 %d 步骤 %d：未知 step_type %q", pi, si, typ)
@@ -1196,18 +1330,35 @@ func connectorDetail(id uint) (gin.H, error) {
 		"default_retry_max":      co.DefaultRetryMax,
 		"debounce_same_event_ms": co.DebounceSameEventMS,
 		"debounce_diff_event_ms": co.DebounceDiffEventMS,
+		"debounce_same_scan_ms":  co.DebounceSameScanMS,
+		"loop_cooldown_ms":       co.LoopCooldownMS,
 		"priority":               co.Priority,
 		"trigger_type":           co.TriggerType,
 		"trigger_config":         tcfg,
-			"webhook_id":             co.WebhookID,
+		"webhook_id":             co.WebhookID,
 		"enabled":                en,
 		"definition_ids":         defIDs,
 		"device_ids":             devIDs,
 		"phases":                 phOut,
 		"endpoint_ids":           epDedup,
+		"interface_mode":         co.InterfaceMode,
+		"interface_code":         co.InterfaceCode,
+		"input_params_json":      co.InputParamsJSON,
+		"output_schema_json":     co.OutputSchemaJSON,
+		"output_mappings_json":   co.OutputMappingsJSON,
+		"custom_script":          rawJSONOrObject(co.CustomScriptJSON),
 		"created_at":             co.CreatedAt,
 		"updated_at":             co.UpdatedAt,
 	}, nil
+}
+
+// rawJSONOrObject 把存库 JSON 字符串解析为对象返回；空/非法时返回空对象。
+func rawJSONOrObject(s string) interface{} {
+	var v interface{}
+	if json.Unmarshal([]byte(s), &v) == nil && v != nil {
+		return v
+	}
+	return map[string]interface{}{}
 }
 
 func ListOutboundConnectors(c *gin.Context) {
@@ -1276,6 +1427,29 @@ func InboundWebhookTrigger(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
+// ensureConnectorInterfaceCodeUnique 在 interface_mode=true 时校验 interface_code 唯一。
+// excludeID>0 用于更新场景（排除自身）。替代历史的 DB 部分唯一索引（MySQL 不支持）。
+func ensureConnectorInterfaceCodeUnique(interfaceMode bool, interfaceCode string, excludeID uint) error {
+	if !interfaceMode {
+		return nil
+	}
+	code := strings.TrimSpace(interfaceCode)
+	if code == "" {
+		return errors.New("接口模式下 interface_code 不能为空")
+	}
+	q := database.DB.Model(&models.OutboundConnector{}).
+		Where("interface_mode = ? AND interface_code = ?", true, code)
+	if excludeID > 0 {
+		q = q.Where("id <> ?", excludeID)
+	}
+	var n int64
+	q.Count(&n)
+	if n > 0 {
+		return fmt.Errorf("接口编码 %q 已被其他连接器使用", code)
+	}
+	return nil
+}
+
 func CreateOutboundConnector(c *gin.Context) {
 	var req outboundConnectorIn
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -1283,6 +1457,10 @@ func CreateOutboundConnector(c *gin.Context) {
 		return
 	}
 	if err := validateConnectorIn(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := ensureConnectorInterfaceCodeUnique(req.InterfaceMode, req.InterfaceCode, 0); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -1312,11 +1490,19 @@ func CreateOutboundConnector(c *gin.Context) {
 		DefaultRetryMax:     req.DefaultRetryMax,
 		DebounceSameEventMS: req.DebounceSameEventMS,
 		DebounceDiffEventMS: req.DebounceDiffEventMS,
+		DebounceSameScanMS:  req.DebounceSameScanMS,
+		LoopCooldownMS:      req.LoopCooldownMS,
 		Priority:            req.Priority,
 		TriggerType:         tt,
 		WebhookID:           req.WebhookID,
 		TriggerConfigJSON:   tcJSON,
 		Enabled:             en,
+		InterfaceMode:       req.InterfaceMode,
+		InterfaceCode:       strings.TrimSpace(req.InterfaceCode),
+		InputParamsJSON:     req.InputParamsJSON,
+		OutputSchemaJSON:    req.OutputSchemaJSON,
+		OutputMappingsJSON:  req.OutputMappingsJSON,
+		CustomScriptJSON:    customScriptJSONFromRaw(req.CustomScript, ""),
 	}
 	if co.DefaultTimeoutMS <= 0 {
 		co.DefaultTimeoutMS = 15000
@@ -1329,6 +1515,12 @@ func CreateOutboundConnector(c *gin.Context) {
 	}
 	if co.DebounceDiffEventMS < 0 {
 		co.DebounceDiffEventMS = 0
+	}
+	if co.DebounceSameScanMS < 0 {
+		co.DebounceSameScanMS = 0
+	}
+	if co.LoopCooldownMS < 0 {
+		co.LoopCooldownMS = 0
 	}
 
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
@@ -1364,6 +1556,10 @@ func UpdateOutboundConnector(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	if err := ensureConnectorInterfaceCodeUnique(req.InterfaceMode, req.InterfaceCode, id); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	dm := strings.TrimSpace(req.Phases[0].RunMode)
 	if dm == "" {
 		dm = "parallel"
@@ -1382,11 +1578,19 @@ func UpdateOutboundConnector(c *gin.Context) {
 	co.DefaultRetryMax = req.DefaultRetryMax
 	co.DebounceSameEventMS = req.DebounceSameEventMS
 	co.DebounceDiffEventMS = req.DebounceDiffEventMS
+	co.DebounceSameScanMS = req.DebounceSameScanMS
+	co.LoopCooldownMS = req.LoopCooldownMS
 	if co.DebounceSameEventMS < 0 {
 		co.DebounceSameEventMS = 0
 	}
 	if co.DebounceDiffEventMS < 0 {
 		co.DebounceDiffEventMS = 0
+	}
+	if co.DebounceSameScanMS < 0 {
+		co.DebounceSameScanMS = 0
+	}
+	if co.LoopCooldownMS < 0 {
+		co.LoopCooldownMS = 0
 	}
 	co.Priority = req.Priority
 	if req.Enabled != nil {
@@ -1400,6 +1604,12 @@ func UpdateOutboundConnector(c *gin.Context) {
 	if req.TriggerConfig != nil {
 		co.TriggerConfigJSON = marshalTriggerConfig(req.TriggerConfig)
 	}
+	co.InterfaceMode = req.InterfaceMode
+	co.InterfaceCode = strings.TrimSpace(req.InterfaceCode)
+	co.InputParamsJSON = req.InputParamsJSON
+	co.OutputSchemaJSON = req.OutputSchemaJSON
+	co.OutputMappingsJSON = req.OutputMappingsJSON
+	co.CustomScriptJSON = customScriptJSONFromRaw(req.CustomScript, co.CustomScriptJSON)
 
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Save(&co).Error; err != nil {
@@ -1480,18 +1690,19 @@ func CloneOutboundApp(c *gin.Context) {
 		}
 		for _, ep := range endpoints {
 			newEp := models.OutboundEndpoint{
-				AppID:          newApp.ID,
-				Name:           ep.Name,
-				Method:         ep.Method,
-				Path:           ep.Path,
-				HeadersJSON:    ep.HeadersJSON,
-				BodyTemplate:   ep.BodyTemplate,
-				ParamSchema:    ep.ParamSchema,
-				ResponseSchema: ep.ResponseSchema,
-				ContentType:    ep.ContentType,
-				TimeoutMS:      ep.TimeoutMS,
-				RetryMax:       ep.RetryMax,
-				Enabled:        ep.Enabled,
+				AppID:            newApp.ID,
+				Name:             ep.Name,
+				Method:           ep.Method,
+				Path:             ep.Path,
+				HeadersJSON:      ep.HeadersJSON,
+				BodyTemplate:     ep.BodyTemplate,
+				ParamSchema:      ep.ParamSchema,
+				ResponseSchema:   ep.ResponseSchema,
+				ContentType:      ep.ContentType,
+				TimeoutMS:        ep.TimeoutMS,
+				RetryMax:         ep.RetryMax,
+				AfterScriptsJSON: ep.AfterScriptsJSON,
+				Enabled:          ep.Enabled,
 			}
 			if err := tx.Create(&newEp).Error; err != nil {
 				return err
@@ -1506,19 +1717,19 @@ func CloneOutboundApp(c *gin.Context) {
 		for _, wh := range webhooks {
 			oldWhID := wh.ID
 			newWh := models.OutboundWebhook{
-				AppID:              newApp.ID,
-				Name:               wh.Name,
-				Description:        wh.Description,
-				Method:             wh.Method,
-				AuthMethod:         wh.AuthMethod,
-				DecryptMethod:      wh.DecryptMethod,
-				DecryptKeyPath:     wh.DecryptKeyPath,
+				AppID:               newApp.ID,
+				Name:                wh.Name,
+				Description:         wh.Description,
+				Method:              wh.Method,
+				AuthMethod:          wh.AuthMethod,
+				DecryptMethod:       wh.DecryptMethod,
+				DecryptKeyPath:      wh.DecryptKeyPath,
 				ResponseTransformJS: wh.ResponseTransformJS,
-				ConfigJSON:         wh.ConfigJSON,
-				ResponseSchema:     wh.ResponseSchema,
-				ObservedEventTypes: "",
-				ReceiveToken:       generateReceiveToken(),
-				Enabled:            wh.Enabled,
+				ConfigJSON:          wh.ConfigJSON,
+				ResponseSchema:      wh.ResponseSchema,
+				ObservedEventTypes:  "",
+				ReceiveToken:        generateReceiveToken(),
+				Enabled:             wh.Enabled,
 			}
 			if err := tx.Create(&newWh).Error; err != nil {
 				return err

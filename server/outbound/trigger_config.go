@@ -11,12 +11,14 @@ type TriggerConfig struct {
 	TypeField string `json:"type_field"`
 	// 通用：本连接器匹配的事件类型值列表（空=匹配全部；支持前缀 "order.*"）
 	MatchValues []string `json:"match_values"`
+	// device_event 专属：前台应用包名白名单（空=不限制，任何前台应用都触发；非空=仅当前台应用在列表中时触发）
+	ForegroundPackages []string `json:"foreground_packages"`
 
 	// websocket / stomp 通用
-	URL             string            `json:"url"`
-	Headers         map[string]string `json:"headers"`           // 连接时附加 HTTP 头
-	ReconnectDelayMS int              `json:"reconnect_delay_ms"` // 默认 5000
-	PingIntervalMS   int              `json:"ping_interval_ms"`   // websocket ping，默认 30000
+	URL              string            `json:"url"`
+	Headers          map[string]string `json:"headers"`            // 连接时附加 HTTP 头
+	ReconnectDelayMS int               `json:"reconnect_delay_ms"` // 默认 5000
+	PingIntervalMS   int               `json:"ping_interval_ms"`   // websocket ping，默认 30000
 
 	// stomp 专属
 	Login       string `json:"login"`
@@ -39,9 +41,14 @@ type TriggerConfig struct {
 	DataPollParams      map[string]interface{} `json:"data_poll_params"`
 	DataPollResultField string                 `json:"data_poll_result_field"`
 
+	// cron 专属（5 段：分 时 日 月 周）
+	CronExpression string `json:"cron_expression"` // 如 "0 9 * * MON-FRI"
+	CronTimezone   string `json:"cron_timezone"`   // IANA 时区，空=服务器本地
+	CronEventType  string `json:"cron_event_type"` // 触发事件类型，默认 cron.tick
+
 	// channel 专属（mqtt / kafka）
-	ChannelType      string `json:"channel_type"`       // mqtt | kafka
-	ChannelTopic     string `json:"channel_topic"`      // MQTT topic 或 Kafka topic
+	ChannelType  string `json:"channel_type"`  // mqtt | kafka
+	ChannelTopic string `json:"channel_topic"` // MQTT topic 或 Kafka topic
 	// MQTT 专属
 	MQTTBroker   string `json:"mqtt_broker"`    // tcp://host:1883
 	MQTTClientID string `json:"mqtt_client_id"` // 空=自动生成

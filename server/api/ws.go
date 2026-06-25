@@ -3,12 +3,14 @@ package api
 import (
 	"app-manager/agent"
 	"app-manager/auth"
+	"app-manager/cluster"
 	"app-manager/database"
 	"app-manager/datastack"
 	"app-manager/event"
 	appoutbound "app-manager/outbound"
 	"app-manager/logcat"
 	"app-manager/models"
+	appoutbound "app-manager/outbound"
 	"app-manager/screen"
 	"app-manager/shell"
 	wrtc "app-manager/webrtc"
@@ -72,13 +74,13 @@ func screenWSOutboundAllowed(c *gin.Context, msg map[string]interface{}) bool {
 // 首连下发 start_screen；浏览器刷新/关闭连接不自动 stop_screen（保持 Agent 端授权会话），仅显式 viewer_stop_screen 下发 stop_screen。
 func ScreenWS(c *gin.Context) {
 	param := c.Param("deviceId")
-	routeKey, err := agent.AgentConnectionKey(param)
+	routeKey, devID, err := agent.CanonicalRouteKey(param)
 	if err != nil {
 		log.Printf("ScreenWS: reject param=%q: %v", param, err)
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
-	if devID, ok := agent.ResolveDeviceID(param); ok {
+	if devID > 0 {
 		var d models.Device
 		if err := database.DB.First(&d, devID).Error; err == nil && !d.AllowRemoteScreen {
 			c.JSON(http.StatusForbidden, gin.H{"error": "该设备未允许 Web 远程查看屏幕，请在 Android Agent 开启「允许远程查看屏幕」并保存"})
@@ -91,18 +93,21 @@ func ScreenWS(c *gin.Context) {
 	}
 	log.Printf("Browser connected to screen param=%s routeKey=%s", param, routeKey)
 	screen.ScreenHub.RegisterViewer(routeKey, conn)
-	needStart := screen.ViewerJoined(routeKey)
-	if needStart {
-		_ = agent.AgentHub.Send(routeKey, map[string]interface{}{
-			"type":   "command",
-			"action": "start_screen",
-		})
-		log.Printf("Sent start_screen to agent [%s] (first viewer)", routeKey)
+	needStart := cluster.ScreenViewerJoined(routeKey)
+	startMsg := map[string]interface{}{
+		"type":   "command",
+		"action": "start_screen",
+	}
+	// 始终向在线 Agent 下发 start_screen：服务端 agentCaptureHeld 与端上实际采集可能不同步（重连/竞态）。
+	if agent.AgentHub.SendToDevice(devID, startMsg) {
+		log.Printf("Sent start_screen to agent devID=%d routeKey=%s (needStart=%v)", devID, routeKey, needStart)
+	} else if needStart {
+		log.Printf("start_screen skipped: agent offline devID=%d routeKey=%s", devID, routeKey)
 	}
 	defer func() {
 		log.Printf("Browser disconnected from screen param=%s routeKey=%s", param, routeKey)
 		screen.ScreenHub.UnregisterViewer(routeKey, conn)
-		screen.ViewerLeft(routeKey)
+		cluster.ScreenViewerLeft(routeKey)
 		_ = conn.Close()
 	}()
 
@@ -232,9 +237,19 @@ func ShellWS(c *gin.Context) {
 	}
 }
 
+func logcatFiltersFromQuery(c *gin.Context) []string {
+	if arr := c.QueryArray("filter"); len(arr) > 0 {
+		return logcat.NormalizeFilters(arr)
+	}
+	if f := strings.TrimSpace(c.Query("filter")); f != "" {
+		return logcat.NormalizeFilters([]string{f})
+	}
+	return nil
+}
+
 func LogcatWS(c *gin.Context) {
 	param := c.Param("deviceId")
-	filter := c.Query("filter")
+	filters := logcatFiltersFromQuery(c)
 
 	// 查询设备，判断是否可以走 ADB
 	var dev models.Device
@@ -278,8 +293,8 @@ func LogcatWS(c *gin.Context) {
 
 	// ADB 模式：直接用 adb logcat 流式输出（连接保持到 session 结束）
 	if useADB {
-		log.Printf("Browser logcat (ADB) param=%s serial=%s filter=%q", param, adbSerial, filter)
-		_, err := logcat.NewSession(adbSerial, conn, getADB().ExePath(), filter)
+		log.Printf("Browser logcat (ADB) param=%s serial=%s filters=%v", param, adbSerial, filters)
+		_, err := logcat.NewSession(adbSerial, conn, getADB().ExePath(), filters)
 		if err != nil {
 			log.Printf("LogcatWS: ADB session error serial=%s: %v", adbSerial, err)
 			_ = conn.WriteMessage(websocket.TextMessage, []byte("[error] 无法启动 ADB logcat: "+err.Error()))
@@ -296,7 +311,7 @@ func LogcatWS(c *gin.Context) {
 	agent.AgentHub.Send(routeKey, map[string]interface{}{
 		"type":   "command",
 		"action": "start_logcat",
-		"data":   map[string]interface{}{"filter": filter},
+		"data":   map[string]interface{}{"filters": filters},
 	})
 
 	defer func() {
@@ -324,36 +339,69 @@ func AgentWS(c *gin.Context) {
 		return
 	}
 	agent.SyncDeviceStatus(deviceID, true)
+	emitAgentSystemEvent("device.online", deviceID)
 	done := agent.AgentHub.Register(deviceID, conn)
 	<-done
-	agent.SyncDeviceStatus(deviceID, false)
+	// 重连竞态：若本连接已被新连接替换，则离线判定交给新连接，避免把在线设备误标离线。
+	if agent.AgentHub.IsCurrentConn(deviceID, conn) {
+		return
+	}
+	if !agent.AgentHub.HasLocal(deviceID) {
+		agent.SyncDeviceStatus(deviceID, false)
+		emitAgentSystemEvent("device.offline", deviceID)
+	}
+}
+
+func emitAgentSystemEvent(eventType, deviceKey string) {
+	devID, ok := agent.ResolveDeviceID(deviceKey)
+	if !ok {
+		return
+	}
+	payload, _ := json.Marshal(map[string]interface{}{
+		"device_id": devID,
+		"agent_key": deviceKey,
+	})
+	appoutbound.NotifySystemEvent(eventType, devID, string(payload))
 }
 
 func init() {
+	agent.OnAgentConnect = func(deviceID string) {
+		RestoreDeviceCustomEventListenForAgentKey(deviceID)
+	}
 	agent.OnAgentDisconnect = func(deviceID string) {
-		screen.AbortServerRecording(deviceID)
-		screen.ResetCaptureRoute(deviceID)
-		screen.ScreenHub.CloseAllForDevice(deviceID)
-		DeactivateDeviceCustomListenStateForAgentKey(deviceID)
-		wrtc.CameraHub.RemoveAllPublishers(deviceID)
+		routeKey := agent.CanonicalRouteKeyFromWS(deviceID)
+		screen.AbortServerRecording(routeKey)
+		screen.ResetCaptureRoute(routeKey)
+		screen.ScreenHub.CloseAllForDevice(routeKey)
+		if routeKey != deviceID {
+			screen.AbortServerRecording(deviceID)
+			screen.ResetCaptureRoute(deviceID)
+			screen.ScreenHub.CloseAllForDevice(deviceID)
+		}
+		wrtc.CameraHub.RemoveAllPublishers(routeKey)
+		cluster.PublishWebRTCStopCamera(routeKey, wrtc.CameraBack)
+		cluster.PublishWebRTCStopCamera(routeKey, wrtc.CameraFront)
 	}
 	// Handle uplink messages from agents
 	agent.SetMessageHandler(func(deviceID string, msg map[string]interface{}) {
+		routeKey := agent.CanonicalRouteKeyFromWS(deviceID)
 		msgType, _ := msg["type"].(string)
 		switch msgType {
 		case "screen_frame":
-			screen.MarkAgentCaptureHeld(deviceID)
+			screen.MarkAgentCaptureHeld(routeKey)
 			raw, err := json.Marshal(msg)
 			if err == nil {
-				screen.ScreenHub.BroadcastText(deviceID, raw)
+				screen.ScreenHub.BroadcastText(routeKey, raw)
+				cluster.PublishScreenText(routeKey, raw)
 			}
 			if data, ok := msg["data"].(map[string]interface{}); ok {
-				screen.AppendRecordingFrame(deviceID, data)
+				screen.AppendRecordingFrame(routeKey, data)
 			}
 		case "screen_meta", "screen_pong":
 			raw, err := json.Marshal(msg)
 			if err == nil {
-				screen.ScreenHub.BroadcastText(deviceID, raw)
+				screen.ScreenHub.BroadcastText(routeKey, raw)
+				cluster.PublishScreenText(routeKey, raw)
 			}
 		case "heartbeat", "device_info":
 			if data, ok := msg["data"].(map[string]interface{}); ok {
@@ -369,16 +417,49 @@ func init() {
 		case "shell_output":
 			if out, ok := wsShellOutputPayload(msg["data"]); ok {
 				shell.ShellHub.SendToClient(deviceID, out)
+				cluster.PublishShellOutput(deviceID, out)
 			}
 		case "logcat_output":
 			if data, ok := msg["data"].(string); ok {
 				logcat.LogcatHub.SendToClient(deviceID, []byte(data))
+				cluster.PublishLogcatOutput(deviceID, []byte(data))
+			}
+		case "wireless_adb_guide_ack":
+			if devID, ok := agent.ResolveDeviceID(deviceID); ok {
+				data, _ := msg["data"].(map[string]interface{})
+				tokenMatched := true
+				if data != nil {
+					if v, ok := data["token_matched"].(bool); ok {
+						tokenMatched = v
+					}
+				}
+				var scannedID int64
+				if data != nil {
+					switch v := data["device_id"].(type) {
+					case float64:
+						scannedID = int64(v)
+					case int64:
+						scannedID = v
+					}
+				}
+				PublishWirelessAdbGuideAck(devID, tokenMatched, scannedID)
+			}
+		case "custom_event_probe":
+			if devID, ok := agent.ResolveDeviceID(deviceID); ok {
+				data, _ := msg["data"].(map[string]interface{})
+				if data != nil {
+					sid, _ := data["session_id"].(string)
+					action, _ := data["intent_action"].(string)
+					extras, _ := data["extras"].(map[string]interface{})
+					event.RecordAnalyzeProbe(devID, sid, action, extras)
+				}
 			}
 		case "device_event":
 			eventType, _ := msg["eventType"].(string)
 			eventData, _ := msg["eventData"].(string)
 			if eventType != "" {
 				if devID, ok := agent.ResolveDeviceID(deviceID); ok {
+					event.RecordAnalyzeDeviceEvent(devID, eventData)
 					rec := models.DeviceEvent{
 						DeviceID:  devID,
 						EventType: eventType,
@@ -563,41 +644,63 @@ func init() {
 				}
 				agent.DeliverInstallTaskResult(cid, out, errStr)
 			}
+		case "command_result":
+			// 通用命令结果（如远程打印调试）。Agent 回传 commandId/success/output。
+			cid, _ := msg["commandId"].(string)
+			if cid == "" {
+				cid, _ = msg["command_id"].(string)
+			}
+			if cid == "" {
+				return
+			}
+			out, _ := msg["output"].(string)
+			agent.DeliverCommandResult(cid, wsMsgBool(msg, "success"), out)
 		case "webrtc_offer":
 			// Agent 发来摄像头 WebRTC offer
+			routeKey := agent.CanonicalRouteKeyFromWS(deviceID)
+			_, offerDevID, _ := agent.CanonicalRouteKey(deviceID)
 			camera, _ := msg["camera"].(string)
 			sdp, _ := msg["sdp"].(string)
 			if camera != "" && sdp != "" {
 				sendFn := func(m interface{}) {
-					_ = agent.AgentHub.Send(deviceID, m)
+					if offerDevID > 0 {
+						_ = agent.AgentHub.SendToDevice(offerDevID, m)
+					} else {
+						_ = agent.AgentHub.Send(routeKey, m)
+					}
 				}
-				if err := wrtc.CameraHub.HandleAgentOffer(deviceID, wrtc.CameraType(camera), sdp, sendFn); err != nil {
-					log.Printf("WebRTC agent offer error device=%s camera=%s: %v", deviceID, camera, err)
+				if err := wrtc.CameraHub.HandleAgentOffer(routeKey, wrtc.CameraType(camera), sdp, sendFn); err != nil {
+					log.Printf("WebRTC agent offer error device=%s camera=%s: %v", routeKey, camera, err)
 				}
 			}
 		case "webrtc_ice_candidate":
 			// Agent 发来 ICE candidate
+			routeKey := agent.CanonicalRouteKeyFromWS(deviceID)
 			camera, _ := msg["camera"].(string)
 			if camera != "" {
 				if cand, ok := msg["candidate"].(map[string]interface{}); ok {
 					raw, _ := json.Marshal(cand)
-					_ = wrtc.CameraHub.HandleAgentICE(deviceID, wrtc.CameraType(camera), raw)
+					_ = wrtc.CameraHub.HandleAgentICE(routeKey, wrtc.CameraType(camera), raw)
 				}
 			}
 		case "webrtc_stop_camera":
 			// Agent 主动停止摄像头推流
+			routeKey := agent.CanonicalRouteKeyFromWS(deviceID)
 			camera, _ := msg["camera"].(string)
 			if camera != "" {
-				wrtc.CameraHub.RemovePublisher(deviceID, wrtc.CameraType(camera))
-				log.Printf("WebRTC: agent stopped camera device=%s camera=%s", deviceID, camera)
+				wrtc.CameraHub.RemovePublisher(routeKey, wrtc.CameraType(camera))
+				cluster.PublishWebRTCStopCamera(routeKey, wrtc.CameraType(camera))
+				log.Printf("WebRTC: agent stopped camera device=%s camera=%s", routeKey, camera)
 			}
 		case "camera_error":
 			// Agent 摄像头启动失败，转发错误给所有等待的 viewer
+			routeKey := agent.CanonicalRouteKeyFromWS(deviceID)
 			camera, _ := msg["camera"].(string)
 			message, _ := msg["message"].(string)
 			if camera != "" {
-				wrtc.CameraHub.BroadcastError(deviceID, wrtc.CameraType(camera), message)
-				log.Printf("WebRTC: camera error device=%s camera=%s: %s", deviceID, camera, message)
+				wrtc.CameraHub.BroadcastError(routeKey, wrtc.CameraType(camera), message)
+				cluster.PublishWebRTCCameraError(routeKey, wrtc.CameraType(camera), message)
+				log.Printf("WebRTC: camera error device=%s camera=%s: %s", routeKey, camera, message)
 			}
 		default:
 			raw, _ := json.Marshal(msg)
@@ -713,7 +816,7 @@ func cameraWsWrite(viewerID string, conn *websocket.Conn, msg interface{}) {
 // URL: /ws/camera/:deviceId?camera=back|front
 func CameraWS(c *gin.Context) {
 	param := c.Param("deviceId")
-	routeKey, err := agent.AgentConnectionKey(param)
+	routeKey, devID, err := agent.CanonicalRouteKey(param)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
@@ -739,26 +842,45 @@ func CameraWS(c *gin.Context) {
 
 	// Register viewer first — so error messages from agent can be delivered
 	wrtc.CameraHub.RegisterViewer(routeKey, camera, viewerID, sendFn)
+	if mime := cluster.LookupWebRTCTrackMime(routeKey, string(camera)); mime != "" {
+		wrtc.CameraHub.HandleRemoteTrackReady(routeKey, camera, mime)
+	}
 
-	// Tell agent to start camera if not already streaming
-	_ = agent.AgentHub.Send(routeKey, map[string]interface{}{
-		"type":   "command",
-		"action": "start_camera",
-		"camera": string(camera),
-	})
+	needStartCamera := cluster.IncrCameraViewer(routeKey, string(camera))
+	if needStartCamera {
+		startMsg := map[string]interface{}{
+			"type":        "command",
+			"action":      "start_camera",
+			"camera":      string(camera),
+			"ice_servers": wrtc.ICEServersJSON(),
+		}
+		if !agent.AgentHub.SendToDevice(devID, startMsg) {
+			log.Printf("CameraWS: agent offline device=%s (devID=%d), cannot start_camera", routeKey, devID)
+			wrtc.CameraHub.BroadcastError(routeKey, camera, "Agent 未在线，无法启动摄像头")
+		} else {
+			log.Printf("CameraWS: sent start_camera device=%s camera=%s", routeKey, camera)
+		}
+	}
 
 	defer func() {
-		remaining := wrtc.CameraHub.RemoveViewer(routeKey, viewerID, camera)
+		localRemaining := wrtc.CameraHub.RemoveViewer(routeKey, viewerID, camera)
+		globalRemaining := cluster.DecrCameraViewer(routeKey, string(camera))
 		cameraWsWriteMu.Delete(viewerID)
 		_ = conn.Close()
-		log.Printf("CameraWS: viewer=%s device=%s camera=%s disconnected, remaining=%d", viewerID, routeKey, camera, remaining)
-		// 最后一个 viewer 断开时通知 agent 停止摄像头
-		if remaining == 0 {
-			_ = agent.AgentHub.Send(routeKey, map[string]interface{}{
-				"type":   "command",
-				"action": "stop_camera",
-				"camera": string(camera),
-			})
+		log.Printf("CameraWS: viewer=%s device=%s camera=%s disconnected, local=%d global=%d", viewerID, routeKey, camera, localRemaining, globalRemaining)
+		// 全集群最后一个 viewer 断开时通知 agent 停止摄像头
+		stopMsg := map[string]interface{}{
+			"type":   "command",
+			"action": "stop_camera",
+			"camera": string(camera),
+		}
+		if cluster.Enabled() {
+			if globalRemaining <= 0 {
+				_ = agent.AgentHub.SendToDevice(devID, stopMsg)
+				log.Printf("CameraWS: sent stop_camera to agent device=%s camera=%s", routeKey, camera)
+			}
+		} else if localRemaining == 0 {
+			_ = agent.AgentHub.SendToDevice(devID, stopMsg)
 			log.Printf("CameraWS: sent stop_camera to agent device=%s camera=%s", routeKey, camera)
 		}
 	}()
@@ -792,4 +914,3 @@ func CameraWS(c *gin.Context) {
 		}
 	}
 }
-

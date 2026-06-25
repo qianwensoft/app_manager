@@ -4,25 +4,25 @@ import "time"
 
 // OutboundApp 外部应用：Base URL + 鉴权（首期 static_header / none）。
 type OutboundApp struct {
-	ID                uint      `gorm:"primaryKey" json:"id"`
+	ID uint `gorm:"primaryKey" json:"id"`
 	// AppCode 应用编码，用于接收 URL 中识别应用（自动生成，唯一）。
-	AppCode           string    `gorm:"column:app_code;size:32;uniqueIndex" json:"app_code"`
-	Name              string    `gorm:"size:120;not null" json:"name"`
-	Description       string    `gorm:"type:text" json:"description"`
-	BaseURL           string    `gorm:"column:base_url;size:500;not null" json:"base_url"`
-	AuthType          string    `gorm:"column:auth_type;size:40;not null;default:none" json:"auth_type"` // none | static_header | dynamic_bearer
-	AuthConfigJSON    string    `gorm:"column:auth_config_json;type:text" json:"-"`
+	AppCode        string `gorm:"column:app_code;size:32;uniqueIndex" json:"app_code"`
+	Name           string `gorm:"size:120;not null" json:"name"`
+	Description    string `gorm:"type:text" json:"description"`
+	BaseURL        string `gorm:"column:base_url;size:500;not null" json:"base_url"`
+	AuthType       string `gorm:"column:auth_type;size:40;not null;default:none" json:"auth_type"` // none | static_header | dynamic_bearer
+	AuthConfigJSON string `gorm:"column:auth_config_json;type:text" json:"-"`
 	// CommonHeadersJSON 出站 HTTP 通用请求头（JSON 对象 string->string），与接口 Headers 合并，同名键以接口为准。
 	CommonHeadersJSON string `gorm:"column:common_headers_json;type:text" json:"-"`
-	TokenProviderJSON string    `gorm:"column:token_provider_json;type:text" json:"-"` // 获取/刷新 token 的接口配置
-	TokenCacheJSON    string    `gorm:"column:token_cache_json;type:text" json:"-"`    // 服务端缓存 access/refresh 与过期时间
+	TokenProviderJSON string `gorm:"column:token_provider_json;type:text" json:"-"` // 获取/刷新 token 的接口配置
+	TokenCacheJSON    string `gorm:"column:token_cache_json;type:text" json:"-"`    // 服务端缓存 access/refresh 与过期时间
 	// ExtensionScriptsJSON 应用级扩展脚本（JSON，version 2）：before_request / after_response 各为脚本对象数组（顺序执行；default 为 true 的条目先于同阶段其它条目）。兼容旧版单对象。ECMAScript 5，入口 function main(ctx){...}。
 	ExtensionScriptsJSON string `gorm:"column:extension_scripts_json;type:text" json:"-"`
 	// AppParamsJSON 应用级参数（JSON 数组），每项 {key, value, sensitive, description}；sensitive=true 时 value 不出现在 API 响应中。
-	AppParamsJSON string `gorm:"column:app_params_json;type:text" json:"-"`
-	Enabled       bool   `gorm:"default:true" json:"enabled"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	AppParamsJSON string    `gorm:"column:app_params_json;type:text" json:"-"`
+	Enabled       bool      `gorm:"default:true" json:"enabled"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 func (OutboundApp) TableName() string { return "outbound_apps" }
@@ -39,13 +39,23 @@ type OutboundEndpoint struct {
 	BodyTemplate string       `gorm:"column:body_template;type:text" json:"body_template"`
 	ParamSchema  string       `gorm:"column:param_schema;type:text" json:"param_schema"`
 	// ResponseSchema 由调试后「生成返回参数 Schema」写入；JSON Schema 格式，描述接口响应体结构。
-	ResponseSchema string    `gorm:"column:response_schema;type:text" json:"response_schema"`
-	ContentType    string    `gorm:"column:content_type;size:120" json:"content_type"`
-	TimeoutMS      int       `gorm:"column:timeout_ms;default:0" json:"timeout_ms"`
-	RetryMax       int       `gorm:"column:retry_max;default:0" json:"retry_max"`
-	Enabled        bool      `gorm:"default:true" json:"enabled"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ResponseSchema string `gorm:"column:response_schema;type:text" json:"response_schema"`
+	// DemoParams 调试/二次执行用的示例入参（JSON 对象 string->string），
+	// 键为完整占位符 token（如 "{{access_token}}"），与调试页 sample_vars 对齐；AI 导入时形成参数模版。
+	DemoParams  string `gorm:"column:demo_params;type:text" json:"demo_params"`
+	ContentType string `gorm:"column:content_type;size:120" json:"content_type"`
+	TimeoutMS   int    `gorm:"column:timeout_ms;default:0" json:"timeout_ms"`
+	RetryMax    int    `gorm:"column:retry_max;default:0" json:"retry_max"`
+	// AfterScriptsJSON 接口级「响应后脚本」（after_response）。结构 {"after_response":[scriptHookEntry...]}，
+	// 在应用级 after_response 脚本之后执行，可读改本接口的响应状态码/响应体（ctx.setResponseStatus/Body）。
+	AfterScriptsJSON string `gorm:"column:after_scripts_json;type:text" json:"-"`
+	// AfterScriptOrderJSON 可选；定义 after_response 阶段统一执行序列（方案 B）。
+	// 结构：[{"scope":"app","index":0},{"scope":"endpoint","index":0},...]
+	// 为空时退化为旧行为：应用级全部 → 接口级全部（向后兼容）。
+	AfterScriptOrderJSON string    `gorm:"column:after_script_order_json;type:text" json:"-"`
+	Enabled              bool      `gorm:"default:true" json:"enabled"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
 }
 
 func (OutboundEndpoint) TableName() string { return "outbound_endpoints" }
@@ -62,17 +72,39 @@ type OutboundConnector struct {
 	// DebounceSameEventMS 相同事件码（同一 event_type）+ 同一设备 + 同一连接器，在此毫秒内的重复触发将被忽略（0 表示关闭）。
 	DebounceSameEventMS int `gorm:"column:debounce_same_event_ms;default:0" json:"debounce_same_event_ms"`
 	// DebounceDiffEventMS 切换到不同事件码后，若距上次执行不足此毫秒则忽略（0 表示关闭）。
-	DebounceDiffEventMS int       `gorm:"column:debounce_diff_event_ms;default:0" json:"debounce_diff_event_ms"`
-	Priority            int       `gorm:"column:priority;default:0;index" json:"priority"`
-	// TriggerType 触发方式：device_event | http_webhook | http_poll | websocket | stomp
+	DebounceDiffEventMS int `gorm:"column:debounce_diff_event_ms;default:0" json:"debounce_diff_event_ms"`
+	// DebounceSameScanMS 同一设备 + 连接器 + 相同扫码内容（event_data.value）在窗口内忽略（防连扫/回环，0 关闭）。
+	DebounceSameScanMS int `gorm:"column:debounce_same_scan_ms;default:0" json:"debounce_same_scan_ms"`
+	// LoopCooldownMS 本连接器下发 broadcast_intent 成功后，同设备在冷却期内不再触发（0 关闭）。
+	LoopCooldownMS int `gorm:"column:loop_cooldown_ms;default:0" json:"loop_cooldown_ms"`
+	Priority       int `gorm:"column:priority;default:0;index" json:"priority"`
+	// TriggerType 触发方式：device_event | http_webhook | http_poll | websocket | stomp | cron | system_event | api_call（接口模式）
 	TriggerType string `gorm:"column:trigger_type;size:40;not null;default:device_event" json:"trigger_type"`
 	// TriggerConfigJSON 触发器配置 JSON，结构因 TriggerType 而异。
 	TriggerConfigJSON string `gorm:"column:trigger_config_json;type:text" json:"-"`
 	// WebhookID 当 trigger_type=http_webhook 时，关联到 outbound_webhooks.id（0 表示未绑定）。
-	WebhookID           uint      `gorm:"column:webhook_id;index;default:0" json:"webhook_id"`
-	Enabled             bool      `gorm:"default:true" json:"enabled"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	WebhookID uint `gorm:"column:webhook_id;index;default:0" json:"webhook_id"`
+	// InterfaceMode 接口模式：当为 true 时，此连接器可作为接口被调用（支持入参和返回值）
+	InterfaceMode bool `gorm:"column:interface_mode;default:false" json:"interface_mode"`
+	// InterfaceCode 接口编码，当 interface_mode=true 时必填，用于唯一标识此连接器接口。
+	// 不使用部分唯一索引（MySQL 不支持 where 过滤索引；普通唯一索引会因多条空串冲突）。
+	// 唯一性在应用层校验（interface_mode=true 时 interface_code 不可重复）。
+	InterfaceCode string `gorm:"column:interface_code;size:80;index:idx_interface_code" json:"interface_code"`
+	// InputParamsJSON 输入参数定义（JSON Schema 格式），描述接口接受的参数
+	InputParamsJSON string `gorm:"column:input_params_json;type:text" json:"input_params_json"`
+	// OutputSchemaJSON 输出结构定义（JSON Schema 格式），描述接口返回的数据结构
+	OutputSchemaJSON string `gorm:"column:output_schema_json;type:text" json:"output_schema_json"`
+	// OutputMappingsJSON 输出参数映射配置（JSON 数组），定义如何从 context 映射到返回结构
+	OutputMappingsJSON string `gorm:"column:output_mappings_json;type:text" json:"output_mappings_json"`
+	// CustomScriptJSON 连接器全局自定义脚本。结构：
+	//   {"steps":[{name,enabled,code,timeout_ms}...], "result":{enabled,code,timeout_ms}}
+	//   steps：可在 step_type=connector_script 步骤中按 name 引用执行；
+	//   result：接口模式全流程结束、应用 output_mappings 之后执行，可整体改写接口返回值
+	//   （脚本中 ctx.getResponseBody() 读到当前返回 JSON，ctx.setResponseBody(json) 整体替换）。
+	CustomScriptJSON string    `gorm:"column:custom_script_json;type:text" json:"-"`
+	Enabled          bool      `gorm:"default:true" json:"enabled"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 func (OutboundConnector) TableName() string { return "outbound_connectors" }
@@ -115,12 +147,12 @@ func (OutboundConnectorEndpoint) TableName() string { return "outbound_connector
 
 // OutboundConnectorPhase 连接器内有序阶段；阶段之间严格顺序执行，阶段内由 RunMode 控制。
 type OutboundConnectorPhase struct {
-	ID          uint      `gorm:"primaryKey" json:"id"`
-	ConnectorID uint      `gorm:"column:connector_id;index;not null" json:"connector_id"`
-	SortOrder   int       `gorm:"column:sort_order;default:0" json:"sort_order"`
-	RunMode     string    `gorm:"column:run_mode;size:24;not null;default:parallel" json:"run_mode"` // parallel | sequential | failover
+	ID          uint   `gorm:"primaryKey" json:"id"`
+	ConnectorID uint   `gorm:"column:connector_id;index;not null" json:"connector_id"`
+	SortOrder   int    `gorm:"column:sort_order;default:0" json:"sort_order"`
+	RunMode     string `gorm:"column:run_mode;size:24;not null;default:parallel" json:"run_mode"` // parallel | sequential | failover
 	// ParamsJSON 阶段级默认占位符：JSON 对象，键为完整 {{...}}，值为字符串；本阶段任一步执行前写入公共 vars。
-	ParamsJSON string `gorm:"column:params_json;type:text" json:"-"`
+	ParamsJSON string    `gorm:"column:params_json;type:text" json:"-"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
@@ -129,16 +161,26 @@ func (OutboundConnectorPhase) TableName() string { return "outbound_connector_ph
 
 // OutboundConnectorStep 阶段内单步：HTTP 调用或向源设备下发 Intent / 打开网页。
 type OutboundConnectorStep struct {
-	ID            uint      `gorm:"primaryKey" json:"id"`
-	PhaseID       uint      `gorm:"column:phase_id;index;not null" json:"phase_id"`
-	SortOrder     int       `gorm:"column:sort_order;default:0" json:"sort_order"`
-	StepType      string    `gorm:"column:step_type;size:40;not null" json:"step_type"`      // http | app_script | broadcast_intent | view_url | message
-	EndpointID    uint      `gorm:"column:endpoint_id;index" json:"endpoint_id"`             // 仅 http；其它为 0
-	DelayBeforeMS int       `gorm:"column:delay_before_ms;default:0" json:"delay_before_ms"` // 本步执行前等待
-	DelayAfterMS  int       `gorm:"column:delay_after_ms;default:0" json:"delay_after_ms"`   // 本步执行完成后等待
-	ConfigJSON    string    `gorm:"column:config_json;type:text" json:"-"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID            uint   `gorm:"primaryKey" json:"id"`
+	PhaseID       uint   `gorm:"column:phase_id;index;not null" json:"phase_id"`
+	SortOrder     int    `gorm:"column:sort_order;default:0" json:"sort_order"`
+	StepType      string `gorm:"column:step_type;size:40;not null" json:"step_type"`      // http | app_script | connector_script | broadcast_intent | view_url | message | condition | call_connector
+	EndpointID    uint   `gorm:"column:endpoint_id;index" json:"endpoint_id"`             // 仅 http；其它为 0
+	DelayBeforeMS int    `gorm:"column:delay_before_ms;default:0" json:"delay_before_ms"` // 本步执行前等待
+	DelayAfterMS  int    `gorm:"column:delay_after_ms;default:0" json:"delay_after_ms"`   // 本步执行完成后等待
+	ConfigJSON    string `gorm:"column:config_json;type:text" json:"-"`
+	// ConditionExpr 条件表达式（仅当 step_type=condition 时使用），JavaScript 表达式，返回布尔值
+	ConditionExpr string `gorm:"column:condition_expr;type:text" json:"condition_expr"`
+	// TrueBranchPhaseID 条件为真时跳转到的阶段 ID（0 表示继续当前流程）
+	TrueBranchPhaseID uint `gorm:"column:true_branch_phase_id;default:0" json:"true_branch_phase_id"`
+	// FalseBranchPhaseID 条件为假时跳转到的阶段 ID（0 表示继续当前流程）
+	FalseBranchPhaseID uint `gorm:"column:false_branch_phase_id;default:0" json:"false_branch_phase_id"`
+	// CallConnectorCode 调用其他连接器的接口编码（仅当 step_type=call_connector 时使用）
+	CallConnectorCode string `gorm:"column:call_connector_code;size:80" json:"call_connector_code"`
+	// CallParamsJSON 调用连接器时的参数映射（JSON 对象），支持 {{placeholder}} 占位符
+	CallParamsJSON string    `gorm:"column:call_params_json;type:text" json:"call_params_json"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 func (OutboundConnectorStep) TableName() string { return "outbound_connector_steps" }
@@ -167,35 +209,35 @@ func (OutboundDelivery) TableName() string { return "outbound_deliveries" }
 // OutboundWebhook 应用下的入站 Webhook 接口（被动接收外部推送）。
 // 每个 app 可配置多个，各自独立的鉴权与解密方式。
 type OutboundWebhook struct {
-	ID            uint      `gorm:"primaryKey" json:"id"`
-	AppID         uint      `gorm:"column:app_id;index;not null" json:"app_id"`
-	Name          string    `gorm:"size:120;not null" json:"name"`
-	Description   string    `gorm:"type:text" json:"description"`
+	ID          uint   `gorm:"primaryKey" json:"id"`
+	AppID       uint   `gorm:"column:app_id;index;not null" json:"app_id"`
+	Name        string `gorm:"size:120;not null" json:"name"`
+	Description string `gorm:"type:text" json:"description"`
 	// Method 接收 HTTP 方法：POST | GET | PUT | PATCH（默认 POST）
-	Method        string    `gorm:"column:method;size:12;not null;default:POST" json:"method"`
+	Method string `gorm:"column:method;size:12;not null;default:POST" json:"method"`
 	// Path 接收路径标识，用于区分同 app 下多个 webhook（可选）
-	Path          string    `gorm:"column:path;size:500" json:"path"`
+	Path string `gorm:"column:path;size:500" json:"path"`
 	// AuthMethod 入站鉴权方式：none | hmac_sha256 | token_header | token_query
-	AuthMethod    string    `gorm:"column:auth_method;size:40;not null;default:none" json:"auth_method"`
+	AuthMethod string `gorm:"column:auth_method;size:40;not null;default:none" json:"auth_method"`
 	// DecryptMethod 解密方式：none | aes_cbc_pkcs7 | aes_ecb_pkcs7
-	DecryptMethod string    `gorm:"column:decrypt_method;size:40;not null;default:none" json:"decrypt_method"`
+	DecryptMethod string `gorm:"column:decrypt_method;size:40;not null;default:none" json:"decrypt_method"`
 	// DecryptKeyPath 指定需要解密的字段路径（点分隔，如 data.encryptedContent）；空表示整个 body 解密
-	DecryptKeyPath string    `gorm:"column:decrypt_key_path;size:500" json:"decrypt_key_path"`
+	DecryptKeyPath string `gorm:"column:decrypt_key_path;size:500" json:"decrypt_key_path"`
 	// ResponseTransformJS 解密后对 payload 执行的 JS 转换脚本；入口 function main(payload){ return transformed; }
 	ResponseTransformJS string `gorm:"column:response_transform_js;type:text" json:"response_transform_js"`
 	// ConfigJSON 鉴权/解密所需参数（JSON 对象），敏感字段在 API 响应中脱敏。
-	ConfigJSON    string    `gorm:"column:config_json;type:text" json:"-"`
+	ConfigJSON string `gorm:"column:config_json;type:text" json:"-"`
 	// ResponseSchema 由调试后「生成返回参数 Schema」写入；JSON Schema 格式，描述接口响应体结构。
-	ResponseSchema string   `gorm:"column:response_schema;type:text" json:"response_schema"`
+	ResponseSchema string `gorm:"column:response_schema;type:text" json:"response_schema"`
 	// ObservedEventTypes 调试时自动从 payload 提取的事件类型列表（JSON 字符串数组）。
 	ObservedEventTypes string `gorm:"column:observed_event_types;type:text" json:"observed_event_types"`
 	// LastReceivedAt 最近一次成功接收数据的时间。
 	LastReceivedAt *time.Time `gorm:"column:last_received_at" json:"last_received_at"`
 	// ReceiveToken 用于接收 URL 的不透明令牌，替代路径中暴露的 ID。
-	ReceiveToken  string     `gorm:"column:receive_token;size:32;uniqueIndex" json:"receive_token"`
-	Enabled       bool      `gorm:"default:true" json:"enabled"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ReceiveToken string    `gorm:"column:receive_token;size:32;uniqueIndex" json:"receive_token"`
+	Enabled      bool      `gorm:"default:true" json:"enabled"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 func (OutboundWebhook) TableName() string { return "outbound_webhooks" }

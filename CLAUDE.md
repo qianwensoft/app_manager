@@ -57,6 +57,23 @@ make agent-release       # assembleRelease
 make install-agent       # installDebug via ADB
 ```
 
+### Form App (React)
+```bash
+cd form-app && npm install
+npm run dev              # dev server at :5175, proxies /api to http://127.0.0.1:8080
+npm run build            # production build → form-app/dist/
+```
+
+## Development Environment
+
+Entry point: **http://localhost:3001** (web/Vue 3)
+
+| Port | Service | Role |
+|------|---------|------|
+| `:3001` | web (Vite) | Browser entry |
+| `:5175` | form-app (Vite) | Form designer dev server |
+| `:8080` | server (Go) | Backend API |
+
 ### Release Packaging
 ```bash
 make release             # web + server + agent → dist/release/app-manager-<VERSION>/

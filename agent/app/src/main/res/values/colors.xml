@@ -14,5 +14,7 @@
     <color name="agent_divider">#E2E8F0</color>
     <color name="agent_tile_icon_tint">#3B82F6</color>
     <color name="agent_placeholder">#CBD5E1</color>
+    <!-- 磐石 Bedrock 自适应图标背景（深岩底色） -->
+    <color name="ic_launcher_background">#16202E</color>
 </resources>
 

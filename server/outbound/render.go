@@ -166,8 +166,9 @@ const maxHTTPResponseContextBody = maxEventDataSubst
 
 // MergeHTTPResponseContext 将最近一次成功 HTTP 响应写入 vars，供同连接器后续步骤 expandTemplate 使用。
 // 占位符：
-//   {{http.last.body}}  {{http.last.status}}
-//   {{http.step.<步骤表 id>.body}}  {{http.step.<步骤表 id>.status}}（meta.StepID / 步骤主键）
+//
+//	{{http.last.body}}  {{http.last.status}}
+//	{{http.step.<步骤表 id>.body}}  {{http.step.<步骤表 id>.status}}（meta.StepID / 步骤主键）
 func MergeHTTPResponseContext(vars map[string]string, stepID uint, httpStatus int, body []byte) {
 	if vars == nil {
 		return
@@ -352,11 +353,11 @@ func DeviceEventJSONPlaceholder(rec models.DeviceEvent) string {
 		created = time.Now()
 	}
 	payload := map[string]interface{}{
-		"id":          rec.ID,
-		"device_id":   rec.DeviceID,
-		"event_type":  rec.EventType,
-		"event_data":  eventDataField,
-		"created_at":  created.UTC().Format(time.RFC3339Nano),
+		"id":         rec.ID,
+		"device_id":  rec.DeviceID,
+		"event_type": rec.EventType,
+		"event_data": eventDataField,
+		"created_at": created.UTC().Format(time.RFC3339Nano),
 	}
 	b, err := json.Marshal(payload)
 	if err != nil {
@@ -420,7 +421,33 @@ func expandTemplate(s string, vars map[string]string) string {
 		s = strings.ReplaceAll(s, p.k, p.v)
 	}
 	// 在静态变量替换之后求值函数调用（{{$func(args)}}）
-	return evalFunctions(s)
+	s = evalFunctions(s)
+	// 注意：不在此处理转义字符（\n、\r\n、\t 等）
+	// 对于 JSON body，转义字符会由 JSON 解析器自动处理
+	// 对于需要转义的场景（如纯文本、URL参数），调用方需显式调用 unescapeString
+	return s
+}
+
+// ExpandTemplateWithUnescape 扩展模板并处理转义字符（用于非 JSON 场景，如纯文本、URL 参数等）
+func ExpandTemplateWithUnescape(s string, vars map[string]string) string {
+	return unescapeString(expandTemplate(s, vars))
+}
+
+// unescapeString 处理常见转义字符（\n → 换行、\r\n → 回车换行、\t → 制表符、\\ → 反斜杠）
+func unescapeString(s string) string {
+	// 按顺序处理，避免重复替换
+	replacements := []struct{ old, new string }{
+		{"\\r\\n", "\r\n"}, // Windows 换行
+		{"\\n", "\n"},      // Unix 换行
+		{"\\r", "\r"},      // Mac 旧换行
+		{"\\t", "\t"},      // 制表符
+		{"\\\\", "\\"},     // 反斜杠本身
+	}
+	result := s
+	for _, r := range replacements {
+		result = strings.ReplaceAll(result, r.old, r.new)
+	}
+	return result
 }
 
 // ExpandTemplate 与运行时占位符替换规则一致（供连接器编辑预览等 API）。
@@ -466,11 +493,11 @@ func TemplateDemoPayload() map[string]interface{} {
 		"execution_template": vars,
 		"device_event":       rec,
 		"device": map[string]interface{}{
-			"id":             rec.DeviceID,
-			"name":           vars["{{device.name}}"],
-			"serial":         vars["{{device.serial}}"],
-			"agent_alias":    vars["{{device.agent_alias}}"],
-			"server_alias":   vars["{{device.server_alias}}"],
+			"id":           rec.DeviceID,
+			"name":         vars["{{device.name}}"],
+			"serial":       vars["{{device.serial}}"],
+			"agent_alias":  vars["{{device.agent_alias}}"],
+			"server_alias": vars["{{device.server_alias}}"],
 		},
 		"definition": map[string]interface{}{
 			"key":  vars["{{definition.key}}"],

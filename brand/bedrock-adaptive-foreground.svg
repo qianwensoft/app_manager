@@ -1,0 +1,29 @@
+<svg width="108" height="108" viewBox="0 0 108 108" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="磐石 Bedrock adaptive foreground">
+  <!-- Art kept within the 72dp safe zone (centered, ~18..90). Transparent background. -->
+  <defs>
+    <linearGradient id="fTop" x1="54" y1="26" x2="54" y2="44" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3BE0C8"/>
+      <stop offset="1" stop-color="#19B8A6"/>
+    </linearGradient>
+    <linearGradient id="fMid" x1="54" y1="42" x2="54" y2="62" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5C7491"/>
+      <stop offset="1" stop-color="#3E5168"/>
+    </linearGradient>
+    <linearGradient id="fBot" x1="54" y1="60" x2="54" y2="84" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#41556E"/>
+      <stop offset="1" stop-color="#28384C"/>
+    </linearGradient>
+    <radialGradient id="fGlow" cx="54" cy="34" r="22" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#3BE0C8" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#3BE0C8" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <circle cx="54" cy="34" r="21" fill="url(#fGlow)"/>
+  <path d="M54 62 L82 78 L54 94 L26 78 Z" fill="url(#fBot)"/>
+  <path d="M54 62 L82 78 L54 94 Z" fill="#000000" opacity="0.16"/>
+  <path d="M54 45 L74 56 L54 67 L34 56 Z" fill="url(#fMid)"/>
+  <path d="M54 45 L74 56 L54 67 Z" fill="#000000" opacity="0.16"/>
+  <path d="M54 26 L67 33.5 L54 41 L41 33.5 Z" fill="url(#fTop)"/>
+  <path d="M54 26 L67 33.5 L54 41 Z" fill="#ffffff" opacity="0.20"/>
+  <line x1="54" y1="41" x2="54" y2="45" stroke="#3BE0C8" stroke-width="1.6" stroke-linecap="round"/>
+</svg>

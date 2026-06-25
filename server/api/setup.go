@@ -198,7 +198,7 @@ func registerLinuxService(serviceName string) {
 	configPath := workDir + "/config.yaml"
 
 	serviceContent := fmt.Sprintf(`[Unit]
-Description=AppManager Service
+Description=磐石 Bedrock Service
 After=network.target
 
 [Service]

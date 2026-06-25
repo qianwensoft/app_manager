@@ -1,0 +1,243 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/agent_background">
+
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="?attr/actionBarSize"
+        android:background="@drawable/bg_main_header"
+        app:navigationIcon="@drawable/ic_arrow_back"
+        app:title="@string/main_tile_backend"
+        app:titleTextColor="@android:color/white"
+        app:navigationIconTint="@android:color/white" />
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:paddingTop="16dp"
+            android:paddingBottom="24dp">
+
+            <!-- 系统管理固定磁贴 -->
+            <TextView
+                style="@style/AppManagerSectionTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                android:text="@string/backend_section_admin" />
+
+            <!-- Row 1: 设置 | 权限 | 设备信息 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/card_tile_settings"
+                    style="@style/AppManagerGridTile"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1">
+                    <LinearLayout style="@style/AppManagerGridTileInner">
+                        <ImageView android:layout_width="32dp" android:layout_height="32dp"
+                            android:src="@android:drawable/ic_menu_preferences"
+                            android:contentDescription="@string/main_tile_settings"
+                            app:tint="@color/agent_tile_icon_tint" />
+                        <TextView style="@style/AppManagerGridTileLabel" android:text="@string/main_tile_settings" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/card_tile_runtime_perm"
+                    style="@style/AppManagerGridTile"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1">
+                    <LinearLayout style="@style/AppManagerGridTileInner">
+                        <ImageView android:layout_width="32dp" android:layout_height="32dp"
+                            android:src="@android:drawable/ic_lock_idle_lock"
+                            android:contentDescription="@string/main_tile_runtime_perm"
+                            app:tint="@color/agent_tile_icon_tint" />
+                        <TextView style="@style/AppManagerGridTileLabel" android:text="@string/main_tile_runtime_perm" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/card_tile_device_info"
+                    style="@style/AppManagerGridTile"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1">
+                    <LinearLayout style="@style/AppManagerGridTileInner">
+                        <ImageView android:layout_width="32dp" android:layout_height="32dp"
+                            android:src="@android:drawable/ic_menu_info_details"
+                            android:contentDescription="@string/main_tile_device"
+                            app:tint="@color/agent_tile_icon_tint" />
+                        <TextView style="@style/AppManagerGridTileLabel" android:text="@string/main_tile_device" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+            </LinearLayout>
+
+            <!-- Row 2: 权限管理 | 出站连接 | 自定义事件 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/card_tile_perm_mgmt"
+                    style="@style/AppManagerGridTile"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1">
+                    <LinearLayout style="@style/AppManagerGridTileInner">
+                        <ImageView android:layout_width="32dp" android:layout_height="32dp"
+                            android:src="@android:drawable/ic_menu_manage"
+                            android:contentDescription="@string/main_tile_perm_mgmt"
+                            app:tint="@color/agent_tile_icon_tint" />
+                        <TextView style="@style/AppManagerGridTileLabel" android:text="@string/main_tile_perm_mgmt" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/card_tile_outbound"
+                    style="@style/AppManagerGridTile"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1">
+                    <LinearLayout style="@style/AppManagerGridTileInner">
+                        <ImageView android:layout_width="32dp" android:layout_height="32dp"
+                            android:src="@android:drawable/ic_menu_share"
+                            android:contentDescription="@string/main_tile_outbound"
+                            app:tint="@color/agent_tile_icon_tint" />
+                        <TextView style="@style/AppManagerGridTileLabel" android:text="@string/main_tile_outbound" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/card_tile_custom_events"
+                    style="@style/AppManagerGridTile"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1">
+                    <LinearLayout style="@style/AppManagerGridTileInner">
+                        <ImageView android:layout_width="32dp" android:layout_height="32dp"
+                            android:src="@android:drawable/ic_menu_sort_by_size"
+                            android:contentDescription="@string/main_tile_custom_events"
+                            app:tint="@color/agent_tile_icon_tint" />
+                        <TextView style="@style/AppManagerGridTileLabel" android:text="@string/main_tile_custom_events" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+            </LinearLayout>
+
+            <!-- Row 3: 事件监听 | 关于 | 系统更新 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/card_tile_listen_state"
+                    style="@style/AppManagerGridTile"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1">
+                    <LinearLayout style="@style/AppManagerGridTileInner">
+                        <ImageView android:layout_width="32dp" android:layout_height="32dp"
+                            android:src="@android:drawable/ic_lock_idle_alarm"
+                            android:contentDescription="@string/main_tile_listen_state"
+                            app:tint="@color/agent_tile_icon_tint" />
+                        <TextView style="@style/AppManagerGridTileLabel" android:text="@string/main_tile_listen_state" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/card_tile_about"
+                    style="@style/AppManagerGridTile"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1">
+                    <LinearLayout style="@style/AppManagerGridTileInner">
+                        <ImageView android:layout_width="32dp" android:layout_height="32dp"
+                            android:src="@android:drawable/ic_menu_info_details"
+                            android:contentDescription="@string/main_tile_about"
+                            app:tint="@color/agent_tile_icon_tint" />
+                        <TextView style="@style/AppManagerGridTileLabel" android:text="@string/main_tile_about" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/card_tile_system_update"
+                    style="@style/AppManagerGridTile"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1">
+                    <LinearLayout style="@style/AppManagerGridTileInner">
+                        <ImageView android:layout_width="32dp" android:layout_height="32dp"
+                            android:src="@android:drawable/ic_popup_sync"
+                            android:contentDescription="@string/main_tile_system_update"
+                            app:tint="@color/agent_tile_icon_tint" />
+                        <TextView style="@style/AppManagerGridTileLabel" android:text="@string/main_tile_system_update" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+            </LinearLayout>
+
+            <!-- Row 4: 打印配置 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <com.google.android.material.card.MaterialCardView
+                    android:id="@+id/card_tile_printer"
+                    style="@style/AppManagerGridTile"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1">
+                    <LinearLayout style="@style/AppManagerGridTileInner">
+                        <ImageView android:layout_width="32dp" android:layout_height="32dp"
+                            android:src="@android:drawable/ic_menu_sort_by_size"
+                            android:contentDescription="@string/main_tile_printer"
+                            app:tint="@color/agent_tile_icon_tint" />
+                        <TextView style="@style/AppManagerGridTileLabel" android:text="@string/main_tile_printer" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
+
+                <!-- 占位，保持三列对齐 -->
+                <View android:layout_width="0dp" android:layout_height="0dp" android:layout_weight="1" />
+                <View android:layout_width="0dp" android:layout_height="0dp" android:layout_weight="1" />
+            </LinearLayout>
+
+            <!-- 后台推送菜单区域（动态填充） -->
+            <TextView
+                android:id="@+id/tv_backend_menus_title"
+                style="@style/AppManagerSectionTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:layout_marginBottom="8dp"
+                android:text="@string/backend_section_pushed"
+                android:visibility="gone" />
+
+            <LinearLayout
+                android:id="@+id/container_backend_tiles"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+
+        </LinearLayout>
+    </ScrollView>
+</LinearLayout>

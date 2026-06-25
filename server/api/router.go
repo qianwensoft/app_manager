@@ -3,9 +3,12 @@ package api
 import (
 	"app-manager/auth"
 	"app-manager/config"
-	"app-manager/datastack"
 	"app-manager/database"
+	"app-manager/datastack"
 	"app-manager/mcp"
+	"app-manager/ratelimit"
+	"log"
+	"os"
 
 	"github.com/gin-gonic/gin"
 )
@@ -15,6 +18,13 @@ func SetupRouter() *gin.Engine {
 	StartAdbKeepalive()
 
 	r := gin.Default()
+
+	// 受信任代理：默认不信任任何代理（用 RemoteAddr 作为客户端 IP，X-Forwarded-For 不可伪造）。
+	// 部署在反向代理后时，在配置 server.trusted_proxies 填入代理地址以正确解析真实客户端 IP。
+	// 这同时消除 Gin "trusted all proxies" 的不安全警告。
+	if err := r.SetTrustedProxies(config.C.Server.TrustedProxies); err != nil {
+		log.Printf("SetTrustedProxies failed: %v", err)
+	}
 
 	// CORS
 	r.Use(func(c *gin.Context) {
@@ -28,10 +38,35 @@ func SetupRouter() *gin.Engine {
 		c.Next()
 	})
 
+	// 接口调用量埋点（内存累加，定期 flush；仅统计 /api/*）
+	r.Use(MetricsMiddleware())
+
 	// 静态文件
 	r.Static("/assets", "./web/dist/assets")
 	r.StaticFile("/", "./web/dist/index.html")
-	r.Static("/scada-editor", "./web/dist/scada-editor")
+	// scada-editor: 优先 web/dist/scada-editor（make 构建后），fallback 到 scada-editor/dist（开发模式）
+	scadaEditorDir := "./web/dist/scada-editor"
+	if _, err := os.Stat(scadaEditorDir); os.IsNotExist(err) {
+		scadaEditorDir = "../scada-editor/dist"
+	}
+	r.Static("/scada-editor", scadaEditorDir)
+	// form-app: 优先 web/dist/form-app（make 构建后），fallback 到 form-app/dist（开发模式）
+	// 禁用缓存以避免浏览器加载旧版本的 JavaScript 文件
+	formAppDir := "./web/dist/form-app"
+	if _, err := os.Stat(formAppDir); os.IsNotExist(err) {
+		formAppDir = "../form-app/dist"
+	}
+	formAppGroup := r.Group("/form-app")
+	formAppGroup.Use(func(c *gin.Context) {
+		c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+		c.Header("Pragma", "no-cache")
+		c.Header("Expires", "0")
+		c.Next()
+	})
+	formAppGroup.StaticFS("", gin.Dir(formAppDir, false))
+
+	// Prometheus（内网抓取；生产请用防火墙或反向代理限制访问）
+	r.GET("/metrics", PrometheusMetrics)
 
 	// 安装状态检查（正常模式）
 	r.GET("/api/setup/status", GetSetupStatus)
@@ -53,9 +88,14 @@ func SetupRouter() *gin.Engine {
 	r.GET("/api/agent/install-apk", AgentInstallApkDownload)
 	r.POST("/api/agent/pulled-apk-upload", AgentPulledApkUpload)
 	r.GET("/api/agent/menu-manifest", AgentMenuManifest)
+	r.POST("/api/agent/menu-execution/report", AgentMenuExecutionReport)
+	r.GET("/api/agent/update/check", AgentUpdateCheck)
+	r.GET("/api/agent/work-orders", AgentListWorkOrders)
 
 	// 免登录：组态分享
 	r.GET("/api/scada/info/share/:token", GetScadaInfoByShareToken)
+	// 免登录：表单分享
+	r.GET("/api/form-app/info/share/:token", GetFormAppByShareToken)
 	// 组态静态资源（上传目录映射）
 	r.Static("/api/scada/resource", config.C.Storage.Path)
 
@@ -70,11 +110,16 @@ func SetupRouter() *gin.Engine {
 	r.GET("/api/agent-updates/latest", GetLatestAgentUpdate)
 	r.GET("/api/agent-updates/:id/download", DownloadAgentAPK)
 
+	rl := config.C.RateLimit
+
 	// 认证
 	a := r.Group("/api/auth")
 	{
 		a.POST("/register", Register)
-		a.POST("/login", Login)
+		a.POST("/login",
+			ratelimit.Middleware(ratelimit.KeyByClientIP, rl.LoginRPM(), rl.LoginBurstSize()),
+			Login,
+		)
 		a.GET("/me", auth.AuthMiddleware(), Me)
 		a.GET("/scope-catalog", auth.AuthMiddleware(), ScopeCatalog)
 		a.POST("/apikey", auth.AuthMiddleware(), CreateAPIKey)
@@ -97,7 +142,11 @@ func SetupRouter() *gin.Engine {
 		d.GET("/:id/apps", GetDeviceApps)
 		d.POST("/:id/apps/refresh", RefreshDeviceAppsFromAgent)
 		d.POST("/:id/apps/pull-apk", auth.RequireRole("admin", "operator"), PullInstalledApkFromAgent)
+		d.POST("/:id/apps/export-to-server", auth.RequireRole("admin", "operator"), ExportInstalledApkToServer)
 		d.POST("/:id/agent/refresh-info", RefreshAgentDeviceInfoFromAgent)
+		d.POST("/:id/agent/open-wireless-adb", auth.RequireRole("admin", "operator"), OpenWirelessAdbOnAgent)
+		d.POST("/:id/agent/trigger-menu", auth.RequireRole("admin", "operator"), TriggerAgentMenuOnAgent)
+		d.POST("/:id/agent/nav-key", auth.RequireRole("admin", "operator"), AgentNavKey)
 		d.POST("/:id/speed-test", auth.RequireRole("admin", "operator"), DeviceSpeedTest)
 		d.GET("/:id/file-hub", ListDeviceFileHub)
 		d.POST("/:id/audio-recording/start", auth.RequireRole("admin", "operator"), StartAudioRecording)
@@ -126,6 +175,7 @@ func SetupRouter() *gin.Engine {
 		op.POST("/recording/start", StartRecording)
 		op.POST("/recording/stop", StopRecording)
 		op.POST("/grant-read-logs", GrantAgentReadLogs)
+		op.POST("/grant-accessibility", GrantAgentAccessibility)
 		op.POST("/connect-by-ip", AdbConnectByAgentIP)
 		op.POST("/pair-by-ip", AdbPairByAgentIP)
 		op.GET("/status", GetAdbStatus)
@@ -163,6 +213,22 @@ func SetupRouter() *gin.Engine {
 		settings.PUT("/heartbeat", UpdateHeartbeatSettings)
 		settings.GET("/register", GetRegisterSetting)
 		settings.PUT("/register", UpdateRegisterSetting)
+		settings.GET("/cluster", ClusterStatus)
+		settings.GET("/cluster/agent-route/:deviceKey", ClusterAgentRoute)
+		settings.GET("/system-info", GetSystemInfo)
+		settings.PUT("/env", UpdateEnvSettings)
+		settings.POST("/ffmpeg/check", CheckFFmpeg)
+		settings.POST("/ffmpeg/install", InstallFFmpeg)
+		// 运行监控：Agent 在线连接 + 接口调用量趋势/详情 + STOMP 主题统计
+		settings.GET("/agent-connections", GetAgentConnections)
+		settings.GET("/agent-online-trend", GetAgentOnlineTrend)
+		settings.GET("/api-call-trend", GetApiCallTrend)
+		settings.GET("/api-call-details", GetApiCallDetails)
+		settings.GET("/stomp-stats", GetStompStats)
+		// AI（Claude）配置
+		settings.GET("/claude", GetClaudeSettings)
+		settings.PUT("/claude", UpdateClaudeSettings)
+		settings.POST("/claude/demo-chat", ClaudeDemoChat)
 	}
 
 	// 用户管理（仅 admin）
@@ -226,6 +292,9 @@ func SetupRouter() *gin.Engine {
 		ce.DELETE("/listen-state/device/:device_id", auth.RequireRole("admin", "operator"), DeleteDeviceCustomListenState)
 		ce.POST("/listen/start", auth.RequireRole("admin", "operator"), BatchStartCustomEventListen)
 		ce.POST("/listen/stop", auth.RequireRole("admin", "operator"), BatchStopCustomEventListen)
+		ce.POST("/analyze/start", auth.RequireRole("admin", "operator"), StartCustomEventAnalyze)
+		ce.POST("/analyze/stop", auth.RequireRole("admin", "operator"), StopCustomEventAnalyze)
+		ce.GET("/analyze/session/:device_id", auth.RequireRole("admin", "operator", "viewer"), GetCustomEventAnalyzeSession)
 	}
 	ceg := r.Group("/api/custom-event-groups", auth.AuthMiddleware())
 	{
@@ -249,6 +318,11 @@ func SetupRouter() *gin.Engine {
 	{
 		obBase.GET("/connectors/:id/device-states", auth.RequireRole("admin", "operator", "viewer"), GetOutboundConnectorDeviceStates)
 		obBase.GET("/connectors", auth.RequireRole("admin", "operator", "viewer"), ListOutboundConnectors)
+
+		// 连接器接口元信息（所有认证用户可读）
+		obBase.GET("/connector-interfaces", ListConnectorInterfaces)
+		obBase.GET("/connector-interfaces/:code", GetConnectorInterface)
+
 		ob := obBase.Group("", auth.RequireRole("admin", "operator"))
 		{
 			ob.GET("/apps", ListOutboundApps)
@@ -262,6 +336,8 @@ func SetupRouter() *gin.Engine {
 			ob.PUT("/apps/:id", UpdateOutboundApp)
 			ob.DELETE("/apps/:id", DeleteOutboundApp)
 			ob.POST("/apps/:id/clone", CloneOutboundApp)
+			ob.POST("/apps/:id/script-ai", OutboundScriptAIChat)
+			ob.POST("/interface-ai", OutboundInterfaceAIChat)
 
 			ob.GET("/endpoints", ListOutboundEndpoints)
 			ob.POST("/endpoints", CreateOutboundEndpoint)
@@ -269,6 +345,7 @@ func SetupRouter() *gin.Engine {
 			ob.POST("/template-expand", PostOutboundTemplateExpand)
 			ob.GET("/template-vars", GetOutboundTemplateVars)
 			ob.POST("/phase-preview", PostOutboundPhasePreview)
+			ob.POST("/interface-debug", PostOutboundInterfaceDebug)
 			ob.POST("/endpoints/debug", PostOutboundEndpointDebug)
 			ob.GET("/endpoints/:id", GetOutboundEndpoint)
 			ob.GET("/endpoints/:id/param-schema", GetEndpointParamSchema)
@@ -276,6 +353,7 @@ func SetupRouter() *gin.Engine {
 			ob.DELETE("/endpoints/:id", DeleteOutboundEndpoint)
 
 			ob.POST("/connectors", CreateOutboundConnector)
+			ob.POST("/connectors/script-ai", OutboundScriptAIChat)
 			ob.POST("/connectors/:id/devices/:device_id/pause", PostOutboundConnectorDevicePause)
 			ob.POST("/connectors/:id/devices/:device_id/enable", PostOutboundConnectorDeviceEnable)
 			ob.POST("/connectors/:id/devices/:device_id/exclude", PostOutboundConnectorDeviceExclude)
@@ -304,6 +382,20 @@ func SetupRouter() *gin.Engine {
 		}
 	}
 
+	// 出站接口调用：供 form-app 运行时调用（connector / third_party）。
+	// 用 FormRuntimeAuthMiddleware 同时接受管理端 JWT Bearer 与 Agent WebView 的 X-Device-Token，
+	// 否则 Agent 端（仅有 X-Device-Token）调用 connector/third_party 接口会 401。
+	obCall := r.Group("/api/outbound", auth.FormRuntimeAuthMiddleware())
+	{
+		obCall.POST("/connector-interfaces/call", CallConnectorInterface)
+		obCall.GET("/connector-interfaces/:code/invoke", CallConnectorInterfaceByCode)
+		obCall.POST("/connector-interfaces/:code/invoke", CallConnectorInterfaceByCode)
+		obCall.PUT("/connector-interfaces/:code/invoke", CallConnectorInterfaceByCode)
+		obCall.DELETE("/connector-interfaces/:code/invoke", CallConnectorInterfaceByCode)
+		obCall.PATCH("/connector-interfaces/:code/invoke", CallConnectorInterfaceByCode)
+		obCall.POST("/endpoints/:id/call", CallOutboundEndpoint)
+	}
+
 	// 上传链接管理
 	ul := r.Group("/api/upload-links", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"))
 	{
@@ -327,7 +419,7 @@ func SetupRouter() *gin.Engine {
 		sca.PUT("/infos/:scada_id", auth.RequireRole("admin", "operator"), UpdateScadaInfo)
 		sca.DELETE("/infos/:scada_id", auth.RequireRole("admin", "operator"), DeleteScadaInfo)
 		sca.POST("/save-canvas", auth.RequireRole("admin", "operator"), SaveScadaCanvas)
-			sca.POST("/infos/:scada_id/save-canvas", auth.RequireRole("admin", "operator"), SaveScadaCanvasByID)
+		sca.POST("/infos/:scada_id/save-canvas", auth.RequireRole("admin", "operator"), SaveScadaCanvasByID)
 		sca.POST("/infos/:scada_id/publish", auth.RequireRole("admin", "operator"), PublishScada)
 		sca.POST("/infos/:scada_id/unpublish", auth.RequireRole("admin", "operator"), UnpublishScada)
 		sca.POST("/resource/upload/:category", auth.RequireRole("admin", "operator"), UploadScadaResource)
@@ -344,7 +436,8 @@ func SetupRouter() *gin.Engine {
 	sim := r.Group("/api/scada/sim-points", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"))
 	{
 		sim.GET("", ListScadaSimPoints)
-			sim.GET("/snapshot/:scada_code", GetScadaSimSnapshot)
+		sim.GET("/snapshot/:scada_code", GetScadaSimSnapshot)
+		sim.GET("/history/:scada_code", GetScadaSimHistory)
 		sim.POST("", CreateScadaSimPoint)
 		sim.PUT("/:id", UpdateScadaSimPoint)
 		sim.DELETE("/:id", DeleteScadaSimPoint)
@@ -374,6 +467,7 @@ func SetupRouter() *gin.Engine {
 		dstack.PUT("/datasets/:id/structures/:sid", auth.RequireRole("admin", "operator"), UpdateDataStructure)
 		dstack.DELETE("/datasets/:id/structures/:sid", auth.RequireRole("admin", "operator"), DeleteDataStructure)
 		dstack.POST("/interfaces/:id/debug", auth.RequireRole("admin", "operator"), DebugDataInterface)
+		dstack.POST("/interfaces/:id/invoke", auth.RequireRole("admin", "operator", "viewer"), InvokeDataInterfaceForClient)
 		dstack.GET("/interfaces/:id/mock-params", auth.RequireRole("admin", "operator"), MockParamsInterface)
 		dstack.GET("/interfaces/:id/param-schema", auth.RequireRole("admin", "operator"), GetInterfaceParamSchema)
 		dstack.POST("/datasets/:id/generate-static-crud-interfaces", auth.RequireRole("admin", "operator"), GenerateStaticCrudInterfaces)
@@ -392,10 +486,135 @@ func SetupRouter() *gin.Engine {
 	amenu := r.Group("/api/agent-menus", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"))
 	{
 		amenu.GET("", ListAgentMenuItems)
+		amenu.GET("/execution-logs", ListAgentMenuExecutionLogs)
+		amenu.GET("/matrix", GetAgentMenuMatrix)
 		amenu.POST("", CreateAgentMenuItem)
 		amenu.PUT("/:id", UpdateAgentMenuItem)
 		amenu.DELETE("/:id", DeleteAgentMenuItem)
 		amenu.POST("/deploy", DeployAgentMenus)
+		amenu.PUT("/assignments", SetAgentMenuAssignments)
+	}
+	// 工单（问题反馈）
+	// 创建 / 上传附件 / 我的工单：支持登录用户(JWT) 或 Agent(X-Device-Token)
+	woRuntime := r.Group("/api/work-orders", auth.FormRuntimeAuthMiddleware())
+	{
+		woRuntime.POST("", CreateWorkOrder)
+		woRuntime.GET("/types", ListWorkOrderTypes)
+		woRuntime.GET("/mine", ListMyWorkOrders)
+		woRuntime.GET("/mine/:id", GetMyWorkOrder)
+		woRuntime.PUT("/mine/:id", UpdateMyWorkOrder)
+		woRuntime.POST("/mine/:id/status", ChangeMyWorkOrderStatus)
+		woRuntime.POST("/:id/items", UploadWorkOrderItem)
+		woRuntime.GET("/:id/items/:item_id/download", DownloadWorkOrderItem)
+		woRuntime.PUT("/:id/items/:item_id", UpdateWorkOrderItem)
+		woRuntime.POST("/items/:item_id/recognize-barcode", RecognizeWorkOrderItemBarcode)
+		// 工单进展：web(JWT) 与 app(device-token) 共用
+		woRuntime.GET("/:id/progress", ListWorkOrderProgress)
+		woRuntime.POST("/:id/progress", CreateWorkOrderProgress)
+		woRuntime.POST("/progress/:progress_id/attachments", UploadWorkOrderProgressAttachment)
+		woRuntime.GET("/progress/attachments/:att_id/download", DownloadWorkOrderProgressAttachment)
+		// 标签字典读取 + 工单标签维护：web(JWT) 与 app(device-token) 共用
+		woRuntime.GET("/tags", ListWorkOrderTagDict)
+		woRuntime.PUT("/:id/tags", SetWorkOrderTags)
+	}
+	// 管理/处理：登录用户
+	wo := r.Group("/api/work-orders", auth.AuthMiddleware())
+	{
+		wo.GET("", ListWorkOrders)
+		wo.POST("/types", auth.RequireRole("admin", "operator"), CreateWorkOrderType)
+		wo.PUT("/types/:id", auth.RequireRole("admin", "operator"), UpdateWorkOrderType)
+		wo.DELETE("/types/:id", auth.RequireRole("admin", "operator"), DeleteWorkOrderType)
+		wo.GET("/webhooks", auth.RequireRole("admin", "operator"), ListWorkOrderWebhooks)
+		wo.POST("/webhooks", auth.RequireRole("admin", "operator"), CreateWorkOrderWebhook)
+		wo.PUT("/webhooks/:id", auth.RequireRole("admin", "operator"), UpdateWorkOrderWebhook)
+		wo.DELETE("/webhooks/:id", auth.RequireRole("admin", "operator"), DeleteWorkOrderWebhook)
+		wo.GET("/webhooks/logs", auth.RequireRole("admin", "operator"), ListWorkOrderWebhookLogs)
+		wo.GET("/webhooks/logs/:id", auth.RequireRole("admin", "operator"), GetWorkOrderWebhookLog)
+		// 工作流管理（admin/operator）
+		wo.GET("/workflows", auth.RequireRole("admin", "operator"), ListWorkOrderWorkflows)
+		wo.GET("/workflows/:id", auth.RequireRole("admin", "operator"), GetWorkOrderWorkflow)
+		wo.POST("/workflows", auth.RequireRole("admin", "operator"), CreateWorkOrderWorkflow)
+		wo.PUT("/workflows/:id", auth.RequireRole("admin", "operator"), UpdateWorkOrderWorkflow)
+		wo.DELETE("/workflows/:id", auth.RequireRole("admin", "operator"), DeleteWorkOrderWorkflow)
+		wo.POST("/workflows/:id/test", auth.RequireRole("admin", "operator"), TestWorkOrderWorkflow)
+		wo.GET("/workflow-logs", auth.RequireRole("admin", "operator"), ListWorkOrderWorkflowLogs)
+		// 标签字典管理（admin/operator）
+		wo.GET("/tag-dict", auth.RequireRole("admin", "operator"), ListWorkOrderTags)
+		wo.POST("/tag-dict", auth.RequireRole("admin", "operator"), CreateWorkOrderTag)
+		wo.PUT("/tag-dict/:id", auth.RequireRole("admin", "operator"), UpdateWorkOrderTag)
+		wo.DELETE("/tag-dict/:id", auth.RequireRole("admin", "operator"), DeleteWorkOrderTag)
+		// 批量归档/取消归档（静态段，须在 /:id 之前避免路由歧义）
+		wo.POST("/batch/archive", auth.RequireRole("admin", "operator"), BatchArchiveWorkOrders)
+		wo.POST("/batch/unarchive", auth.RequireRole("admin", "operator"), BatchUnarchiveWorkOrders)
+		wo.GET("/:id", GetWorkOrder)
+		wo.PUT("/:id", auth.RequireRole("admin", "operator"), UpdateWorkOrder)
+		wo.DELETE("/:id", auth.RequireRole("admin", "operator"), DeleteWorkOrder)
+		wo.POST("/:id/assign", auth.RequireRole("admin", "operator"), AssignWorkOrder)
+		wo.POST("/:id/status", auth.RequireRole("admin", "operator"), ChangeWorkOrderStatus)
+	}
+	fapp := r.Group("/api/form-app", auth.AuthMiddleware(), auth.RequireRole("admin", "operator", "viewer"))
+	{
+		fapp.GET("/infos", ListFormApps)
+		fapp.GET("/infos/:id", GetFormApp)
+		fapp.GET("/infos/code/:code", GetFormAppByCode)
+		fapp.POST("/infos", auth.RequireRole("admin", "operator"), CreateFormApp)
+		fapp.PUT("/infos/:id", auth.RequireRole("admin", "operator"), UpdateFormApp)
+		fapp.DELETE("/infos/:id", auth.RequireRole("admin", "operator"), DeleteFormApp)
+		fapp.POST("/infos/:id/save-schema", auth.RequireRole("admin", "operator"), SaveFormAppSchema)
+		fapp.POST("/repair-generated-schemas", auth.RequireRole("admin", "operator"), RepairGeneratedFormSchemas)
+		fapp.POST("/infos/:id/generate-pages-from-table", auth.RequireRole("admin", "operator"), GenerateFormAppPagesFromTable)
+		fapp.POST("/infos/:id/publish", auth.RequireRole("admin", "operator"), PublishFormApp)
+		fapp.POST("/infos/:id/unpublish", auth.RequireRole("admin", "operator"), UnpublishFormApp)
+		fapp.POST("/infos/:id/deploy-to-devices", auth.RequireRole("admin", "operator"), DeployFormAppToDevices)
+		fapp.POST("/runtime/query", auth.RequireRole("admin", "operator"), FormRuntimeQuery)
+		fapp.POST("/runtime/submit", auth.RequireRole("admin", "operator"), FormRuntimeSubmit)
+		fapp.GET("/runtime/draft", FormRuntimeGetDraft)
+		fapp.PUT("/runtime/draft", FormRuntimePutDraft)
+		fapp.DELETE("/runtime/draft", FormRuntimeDeleteDraft)
+
+		fapp.GET("/infos/:id/pages", GetFormAppPages)
+		fapp.POST("/infos/:id/pages", auth.RequireRole("admin", "operator"), CreateFormAppPage)
+		fapp.GET("/pages/:page_id", GetFormAppPage)
+		fapp.PUT("/pages/:page_id", auth.RequireRole("admin", "operator"), UpdateFormAppPage)
+		fapp.DELETE("/pages/:page_id", auth.RequireRole("admin", "operator"), DeleteFormAppPage)
+		fapp.POST("/pages/:page_id/duplicate", auth.RequireRole("admin", "operator"), DuplicateFormAppPage)
+		// AI 编辑字段快照与回滚
+		fapp.GET("/pages/:page_id/snapshots", ListPageSnapshots)
+		fapp.POST("/pages/:page_id/ai-save", auth.RequireRole("admin", "operator"), AISavePage)
+		fapp.POST("/pages/:page_id/snapshots/:snapshot_id/rollback", auth.RequireRole("admin", "operator"), RollbackPageSnapshot)
+		fapp.POST("/print-debug", auth.RequireRole("admin", "operator"), FormAppPrintDebug)
+		fapp.POST("/infos/:id/pages/batch-delete", auth.RequireRole("admin", "operator"), BatchDeleteFormAppPages)
+		fapp.POST("/infos/:id/pages/clear", auth.RequireRole("admin", "operator"), ClearFormAppPages)
+		fapp.POST("/infos/:id/pages/regenerate", auth.RequireRole("admin", "operator"), RegenerateSinglePage)
+		fapp.POST("/infos/:id/pages/reorder", auth.RequireRole("admin", "operator"), ReorderFormAppPages)
+
+		fapp.GET("/infos/:id/links", GetFormAppPageLinks)
+		fapp.POST("/infos/:id/links", auth.RequireRole("admin", "operator"), CreateFormAppPageLink)
+		fapp.PUT("/links/:link_id", auth.RequireRole("admin", "operator"), UpdateFormAppPageLink)
+		fapp.DELETE("/links/:link_id", auth.RequireRole("admin", "operator"), DeleteFormAppPageLink)
+
+		// AI 技能管理 + AI Chat 流式生成字段
+		fapp.GET("/skills", ListAISkills)
+		fapp.GET("/skills/:skill_id", GetAISkill)
+		fapp.POST("/skills", auth.RequireRole("admin", "operator"), CreateAISkill)
+		fapp.PUT("/skills/:skill_id", auth.RequireRole("admin", "operator"), UpdateAISkill)
+		fapp.DELETE("/skills/:skill_id", auth.RequireRole("admin", "operator"), DeleteAISkill)
+		fapp.POST("/ai/chat", FormAppAIChat)
+
+		fapp.GET("/infos/:id/event-routes", GetFormAppEventRoutes)
+		fapp.POST("/infos/:id/event-routes", auth.RequireRole("admin", "operator"), CreateFormAppEventRoute)
+		fapp.PUT("/event-routes/:route_id", auth.RequireRole("admin", "operator"), UpdateFormAppEventRoute)
+		fapp.DELETE("/event-routes/:route_id", auth.RequireRole("admin", "operator"), DeleteFormAppEventRoute)
+		fapp.POST("/infos/:id/test-event", auth.RequireRole("admin", "operator"), TestFormAppEvent)
+	}
+
+	// Form App Agent 运行时（JWT 或 X-Device-Token）
+	agentFapp := r.Group("/api/form-app/agent-runtime", auth.FormRuntimeAuthMiddleware())
+	{
+		agentFapp.GET("/:code/bootstrap", FormRuntimeBootstrap)
+		agentFapp.POST("/query", FormRuntimeQuery)
+		agentFapp.POST("/submit", FormRuntimeSubmit)
+		agentFapp.POST("/match-event", FormRuntimeMatchEvent)
 	}
 
 	// 组织架构
@@ -456,11 +675,23 @@ func SetupRouter() *gin.Engine {
 		tp.GET("/:id/wechat/callback", WechatCallback)
 		tp.POST("/:id/wechat/refresh", WechatRefresh)
 		tp.POST("/:id/wechat/ticket", WechatTicket)
+
+		// API Endpoints
+		tp.GET("/endpoints", ListThirdPartyApiEndpoints)
+		tp.POST("/endpoints", CreateThirdPartyApiEndpoint)
+		tp.GET("/endpoints/:id", GetThirdPartyApiEndpoint)
+		tp.PUT("/endpoints/:id", UpdateThirdPartyApiEndpoint)
+		tp.DELETE("/endpoints/:id", DeleteThirdPartyApiEndpoint)
 	}
+
+	// Third party API call (accessible to operators for form-app scanner)
+	r.POST("/api/thirdparty/call", auth.AuthMiddleware(), CallThirdPartyApi)
 
 	// WebSocket
 	r.GET("/ws/stomp", StompWSAuth, StompWS)
 	r.GET("/ws/stomp-scada", StompScadaShareAuth, StompScadaShareWS)
+	r.GET("/ws/open/stomp", OpenStompWSAuth, OpenStompWS)
+	r.GET("/ws/scada/stream/:scada_code", ScadaStreamWS)
 	r.GET("/ws/screen/:deviceId", auth.ScreenWSAuth(), ScreenWS)
 	r.GET("/ws/shell/:deviceId", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"), ShellWS)
 	r.GET("/ws/logcat/:deviceId", auth.AuthMiddleware(), LogcatWS)
@@ -479,7 +710,10 @@ func SetupRouter() *gin.Engine {
 	r.Any("/api/open/v1/outbound/webhooks/receive/:app_code/:token", ReceiveOutboundWebhook)
 
 	// 对外开放 API
-	open := r.Group("/api/open/v1", auth.APIKeyMiddleware())
+	open := r.Group("/api/open/v1",
+		auth.APIKeyMiddleware(),
+		ratelimit.Middleware(ratelimit.KeyByAPIKey, rl.OpenAPIRPM(), rl.OpenAPIBurstSize()),
+	)
 	{
 		open.GET("/data/:code", OpenDataInterfaceInvoke)
 		open.POST("/data/:code", OpenDataInterfaceInvoke)
@@ -490,10 +724,17 @@ func SetupRouter() *gin.Engine {
 		open.POST("/apps/:id/install", auth.RequireOpenScope(auth.OpenAppsInstall), InstallApp)
 		open.GET("/tasks/:id", auth.RequireOpenScope(auth.OpenTasksGet), GetTask)
 		open.GET("/events", auth.RequireOpenScope(auth.OpenEventsList), ListDeviceEvents)
+		// 工单：第三方查询/处理/关闭
+		open.GET("/work-orders/:code", auth.RequireOpenScope(auth.OpenWorkOrderRead), OpenGetWorkOrder)
+		open.POST("/work-orders/:code/process", auth.RequireOpenScope(auth.OpenWorkOrderWrite), OpenProcessWorkOrder)
+		open.POST("/work-orders/:code/close", auth.RequireOpenScope(auth.OpenWorkOrderWrite), OpenCloseWorkOrder)
 	}
 
 	// MCP — Model Context Protocol (X-API-Key auth)
-	mcpGroup := r.Group("/mcp/v1", auth.APIKeyMiddleware())
+	mcpGroup := r.Group("/mcp/v1",
+		auth.APIKeyMiddleware(),
+		ratelimit.Middleware(ratelimit.KeyByAPIKey, rl.MCPRPM(), rl.MCPBurstSize()),
+	)
 	{
 		mcpGroup.POST("/", mcp.Handle)
 	}
@@ -502,7 +743,11 @@ func SetupRouter() *gin.Engine {
 	r.NoRoute(func(c *gin.Context) {
 		path := c.Request.URL.Path
 		if len(path) >= 14 && path[:14] == "/scada-editor/" {
-			c.File("./web/dist/scada-editor/index.html")
+			c.File(scadaEditorDir + "/index.html")
+			return
+		}
+		if len(path) >= 10 && path[:10] == "/form-app/" {
+			c.File(formAppDir + "/index.html")
 			return
 		}
 		c.File("./web/dist/index.html")

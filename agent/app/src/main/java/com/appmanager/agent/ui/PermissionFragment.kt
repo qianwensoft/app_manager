@@ -16,11 +16,14 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import com.appmanager.agent.R
 import com.appmanager.agent.service.TouchAccessibilityService
+import com.appmanager.agent.util.ForegroundAppDetector
+import com.appmanager.agent.util.StorageAccessUtil
 
 class PermissionFragment : Fragment() {
 
@@ -69,6 +72,18 @@ class PermissionFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
+        // 使用情况访问权限警告横幅
+        val warningBanner = view.findViewById<View>(R.id.usageStatsWarning)
+        val btnGrantUsageStats = view.findViewById<Button>(R.id.btnGrantUsageStats)
+
+        btnGrantUsageStats.setOnClickListener {
+            try {
+                startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+            } catch (e: Exception) {
+                Toast.makeText(requireContext(), "无法打开设置页面", Toast.LENGTH_SHORT).show()
+            }
+        }
+
         // 一键申请
         view.findViewById<Button>(R.id.btnRequestAll).setOnClickListener {
             requestAllRuntimePermissions()
@@ -83,7 +98,7 @@ class PermissionFragment : Fragment() {
             label = "无障碍服务（触控转发）",
             hint = "开启后可使用 Web 端远程操控触屏",
             checkFn = { isAccessibilityEnabled(requireContext()) },
-            grantFn = { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+            grantFn = { openAccessibilityGrant() }
         )
 
         setupSpecialPermission(
@@ -132,25 +147,8 @@ class PermissionFragment : Fragment() {
             view.findViewById(R.id.cardManageStorage),
             label = "管理所有文件（完整存储访问）",
             hint = "Android 11+ 需要此权限访问全部文件",
-            checkFn = {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
-                    android.os.Environment.isExternalStorageManager()
-                else true
-            },
-            grantFn = {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    try {
-                        startActivity(
-                            Intent(
-                                Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                                Uri.parse("package:${requireContext().packageName}")
-                            )
-                        )
-                    } catch (e: Exception) {
-                        startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
-                    }
-                }
-            }
+            checkFn = { StorageAccessUtil.isAllFilesAccessGranted(requireContext()) },
+            grantFn = { StorageAccessUtil.openManageAllFilesSettings(requireContext()) }
         )
 
         setupSpecialPermission(
@@ -168,6 +166,20 @@ class PermissionFragment : Fragment() {
             hint = "开启后服务器可通过 Wi-Fi 授予 READ_LOGS 等权限，无需 USB",
             checkFn = { isWirelessAdbEnabled(requireContext()) },
             grantFn = { openWirelessAdbSettings() }
+        )
+
+        setupSpecialPermission(
+            view.findViewById(R.id.cardUsageStats),
+            label = "使用情况访问权限",
+            hint = "允许 Agent 检测当前前台应用包名并推送到服务器，用于触发器过滤等功能",
+            checkFn = { ForegroundAppDetector.hasUsageStatsPermission(requireContext()) },
+            grantFn = {
+                try {
+                    startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+                } catch (e: Exception) {
+                    Toast.makeText(requireContext(), "无法打开设置页面", Toast.LENGTH_SHORT).show()
+                }
+            }
         )
 
         setupSpecialPermission(
@@ -193,6 +205,12 @@ class PermissionFragment : Fragment() {
     override fun onResume() {
         super.onResume()
         val v = view ?: return
+
+        // 更新使用情况访问权限警告横幅显示状态
+        val warningBanner = v.findViewById<View>(R.id.usageStatsWarning)
+        val hasUsageStatsPermission = ForegroundAppDetector.hasUsageStatsPermission(requireContext())
+        warningBanner?.visibility = if (hasUsageStatsPermission) View.GONE else View.VISIBLE
+
         // 刷新运行时权限行
         refreshRuntimePermRows(v)
         // 刷新特殊权限卡片
@@ -294,6 +312,39 @@ class PermissionFragment : Fragment() {
     }
 
     // ── 辅助方法 ─────────────────────────────────────────────────────────────
+
+    /**
+     * 打开无障碍授权。Android 13+ 对侧载/会话安装的应用默认把无障碍开关锁为
+     * 「受限制的设置」，直接跳无障碍页用户也点不动。此时先引导到「应用详情」让用户
+     * 通过右上角菜单「允许受限制的设置」解锁，再回无障碍页开启。
+     */
+    private fun openAccessibilityGrant() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            AlertDialog.Builder(requireContext())
+                .setTitle("开启无障碍服务")
+                .setMessage(
+                    "Android 13 及以上对本应用的无障碍开关默认锁定为「受限制的设置」。\n\n" +
+                    "若在无障碍页面无法开启（开关变灰），请按以下步骤解锁：\n" +
+                    "1. 点「去应用详情」\n" +
+                    "2. 点右上角 ⋮ 菜单 →「允许受限制的设置」\n" +
+                    "3. 返回后再进无障碍页面开启本应用"
+                )
+                .setPositiveButton("去无障碍页面") { _, _ ->
+                    runCatching { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+                }
+                .setNeutralButton("去应用详情") { _, _ ->
+                    runCatching {
+                        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                            data = Uri.fromParts("package", requireContext().packageName, null)
+                        })
+                    }
+                }
+                .setNegativeButton("取消", null)
+                .show()
+        } else {
+            runCatching { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+        }
+    }
 
     private fun isAccessibilityEnabled(ctx: Context): Boolean {
         val service = "${ctx.packageName}/${TouchAccessibilityService::class.java.canonicalName}"

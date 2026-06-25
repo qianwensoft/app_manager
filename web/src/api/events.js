@@ -19,3 +19,22 @@ export const deleteCustomEventListenState = (deviceId) =>
 /** @param {{ device_id?: string, event_key?: string, include_inactive?: string }} [params] */
 export const getCustomListenState = (params) => http.get('/custom-events/listen-state', { params })
 export const getCustomListenAggregates = () => http.get('/custom-events/listen-state/aggregates')
+
+/**
+ * 开始事件分析（下发 Agent 探针，结果经 STOMP 推送）
+ * @param {number} deviceId
+ * @param {{ minScans?: number, probeMode?: 'preset'|'custom', probeActions?: string[] }} [opts]
+ */
+export const startCustomEventAnalyze = (deviceId, opts = {}) =>
+  http.post('/custom-events/analyze/start', {
+    device_id: deviceId,
+    min_scans: opts.minScans ?? 2,
+    probe_mode: opts.probeMode ?? 'preset',
+    probe_actions: opts.probeActions?.length ? opts.probeActions : undefined
+  })
+
+export const stopCustomEventAnalyze = (deviceId) =>
+  http.post('/custom-events/analyze/stop', { device_id: deviceId })
+
+export const getCustomEventAnalyzeSession = (deviceId) =>
+  http.get(`/custom-events/analyze/session/${deviceId}`)

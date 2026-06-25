@@ -12,38 +12,39 @@ type User struct {
 }
 
 type Device struct {
-	ID             uint      `gorm:"primaryKey" json:"id"`
-	UserID         *uint     `gorm:"index" json:"user_id"`
-	Serial         string    `gorm:"uniqueIndex;size:100" json:"serial"`
-	Name           string    `gorm:"size:100" json:"name"`
-	Model          string    `gorm:"size:100" json:"model"`
-	Brand          string    `gorm:"size:50" json:"brand"`
-	OSVersion      string    `gorm:"size:50" json:"os_version"`
-	SDKVersion     int       `json:"sdk_version"`
-	CPUInfo        string    `json:"cpu_info"`
-	TotalMemory    int64     `json:"total_memory"`
-	TotalStorage   int64     `json:"total_storage"`
+	ID           uint   `gorm:"primaryKey" json:"id"`
+	UserID       *uint  `gorm:"index" json:"user_id"`
+	Serial       string `gorm:"uniqueIndex;size:100" json:"serial"`
+	Name         string `gorm:"size:100" json:"name"`
+	Model        string `gorm:"size:100" json:"model"`
+	Brand        string `gorm:"size:50" json:"brand"`
+	OSVersion    string `gorm:"size:50" json:"os_version"`
+	SDKVersion   int    `json:"sdk_version"`
+	CPUInfo      string `json:"cpu_info"`
+	TotalMemory  int64  `json:"total_memory"`
+	TotalStorage int64  `json:"total_storage"`
 	// Agent 心跳：/data 已用空间（MB）；ADB 路径可能未写入
-	StorageUsed    int64     `json:"storage_used"`
-	Resolution     string    `json:"resolution"`
-	IPAddress      string    `json:"ip_address"`
-	Status         string    `gorm:"size:20;default:'offline'" json:"status"`
-	AgentConnected bool      `gorm:"default:false" json:"agent_connected"`
-	AgentToken     string    `gorm:"size:64;index" json:"agent_token"` // 扫码/Agent WebSocket 连接键，与自增 id 不同
-	AgentVersion   string    `gorm:"size:20" json:"agent_version"`
-	Battery        int       `json:"battery"`
-	CPUUsage       float64   `json:"cpu_usage"`
-	MemoryUsed     int64     `json:"memory_used"`
-	MemoryTotal    int64     `json:"memory_total"`
-	IP             string    `gorm:"size:50" json:"ip"`
-	NetworkType    string    `gorm:"size:20" json:"network_type"`
-	WifiSSID       string    `gorm:"column:wifi_ssid;size:100" json:"wifi_ssid"`
-	WifiSignal     int       `json:"wifi_signal"`
-	WifiSpeed      int       `json:"wifi_speed"`
-	NetworkConnected bool    `json:"network_connected"`
-	GroupName      string    `gorm:"size:100;default:''" json:"group_name"`
-	ServerAlias    string    `gorm:"size:100;default:''" json:"server_alias"`
-	AgentAlias     string     `gorm:"size:100;default:''" json:"agent_alias"`
+	StorageUsed           int64   `json:"storage_used"`
+	Resolution            string  `json:"resolution"`
+	IPAddress             string  `json:"ip_address"`
+	Status                string  `gorm:"size:20;default:'offline'" json:"status"`
+	AgentConnected        bool    `gorm:"default:false" json:"agent_connected"`
+	AgentToken            string  `gorm:"size:64;index" json:"agent_token"` // 扫码/Agent WebSocket 连接键，与自增 id 不同
+	AgentVersion          string  `gorm:"size:20" json:"agent_version"`
+	AgentCapabilitiesJSON string  `gorm:"column:agent_capabilities_json;type:text" json:"agent_capabilities_json"`
+	Battery               int     `json:"battery"`
+	CPUUsage              float64 `json:"cpu_usage"`
+	MemoryUsed            int64   `json:"memory_used"`
+	MemoryTotal           int64   `json:"memory_total"`
+	IP                    string  `gorm:"size:50" json:"ip"`
+	NetworkType           string  `gorm:"size:20" json:"network_type"`
+	WifiSSID              string  `gorm:"column:wifi_ssid;size:100" json:"wifi_ssid"`
+	WifiSignal            int     `json:"wifi_signal"`
+	WifiSpeed             int     `json:"wifi_speed"`
+	NetworkConnected      bool    `json:"network_connected"`
+	GroupName             string  `gorm:"size:100;default:''" json:"group_name"`
+	ServerAlias           string  `gorm:"size:100;default:''" json:"server_alias"`
+	AgentAlias            string  `gorm:"size:100;default:''" json:"agent_alias"`
 	// 由 Agent 心跳上报：是否允许 Web 远程查看屏幕
 	AllowRemoteScreen bool `gorm:"default:false" json:"allow_remote_screen"`
 	// Agent 上报的已安装应用（第三方），JSON 数组，供 Web 在无 ADB 时展示
@@ -51,13 +52,17 @@ type Device struct {
 	// Agent 上报的手机硬件序列号（Build.SERIAL 等）：设备接入的物理唯一键，与 agent_token 变更时仍按此串号合并同一台设备。
 	// 库级唯一由 database.MigrateDeviceAndroidSerialUnique 的部分索引保证（排除空 / unknown）。
 	AndroidSerial string `gorm:"column:android_serial;size:64;index" json:"android_serial"`
-	// 无线 ADB 连接地址（ip:port），独立于 USB serial，每次 connect-by-ip 成功后更新
-	WirelessAdbSerial string `gorm:"column:wireless_adb_serial;size:64" json:"wireless_adb_serial"`
+	// 无线 ADB 上次成功连接的端口；IP 每次连接时取 Agent 心跳上报的 device.IP
+	WirelessAdbPort int `gorm:"column:wireless_adb_port" json:"wireless_adb_port"`
+	// 已废弃：仅迁移期读取旧 ip:port，新数据不再写入
+	WirelessAdbSerial string `gorm:"column:wireless_adb_serial;size:64" json:"wireless_adb_serial,omitempty"`
 	// 指针：MySQL 在 NO_ZERO_DATE 下禁止 '0000-00-00'，未上线/未心跳时为 NULL
-	LastSeenAt     *time.Time `json:"last_seen_at"`
+	LastSeenAt *time.Time `json:"last_seen_at"`
 	// Agent 菜单下发 revision（单调递增，与 agent_menu 分配变更同步）
 	AgentMenuRevision uint `gorm:"default:0" json:"agent_menu_revision"`
-	CreatedAt      time.Time  `json:"created_at"`
+	// 当前前台应用包名（Agent 心跳上报）
+	ForegroundPackage string    `gorm:"column:foreground_package;size:200" json:"foreground_package"`
+	CreatedAt         time.Time `json:"created_at"`
 }
 
 type App struct {
@@ -108,9 +113,9 @@ type InstallTask struct {
 	Output            string     `gorm:"type:text" json:"output"`
 	StartAfterInstall bool       `gorm:"default:true" json:"start_after_install"` // 安装成功后是否尝试拉起主界面（ADB monkey 或 Agent start_app）
 	AgentFetchToken   string     `gorm:"size:64;default:''" json:"-"`             // Agent 拉取 APK 凭据，与 X-Device-Token 一起校验
-	CreatedBy       uint       `json:"created_by"`
-	CreatedAt       time.Time  `json:"created_at"`
-	FinishedAt      *time.Time `json:"finished_at"`
+	CreatedBy         uint       `json:"created_by"`
+	CreatedAt         time.Time  `json:"created_at"`
+	FinishedAt        *time.Time `json:"finished_at"`
 }
 
 type AuditLog struct {
@@ -125,11 +130,11 @@ type AuditLog struct {
 }
 
 type DeviceEvent struct {
-	ID         uint      `gorm:"primaryKey" json:"id"`
-	DeviceID   uint      `json:"device_id"`
-	EventType  string    `gorm:"size:50" json:"event_type"`
-	EventData  string    `gorm:"type:text" json:"event_data"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	DeviceID  uint      `json:"device_id"`
+	EventType string    `gorm:"size:50" json:"event_type"`
+	EventData string    `gorm:"type:text" json:"event_data"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type Recording struct {
@@ -137,7 +142,7 @@ type Recording struct {
 	DeviceID  uint      `json:"device_id"`
 	FileName  string    `gorm:"size:255" json:"file_name"`
 	FilePath  string    `gorm:"size:500" json:"file_path"`
-	HlsDir    string    `gorm:"size:500" json:"hls_dir"`   // HLS 目录（含 index.m3u8），空字符串表示尚未生成
+	HlsDir    string    `gorm:"size:500" json:"hls_dir"` // HLS 目录（含 index.m3u8），空字符串表示尚未生成
 	FileSize  int64     `json:"file_size"`
 	Duration  int       `json:"duration"`
 	CreatedBy uint      `json:"created_by"`

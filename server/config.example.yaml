@@ -21,6 +21,25 @@ adb:
 ffmpeg:
   path: ""
 
+# 接口文档 AI 助手可用无头浏览器抓取（执行 JS、跟随跳转、最多分析 5 层）。
+# path 为空时自动探测系统 Chrome/Chromium；探测不到则回退为纯 HTTP 抓取（不执行 JS）。
+chrome:
+  path: ""
+
 jwt:
   secret: change-me-in-production
   expire_hour: 24
+
+cluster:
+  enabled: false
+  node_id: ""
+  redis_url: "redis://127.0.0.1:6379/0"
+
+rate_limit:
+  enabled: false
+  login_per_minute: 20
+  login_burst: 5
+  open_api_per_minute: 120
+  open_api_burst: 30
+  mcp_per_minute: 60
+  mcp_burst: 15

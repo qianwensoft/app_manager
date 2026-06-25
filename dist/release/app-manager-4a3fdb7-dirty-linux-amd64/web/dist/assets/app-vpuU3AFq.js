@@ -1,0 +1,1 @@
+import{B as t}from"./index-BDl-n6mW.js";const o=(p,s)=>t.post("/apps/upload",p,{timeout:6e5,onUploadProgress:a=>s}),l=()=>t.get("/apps"),n=(p,s)=>t.put(`/apps/${p}`,s),d=p=>t.delete(`/apps/${p}`),i=(p,s,a={})=>t.post(`/apps/${p}/install`,{device_ids:s,...a}),c=(p,s)=>t.post(`/apps/${p}/uninstall`,{device_ids:s});export{n as a,c as b,d,l as g,i,o as u};

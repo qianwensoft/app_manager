@@ -21,7 +21,9 @@ class AgentWebSocket(
     private val deviceToken: String,
     private val onMessage: (Message) -> Unit,
     private val onConnected: () -> Unit = {},
-    private val onDisconnected: () -> Unit = {}
+    private val onDisconnected: () -> Unit = {},
+    /** 连接失败时回传可读原因，供 UI/通知展示，便于真机排查。 */
+    private val onError: (String) -> Unit = {}
 ) {
     private val TAG = "AgentWebSocket"
     private val gson = Gson()
@@ -68,7 +70,9 @@ class AgentWebSocket(
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.w(TAG, "WebSocket failure: ${formatWsFailure(t, response)}", t)
+                val reason = formatWsFailure(t, response)
+                Log.w(TAG, "WebSocket failure: $reason", t)
+                onError(reason)
                 onDisconnected()
                 scheduleReconnect()
             }

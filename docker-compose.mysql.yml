@@ -1,0 +1,31 @@
+# MySQL 可选叠加配置（与 docker-compose.yml 一起使用）：
+#   docker compose -f docker-compose.yml -f docker-compose.mysql.yml up -d --build
+
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootsecret}
+      MYSQL_DATABASE: app_manager
+      MYSQL_USER: appmanager
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-appmanager}
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  app-manager:
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      DATABASE_TYPE: mysql
+      DATABASE_DSN: ${DATABASE_DSN:-appmanager:appmanager@tcp(mysql:3306)/app_manager?charset=utf8mb4&parseTime=True&loc=Local}
+
+volumes:
+  mysql-data:

@@ -14,24 +14,24 @@ import (
 )
 
 type deviceListenBrief struct {
-	ID               uint   `json:"id"`
-	Name             string `json:"name"`
-	Serial           string `json:"serial"`
-	AgentConnected   bool   `json:"agent_connected"`
-	AgentToken       string `json:"agent_token,omitempty"`
-	GroupName        string `json:"group_name"`
-	AgentAlias       string `json:"agent_alias"`
-	ServerAlias      string `json:"server_alias"`
+	ID             uint   `json:"id"`
+	Name           string `json:"name"`
+	Serial         string `json:"serial"`
+	AgentConnected bool   `json:"agent_connected"`
+	AgentToken     string `json:"agent_token,omitempty"`
+	GroupName      string `json:"group_name"`
+	AgentAlias     string `json:"agent_alias"`
+	ServerAlias    string `json:"server_alias"`
 }
 
 type customListenStateOut struct {
-	DeviceID         uint              `json:"device_id"`
-	Active           bool              `json:"active"`
-	UpdatedAt        time.Time         `json:"updated_at"`
-	DefinitionIDs    []uint            `json:"definition_ids"`
-	EventKeys        []string          `json:"event_keys"`
-	DefinitionNames  []string          `json:"definition_names"`
-	Device           *deviceListenBrief `json:"device,omitempty"`
+	DeviceID        uint               `json:"device_id"`
+	Active          bool               `json:"active"`
+	UpdatedAt       time.Time          `json:"updated_at"`
+	DefinitionIDs   []uint             `json:"definition_ids"`
+	EventKeys       []string           `json:"event_keys"`
+	DefinitionNames []string           `json:"definition_names"`
+	Device          *deviceListenBrief `json:"device,omitempty"`
 }
 
 func persistListenStateAfterStart(defs []models.CustomEventDefinition, results []customEventListenResult) {
@@ -94,7 +94,7 @@ func persistListenStateAfterStop(results []customEventListenResult) {
 	}
 }
 
-// DeactivateDeviceCustomListenStateForAgentKey Agent 断开时标记监听未激活（设备端实际已 unregister）。
+// DeactivateDeviceCustomListenStateForAgentKey 将库中监听标为未激活（仅 Web/Agent 显式暂停或删除时调用；断线重连不再调用，以便自动恢复）。
 func DeactivateDeviceCustomListenStateForAgentKey(agentKey string) {
 	devID, ok := agent.ResolveDeviceID(agentKey)
 	if !ok {

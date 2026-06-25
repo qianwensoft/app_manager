@@ -7,7 +7,9 @@ import android.net.wifi.WifiManager
 import com.appmanager.agent.config.AgentConfig
 import com.appmanager.agent.util.AppVersions
 import com.appmanager.agent.util.DeviceInfoUtil
+import com.appmanager.agent.util.DeviceMachineId
 import com.appmanager.agent.util.DisplayUtil
+import com.appmanager.agent.util.ForegroundAppDetector
 import com.appmanager.agent.ws.DeviceInfoData
 
 private data class WifiInfo(val ssid: String?, val signal: Int?, val speed: Int?)
@@ -80,6 +82,7 @@ fun collectDeviceInfoData(context: Context): DeviceInfoData {
     val config = AgentConfig.get(context)
     val (rw, rh) = DisplayUtil.getPhysicalDisplaySize(context)
     val resolution = "${rw}x${rh}"
+    val foregroundPackage = ForegroundAppDetector.getForegroundPackageName(context)
     return DeviceInfoData(
         battery = battery,
         cpuUsage = cpuUsage(),
@@ -102,6 +105,7 @@ fun collectDeviceInfoData(context: Context): DeviceInfoData {
         resolution = resolution,
         allowRemoteScreen = config.allowRemoteScreen,
         agentVersion = AppVersions.displayLabel(context),
-        androidSerial = try { android.os.Build.SERIAL } catch (_: Exception) { "" }
+        androidSerial = DeviceMachineId.get(context),
+        foregroundPackage = foregroundPackage
     )
 }

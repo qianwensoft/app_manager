@@ -25,6 +25,7 @@ import java.util.concurrent.atomic.AtomicInteger
 object OutboundMessagePresenter {
 
     private const val CHANNEL_ID = "outbound_messages"
+    private const val TAG = "OutboundMsg"
     private val notifyIds = AtomicInteger(900000)
 
     @Volatile
@@ -36,9 +37,11 @@ object OutboundMessagePresenter {
         val app = context.applicationContext
         val dur = durationMs.coerceIn(1500, 60_000)
         mainHandler.post {
-            postNotification(app, title, body)
+            // 三条展示路径各自独立兜底：任意一条因厂商 ROM / 权限 / 主题差异抛异常，
+            // 都不能让承载它的主线程 runnable 崩溃（此前会直接杀掉整个进程）。
+            try { postNotification(app, title, body) } catch (e: Throwable) { android.util.Log.w(TAG, "notification failed", e) }
             tryToastTop(app, title, body)
-            maybeShowOverlay(app, title, body, dur)
+            try { maybeShowOverlay(app, title, body, dur) } catch (e: Throwable) { android.util.Log.w(TAG, "overlay failed", e) }
         }
     }
 

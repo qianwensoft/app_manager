@@ -3,6 +3,11 @@ import { useAuthStore } from '@/stores/auth'
 /** 始终走 Vite /ws 代理（与页面同源），生产环境与后端同源无需代理 */
 export const WS_BASE = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`
 
+/** WebSocket 基址 → HTTP API 基址（供 Agent 扫码 JSON 等使用） */
+export function httpBaseFromWs(wsBase = WS_BASE) {
+  return wsBase.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:').replace(/\/ws$/, '')
+}
+
 export class WSClient {
   constructor(path, { onOpen, onMessage, onClose, onError, reconnect = true } = {}) {
     this.url = `${WS_BASE}${path}`
@@ -20,7 +25,8 @@ export class WSClient {
   connect() {
     const auth = useAuthStore()
     const t = auth.token ? encodeURIComponent(auth.token) : ''
-    const url = t ? `${this.url}?token=${t}` : this.url
+    const sep = this.url.includes('?') ? '&' : '?'
+    const url = t ? `${this.url}${sep}token=${t}` : this.url
     this.ws = new WebSocket(url)
     this.ws.binaryType = 'arraybuffer'
 

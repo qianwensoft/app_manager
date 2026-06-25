@@ -76,7 +76,7 @@ object CommandDispatcher {
             "command" -> {
                 Log.i(TAG, "Dispatching command: ${msg.action}")
                 when (msg.action) {
-                    CommandAction.START_SCREEN  -> service.promptScreenCapturePermission()
+                    CommandAction.START_SCREEN  -> service.requestScreenCapture()
                     CommandAction.STOP_SCREEN   -> service.stopScreenCapture()
                     CommandAction.START_SHELL   -> service.startShell()
                     CommandAction.STOP_SHELL    -> service.stopShell()
@@ -85,8 +85,9 @@ object CommandDispatcher {
                         if (cmd != null) service.executeShellCommand(cmd)
                     }
                     CommandAction.START_LOGCAT  -> {
-                        val filter = (msg.data as? Map<*, *>)?.get("filter") as? String ?: ""
-                        service.startLogcat(filter)
+                        val m = msg.data as? Map<*, *>
+                        val filters = parseLogcatFilters(m)
+                        service.startLogcat(filters)
                     }
                     CommandAction.STOP_LOGCAT   -> service.stopLogcat()
                     CommandAction.START_RECORDING -> service.startRecording()
@@ -97,7 +98,7 @@ object CommandDispatcher {
                         val camera = (msg.data as? Map<*, *>)?.get("camera") as? String
                             ?: msg.camera
                             ?: "back"
-                        service.startCamera(camera)
+                        service.startCamera(camera, msg.iceServers)
                     }
                     CommandAction.STOP_CAMERA -> {
                         val camera = (msg.data as? Map<*, *>)?.get("camera") as? String
@@ -170,6 +171,16 @@ object CommandDispatcher {
                             Log.w(TAG, "push_device_info missing request_id")
                         }
                     }
+                    CommandAction.OPEN_WIRELESS_ADB -> service.openWirelessAdbSettings()
+                    CommandAction.TRIGGER_AGENT_MENU -> {
+                        val m = msg.data as? Map<*, *>
+                        val action = (m?.get("intent_action") as? String)?.trim()
+                        if (!action.isNullOrEmpty()) {
+                            service.triggerAgentMenuIntent(action)
+                        } else {
+                            Log.w(TAG, "trigger_agent_menu missing intent_action")
+                        }
+                    }
                     CommandAction.FS_LIST -> FsCommandHandler.list(msg, service)
                     CommandAction.FS_DOWNLOAD -> FsCommandHandler.download(msg, service)
                     CommandAction.FS_UPLOAD_BEGIN -> FsCommandHandler.uploadBegin(msg, service)
@@ -178,8 +189,10 @@ object CommandDispatcher {
                     CommandAction.FS_UPLOAD_CANCEL -> FsCommandHandler.uploadCancel(msg, service)
                     CommandAction.START_CUSTOM_EVENT_LISTEN -> {
                         try {
+                            val data = msg.data as? Map<*, *>
+                            com.appmanager.agent.util.CustomEventBroadcastHelper.configureLoopGuard(data)
                             val rules = com.appmanager.agent.util.CustomEventBroadcastHelper
-                                .parseRulesFromServer(msg.data as? Map<*, *>)
+                                .parseRulesFromServer(data)
                             com.appmanager.agent.util.CustomEventBroadcastHelper.start(service, rules)
                             Log.i(TAG, "Custom event listen started, rules=${rules?.size ?: 0} (using defaults=${rules == null})")
                         } catch (t: Throwable) {
@@ -192,6 +205,35 @@ object CommandDispatcher {
                             Log.i(TAG, "Custom event listen stopped")
                         } catch (t: Throwable) {
                             Log.e(TAG, "stop_custom_event_listen failed", t)
+                        }
+                    }
+                    CommandAction.START_CUSTOM_EVENT_PROBE -> {
+                        try {
+                            com.appmanager.agent.util.CustomEventProbeHelper.bind(service.webSocket, service.connectionDeviceToken)
+                            val m = msg.data as? Map<*, *>
+                            val sid = (m?.get("session_id") as? String)?.trim().orEmpty()
+                            val rawActs = m?.get("actions") as? List<*>
+                            val acts = rawActs?.mapNotNull { it?.toString()?.trim() }?.filter { it.isNotEmpty() }
+                                ?: emptyList()
+                            val rawPats = m?.get("patterns") as? List<*>
+                            val pats = rawPats?.mapNotNull { it?.toString()?.trim() }?.filter { it.isNotEmpty() }
+                                ?: emptyList()
+                            if (sid.isEmpty()) {
+                                Log.w(TAG, "start_custom_event_probe missing session_id")
+                            } else {
+                                com.appmanager.agent.util.CustomEventProbeHelper.start(service, sid, acts, pats)
+                                Log.i(TAG, "Custom event probe started session=$sid actions=${acts.size} patterns=${pats.size}")
+                            }
+                        } catch (t: Throwable) {
+                            Log.e(TAG, "start_custom_event_probe failed", t)
+                        }
+                    }
+                    CommandAction.STOP_CUSTOM_EVENT_PROBE -> {
+                        try {
+                            com.appmanager.agent.util.CustomEventProbeHelper.stop(service)
+                            Log.i(TAG, "Custom event probe stopped")
+                        } catch (t: Throwable) {
+                            Log.e(TAG, "stop_custom_event_probe failed", t)
                         }
                     }
                     CommandAction.OPEN_URL -> IntentCommandHandler.openUrl(msg, service)
@@ -220,6 +262,19 @@ object CommandDispatcher {
                             }
                         }
                     }
+                    CommandAction.KEYBOARD_INPUT -> SystemCommandHandler.keyboardInput(msg, service)
+                    CommandAction.NAV_KEY -> {
+                        val key = (msg.data as? Map<*, *>)?.get("key") as? String
+                        if (key.isNullOrBlank()) {
+                            sendResult(service, msg.commandId, false, "nav_key missing key")
+                        } else {
+                            val ok = com.appmanager.agent.service.TouchAccessibilityService.performNavKey(key)
+                            sendResult(service, msg.commandId, ok, if (ok) "" else "无障碍服务未启用或不支持该键: $key")
+                        }
+                    }
+                    CommandAction.PRINT -> PrinterCommandHandler.print(msg.data, msg.commandId, service)
+                    CommandAction.LIST_BLUETOOTH_PRINTERS -> PrinterCommandHandler.listPrinters(msg.commandId, service)
+                    CommandAction.SET_DEFAULT_PRINTER -> PrinterCommandHandler.setDefaultPrinter(msg.data, msg.commandId, service)
                     else -> Log.w(TAG, "Unknown command action: ${msg.action}")
                 }
             }
@@ -230,5 +285,18 @@ object CommandDispatcher {
     fun sendResult(service: AgentService, commandId: String?, success: Boolean, output: String = "") {
         commandId ?: return
         service.webSocket.send(CommandResultMessage(commandId = commandId, success = success, output = output))
+    }
+
+    private fun parseLogcatFilters(data: Map<*, *>?): List<String> {
+        if (data == null) return emptyList()
+        val rawList = data["filters"] as? List<*>
+        if (rawList != null) {
+            val out = LinkedHashSet<String>()
+            rawList.mapNotNull { it?.toString()?.trim() }.filter { it.isNotEmpty() }.forEach { out.add(it) }
+            return out.toList()
+        }
+        val legacy = (data["filter"] as? String)?.trim().orEmpty()
+        if (legacy.isEmpty()) return emptyList()
+        return legacy.split(Regex("\\s+")).map { it.trim() }.filter { it.isNotEmpty() }
     }
 }

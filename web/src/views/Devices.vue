@@ -17,6 +17,7 @@
       <div style="display:flex;gap:12px;margin-bottom:16px;align-items:center">
         <el-button type="primary" @click="scan" :loading="scanning">扫描设备</el-button>
         <el-button @click="showAddDialog = true">手动添加</el-button>
+        <el-button @click="openReverseDialog">设备注册</el-button>
         <AdbBridgeScan @registered="refresh" />
         <el-button :loading="refreshing" @click="refresh" :icon="RefreshIcon">刷新</el-button>
         <div style="flex:1"></div>
@@ -84,6 +85,13 @@
           </div>
           <template #footer>
             <div style="display:flex;flex-wrap:wrap;gap:8px">
+              <el-button
+                v-if="d.agent_connected || d.status === 'online'"
+                size="small"
+                type="success"
+                :icon="MonitorIcon"
+                @click="$router.push(`/screen?device=${d.id}`)"
+              >查看屏幕</el-button>
               <el-button size="small" @click="editDevice(d)">编辑</el-button>
               <el-button size="small" @click="$router.push(`/devices/${d.id}`)">详情</el-button>
               <el-button size="small" type="primary" plain @click="$router.push(`/devices/${d.id}?tab=files`)">文件</el-button>
@@ -130,12 +138,63 @@
       <el-button type="primary" @click="saveEdit">保存</el-button>
     </template>
   </el-dialog>
+
+  <!-- 设备注册（反向注册）：输入设备 IP → 拉取机型确认 → 输入授权码认领 -->
+  <el-dialog v-model="showReverseDialog" title="设备注册" width="460px">
+    <el-alert
+      type="info"
+      :closable="false"
+      show-icon
+      style="margin-bottom:16px"
+      title="在设备端打开「设备注册」，按屏幕显示的 IP 与授权码填写。需与设备处于同一局域网。"
+    />
+    <el-form :model="reverseForm" label-width="80px">
+      <el-form-item label="设备 IP">
+        <div style="display:flex;gap:8px;width:100%">
+          <el-input v-model="reverseForm.ip" placeholder="192.168.1.x" @keyup.enter="probeAgent" />
+          <el-button :loading="reverseProbing" @click="probeAgent">搜索</el-button>
+        </div>
+      </el-form-item>
+
+      <template v-if="reverseInfo">
+        <el-form-item label="设备">
+          <span>{{ reverseInfo.brand }} {{ reverseInfo.model }}（Android {{ reverseInfo.osVersion }}）</span>
+        </el-form-item>
+        <el-form-item label="机器码">
+          <span style="word-break:break-all">{{ reverseInfo.machineCode || '（由服务端生成）' }}</span>
+        </el-form-item>
+        <el-form-item v-if="reverseInfo.configured">
+          <el-alert type="warning" :closable="false" title="该设备已配置过，确认后将覆盖原有服务器配置。" />
+        </el-form-item>
+        <el-form-item label="授权码">
+          <el-input v-model="reverseForm.authCode" placeholder="设备屏幕上的 4 位授权码" maxlength="4" />
+        </el-form-item>
+        <el-form-item label="设备名称">
+          <el-input v-model="reverseForm.name" placeholder="可选" />
+        </el-form-item>
+        <el-form-item label="分组">
+          <el-select v-model="reverseForm.group" filterable allow-create clearable placeholder="可选">
+            <el-option v-for="g in groups" :key="g" :label="g" :value="g" />
+          </el-select>
+        </el-form-item>
+      </template>
+    </el-form>
+    <template #footer>
+      <el-button @click="showReverseDialog = false">取消</el-button>
+      <el-button
+        type="primary"
+        :disabled="!reverseInfo || !reverseForm.authCode"
+        :loading="reverseClaiming"
+        @click="doClaim"
+      >确认注册</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Refresh as RefreshIcon } from '@element-plus/icons-vue'
+import { Refresh as RefreshIcon, Monitor as MonitorIcon } from '@element-plus/icons-vue'
 import * as deviceApi from '@/api/device'
 import { useEventListenerStore } from '@/stores/eventListeners'
 import NetworkCell from '@/components/NetworkCell.vue'
@@ -238,6 +297,56 @@ const saveEdit = async () => {
 
 const handleGroupSelect = (index) => {
   selectedGroup.value = index
+}
+
+// ── 设备注册（反向注册，电视等无摄像头端亦可用）────────────────────────
+const showReverseDialog = ref(false)
+const reverseProbing = ref(false)
+const reverseClaiming = ref(false)
+const reverseInfo = ref(null)
+const reverseForm = ref({ ip: '', authCode: '', name: '', group: '' })
+
+const openReverseDialog = () => {
+  reverseInfo.value = null
+  reverseForm.value = { ip: '', authCode: '', name: '', group: '' }
+  showReverseDialog.value = true
+}
+
+const probeAgent = async () => {
+  const ip = reverseForm.value.ip.trim()
+  if (!ip) { ElMessage.warning('请输入设备 IP'); return }
+  reverseProbing.value = true
+  reverseInfo.value = null
+  try {
+    reverseInfo.value = await deviceApi.fetchAgentInfo(ip)
+  } catch (e) {
+    ElMessage.error('连接设备失败，请确认 IP、同一局域网，且设备处于「设备注册」界面')
+  } finally {
+    reverseProbing.value = false
+  }
+}
+
+const doClaim = async () => {
+  const ip = reverseForm.value.ip.trim()
+  reverseClaiming.value = true
+  try {
+    // serverUrl 与扫码接入一致：用当前页面 host 的 ws 地址
+    const serverUrl = `ws://${window.location.host}`
+    await deviceApi.claimAgent(ip, {
+      authCode: reverseForm.value.authCode.trim(),
+      serverUrl,
+      name: reverseForm.value.name.trim(),
+      group: reverseForm.value.group || '',
+    })
+    showReverseDialog.value = false
+    ElMessage.success('注册指令已下发，设备将自动接入')
+    // 设备连上后会自动建设备，稍候刷新列表
+    setTimeout(() => load(), 2000)
+  } catch (e) {
+    ElMessage.error(e.message === 'bad auth code' ? '授权码错误' : `注册失败：${e.message}`)
+  } finally {
+    reverseClaiming.value = false
+  }
 }
 
 const eventListeners = useEventListenerStore()

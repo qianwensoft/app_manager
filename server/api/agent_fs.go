@@ -66,16 +66,16 @@ func AgentFsList(c *gin.Context) {
 
 // AgentFsWS is a browser WebSocket that streams file uploads to Agent via server relay.
 // Browser sends:
-//  - text JSON: {type:"upload_begin", upload_id, path, file_name, size}
-//  - binary frames: raw bytes (chunk)
-//  - text JSON: {type:"upload_end", upload_id}
-//  - text JSON: {type:"upload_cancel", upload_id}
+//   - text JSON: {type:"upload_begin", upload_id, path, file_name, size}
+//   - binary frames: raw bytes (chunk)
+//   - text JSON: {type:"upload_end", upload_id}
+//   - text JSON: {type:"upload_cancel", upload_id}
 //
 // Server forwards to Agent as command frames:
-//  - fs_upload_begin {upload_id, path, file_name, size}
-//  - fs_upload_chunk {upload_id, seq, data_base64}
-//  - fs_upload_end   {upload_id}
-//  - fs_upload_cancel{upload_id}
+//   - fs_upload_begin {upload_id, path, file_name, size}
+//   - fs_upload_chunk {upload_id, seq, data_base64}
+//   - fs_upload_end   {upload_id}
+//   - fs_upload_cancel{upload_id}
 func AgentFsWS(c *gin.Context) {
 	param := c.Param("deviceId")
 	routeKey, err := agent.AgentConnectionKey(param)
@@ -283,4 +283,3 @@ func AgentFsDownload(c *gin.Context) {
 		c.JSON(http.StatusGatewayTimeout, gin.H{"error": "下载超时"})
 	}
 }
-

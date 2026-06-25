@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -53,6 +54,13 @@ type TokenProvider struct {
 	} `json:"paths"`
 	SkewSeconds int `json:"skew_seconds"` // 提前多少秒视为过期，默认 60
 
+	// TokenIn 控制业务接口调用时 token 的注入位置：
+	//   "header"（默认）：写入 AuthHeaderName 头，值为 AuthHeaderTemplate。
+	//   "json_body"：在请求发出前把 TokenBodyValueTemplate 注入到请求 JSON body 的 TokenBodyKey 字段。
+	TokenIn                string `json:"token_in"`
+	TokenBodyKey           string `json:"token_body_key"`            // json_body 模式字段名，默认 access_token
+	TokenBodyValueTemplate string `json:"token_body_value_template"` // json_body 模式值模板，默认 {{access_token}}
+
 	AuthHeaderName     string `json:"auth_header_name"`     // 默认 Authorization
 	AuthHeaderTemplate string `json:"auth_header_template"` // 默认 Bearer {{access_token}}
 }
@@ -82,7 +90,46 @@ func parseTokenProvider(raw string) (TokenProvider, error) {
 	if strings.TrimSpace(p.AuthHeaderTemplate) == "" {
 		p.AuthHeaderTemplate = "Bearer {{access_token}}"
 	}
+	if strings.TrimSpace(p.TokenIn) == "" {
+		p.TokenIn = "header"
+	}
+	if p.TokenIn == "json_body" {
+		if strings.TrimSpace(p.TokenBodyKey) == "" {
+			p.TokenBodyKey = "access_token"
+		}
+		if strings.TrimSpace(p.TokenBodyValueTemplate) == "" {
+			p.TokenBodyValueTemplate = "{{access_token}}"
+		}
+	}
 	return p, nil
+}
+
+// reSimplePlaceholder 匹配 body 值模板里的简单占位符 {{name}}（不含函数调用形式 {{$fn(...)}}）。
+var reSimplePlaceholder = regexp.MustCompile(`\{\{([^${}][^{}]*)\}\}`)
+
+// AutoInjectedBodyParamNames 返回「业务接口调用时由服务端自动注入到 JSON body、因此不应作为
+// 调用方入参暴露」的字段/占位符名集合。当前仅 dynamic_bearer + token_in=json_body 场景：
+// 服务端会在请求发出前把 token 写入 TokenBodyKey 字段，并解析 TokenBodyValueTemplate 中的占位符，
+// 这些都由服务端托管，调用方无需也不应填写。app 为 nil 或非该场景时返回空集合。
+func AutoInjectedBodyParamNames(app *models.OutboundApp) map[string]bool {
+	out := map[string]bool{}
+	if app == nil || strings.TrimSpace(app.AuthType) != "dynamic_bearer" {
+		return out
+	}
+	p, err := parseTokenProvider(app.TokenProviderJSON)
+	if err != nil || p.TokenIn != "json_body" {
+		return out
+	}
+	if k := strings.TrimSpace(p.TokenBodyKey); k != "" {
+		out[k] = true
+	}
+	// 值模板里的占位符（如 {{access_token}}）由服务端解析，不应暴露给调用方。
+	for _, m := range reSimplePlaceholder.FindAllStringSubmatch(p.TokenBodyValueTemplate, -1) {
+		if name := strings.TrimSpace(m[1]); name != "" {
+			out[name] = true
+		}
+	}
+	return out
 }
 
 func parseTokenCache(raw string) (TokenCache, error) {
@@ -218,8 +265,8 @@ type TokenFetchResult struct {
 
 // TokenExchangeTrace 与第三方 Token 接口的单次 HTTP 往返（管理端调试用）。
 type TokenExchangeTrace struct {
-	Phase    string `json:"phase"`
-	Request  struct {
+	Phase   string `json:"phase"`
+	Request struct {
 		Method        string            `json:"method"`
 		URL           string            `json:"url"`
 		Headers       map[string]string `json:"headers"`
@@ -845,8 +892,8 @@ func MaskFetchResult(r *TokenFetchResult, app *models.OutboundApp) *TokenFetchRe
 		masker.AddTokenValues(r.TokenTrace.Response.Body)
 	}
 	cp := &TokenFetchResult{
-		CodeTrace:  masker.MaskTrace(r.CodeTrace),
-		TokenTrace: masker.MaskTrace(r.TokenTrace),
+		CodeTrace:   masker.MaskTrace(r.CodeTrace),
+		TokenTrace:  masker.MaskTrace(r.TokenTrace),
 		CodeContext: r.CodeContext,
 	}
 	return cp

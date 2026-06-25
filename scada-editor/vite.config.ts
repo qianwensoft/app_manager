@@ -20,6 +20,17 @@ export default defineConfig(({ mode }) => {
     // - 生产：Go 静态托管路径一致
     // - 开发：web proxy rewrite 后资源路径也能正确匹配
     base: '/scada-editor/',
+    // 降级到 es2015/chrome67：旧版 Android 9 WebView（Chromium ~66）跑不了
+    // Vite 默认的 esnext 产物，会在加载后静默崩溃导致 WebView 白屏。
+    // 三处分别覆盖「源码即时转换」「预打包依赖」「生产构建」，与 form-app 对齐。
+    esbuild: {
+      target: 'es2015',
+    },
+    optimizeDeps: {
+      esbuildOptions: {
+        target: 'es2015',
+      },
+    },
     server: {
       host: true,
       port: 5174,
@@ -32,6 +43,7 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: 'dist',
       sourcemap: false,
+      target: ['es2015', 'chrome67'],
     },
   }
 })

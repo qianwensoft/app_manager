@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>STOMP Connection Test</title>
+    <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7/bundles/stomp.umd.min.js"></script>
+</head>
+<body>
+    <h1>STOMP Connection Test</h1>
+    <div id="status"></div>
+    <div id="messages" style="margin-top: 20px; border: 1px solid #ccc; padding: 10px; height: 400px; overflow-y: scroll;"></div>
+    
+    <script>
+        const status = document.getElementById('status');
+        const messages = document.getElementById('messages');
+        
+        function log(msg) {
+            const time = new Date().toLocaleTimeString();
+            messages.innerHTML += `<div>[${time}] ${msg}</div>`;
+            messages.scrollTop = messages.scrollHeight;
+        }
+        
+        log('Starting STOMP connection test...');
+        
+        const token = localStorage.getItem('token');
+        if (!token) {
+            log('ERROR: No token found in localStorage');
+            status.innerHTML = '<span style="color: red;">❌ No authentication token</span>';
+        } else {
+            log('Token found: ' + token.substring(0, 20) + '...');
+        }
+        
+        const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        const wsUrl = `${proto}://${window.location.host}/ws/stomp${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+        
+        log('Connecting to: ' + wsUrl);
+        
+        const client = new StompJs.Client({
+            brokerURL: wsUrl,
+            reconnectDelay: 5000,
+            debug: function (str) {
+                log('DEBUG: ' + str);
+            },
+            onConnect: function () {
+                log('✅ Connected to STOMP!');
+                status.innerHTML = '<span style="color: green;">✅ Connected</span>';
+                
+                log('Subscribing to /topic/scada-events...');
+                client.subscribe('/topic/scada-events', function (msg) {
+                    log('📨 Received event: ' + msg.body);
+                    try {
+                        const data = JSON.parse(msg.body);
+                        log('Event type: ' + data.event + ', SCADA ID: ' + data.id);
+                    } catch (e) {
+                        log('Failed to parse: ' + e.message);
+                    }
+                });
+                log('✅ Subscribed to /topic/scada-events');
+            },
+            onStompError: function (frame) {
+                log('❌ STOMP error: ' + (frame.headers ? frame.headers.message : 'unknown'));
+                status.innerHTML = '<span style="color: red;">❌ STOMP Error</span>';
+            },
+            onWebSocketError: function (event) {
+                log('❌ WebSocket error');
+                status.innerHTML = '<span style="color: red;">❌ WebSocket Error</span>';
+            },
+            onWebSocketClose: function () {
+                log('⚠️ WebSocket closed');
+                status.innerHTML = '<span style="color: orange;">⚠️ Disconnected</span>';
+            }
+        });
+        
+        client.activate();
+        log('Client activated, waiting for connection...');
+    </script>
+</body>
+</html>

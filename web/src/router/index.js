@@ -77,12 +77,27 @@ const routes = [
       },
       { path: 'apps', name: 'Apps', meta: { title: 'APK 管理' }, component: () => import('@/views/Apps.vue') },
       { path: 'tasks', name: 'Tasks', meta: { title: '任务队列' }, component: () => import('@/views/Tasks.vue') },
+      { path: 'work-orders', name: 'WorkOrders', meta: { title: '工单管理' }, component: () => import('@/views/work-orders/WorkOrders.vue') },
+      { path: 'work-orders/settings', name: 'WorkOrderSettings', meta: { title: '工单设置' }, component: () => import('@/views/work-orders/WorkOrderSettings.vue') },
+      { path: 'work-orders/workflows', name: 'WorkOrderWorkflows', meta: { title: '工单工作流' }, component: () => import('@/views/work-orders/WorkOrderWorkflows.vue') },
+      { path: 'work-orders/workflow-logs', name: 'WorkOrderWorkflowLogs', meta: { title: '工作流日志' }, component: () => import('@/views/work-orders/WorkOrderWorkflowLogs.vue') },
+      { path: 'work-orders/webhook-logs', name: 'WorkOrderWebhookLogs', meta: { title: '外发历史' }, component: () => import('@/views/work-orders/WorkOrderWebhookLogs.vue') },
+      // 旧配置入口重定向到「工单设置」对应标签页（保留历史书签）
+      { path: 'work-orders/types', redirect: { name: 'WorkOrderSettings', query: { tab: 'types' } } },
+      { path: 'work-orders/webhooks', redirect: { name: 'WorkOrderSettings', query: { tab: 'webhooks' } } },
+      { path: 'work-orders/tags', redirect: { name: 'WorkOrderSettings', query: { tab: 'tags' } } },
+      { path: 'work-orders/archived', name: 'WorkOrdersArchived', meta: { title: '已归档工单' }, component: () => import('@/views/work-orders/WorkOrdersArchived.vue') },
+      { path: 'work-orders/:id', name: 'WorkOrderDetail', meta: { title: '工单详情' }, component: () => import('@/views/work-orders/WorkOrderDetail.vue') },
       { path: 'apikeys', name: 'ApiKeys', meta: { title: '授权管理' }, component: () => import('@/views/ApiKeys.vue') },
+      { path: 'thirdparty', name: 'ThirdParty', meta: { title: '第三方平台' }, component: () => import('@/views/ThirdPartyProviders.vue') },
+      { path: 'open-stomp-debug', name: 'OpenStompDebug', meta: { title: 'STOMP 调试' }, component: () => import('@/views/OpenStompDebug.vue') },
       { path: 'users', name: 'Users', meta: { title: '用户管理' }, component: () => import('@/views/Users.vue') },
       { path: 'audit', name: 'AuditLog', meta: { title: '审计日志' }, component: () => import('@/views/AuditLog.vue') },
       { path: 'settings', name: 'Settings', meta: { title: '系统管理' }, component: () => import('@/views/Settings.vue') },
       { path: 'data', name: 'DataStack', meta: { title: '数据源与接口' }, component: () => import('@/views/data/DataStack.vue') },
-      { path: 'agent-menus', name: 'AgentMenus', meta: { title: 'Agent 菜单下发' }, component: () => import('@/views/agent-menus/AgentMenus.vue') }
+      { path: 'agent-menus', name: 'AgentMenus', meta: { title: 'Agent 菜单下发' }, component: () => import('@/views/agent-menus/AgentMenus.vue') },
+      { path: 'about', name: 'About', meta: { title: '关于' }, component: () => import('@/views/About.vue') },
+      { path: 'system-update', name: 'SystemUpdate', meta: { title: '系统更新' }, component: () => import('@/views/SystemUpdate.vue') }
     ]
   }
 ]

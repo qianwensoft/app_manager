@@ -97,7 +97,7 @@ func isCreatedByDatasetBinding(metaJSON string) bool {
 		return false
 	}
 	var m struct {
-		SQLShape    string `json:"sql_shape"`
+		SQLShape     string `json:"sql_shape"`
 		TableBinding *struct {
 			BindingMode string `json:"binding_mode"`
 		} `json:"table_binding"`
@@ -114,7 +114,7 @@ func isCreatedByDatasetBinding(metaJSON string) bool {
 // appendDDLHistory 将执行的 DDL 追加到 meta_json.table_binding.ddl_history 中。
 func appendDDLHistory(datasetID uint, metaJSON, ddl string) error {
 	type ddlRecord struct {
-		SQL       string `json:"sql"`
+		SQL        string `json:"sql"`
 		ExecutedAt string `json:"executed_at"`
 	}
 	type tableBinding struct {
@@ -137,7 +137,7 @@ func appendDDLHistory(datasetID uint, metaJSON, ddl string) error {
 		m.TableBinding = &tableBinding{BindingMode: "created_by_dataset"}
 	}
 	m.TableBinding.DDLHistory = append(m.TableBinding.DDLHistory, ddlRecord{
-		SQL:       ddl,
+		SQL:        ddl,
 		ExecutedAt: time.Now().UTC().Format(time.RFC3339),
 	})
 

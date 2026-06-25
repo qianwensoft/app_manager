@@ -86,12 +86,12 @@ func getConnectorSchema(raw json.RawMessage) (any, *RPCError) {
 		}
 	}
 	return map[string]any{
-		"connector_id":  connector.ID,
+		"connector_id":   connector.ID,
 		"connector_name": connector.Name,
-		"trigger_type":  connector.TriggerType,
-		"webhook_id":    connector.WebhookID,
-		"event_types":   etList,
-		"input_schemas": inputSchemas,
+		"trigger_type":   connector.TriggerType,
+		"webhook_id":     connector.WebhookID,
+		"event_types":    etList,
+		"input_schemas":  inputSchemas,
 	}, nil
 }
 

@@ -13,7 +13,9 @@ data class Message(
     val camera: String? = null,
     val sdp: String? = null,
     val candidate: Map<String, Any>? = null,
-    val role: String? = null
+    val role: String? = null,
+    /** start_camera 随命令下发的 ICE 服务器列表（与服务端 webrtc.ice_servers 统一）。 */
+    @SerializedName("ice_servers") val iceServers: List<Map<String, Any>>? = null
 )
 
 // ─── 上行：Agent → Server ────────────────────────────────────────────────────
@@ -63,7 +65,9 @@ data class DeviceInfoData(
     /** Agent APK 版本，供服务端设备档案展示 */
     @SerializedName("agent_version") val agentVersion: String = "",
     /** 手机硬件序列号（Build.SERIAL），服务端用于跨重装唯一识别设备 */
-    @SerializedName("android_serial") val androidSerial: String = ""
+    @SerializedName("android_serial") val androidSerial: String = "",
+    /** 当前前台应用包名 */
+    @SerializedName("foreground_package") val foregroundPackage: String = ""
 )
 
 data class ScreenFrameMessage(
@@ -137,6 +141,13 @@ object CommandAction {
     const val EXPORT_INSTALLED_APK = "export_installed_apk"
     /** 立即采集并上报 device_info（含 Wi‑Fi SSID 等），供 Web 刷新 */
     const val PUSH_DEVICE_INFO = "push_device_info"
+    /** 打开系统「无线调试」设置页 */
+    const val OPEN_WIRELESS_ADB = "open_wireless_adb"
+    /** 远程触发 Agent 菜单 intent_action：data.intent_action */
+    const val TRIGGER_AGENT_MENU = "trigger_agent_menu"
+
+    /** 虚拟导航键（无障碍 performGlobalAction）：data.key = back | home | recents | notifications | quick_settings | power_dialog | lock_screen */
+    const val NAV_KEY = "nav_key"
 
     // ─── 文件管理（Agent 文件系统） ─────────────────────────────────────────
     /** 列目录：data: { request_id, path, include_hidden? } */
@@ -158,6 +169,11 @@ object CommandAction {
     /** 停止自定义事件监听 */
     const val STOP_CUSTOM_EVENT_LISTEN = "stop_custom_event_listen"
 
+    /** 启动事件分析探针：data.session_id、data.actions */
+    const val START_CUSTOM_EVENT_PROBE = "start_custom_event_probe"
+    /** 停止事件分析探针 */
+    const val STOP_CUSTOM_EVENT_PROBE = "stop_custom_event_probe"
+
     /** 打开网页（ACTION_VIEW） */
     const val OPEN_URL = "open_url"
 
@@ -166,4 +182,15 @@ object CommandAction {
 
     /** 出站连接器「消息」步骤：data.title、data.body（或 text/message）、data.duration_ms */
     const val SHOW_DEVICE_MESSAGE = "show_device_message"
+
+    /** 键盘HID输出：data.input_method、data.text、data.keys、data.delay_ms、data.target_app */
+    const val KEYBOARD_INPUT = "keyboard_input"
+
+    // ─── 蓝牙打印 ───────────────────────────────────────────────────────────
+    /** 打印：data { protocol?, transport?, mac?, content:[...], raw_base64? }（缺省用默认打印机） */
+    const val PRINT = "print"
+    /** 列出已配对蓝牙打印机：结果经 sendResult.output 返回 JSON 数组 */
+    const val LIST_BLUETOOTH_PRINTERS = "list_bluetooth_printers"
+    /** 设置默认打印机：data { mac, name, protocol, transport } */
+    const val SET_DEFAULT_PRINTER = "set_default_printer"
 }

@@ -7,6 +7,7 @@ import android.content.IntentFilter
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.appmanager.agent.ui.ScadaWebViewActivity
+import com.appmanager.agent.util.WirelessAdbHelper
 
 /**
  * 动态广播接收器，响应菜单项的自定义 intent_action。
@@ -40,12 +41,58 @@ object MenuIntentReceiver {
         val r = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context, intent: Intent) {
                 val action = intent.action ?: return
-                val url = AgentMenuStore.getPreviewUrlByIntent(ctx, action) ?: return
+                val scanValue = intent.getStringExtra("scan_data")
+                    ?: intent.getStringExtra("barcode")
+                    ?: intent.getStringExtra("data")
+                    ?: ""
+                val eventType = intent.getStringExtra("event_type") ?: "intent_scan"
+
+                val menuItem = AgentMenuStore.getMenuByIntent(ctx, action)
+                if (menuItem != null && WirelessAdbHelper.isNativeMenuTarget(menuItem.targetType, menuItem.targetRef)) {
+                    WirelessAdbHelper.openWirelessDebugSettings(ctx)
+                    AgentMenuExecutionReporter.report(
+                        ctx,
+                        intentAction = action,
+                        eventType = eventType,
+                        scanValue = scanValue,
+                        targetUrl = "agent_native:wireless_adb",
+                        status = "success"
+                    )
+                    return
+                }
+                if (menuItem != null && menuItem.targetType == "form_app_entry") {
+                    val formAppCode = menuItem.formAppCode ?: menuItem.targetRef
+                    val pageKey = menuItem.formAppPageKey ?: "form"
+                    Log.i(TAG, "launching FormAppActivity: code=$formAppCode, page=$pageKey")
+                    AgentMenuStore.launchFormAppEntry(
+                        ctx,
+                        mapOf(
+                            "target_type" to "form_app_entry",
+                            "target_ref" to formAppCode,
+                            "form_app_code" to formAppCode,
+                            "form_app_page_key" to pageKey,
+                        ),
+                        newTask = true,
+                    )
+                    return
+                }
+
+                val url = AgentMenuStore.resolveByScanEvent(ctx, action, eventType, scanValue)
+                    ?: AgentMenuStore.getPreviewUrlByIntent(ctx, action)
+                    ?: return
                 val extra = intent.getStringExtra("extra_params")
                 val finalUrl = if (!extra.isNullOrBlank()) {
                     if (url.contains("?")) "$url&$extra" else "$url?$extra"
                 } else url
                 Log.i(TAG, "menu intent received action=$action -> $finalUrl")
+                AgentMenuExecutionReporter.report(
+                    ctx,
+                    intentAction = action,
+                    eventType = eventType,
+                    scanValue = scanValue,
+                    targetUrl = finalUrl,
+                    status = "success"
+                )
                 ctx.startActivity(
                     Intent(ctx, ScadaWebViewActivity::class.java)
                         .putExtra(ScadaWebViewActivity.EXTRA_URL, finalUrl)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"app-manager/database"
+	"app-manager/dbdriver"
 	"app-manager/models"
 )
 
@@ -85,21 +86,12 @@ func execDatasetQuery(ds models.Dataset, params map[string]any, limit int) ([]ma
 	if sqlStr == "" {
 		return nil, fmt.Errorf("empty dataset definition")
 	}
-	// simple :name → ? rewrite
-	args := []any{}
-	for k, v := range params {
-		placeholder := ":" + k
-		count := 0
-		for i := 0; i < len(sqlStr); i++ {
-			if i+len(placeholder) <= len(sqlStr) && sqlStr[i:i+len(placeholder)] == placeholder {
-				count++
-			}
-		}
-		for j := 0; j < count; j++ {
-			sqlStr = replaceFirst(sqlStr, placeholder, "?")
-			args = append(args, v)
-		}
+	// {{name}} → 方言占位符（缺失参数所在子句自动剔除），与数据接口执行保持一致
+	used, args, err := dbdriver.RewriteNamedSQLParams(ds.DataSource.Type, sqlStr, params)
+	if err != nil {
+		return nil, err
 	}
+	sqlStr = used
 	if limit > 0 {
 		sqlStr = fmt.Sprintf("SELECT * FROM (%s) _q LIMIT %d", sqlStr, limit)
 	}
@@ -126,20 +118,6 @@ func execDatasetQuery(ds models.Dataset, params map[string]any, limit int) ([]ma
 	return result, nil
 }
 
-func replaceFirst(s, old, new string) string {
-	idx := -1
-	for i := 0; i+len(old) <= len(s); i++ {
-		if s[i:i+len(old)] == old {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
-		return s
-	}
-	return s[:idx] + new + s[idx+len(old):]
-}
-
 // ── list_data_interfaces ──────────────────────────────────────────────────────
 
 func listDataInterfaces(_ json.RawMessage) (any, *RPCError) {
@@ -151,11 +129,11 @@ func listDataInterfaces(_ json.RawMessage) (any, *RPCError) {
 // ── bind_data_to_canvas ───────────────────────────────────────────────────────
 
 type bindingSpec struct {
-	ElementID   string `json:"element_id"`
-	PointKey    string `json:"point_key"`
-	DeviceCode  string `json:"device_code"`
-	DataMode    string `json:"data_mode"` // "stomp" | "http"
-	Transform   string `json:"transform"`
+	ElementID  string `json:"element_id"`
+	PointKey   string `json:"point_key"`
+	DeviceCode string `json:"device_code"`
+	DataMode   string `json:"data_mode"` // "stomp" | "http"
+	Transform  string `json:"transform"`
 }
 
 type bindDataParams struct {
@@ -224,7 +202,7 @@ func listSimPoints(raw json.RawMessage) (any, *RPCError) {
 type createSimPointParams struct {
 	ScadaCode  string `json:"scada_code"`
 	LinkName   string `json:"link_name"`
-	Mode       string `json:"mode"`        // random | random_walk | sine | ramp | constant
+	Mode       string `json:"mode"` // random | random_walk | sine | ramp | constant
 	IntervalMs int    `json:"interval_ms"`
 	ParamsJSON string `json:"params_json"`
 }

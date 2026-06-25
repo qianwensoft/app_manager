@@ -112,6 +112,11 @@
           <el-tag :type="statusType" size="small">{{ statusText }}</el-tag>
           <el-tag v-if="status === 'connected'" type="success" size="small">端到端: {{ latency || '—' }}ms</el-tag>
           <el-tag v-if="status === 'connected'" type="info" size="small">到服务器: {{ latencyServer || '—' }}ms</el-tag>
+          <template v-if="receivedFrame">
+            <el-tag size="small" type="info">分辨率 {{ screenResolutionText }}</el-tag>
+            <el-tag size="small" type="info">{{ fps }} fps</el-tag>
+            <el-tag size="small" type="info">{{ screenKbps }} kbps</el-tag>
+          </template>
           <template v-if="!shareMode && screenDevice && deviceId">
             <el-divider direction="vertical" />
             <el-tag size="small" :type="screenDevice.agent_connected ? 'success' : 'info'">
@@ -134,6 +139,10 @@
           </el-button>
           <el-tag v-if="status === 'connected'" size="small" type="success">端到端 {{ latency || '—' }}ms</el-tag>
           <el-tag v-if="status === 'connected'" size="small" type="info">到服务器 {{ latencyServer || '—' }}ms</el-tag>
+          <template v-if="receivedFrame">
+            <el-tag size="small" type="info">{{ screenResolutionText }}</el-tag>
+            <el-tag size="small" type="info">{{ fps }}fps · {{ screenKbps }}kbps</el-tag>
+          </template>
           <span v-if="recording" class="screen-fs-topbar__rec">● 录制中 {{ recordingTime }}s</span>
           <span class="screen-fs-topbar__hint">右侧「操作」展开录屏与配置</span>
         </div>
@@ -169,6 +178,9 @@
               class="press-preview-dot"
               :style="{ left: pressPreview.x + 'px', top: pressPreview.y + 'px' }"
             />
+            <div v-if="receivedFrame" class="screen-stream-stats">
+              {{ screenResolutionText }} · {{ fps }}fps · {{ screenKbps }}kbps
+            </div>
             <div
               v-if="uploading"
               style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.7);color:#fff;padding:20px;border-radius:8px"
@@ -926,6 +938,22 @@
   outline-offset: -1px;
 }
 
+.screen-stream-stats {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  z-index: 5;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #e8eaed;
+  background: rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .press-preview-dot {
   position: absolute;
   width: 14px;
@@ -1195,7 +1223,9 @@ const startCameraStream = (camId) => {
   const ws = new WebSocket(wsUrl)
   cameraWSs[camId] = ws
 
-  const pc = new RTCPeerConnection({})
+  // 默认不配 STUN：局域网下仅用 host 候选即可秒连；跨网段时由服务端在 offer
+  // 里下发 ice_servers（与服务端 webrtc.ice_servers 配置统一）后再 setConfiguration。
+  const pc = new RTCPeerConnection({ iceServers: [] })
   cameraPCs[camId] = pc
 
   // Server sends track to browser — bind to video element
@@ -1239,6 +1269,10 @@ const startCameraStream = (camId) => {
   ws.onmessage = async (e) => {
     const msg = JSON.parse(e.data)
     if (msg.type === 'webrtc_offer') {
+      // 应用服务端下发的 ICE 配置（跨网段才有；LAN 通常为空，保持纯 host 秒连）
+      if (Array.isArray(msg.ice_servers) && msg.ice_servers.length > 0) {
+        try { pc.setConfiguration({ iceServers: msg.ice_servers }) } catch (_) {}
+      }
       // Server sends offer when publisher track is ready
       await pc.setRemoteDescription({ type: 'offer', sdp: msg.sdp })
       const answer = await pc.createAnswer()
@@ -1301,6 +1335,7 @@ const recordingDownload = ref(null)
 /** STOMP 录屏业务进度文案（服务器 ↔ Agent） */
 const recordingProgressHint = ref('')
 const fps = ref(0)
+const screenKbps = ref(0)
 const latency = ref(0)
 /** 浏览器 ↔ 服务器 RTT（client_ping，不经 Agent） */
 const latencyServer = ref(0)
@@ -1310,6 +1345,9 @@ let touchStartPos = null
 let effectIdCounter = 0
 let recordingTimer = null
 let frameCount = 0
+let screenFrameBytes = 0
+let screenStatsPrevBytes = 0
+let screenStatsPrevTs = 0
 let fpsTimer = null
 let pingTimer = null
 let pingStartTime = 0
@@ -1371,7 +1409,47 @@ function applyLegacyBase64Jpeg(b64) {
     const u8 = new Uint8Array(bin.length)
     for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i)
     applyFrameFromBlob(new Blob([u8], { type: 'image/jpeg' }))
+    recordScreenFrame(u8.length)
   } catch (_) { /* noop */ }
+}
+
+function startScreenStatsTimer() {
+  if (fpsTimer) return
+  frameCount = 0
+  screenFrameBytes = 0
+  screenStatsPrevBytes = 0
+  screenStatsPrevTs = Date.now()
+  fpsTimer = setInterval(() => {
+    const now = Date.now()
+    fps.value = frameCount
+    frameCount = 0
+    const dt = (now - screenStatsPrevTs) / 1000
+    if (dt > 0) {
+      const delta = screenFrameBytes - screenStatsPrevBytes
+      screenKbps.value = Math.max(0, Math.round(delta * 8 / dt / 1000))
+    }
+    screenStatsPrevBytes = screenFrameBytes
+    screenStatsPrevTs = now
+  }, 1000)
+}
+
+function stopScreenStatsTimer() {
+  if (fpsTimer) {
+    clearInterval(fpsTimer)
+    fpsTimer = null
+  }
+  fps.value = 0
+  screenKbps.value = 0
+  frameCount = 0
+  screenFrameBytes = 0
+  screenStatsPrevBytes = 0
+  screenStatsPrevTs = 0
+}
+
+function recordScreenFrame(byteLen) {
+  if (byteLen > 0) screenFrameBytes += byteLen
+  frameCount++
+  startScreenStatsTimer()
 }
 
 function handleScreenBinaryFrame(u8) {
@@ -1385,7 +1463,7 @@ function handleScreenBinaryFrame(u8) {
   applyFrameFromBlob(blob)
   status.value = 'connected'
   receivedFrame.value = true
-  frameCount++
+  recordScreenFrame(u8.length)
 }
 
 let wheelFlushTimer = null
@@ -1413,6 +1491,14 @@ const streamStatusText = computed(() => {
       : '投屏：等待画面…'
   }
   return '投屏：画面传输中'
+})
+
+const screenResolutionText = computed(() => {
+  const s = streamResolution.value
+  if (s?.width > 0 && s?.height > 0) return `${s.width}×${s.height}`
+  const d = deviceResolution.value
+  if (d?.width > 0 && d?.height > 0) return `${d.width}×${d.height}`
+  return '—'
 })
 
 const streamStatusTagType = computed(() => {
@@ -1683,6 +1769,7 @@ function closeAll() {
   recordingProgressHint.value = ''
   receivedFrame.value = false
   latencyServer.value = 0
+  stopScreenStatsTimer()
   pressPreview.value = null
   if (pingTimer) {
     clearInterval(pingTimer)
@@ -1752,6 +1839,7 @@ function connect() {
       clearInterval(pingTimer)
       pingTimer = null
     }
+    stopScreenStatsTimer()
     if (status.value !== 'disconnected') status.value = 'disconnected'
     receivedFrame.value = false
     cleanupScreenFrameUrls()
@@ -1816,7 +1904,6 @@ function connect() {
       applyLegacyBase64Jpeg(d.data)
       status.value = 'connected'
       receivedFrame.value = true
-      frameCount++
       return
     }
   }
@@ -2328,8 +2415,21 @@ onMounted(async () => {
 })
 
 // 发送虚拟按键
+// keycode → Agent 无障碍导航键映射（仅这三类可用 performGlobalAction，无需 ADB）
+const NAV_KEY_BY_KEYCODE = { 4: 'back', 3: 'home', 187: 'recents' }
+
 const sendKeyEvent = async (keycode) => {
   if (!deviceId.value) return
+  // Agent 在线且是导航键时，优先走无障碍通道（纯 Agent 设备无 ADB 也能用）；失败再回退 ADB
+  const navKey = NAV_KEY_BY_KEYCODE[keycode]
+  if (navKey && screenDevice.value?.agent_connected) {
+    try {
+      await deviceApi.agentNavKey(deviceId.value, navKey)
+      return
+    } catch (e) {
+      // 无障碍未启用等情况，回退到 ADB keyevent
+    }
+  }
   try {
     await deviceApi.keyEvent(deviceId.value, keycode)
   } catch (e) {
