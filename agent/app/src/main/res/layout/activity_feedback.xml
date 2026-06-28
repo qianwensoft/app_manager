@@ -81,15 +81,20 @@
                     android:layout_width="0dp"
                     android:layout_weight="1"
                     android:layout_height="wrap_content"
-                    android:hint="业务单号"
+                    android:hint="业务单号（仅扫码）"
                     app:endIconMode="custom"
                     app:endIconDrawable="@android:drawable/ic_menu_camera"
-                    app:endIconContentDescription="扫码">
+                    app:endIconContentDescription="扫码"
+                    app:helperText="仅支持扫码输入"
+                    app:helperTextEnabled="true">
                     <com.google.android.material.textfield.TextInputEditText
                         android:id="@+id/etBusinessNo"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:maxLines="1" />
+                        android:maxLines="1"
+                        android:focusable="false"
+                        android:clickable="false"
+                        android:cursorVisible="false" />
                 </com.google.android.material.textfield.TextInputLayout>
             </LinearLayout>
 

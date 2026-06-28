@@ -207,6 +207,38 @@ class FeedbackActivity : AppCompatActivity() {
 
         updateScanIconsVisibility()
         loadTypes()
+
+        // 从 Intent 中获取预填充数据（支持从 form-app 一键反馈）
+        handleIntentParams()
+    }
+
+    private fun handleIntentParams() {
+        val data = intent?.data ?: return
+
+        // 从 URL 参数中提取预填充数据
+        data.getQueryParameter("type")?.let { typeCode ->
+            // 等待类型加载完成后再设置（在 loadTypes 回调中处理）
+            getSharedPreferences("feedback_prefs", Context.MODE_PRIVATE)
+                .edit()
+                .putString("prefill_type", typeCode)
+                .apply()
+        }
+
+        data.getQueryParameter("business_no")?.let { businessNo ->
+            etBusinessNo.setText(businessNo)
+        }
+
+        data.getQueryParameter("other_codes")?.let { otherCodes ->
+            etOtherCodes.setText(otherCodes)
+        }
+
+        data.getQueryParameter("title")?.let { title ->
+            etTitle.setText(title)
+        }
+
+        data.getQueryParameter("description")?.let { description ->
+            etDesc.setText(description)
+        }
     }
 
     override fun onStart() {
@@ -248,9 +280,21 @@ class FeedbackActivity : AppCompatActivity() {
                     types.clear(); types.addAll(list)
                     if (types.isEmpty()) types.add(WoType("", "通用反馈"))
                     spinnerType.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, types.map { it.name })
-                    // 记忆上次所选类型：存在则自动选中，否则默认第一个
-                    val lastCode = getLastTypeCode()
-                    val idx = types.indexOfFirst { it.code == lastCode }
+
+                    // 优先使用预填充的类型，其次是记忆的上次类型
+                    val prefillType = getSharedPreferences("feedback_prefs", Context.MODE_PRIVATE)
+                        .getString("prefill_type", null)
+                    val targetCode = prefillType ?: getLastTypeCode()
+
+                    // 清除预填充标记
+                    if (prefillType != null) {
+                        getSharedPreferences("feedback_prefs", Context.MODE_PRIVATE)
+                            .edit()
+                            .remove("prefill_type")
+                            .apply()
+                    }
+
+                    val idx = types.indexOfFirst { it.code == targetCode }
                     val sel = if (idx >= 0) idx else 0
                     setupTypeAutoTitle()
                     spinnerType.setSelection(sel)

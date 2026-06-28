@@ -1,1 +1,0 @@
-import{B as e}from"./index-Cm-yT4Pr.js";const g=()=>e.get("/users"),a=s=>e.post("/users",s),i=(s,t)=>e.put(`/users/${s}`,t),o=s=>e.delete(`/users/${s}`),n=()=>e.get("/settings/register"),u=s=>e.put("/settings/register",{allow_register:s});export{u as a,a as c,o as d,n as g,g as l,i as u};

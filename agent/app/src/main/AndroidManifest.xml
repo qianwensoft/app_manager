@@ -241,10 +241,20 @@
 
         <activity
             android:name=".ui.FeedbackActivity"
-            android:exported="false"
+            android:exported="true"
             android:label="@string/main_tile_feedback"
             android:theme="@style/Theme.AppManagerMain"
-            android:configChanges="orientation|screenSize|keyboardHidden" />
+            android:configChanges="orientation|screenSize|keyboardHidden">
+            <!-- 支持从 form-app 一键反馈跳转 -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="appmanager"
+                    android:host="feedback" />
+            </intent-filter>
+        </activity>
 
         <activity
             android:name=".ui.FeedbackDetailActivity"

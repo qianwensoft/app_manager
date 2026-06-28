@@ -617,7 +617,12 @@ class WorkOrderDetailActivity : AppCompatActivity() {
                 val base = ServerUrlUtil.httpBaseFromWs(cfg.serverUrl.trim())
                 if (base.isBlank()) return@thread
 
-                val json = AgentCatalogApi.getJson(base, "/api/work-orders/$workOrderId/progress", cfg.deviceToken.trim())
+                // Use JWT token if user is logged in, otherwise device token
+                val json = if (cfg.userToken.isNotEmpty()) {
+                    AgentCatalogApi.getJsonWithJWT(base, "/api/work-orders/$workOrderId/progress", cfg.userToken.trim())
+                } else {
+                    AgentCatalogApi.getJson(base, "/api/work-orders/$workOrderId/progress", cfg.deviceToken.trim())
+                }
                 val obj = JSONObject(json)
                 val data = obj.optJSONArray("data") ?: return@thread
 
@@ -860,7 +865,13 @@ class WorkOrderDetailActivity : AppCompatActivity() {
                 try {
                     val cfg = AgentConfig.get(this)
                     val baseUrl = ServerUrlUtil.httpBaseFromWs(cfg.serverUrl)
-                    val url = "$baseUrl/api/work-orders/${attachment.workOrderId}/items/${attachment.id}/download?token=${cfg.deviceToken}"
+                    // Use JWT token if logged in, otherwise device token
+                    val tokenParam = if (cfg.userToken.isNotEmpty()) {
+                        "token=${cfg.userToken}"
+                    } else {
+                        "device_token=${cfg.deviceToken}"
+                    }
+                    val url = "$baseUrl/api/work-orders/${attachment.workOrderId}/items/${attachment.id}/download?$tokenParam"
 
                     val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
                         setDataAndType(android.net.Uri.parse(url), "video/*")
@@ -875,7 +886,13 @@ class WorkOrderDetailActivity : AppCompatActivity() {
                 try {
                     val cfg = AgentConfig.get(this)
                     val baseUrl = ServerUrlUtil.httpBaseFromWs(cfg.serverUrl)
-                    val url = "$baseUrl/api/work-orders/${attachment.workOrderId}/items/${attachment.id}/download?token=${cfg.deviceToken}"
+                    // Use JWT token if logged in, otherwise device token
+                    val tokenParam = if (cfg.userToken.isNotEmpty()) {
+                        "token=${cfg.userToken}"
+                    } else {
+                        "device_token=${cfg.deviceToken}"
+                    }
+                    val url = "$baseUrl/api/work-orders/${attachment.workOrderId}/items/${attachment.id}/download?$tokenParam"
 
                     val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
                         setDataAndType(android.net.Uri.parse(url), "audio/*")
@@ -903,13 +920,22 @@ class WorkOrderDetailActivity : AppCompatActivity() {
 
                 Log.d(TAG, "Updating business_no to: $businessNo")
 
-                // 使用设备 token，路径是 /api/work-orders/mine/:id
-                AgentCatalogApi.putJson(
-                    base,
-                    "/api/work-orders/mine/$workOrderId",
-                    cfg.deviceToken.trim(),
-                    body.toString()
-                )
+                // Use JWT token if logged in, otherwise device token with /mine path
+                if (cfg.userToken.isNotEmpty()) {
+                    AgentCatalogApi.putJsonWithJWT(
+                        base,
+                        "/api/work-orders/$workOrderId",
+                        cfg.userToken.trim(),
+                        body.toString()
+                    )
+                } else {
+                    AgentCatalogApi.putJson(
+                        base,
+                        "/api/work-orders/mine/$workOrderId",
+                        cfg.deviceToken.trim(),
+                        body.toString()
+                    )
+                }
 
                 runOnUiThread {
                     Toast.makeText(this, "业务单号已更新", Toast.LENGTH_SHORT).show()
@@ -937,13 +963,22 @@ class WorkOrderDetailActivity : AppCompatActivity() {
 
                 Log.d(TAG, "Updating other_codes to: $otherCodes")
 
-                // 使用设备 token，路径是 /api/work-orders/mine/:id
-                AgentCatalogApi.putJson(
-                    base,
-                    "/api/work-orders/mine/$workOrderId",
-                    cfg.deviceToken.trim(),
-                    body.toString()
-                )
+                // Use JWT token if logged in, otherwise device token with /mine path
+                if (cfg.userToken.isNotEmpty()) {
+                    AgentCatalogApi.putJsonWithJWT(
+                        base,
+                        "/api/work-orders/$workOrderId",
+                        cfg.userToken.trim(),
+                        body.toString()
+                    )
+                } else {
+                    AgentCatalogApi.putJson(
+                        base,
+                        "/api/work-orders/mine/$workOrderId",
+                        cfg.deviceToken.trim(),
+                        body.toString()
+                    )
+                }
 
                 runOnUiThread {
                     Toast.makeText(this, "其他编码已更新", Toast.LENGTH_SHORT).show()
@@ -1230,13 +1265,22 @@ class WorkOrderDetailActivity : AppCompatActivity() {
 
                 Log.d(TAG, "Creating progress with content: $content")
 
-                // 使用设备 token API - 路径是 /api/work-orders/:id/progress (不是 /api/agent/)
-                AgentCatalogApi.postJson(
-                    base,
-                    "/api/work-orders/$workOrderId/progress",
-                    cfg.deviceToken.trim(),
-                    body.toString()
-                )
+                // Use JWT token if user is logged in, otherwise device token
+                if (cfg.userToken.isNotEmpty()) {
+                    AgentCatalogApi.postJsonWithJWT(
+                        base,
+                        "/api/work-orders/$workOrderId/progress",
+                        cfg.userToken.trim(),
+                        body.toString()
+                    )
+                } else {
+                    AgentCatalogApi.postJson(
+                        base,
+                        "/api/work-orders/$workOrderId/progress",
+                        cfg.deviceToken.trim(),
+                        body.toString()
+                    )
+                }
 
                 runOnUiThread {
                     Toast.makeText(this, "进展已添加", Toast.LENGTH_SHORT).show()
