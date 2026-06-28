@@ -1,6 +1,8 @@
 package api
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -17,6 +19,7 @@ import (
 	"app-manager/workflow"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // ── 工单（问题反馈）API ────────────────────────────────────────────────────
@@ -1077,22 +1080,8 @@ func findWorkOrderByCode(code string) (*models.WorkOrder, error) {
 // ── 开放 API（第三方 X-API-Key） ──────────────────────────────────────────
 
 // AgentListWorkOrders GET /api/agent/work-orders
-// Agent 端（device token 认证）工单列表，支持搜索和分页。
+// Agent 端（device token 或 JWT 认证）工单列表，支持搜索和分页。
 func AgentListWorkOrders(c *gin.Context) {
-	token := strings.TrimSpace(c.GetHeader("X-Device-Token"))
-	if token == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing X-Device-Token"})
-		return
-	}
-	var dev models.Device
-	err := database.DB.Table("devices").Where("agent_token = ?", token).First(&dev).Error
-	if err != nil {
-		fmt.Printf("[AgentListWorkOrders] Token validation failed: token=%s, err=%v\n", token, err)
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
-		return
-	}
-	fmt.Printf("[AgentListWorkOrders] Device authenticated: id=%d, name=%s\n", dev.ID, dev.Name)
-
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
 	if page < 1 {
@@ -1106,9 +1095,25 @@ func AgentListWorkOrders(c *gin.Context) {
 	// 默认仅未归档
 	q = q.Where("archived = ? OR archived IS NULL", false)
 
-	// 设备 ID 过滤（"我的工单"场景）
+	// "我的工单"场景：按设备ID或创建者过滤
 	if c.Query("my") == "1" {
-		q = q.Where("device_id = ?", dev.ID)
+		deviceID := c.GetUint("device_id")
+		userID := c.GetUint("user_id")
+		role := c.GetString("role")
+
+		// admin/operator 可以查看所有工单
+		if role == "admin" || role == "operator" {
+			// 不添加过滤条件，返回所有工单
+		} else if userID > 0 && deviceID > 0 {
+			// JWT用户 + 设备token：设备工单 OR 用户创建的工单
+			q = q.Where("device_id = ? OR created_by = ?", deviceID, userID)
+		} else if userID > 0 {
+			// 仅JWT用户：用户创建的工单
+			q = q.Where("created_by = ?", userID)
+		} else if deviceID > 0 {
+			// 仅设备token：设备工单
+			q = q.Where("device_id = ?", deviceID)
+		}
 	}
 
 	// 状态过滤
@@ -1153,6 +1158,60 @@ func AgentListWorkOrders(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": out, "total": total})
+}
+
+// AgentGetWorkOrder GET /api/agent/work-orders/:id
+// Agent 端（device token 或 JWT 认证）工单详情。
+func AgentGetWorkOrder(c *gin.Context) {
+	var wo models.WorkOrder
+	if err := database.DB.First(&wo, c.Param("id")).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+
+	// 权限检查
+	deviceID := c.GetUint("device_id")
+	userID := c.GetUint("user_id")
+	role := c.GetString("role")
+	canView := false
+
+	// 1. admin/operator 可查看所有工单
+	if role == "admin" || role == "operator" {
+		canView = true
+	}
+
+	// 2. 设备token：可查看本设备工单
+	if deviceID > 0 && wo.DeviceID == deviceID {
+		canView = true
+	}
+
+	// 3. JWT用户：可查看自己创建或被指派的工单
+	if userID > 0 && (wo.CreatedBy == userID || (wo.AssignedTo != nil && *wo.AssignedTo == userID)) {
+		canView = true
+	}
+
+	if !canView {
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		return
+	}
+
+	database.DB.Where("work_order_id = ?", wo.ID).Order("id ASC").Find(&wo.Items)
+	database.DB.Where("work_order_id = ?", wo.ID).Order("id DESC").Find(&wo.Activities)
+
+	// 标签
+	var links []models.WorkOrderTagLink
+	database.DB.Where("work_order_id = ?", wo.ID).Order("tag_code ASC").Find(&links)
+	tags := make([]string, 0, len(links))
+	for _, l := range links {
+		tags = append(tags, l.TagCode)
+	}
+
+	type detailRow struct {
+		models.WorkOrder
+		Tags     []string                  `json:"tags"`
+		TagLinks []models.WorkOrderTagLink `json:"tag_links"`
+	}
+	c.JSON(http.StatusOK, gin.H{"data": detailRow{WorkOrder: wo, Tags: tags, TagLinks: links}})
 }
 
 // OpenGetWorkOrder GET /api/open/v1/work-orders/:code
@@ -1538,4 +1597,680 @@ func DownloadWorkOrderProgressAttachment(c *gin.Context) {
 		return
 	}
 	c.FileAttachment(att.FilePath, att.FileName)
+}
+
+// GetWorkOrderStatistics 获取工单统计分析报告（支持按当前查询条件过滤）
+func GetWorkOrderStatistics(c *gin.Context) {
+	q := database.DB.Model(&models.WorkOrder{})
+
+	// 归档过滤：默认仅未归档；archived=1 时仅归档（独立归档页）
+	if c.Query("archived") == "1" {
+		q = q.Where("archived = ?", true)
+	} else {
+		q = q.Where("archived = ? OR archived IS NULL", false)
+	}
+
+	// 应用与列表相同的过滤条件
+	if s := c.Query("status"); s != "" {
+		q = q.Where("status = ?", s)
+	}
+	if t := c.Query("type_code"); t != "" {
+		q = q.Where("type_code = ?", t)
+	}
+	if d := c.Query("device_id"); d != "" {
+		q = q.Where("device_id = ?", d)
+	}
+	if a := c.Query("assigned_to"); a != "" {
+		q = q.Where("assigned_to = ?", a)
+	}
+	if v := c.Query("visibility"); v != "" {
+		q = q.Where("visibility = ?", v)
+	}
+
+	// 创建时间范围
+	if startTime := c.Query("created_start"); startTime != "" {
+		q = q.Where("created_at >= ?", startTime)
+	}
+	if endTime := c.Query("created_end"); endTime != "" {
+		q = q.Where("created_at <= ?", endTime)
+	}
+
+	// 归档时间范围
+	if startTime := c.Query("archived_start"); startTime != "" {
+		q = q.Where("archived_at >= ?", startTime)
+	}
+	if endTime := c.Query("archived_end"); endTime != "" {
+		q = q.Where("archived_at <= ?", endTime)
+	}
+
+	// 标签多选筛选
+	if t := strings.TrimSpace(c.Query("tags")); t != "" {
+		codes := make([]string, 0)
+		for _, p := range strings.Split(t, ",") {
+			if s := strings.TrimSpace(p); s != "" {
+				codes = append(codes, s)
+			}
+		}
+		if len(codes) > 0 {
+			sub := database.DB.Model(&models.WorkOrderTagLink{}).
+				Select("work_order_id").Where("tag_code IN ?", codes)
+			q = q.Where("id IN (?)", sub)
+		}
+	}
+
+	// 非管理员：仅公开 或 自己创建/被指派的工单
+	if c.GetString("role") != "admin" {
+		uid := c.GetUint("user_id")
+		q = q.Where("visibility = ? OR created_by = ? OR assigned_to = ?", "public", uid, uid)
+	}
+
+	// 查询所有符合条件的工单ID
+	var woIDs []uint
+	q.Pluck("id", &woIDs)
+
+	if len(woIDs) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"total":                0,
+			"by_status":            []gin.H{},
+			"by_type":              []gin.H{},
+			"by_tag":               []gin.H{},
+			"by_priority":          []gin.H{},
+			"avg_processing_hours": 0,
+		})
+		return
+	}
+
+	// 按状态统计
+	type statusStat struct {
+		Status string `json:"status"`
+		Count  int    `json:"count"`
+	}
+	var byStatus []statusStat
+	database.DB.Model(&models.WorkOrder{}).
+		Select("status, COUNT(*) as count").
+		Where("id IN ?", woIDs).
+		Group("status").
+		Order("count DESC").
+		Find(&byStatus)
+
+	// 按类型统计
+	type typeStat struct {
+		TypeCode string `json:"type_code"`
+		Count    int    `json:"count"`
+	}
+	var byType []typeStat
+	database.DB.Model(&models.WorkOrder{}).
+		Select("type_code, COUNT(*) as count").
+		Where("id IN ?", woIDs).
+		Group("type_code").
+		Order("count DESC").
+		Find(&byType)
+
+	// 按优先级统计
+	type priorityStat struct {
+		Priority string `json:"priority"`
+		Count    int    `json:"count"`
+	}
+	var byPriority []priorityStat
+	database.DB.Model(&models.WorkOrder{}).
+		Select("priority, COUNT(*) as count").
+		Where("id IN ?", woIDs).
+		Group("priority").
+		Order("count DESC").
+		Find(&byPriority)
+
+	// 按标签统计
+	type tagStat struct {
+		TagCode string `json:"tag_code"`
+		TagName string `json:"tag_name"`
+		Count   int    `json:"count"`
+	}
+	var byTag []tagStat
+	database.DB.Model(&models.WorkOrderTagLink{}).
+		Select("tag_code, tag_name, COUNT(DISTINCT work_order_id) as count").
+		Where("work_order_id IN ?", woIDs).
+		Group("tag_code, tag_name").
+		Order("count DESC").
+		Find(&byTag)
+
+	// 计算平均处理耗时（仅已关闭的工单）- 兼容 SQLite 和 MySQL
+	var avgHours float64
+	var closedWOs []models.WorkOrder
+	database.DB.Select("created_at, closed_at, archived_at").
+		Where("id IN ?", woIDs).
+		Where("closed_at IS NOT NULL OR archived_at IS NOT NULL").
+		Find(&closedWOs)
+
+	if len(closedWOs) > 0 {
+		var totalHours float64
+		for _, wo := range closedWOs {
+			endTime := wo.ClosedAt
+			if endTime == nil {
+				endTime = wo.ArchivedAt
+			}
+			if endTime != nil && wo.CreatedAt.Before(*endTime) {
+				duration := endTime.Sub(wo.CreatedAt)
+				totalHours += duration.Hours()
+			}
+		}
+		avgHours = totalHours / float64(len(closedWOs))
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"total":                len(woIDs),
+		"by_status":            byStatus,
+		"by_type":              byType,
+		"by_tag":               byTag,
+		"by_priority":          byPriority,
+		"avg_processing_hours": avgHours,
+	})
+}
+
+// ── 工单报告分享 ────────────────────────────────────────────────────────
+
+// generateShareToken 生成随机分享令牌
+func generateShareToken() string {
+	b := make([]byte, 32)
+	rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// CreateWorkOrderReportShare 创建报告分享链接
+func CreateWorkOrderReportShare(c *gin.Context) {
+	var req struct {
+		Title     string                 `json:"title"`
+		Filters   map[string]interface{} `json:"filters"`
+		ExpiresIn int                    `json:"expires_in"` // 过期时长（小时），默认168小时（7天）
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if req.ExpiresIn <= 0 {
+		req.ExpiresIn = 168 // 默认7天
+	}
+	if req.ExpiresIn > 720 { // 最多30天
+		req.ExpiresIn = 720
+	}
+
+	filtersJSON, _ := json.Marshal(req.Filters)
+	share := models.WorkOrderReportShare{
+		Token:       generateShareToken(),
+		Title:       req.Title,
+		FiltersJSON: string(filtersJSON),
+		CreatedBy:   c.GetUint("user_id"),
+		ExpiresAt:   time.Now().Add(time.Duration(req.ExpiresIn) * time.Hour),
+	}
+
+	if err := database.DB.Create(&share).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": share})
+}
+
+// GetWorkOrderReportShare 获取分享信息（免登录）
+func GetWorkOrderReportShare(c *gin.Context) {
+	token := c.Param("token")
+	var share models.WorkOrderReportShare
+	if err := database.DB.Where("token = ?", token).First(&share).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "分享链接不存在或已失效"})
+		return
+	}
+
+	// 检查是否过期
+	if time.Now().After(share.ExpiresAt) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "分享链接已过期"})
+		return
+	}
+
+	// 记录浏览
+	go func() {
+		view := models.WorkOrderReportShareView{
+			ShareID:   share.ID,
+			IPAddress: c.ClientIP(),
+			UserAgent: c.GetHeader("User-Agent"),
+			ViewedAt:  time.Now(),
+		}
+		database.DB.Create(&view)
+		// 更新浏览次数
+		database.DB.Model(&models.WorkOrderReportShare{}).Where("id = ?", share.ID).UpdateColumn("view_count", gorm.Expr("view_count + 1"))
+	}()
+
+	// 解析filters
+	var filters map[string]interface{}
+	if share.FiltersJSON != "" {
+		json.Unmarshal([]byte(share.FiltersJSON), &filters)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data": gin.H{
+			"id":         share.ID,
+			"token":      share.Token,
+			"title":      share.Title,
+			"filters":    filters,
+			"expires_at": share.ExpiresAt,
+			"created_at": share.CreatedAt,
+		},
+	})
+}
+
+// GetSharedWorkOrders 获取分享的工单列表（免登录）
+func GetSharedWorkOrders(c *gin.Context) {
+	token := c.Param("token")
+	var share models.WorkOrderReportShare
+	if err := database.DB.Where("token = ?", token).First(&share).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "分享链接不存在或已失效"})
+		return
+	}
+
+	if time.Now().After(share.ExpiresAt) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "分享链接已过期"})
+		return
+	}
+
+	// 解析保存的查询条件
+	var savedFilters map[string]interface{}
+	if share.FiltersJSON != "" {
+		json.Unmarshal([]byte(share.FiltersJSON), &savedFilters)
+	}
+
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 200 {
+		limit = 20
+	}
+
+	q := database.DB.Model(&models.WorkOrder{})
+
+	// 应用保存的查询条件
+	if archived, ok := savedFilters["archived"].(string); ok && archived == "1" {
+		q = q.Where("archived = ?", true)
+	} else {
+		q = q.Where("archived = ? OR archived IS NULL", false)
+	}
+
+	if status, ok := savedFilters["status"].(string); ok && status != "" {
+		q = q.Where("status = ?", status)
+	}
+	if typeCode, ok := savedFilters["type_code"].(string); ok && typeCode != "" {
+		q = q.Where("type_code = ?", typeCode)
+	}
+	if deviceID, ok := savedFilters["device_id"].(string); ok && deviceID != "" {
+		q = q.Where("device_id = ?", deviceID)
+	}
+	if tags, ok := savedFilters["tags"].(string); ok && tags != "" {
+		codes := strings.Split(tags, ",")
+		if len(codes) > 0 {
+			sub := database.DB.Model(&models.WorkOrderTagLink{}).
+				Select("work_order_id").Where("tag_code IN ?", codes)
+			q = q.Where("id IN (?)", sub)
+		}
+	}
+	if createdStart, ok := savedFilters["created_start"].(string); ok && createdStart != "" {
+		q = q.Where("created_at >= ?", createdStart)
+	}
+	if createdEnd, ok := savedFilters["created_end"].(string); ok && createdEnd != "" {
+		q = q.Where("created_at <= ?", createdEnd)
+	}
+	if archivedStart, ok := savedFilters["archived_start"].(string); ok && archivedStart != "" {
+		q = q.Where("archived_at >= ?", archivedStart)
+	}
+	if archivedEnd, ok := savedFilters["archived_end"].(string); ok && archivedEnd != "" {
+		q = q.Where("archived_at <= ?", archivedEnd)
+	}
+
+	var total int64
+	q.Count(&total)
+
+	var rows []models.WorkOrder
+	q.Order("id DESC").Offset((page - 1) * limit).Limit(limit).Find(&rows)
+
+	// 补充标签（包含名称）
+	ids := make([]uint, 0, len(rows))
+	for i := range rows {
+		ids = append(ids, rows[i].ID)
+	}
+
+	// 获取所有标签定义
+	var allTags []models.WorkOrderTag
+	database.DB.Find(&allTags)
+	tagNameMap := make(map[string]string)
+	for _, tag := range allTags {
+		tagNameMap[tag.Code] = tag.Name
+	}
+
+	// 获取工单标签关联
+	tagsByWO := map[uint][]map[string]string{}
+	if len(ids) > 0 {
+		var links []models.WorkOrderTagLink
+		database.DB.Where("work_order_id IN ?", ids).Find(&links)
+		for _, l := range links {
+			tagInfo := map[string]string{
+				"code": l.TagCode,
+				"name": tagNameMap[l.TagCode],
+			}
+			if tagInfo["name"] == "" {
+				tagInfo["name"] = l.TagCode
+			}
+			tagsByWO[l.WorkOrderID] = append(tagsByWO[l.WorkOrderID], tagInfo)
+		}
+	}
+
+	type listRow struct {
+		models.WorkOrder
+		Tags []map[string]string `json:"tags"`
+	}
+	out := make([]listRow, 0, len(rows))
+	for i := range rows {
+		t := tagsByWO[rows[i].ID]
+		if t == nil {
+			t = []map[string]string{}
+		}
+		out = append(out, listRow{WorkOrder: rows[i], Tags: t})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": out, "total": total, "page": page, "limit": limit})
+}
+
+// GetSharedWorkOrderStatistics 获取分享的统计报告（免登录）
+func GetSharedWorkOrderStatistics(c *gin.Context) {
+	token := c.Param("token")
+	var share models.WorkOrderReportShare
+	if err := database.DB.Where("token = ?", token).First(&share).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "分享链接不存在或已失效"})
+		return
+	}
+
+	if time.Now().After(share.ExpiresAt) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "分享链接已过期"})
+		return
+	}
+
+	// 解析保存的查询条件
+	var savedFilters map[string]interface{}
+	if share.FiltersJSON != "" {
+		json.Unmarshal([]byte(share.FiltersJSON), &savedFilters)
+	}
+
+	q := database.DB.Model(&models.WorkOrder{})
+
+	// 应用保存的查询条件（与上面相同逻辑）
+	if archived, ok := savedFilters["archived"].(string); ok && archived == "1" {
+		q = q.Where("archived = ?", true)
+	} else {
+		q = q.Where("archived = ? OR archived IS NULL", false)
+	}
+	if status, ok := savedFilters["status"].(string); ok && status != "" {
+		q = q.Where("status = ?", status)
+	}
+	if typeCode, ok := savedFilters["type_code"].(string); ok && typeCode != "" {
+		q = q.Where("type_code = ?", typeCode)
+	}
+	if deviceID, ok := savedFilters["device_id"].(string); ok && deviceID != "" {
+		q = q.Where("device_id = ?", deviceID)
+	}
+	if tags, ok := savedFilters["tags"].(string); ok && tags != "" {
+		codes := strings.Split(tags, ",")
+		if len(codes) > 0 {
+			sub := database.DB.Model(&models.WorkOrderTagLink{}).
+				Select("work_order_id").Where("tag_code IN ?", codes)
+			q = q.Where("id IN (?)", sub)
+		}
+	}
+	if createdStart, ok := savedFilters["created_start"].(string); ok && createdStart != "" {
+		q = q.Where("created_at >= ?", createdStart)
+	}
+	if createdEnd, ok := savedFilters["created_end"].(string); ok && createdEnd != "" {
+		q = q.Where("created_at <= ?", createdEnd)
+	}
+	if archivedStart, ok := savedFilters["archived_start"].(string); ok && archivedStart != "" {
+		q = q.Where("archived_at >= ?", archivedStart)
+	}
+	if archivedEnd, ok := savedFilters["archived_end"].(string); ok && archivedEnd != "" {
+		q = q.Where("archived_at <= ?", archivedEnd)
+	}
+
+	var woIDs []uint
+	q.Pluck("id", &woIDs)
+
+	if len(woIDs) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"total":                0,
+			"by_status":            []gin.H{},
+			"by_type":              []gin.H{},
+			"by_tag":               []gin.H{},
+			"by_priority":          []gin.H{},
+			"avg_processing_hours": 0,
+		})
+		return
+	}
+
+	// 执行统计（复用GetWorkOrderStatistics的逻辑）
+	type statusStat struct {
+		Status string `json:"status"`
+		Count  int    `json:"count"`
+	}
+	var byStatus []statusStat
+	database.DB.Model(&models.WorkOrder{}).
+		Select("status, COUNT(*) as count").
+		Where("id IN ?", woIDs).
+		Group("status").
+		Order("count DESC").
+		Find(&byStatus)
+
+	type typeStat struct {
+		TypeCode string `json:"type_code"`
+		Count    int    `json:"count"`
+	}
+	var byType []typeStat
+	database.DB.Model(&models.WorkOrder{}).
+		Select("type_code, COUNT(*) as count").
+		Where("id IN ?", woIDs).
+		Group("type_code").
+		Order("count DESC").
+		Find(&byType)
+
+	type priorityStat struct {
+		Priority string `json:"priority"`
+		Count    int    `json:"count"`
+	}
+	var byPriority []priorityStat
+	database.DB.Model(&models.WorkOrder{}).
+		Select("priority, COUNT(*) as count").
+		Where("id IN ?", woIDs).
+		Group("priority").
+		Order("count DESC").
+		Find(&byPriority)
+
+	type tagStat struct {
+		TagCode string `json:"tag_code"`
+		TagName string `json:"tag_name"`
+		Count   int    `json:"count"`
+	}
+	var byTag []tagStat
+	database.DB.Model(&models.WorkOrderTagLink{}).
+		Select("tag_code, tag_name, COUNT(DISTINCT work_order_id) as count").
+		Where("work_order_id IN ?", woIDs).
+		Group("tag_code, tag_name").
+		Order("count DESC").
+		Find(&byTag)
+
+	var avgHours float64
+	var closedWOs []models.WorkOrder
+	database.DB.Select("created_at, closed_at, archived_at").
+		Where("id IN ?", woIDs).
+		Where("closed_at IS NOT NULL OR archived_at IS NOT NULL").
+		Find(&closedWOs)
+
+	if len(closedWOs) > 0 {
+		var totalHours float64
+		for _, wo := range closedWOs {
+			endTime := wo.ClosedAt
+			if endTime == nil {
+				endTime = wo.ArchivedAt
+			}
+			if endTime != nil && wo.CreatedAt.Before(*endTime) {
+				duration := endTime.Sub(wo.CreatedAt)
+				totalHours += duration.Hours()
+			}
+		}
+		avgHours = totalHours / float64(len(closedWOs))
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"total":                len(woIDs),
+		"by_status":            byStatus,
+		"by_type":              byType,
+		"by_tag":               byTag,
+		"by_priority":          byPriority,
+		"avg_processing_hours": avgHours,
+	})
+}
+
+// ListWorkOrderReportShares 列出当前用户创建的分享链接
+func ListWorkOrderReportShares(c *gin.Context) {
+	var shares []models.WorkOrderReportShare
+	database.DB.Where("created_by = ?", c.GetUint("user_id")).
+		Order("id DESC").
+		Find(&shares)
+	c.JSON(http.StatusOK, gin.H{"data": shares})
+}
+
+// GetWorkOrderReportShareViews 获取分享浏览记录
+func GetWorkOrderReportShareViews(c *gin.Context) {
+	id := c.Param("id")
+
+	// 验证权限
+	var share models.WorkOrderReportShare
+	if err := database.DB.Where("id = ? AND created_by = ?", id, c.GetUint("user_id")).First(&share).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "分享链接不存在或无权限查看"})
+		return
+	}
+
+	var views []models.WorkOrderReportShareView
+	database.DB.Where("share_id = ?", id).Order("viewed_at DESC").Find(&views)
+	c.JSON(http.StatusOK, gin.H{"data": views})
+}
+
+// DeleteWorkOrderReportShare 删除分享链接
+func DeleteWorkOrderReportShare(c *gin.Context) {
+	id := c.Param("id")
+	result := database.DB.Where("id = ? AND created_by = ?", id, c.GetUint("user_id")).
+		Delete(&models.WorkOrderReportShare{})
+	if result.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": result.Error.Error()})
+		return
+	}
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "分享链接不存在或无权限删除"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "ok"})
+}
+
+// GetSharedWorkOrderProgress 获取分享工单的进展列表（免登录，通过 token 验证）
+func GetSharedWorkOrderProgress(c *gin.Context) {
+	token := c.Param("token")
+	woID := c.Param("id")
+
+	// 验证分享 token
+	var share models.WorkOrderReportShare
+	if err := database.DB.Where("token = ?", token).First(&share).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "分享链接不存在或已失效"})
+		return
+	}
+
+	if time.Now().After(share.ExpiresAt) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "分享链接已过期"})
+		return
+	}
+
+	// 验证工单在分享范围内
+	var savedFilters map[string]interface{}
+	if share.FiltersJSON != "" {
+		json.Unmarshal([]byte(share.FiltersJSON), &savedFilters)
+	}
+
+	q := database.DB.Model(&models.WorkOrder{})
+
+	// 应用保存的查询条件（与 GetSharedWorkOrders 保持一致）
+	if savedFilters != nil {
+		if typeCode, ok := savedFilters["type_code"].(string); ok && typeCode != "" {
+			q = q.Where("type_code = ?", typeCode)
+		}
+		if status, ok := savedFilters["status"].(string); ok && status != "" {
+			q = q.Where("status = ?", status)
+		}
+		if priority, ok := savedFilters["priority"].(string); ok && priority != "" {
+			q = q.Where("priority = ?", priority)
+		}
+		if deviceID, ok := savedFilters["device_id"].(string); ok && deviceID != "" {
+			q = q.Where("device_id = ?", deviceID)
+		}
+		if tagCode, ok := savedFilters["tag_code"].(string); ok && tagCode != "" {
+			q = q.Where("EXISTS (SELECT 1 FROM work_order_tag_links WHERE work_order_tag_links.work_order_id = work_orders.id AND work_order_tag_links.tag_code = ?)", tagCode)
+		}
+		if businessNo, ok := savedFilters["business_no"].(string); ok && businessNo != "" {
+			q = q.Where("business_no LIKE ?", "%"+businessNo+"%")
+		}
+		if externalRef, ok := savedFilters["external_ref"].(string); ok && externalRef != "" {
+			q = q.Where("external_ref LIKE ?", "%"+externalRef+"%")
+		}
+		if startTime, ok := savedFilters["start_time"].(string); ok && startTime != "" {
+			q = q.Where("created_at >= ?", startTime)
+		}
+		if endTime, ok := savedFilters["end_time"].(string); ok && endTime != "" {
+			q = q.Where("created_at <= ?", endTime)
+		}
+	}
+
+	// 验证工单ID是否在分享范围内
+	var count int64
+	q.Where("id = ?", woID).Count(&count)
+	if count == 0 {
+		c.JSON(http.StatusForbidden, gin.H{"error": "该工单不在分享范围内"})
+		return
+	}
+
+	// 获取进展列表（复用 ListWorkOrderProgress 的逻辑）
+	var list []models.WorkOrderProgress
+	if err := database.DB.Where("work_order_id = ?", woID).Order("id DESC").Find(&list).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 批量查询所有进展的附件
+	progressIDs := make([]uint, 0, len(list))
+	for _, p := range list {
+		progressIDs = append(progressIDs, p.ID)
+	}
+	attachmentsByProgress := make(map[uint][]models.WorkOrderProgressAttachment)
+	if len(progressIDs) > 0 {
+		var attachments []models.WorkOrderProgressAttachment
+		database.DB.Where("progress_id IN ?", progressIDs).Order("id ASC").Find(&attachments)
+		for _, att := range attachments {
+			attachmentsByProgress[att.ProgressID] = append(attachmentsByProgress[att.ProgressID], att)
+		}
+	}
+
+	type progressRow struct {
+		models.WorkOrderProgress
+		Attachments []models.WorkOrderProgressAttachment `json:"attachments"`
+	}
+	out := make([]progressRow, 0, len(list))
+	for _, p := range list {
+		atts := attachmentsByProgress[p.ID]
+		if atts == nil {
+			atts = []models.WorkOrderProgressAttachment{}
+		}
+		out = append(out, progressRow{WorkOrderProgress: p, Attachments: atts})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": out})
 }

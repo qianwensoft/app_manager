@@ -8,7 +8,7 @@
         <el-button @click="$router.push('/work-orders/workflow-logs')">查看执行日志</el-button>
       </div>
 
-      <el-table :data="workflows" stripe>
+      <el-table :data="workflows" stripe :row-key="row => row.id">
         <el-table-column label="ID" prop="id" width="60" />
         <el-table-column label="名称" prop="name" min-width="150" />
         <el-table-column label="工单类型">
@@ -18,14 +18,14 @@
         </el-table-column>
         <el-table-column label="监听事件" min-width="200">
           <template #default="{row}">
-            <span v-if="!row.events || parseEvents(row.events).length === 0">全部事件</span>
-            <el-tag v-else v-for="e in parseEvents(row.events)" :key="e" size="small" style="margin-right:4px">
+            <span v-if="!row.events || getRowEvents(row).length === 0">全部事件</span>
+            <el-tag v-else v-for="e in getRowEvents(row)" :key="e" size="small" style="margin-right:4px">
               {{ eventLabel(e) }}
             </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="动作数">
-          <template #default="{row}">{{ parseActions(row.actions_json).length }}</template>
+          <template #default="{row}">{{ getRowActionsCount(row) }}</template>
         </el-table-column>
         <el-table-column label="启用">
           <template #default="{row}">
@@ -33,9 +33,10 @@
           </template>
         </el-table-column>
         <el-table-column label="排序" prop="sort_order" width="80" />
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" width="240" fixed="right">
           <template #default="{row}">
             <el-button text type="primary" size="small" @click="openEdit(row)">编辑</el-button>
+            <el-button text type="primary" size="small" @click="copyWorkflow(row)">复制</el-button>
             <el-button text type="primary" size="small" @click="openTest(row)">测试</el-button>
             <el-button text type="danger" size="small" @click="remove(row)">删除</el-button>
           </template>
@@ -43,7 +44,7 @@
       </el-table>
     </el-card>
 
-    <el-dialog v-model="dialog" :title="form.id ? '编辑工作流' : '新建工作流'" width="800px" destroy-on-close @opened="onDialogOpened">
+    <el-dialog v-model="dialog" :title="form.id ? '编辑工作流' : '新建工作流'" width="800px" @opened="onDialogOpened" @closed="onDialogClosed">
       <el-form :model="form" label-width="100px">
         <el-form-item label="名称">
           <el-input v-model="form.name" placeholder="工作流名称" />
@@ -101,9 +102,25 @@
           <el-button text type="primary" size="small" @click="addAction">添加动作</el-button>
         </div>
         <div v-for="(action, idx) in actions" :key="idx" class="action-item">
-          <div class="action-head">
-            <span>动作 {{ idx + 1 }}</span>
-            <div>
+          <div class="action-head" @click="toggleActionCollapse(idx)">
+            <div class="action-head-left">
+              <el-icon class="collapse-icon" :class="{ collapsed: action.collapsed }">
+                <ArrowDown />
+              </el-icon>
+              <span>动作 {{ idx + 1 }}</span>
+              <el-tag v-if="action.type" size="small" style="margin-left:8px">{{ actionTypeLabel(action.type) }}</el-tag>
+              <span v-if="action.collapsed && action.condition" class="condition-preview">
+                <el-icon style="margin-left:8px;margin-right:4px"><Filter /></el-icon>
+                <code>{{ action.condition }}</code>
+              </span>
+            </div>
+            <div @click.stop class="action-head-buttons">
+              <el-button text type="primary" size="small" @click="insertAction(idx, 'before')">
+                <el-icon><Top /></el-icon> 向前添加
+              </el-button>
+              <el-button text type="primary" size="small" @click="insertAction(idx, 'after')">
+                <el-icon><Bottom /></el-icon> 向后添加
+              </el-button>
               <el-button text type="primary" size="small" @click="moveAction(idx, -1)" :disabled="idx === 0">
                 <el-icon><ArrowUp /></el-icon>
               </el-button>
@@ -113,6 +130,7 @@
               <el-button text type="danger" size="small" @click="removeAction(idx)">删除</el-button>
             </div>
           </div>
+          <div v-show="!action.collapsed" class="action-content">
           <el-form-item label="动作类型">
             <el-select v-model="action.type" placeholder="选择动作类型" style="width:100%" @change="onActionTypeChange(idx)">
               <el-option label="调用第三方接口" value="call_endpoint" />
@@ -125,111 +143,157 @@
             </el-select>
           </el-form-item>
 
+          <el-form-item label="执行条件">
+            <el-input
+              v-model="action.condition"
+              placeholder="可选，如：{{ctx.count}} > 0 或 {{workOrder.status}} == 'pending'"
+              clearable
+            >
+              <template #prepend>
+                <el-tooltip content="条件为空或为 true 时执行此动作，支持 JavaScript 表达式和模板变量">
+                  <el-icon><QuestionFilled /></el-icon>
+                </el-tooltip>
+              </template>
+              <template #append>
+                <el-dropdown @command="cmd => insertConditionTemplate(idx, cmd)" trigger="click">
+                  <el-button>
+                    <el-icon><More /></el-icon>
+                  </el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item disabled>常用条件</el-dropdown-item>
+                      <el-dropdown-item command="{{workOrder.status}} == 'open'">状态为 open</el-dropdown-item>
+                      <el-dropdown-item command="{{workOrder.priority}} == 'high'">优先级为 high</el-dropdown-item>
+                      <el-dropdown-item command="{{ctx.count}} > 0">ctx.count 大于 0</el-dropdown-item>
+                      <el-dropdown-item command="{{ctx.enabled}} == true">ctx.enabled 为 true</el-dropdown-item>
+                      <el-dropdown-item divided disabled v-if="contextVars.length > 0">上下文变量</el-dropdown-item>
+                      <el-dropdown-item
+                        v-for="ctx in contextVars"
+                        :key="ctx.name"
+                        :command="ctxTemplate(ctx.name)"
+                      >
+                        {{ ctxTemplateLabel(ctx) }}
+                      </el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </template>
+            </el-input>
+            <div class="hint">
+              示例：
+              <code>{{'{{'}}ctx.count}} &gt; 0</code>、
+              <code>{{'{{'}}workOrder.status}} == &quot;pending&quot;</code>、
+              <code>{{'{{'}}ctx.enabled}} == true &amp;&amp; {{'{{'}}workOrder.priority}} == &quot;high&quot;</code>
+            </div>
+          </el-form-item>
+
           <!-- Visual builder for call_endpoint -->
-          <template v-if="action.type === 'call_endpoint' && action.useBuilder">
-            <el-form-item label="选择第三方接口">
-              <el-select
-                v-model="action.builder.endpointId"
-                placeholder="选择第三方接口"
-                style="width:100%"
-                filterable
-                @change="onEndpointSelected(idx)"
-              >
-                <el-option
-                  v-for="endpoint in outboundEndpoints"
-                  :key="endpoint.id"
-                  :label="`${endpoint.name}`"
-                  :value="endpoint.id"
-                />
-              </el-select>
-            </el-form-item>
+          <template v-if="action.type === 'call_endpoint'">
+            <el-tabs v-model="action.activeTab" type="card" style="margin-top: 12px;">
+              <el-tab-pane label="可视化配置" name="visual">
+                <el-form-item label="选择第三方接口">
+                  <el-select
+                    v-model="action.builder.endpointId"
+                    placeholder="选择第三方接口"
+                    style="width:100%"
+                    filterable
+                    @change="onEndpointSelected(idx)"
+                  >
+                    <el-option
+                      v-for="endpoint in outboundEndpoints"
+                      :key="endpoint.id"
+                      :label="`${endpoint.name}`"
+                      :value="endpoint.id"
+                    />
+                  </el-select>
+                </el-form-item>
 
-            <el-form-item v-if="action.builder.endpointId" label="参数映射">
-              <div class="param-mapping">
-                <div v-if="action.builder.paramList === null" class="no-params">
-                  <el-icon class="is-loading"><Loading /></el-icon> 加载参数中...
-                </div>
-                <div v-else-if="!action.builder.paramList || action.builder.paramList.length === 0" class="no-params">
-                  该接口无需参数
-                </div>
-                <div v-else>
-                  <div v-for="param in action.builder.paramList" :key="param.name" class="param-row">
-                    <div class="param-label">
-                      <span class="param-name">{{ param.name }}</span>
-                      <el-tag v-if="param.required" type="danger" size="small">必填</el-tag>
-                      <span class="param-type">{{ param.type || 'string' }}</span>
-                      <span v-if="param.description" class="param-desc">{{ param.description }}</span>
+                <el-form-item v-if="action.builder.endpointId" label="参数映射">
+                  <div class="param-mapping">
+                    <div v-if="action.builder.paramList === null" class="no-params">
+                      <el-icon class="is-loading"><Loading /></el-icon> 加载参数中...
                     </div>
-                    <el-input
-                      v-model="action.builder.params[param.name]"
-                      placeholder="输入值或模板变量 {{field}}"
-                      @input="updateEndpointBuilderJSON(idx)"
-                    >
-                      <template #append>
-                        <el-dropdown @command="cmd => insertTemplate(idx, param.name, cmd)" trigger="click">
-                          <el-button>
-                            <el-icon><More /></el-icon>
-                          </el-button>
-                          <template #dropdown>
-                            <el-dropdown-menu>
-                              <el-dropdown-item disabled>工单字段</el-dropdown-item>
-                              <el-dropdown-item command="{{code}}">{{code}} - 工单编号</el-dropdown-item>
-                              <el-dropdown-item command="{{title}}">{{title}} - 工单标题</el-dropdown-item>
-                              <el-dropdown-item command="{{description}}">{{description}} - 工单描述</el-dropdown-item>
-                              <el-dropdown-item command="{{device_id}}">{{device_id}} - 设备ID</el-dropdown-item>
-                              <el-dropdown-item command="{{status}}">{{status}} - 工单状态</el-dropdown-item>
-                              <el-dropdown-item command="{{priority}}">{{priority}} - 优先级</el-dropdown-item>
-                              <el-dropdown-item command="{{assignee_id}}">{{assignee_id}} - 指派人ID</el-dropdown-item>
-                              <el-dropdown-item command="{{business_no}}">{{business_no}} - 业务编码</el-dropdown-item>
-                              <el-dropdown-item command="{{other_codes}}">{{other_codes}} - 其他编码</el-dropdown-item>
-                              <el-dropdown-item divided disabled v-if="contextVars.length > 0">上下文变量</el-dropdown-item>
-                              <el-dropdown-item
-                                v-for="ctx in contextVars"
-                                :key="ctx.name"
-                                :command="ctxTemplate(ctx.name)"
-                              >
-                                {{ ctxTemplateLabel(ctx) }}
-                              </el-dropdown-item>
-                              <el-dropdown-item divided disabled v-if="idx > 0">前序动作结果</el-dropdown-item>
-                              <el-dropdown-item
-                                v-for="prevIdx in idx"
-                                :key="prevIdx"
-                                :command="actionResultTemplate(prevIdx)"
-                              >
-                                {{ actionResultLabel(prevIdx) }}
-                              </el-dropdown-item>
-                            </el-dropdown-menu>
+                    <div v-else-if="!action.builder.paramList || action.builder.paramList.length === 0" class="no-params">
+                      该接口无需参数
+                    </div>
+                    <div v-else>
+                      <div v-for="param in action.builder.paramList" :key="param.name" class="param-row">
+                        <div class="param-label">
+                          <span class="param-name">{{ param.name }}</span>
+                          <el-tag v-if="param.required" type="danger" size="small">必填</el-tag>
+                          <span class="param-type">{{ param.type || 'string' }}</span>
+                          <span v-if="param.description" class="param-desc">{{ param.description }}</span>
+                        </div>
+                        <el-input
+                          v-model="action.builder.params[param.name]"
+                          placeholder="输入值或模板变量 {{field}}"
+                          @input="updateEndpointBuilderJSON(idx)"
+                        >
+                          <template #append>
+                            <el-dropdown @command="cmd => insertTemplate(idx, param.name, cmd)" trigger="click">
+                              <el-button>
+                                <el-icon><More /></el-icon>
+                              </el-button>
+                              <template #dropdown>
+                                <el-dropdown-menu>
+                                  <el-dropdown-item disabled>工单字段</el-dropdown-item>
+                                  <el-dropdown-item command="{{code}}">{{code}} - 工单编号</el-dropdown-item>
+                                  <el-dropdown-item command="{{title}}">{{title}} - 工单标题</el-dropdown-item>
+                                  <el-dropdown-item command="{{description}}">{{description}} - 工单描述</el-dropdown-item>
+                                  <el-dropdown-item command="{{device_id}}">{{device_id}} - 设备ID</el-dropdown-item>
+                                  <el-dropdown-item command="{{status}}">{{status}} - 工单状态</el-dropdown-item>
+                                  <el-dropdown-item command="{{priority}}">{{priority}} - 优先级</el-dropdown-item>
+                                  <el-dropdown-item command="{{assignee_id}}">{{assignee_id}} - 指派人ID</el-dropdown-item>
+                                  <el-dropdown-item command="{{business_no}}">{{business_no}} - 业务编码</el-dropdown-item>
+                                  <el-dropdown-item command="{{other_codes}}">{{other_codes}} - 其他编码</el-dropdown-item>
+                                  <el-dropdown-item divided disabled v-if="contextVars.length > 0">上下文变量</el-dropdown-item>
+                                  <el-dropdown-item
+                                    v-for="ctx in contextVars"
+                                    :key="ctx.name"
+                                    :command="ctxTemplate(ctx.name)"
+                                  >
+                                    {{ ctxTemplateLabel(ctx) }}
+                                  </el-dropdown-item>
+                                  <el-dropdown-item divided disabled v-if="idx > 0">前序动作结果</el-dropdown-item>
+                                  <el-dropdown-item
+                                    v-for="prevIdx in idx"
+                                    :key="prevIdx"
+                                    :command="actionResultTemplate(prevIdx)"
+                                  >
+                                    {{ actionResultLabel(prevIdx) }}
+                                  </el-dropdown-item>
+                                </el-dropdown-menu>
+                              </template>
+                            </el-dropdown>
                           </template>
-                        </el-dropdown>
-                      </template>
-                    </el-input>
+                        </el-input>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-            </el-form-item>
+                </el-form-item>
 
-            <!-- Context variable to store result -->
-            <el-form-item label="结果保存到上下文">
-              <el-input
-                v-model="action.builder.saveToContext"
-                placeholder="变量名，如：api_response"
-                @input="updateEndpointBuilderJSON(idx)"
-              >
-                <template #prepend>ctx.</template>
-              </el-input>
-              <div class="hint">可选，将接口响应保存到上下文变量中供后续动作使用</div>
-            </el-form-item>
+                <!-- Context variable to store result -->
+                <el-form-item label="结果保存到上下文">
+                  <el-input
+                    v-model="action.builder.saveToContext"
+                    placeholder="变量名，如：api_response"
+                    @input="updateEndpointBuilderJSON(idx)"
+                  >
+                    <template #prepend>ctx.</template>
+                  </el-input>
+                  <div class="hint">可选，将接口响应保存到上下文变量中供后续动作使用</div>
+                </el-form-item>
+              </el-tab-pane>
 
-            <el-form-item label="生成的配置">
-              <el-input v-model="action.configJSON" type="textarea" :rows="4" readonly />
-              <div class="hint">自动从上方配置生成，也可切换到手动模式直接编辑 JSON</div>
-            </el-form-item>
-
-            <el-form-item>
-              <el-button text type="primary" size="small" @click="action.useBuilder = false">
-                切换到手动 JSON 模式
-              </el-button>
-            </el-form-item>
+              <el-tab-pane label="JSON 配置" name="json">
+                <el-form-item label="配置（JSON）" style="margin-top: 8px;">
+                  <el-input v-model="action.configJSON" type="textarea" :rows="10" placeholder="动作配置（JSON 对象）" />
+                  <div class="hint" style="margin-top: 8px;">
+                    格式：{"endpoint_id": 1, "params": {"key": "{{code}}"}, "save_to_context": "变量名"}
+                  </div>
+                </el-form-item>
+              </el-tab-pane>
+            </el-tabs>
           </template>
 
           <!-- Visual builder for call_data_interface -->
@@ -422,19 +486,75 @@
             <el-form-item label="更新字段">
               <div class="update-fields">
                 <div v-for="(field, fieldIdx) in action.builder.updateFields" :key="fieldIdx" class="field-row">
-                  <el-select v-model="field.name" placeholder="选择字段" style="width:200px" @change="updateWorkOrderBuilderJSON(idx)">
+                  <el-select v-model="field.name" placeholder="选择字段" style="width:180px" @change="updateWorkOrderBuilderJSON(idx)">
                     <el-option label="标题 (title)" value="title" />
                     <el-option label="描述 (description)" value="description" />
                     <el-option label="状态 (status)" value="status" />
                     <el-option label="优先级 (priority)" value="priority" />
-                    <el-option label="指派人 (assignee_id)" value="assignee_id" />
+                    <el-option label="可见性 (visibility)" value="visibility" />
+                    <el-option label="指派人 (assigned_to)" value="assigned_to" />
+                    <el-option label="业务编号 (business_no)" value="business_no" />
+                    <el-option label="外部参考号 (external_ref)" value="external_ref" />
+                    <el-option label="其他编码 (other_codes)" value="other_codes" />
+                    <el-option label="设备名称快照 (device_name_snap)" value="device_name_snap" />
+                    <el-option label="服务端别名 (device_alias_server)" value="device_alias_server" />
+                    <el-option label="Agent端别名 (device_alias_agent)" value="device_alias_agent" />
+                    <el-option label="设备分组 (device_group)" value="device_group" />
+                    <el-option label="类型化数据 (data_json)" value="data_json" />
+                  </el-select>
+                  <el-select v-model="field.mode" placeholder="模式" style="width:100px;margin-left:8px" @change="updateWorkOrderBuilderJSON(idx)">
+                    <el-option label="替换" value="replace" />
+                    <el-option label="追加" value="append" />
                   </el-select>
                   <el-input
-                    v-model="field.value"
-                    placeholder="字段值或模板变量"
-                    style="flex:1;margin-left:8px"
+                    v-if="field.mode === 'append'"
+                    v-model="field.separator"
+                    placeholder="分隔符"
+                    style="width:80px;margin-left:8px"
                     @input="updateWorkOrderBuilderJSON(idx)"
                   />
+                  <el-input
+                    v-model="field.value"
+                    placeholder="字段值或模板变量 {{field}}"
+                    style="flex:1;margin-left:8px"
+                    @input="updateWorkOrderBuilderJSON(idx)"
+                  >
+                    <template #append>
+                      <el-dropdown @command="cmd => insertUpdateFieldTemplate(idx, fieldIdx, cmd)" trigger="click">
+                        <el-button>
+                          <el-icon><More /></el-icon>
+                        </el-button>
+                        <template #dropdown>
+                          <el-dropdown-menu>
+                            <el-dropdown-item disabled>工单字段</el-dropdown-item>
+                            <el-dropdown-item command="{{code}}">{{code}} - 工单编号</el-dropdown-item>
+                            <el-dropdown-item command="{{title}}">{{title}} - 标题</el-dropdown-item>
+                            <el-dropdown-item command="{{description}}">{{description}} - 描述</el-dropdown-item>
+                            <el-dropdown-item command="{{status}}">{{status}} - 状态</el-dropdown-item>
+                            <el-dropdown-item command="{{priority}}">{{priority}} - 优先级</el-dropdown-item>
+                            <el-dropdown-item command="{{device_id}}">{{device_id}} - 设备ID</el-dropdown-item>
+                            <el-dropdown-item command="{{other_codes}}">{{other_codes}} - 其他编码</el-dropdown-item>
+                            <el-dropdown-item divided disabled v-if="contextVars.length > 0">上下文变量</el-dropdown-item>
+                            <el-dropdown-item
+                              v-for="ctx in contextVars"
+                              :key="ctx.name"
+                              :command="ctxTemplate(ctx.name)"
+                            >
+                              {{ ctxTemplateLabel(ctx) }}
+                            </el-dropdown-item>
+                            <el-dropdown-item divided disabled v-if="idx > 0">前序动作结果</el-dropdown-item>
+                            <el-dropdown-item
+                              v-for="prevIdx in idx"
+                              :key="prevIdx"
+                              :command="actionResultTemplate(prevIdx)"
+                            >
+                              {{ actionResultLabel(prevIdx) }}
+                            </el-dropdown-item>
+                          </el-dropdown-menu>
+                        </template>
+                      </el-dropdown>
+                    </template>
+                  </el-input>
                   <el-button
                     text
                     type="danger"
@@ -560,6 +680,7 @@
               <div v-if="action.type === 'query_work_orders'">格式：{"conditions": {"device_id": "{{device_id}}"}, "limit": 10}</div>
             </div>
           </el-form-item>
+          </div>
         </div>
       </el-form>
       <template #footer>
@@ -568,18 +689,60 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="testDialog" title="测试工作流" width="460px">
+    <el-dialog v-model="testDialog" title="测试工作流" width="600px">
       <el-form label-width="100px">
-        <el-form-item label="工单 ID">
-          <el-input v-model.number="testForm.workOrderId" type="number" placeholder="测试用工单 ID" />
+        <el-form-item label="选择工单">
+          <el-select
+            v-model="testForm.workOrderId"
+            filterable
+            remote
+            reserve-keyword
+            placeholder="输入工单编号、业务编号或其他编码搜索"
+            :remote-method="searchWorkOrders"
+            :loading="searchLoading"
+            style="width: 100%"
+            clearable
+            popper-class="work-order-select-popper"
+          >
+            <el-option
+              v-for="wo in searchedWorkOrders"
+              :key="wo.id"
+              :label="`${wo.code} - ${wo.title}`"
+              :value="wo.id"
+            >
+              <div class="work-order-option">
+                <div class="wo-main">{{ wo.code }} - {{ wo.title }}</div>
+                <div class="wo-meta">
+                  <span v-if="wo.business_no" class="wo-field">业务编号: {{ wo.business_no }}</span>
+                  <span v-if="wo.business_no && wo.other_codes" class="wo-separator">|</span>
+                  <span v-if="wo.other_codes" class="wo-field">其他编码: {{ wo.other_codes }}</span>
+                  <el-tag size="small" class="wo-status" :type="getStatusType(wo.status)">{{ getStatusLabel(wo.status) }}</el-tag>
+                </div>
+              </div>
+            </el-option>
+          </el-select>
+          <div class="hint">可搜索工单编号、业务编号、其他编码</div>
         </el-form-item>
         <el-form-item label="触发事件">
-          <el-input v-model="testForm.event" placeholder="如 work_order.test" />
+          <el-select v-model="testForm.event" placeholder="选择触发事件" style="width: 100%">
+            <el-option
+              v-for="evt in getAvailableEventsForTest()"
+              :key="evt.value"
+              :label="evt.label"
+              :value="evt.value"
+            />
+          </el-select>
+          <div class="hint" v-if="getCurrentWorkflowEvents().length > 0">
+            当前工作流监听事件: {{ getCurrentWorkflowEvents().map(e => eventLabel(e)).join('、') }}
+          </div>
+          <div class="hint" v-else style="color: #67c23a;">
+            当前工作流监听所有事件
+          </div>
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="testDialog = false">取消</el-button>
-        <el-button type="primary" @click="runTest">执行测试</el-button>
+        <el-button type="primary" @click="runTest" :disabled="!testForm.workOrderId">执行测试</el-button>
       </template>
     </el-dialog>
 
@@ -607,15 +770,18 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { More, QuestionFilled, Plus, ArrowUp, ArrowDown, Loading } from '@element-plus/icons-vue'
+import { More, QuestionFilled, Plus, ArrowUp, ArrowDown, Loading, Top, Bottom, Filter } from '@element-plus/icons-vue'
 import {
   getWorkOrderWorkflows, createWorkOrderWorkflow, updateWorkOrderWorkflow, deleteWorkOrderWorkflow,
-  testWorkOrderWorkflow, getWorkOrderTypes
+  testWorkOrderWorkflow, getWorkOrderTypes, getWorkOrders
 } from '@/api/workOrder'
 import { listDataInterfaces, getInterfaceParamSchema } from '@/api/dataStack'
 import { listOutboundEndpoints, getEndpointParamSchema } from '@/api/outbound'
+import { useRouter } from 'vue-router'
+import '@/monaco-setup.js'
 import * as monaco from 'monaco-editor'
 
+const router = useRouter()
 const workflows = ref([])
 const types = ref([])
 const dataInterfaces = ref([])
@@ -631,6 +797,8 @@ const contextDialog = ref(false)
 const contextForm = ref({ name: '', description: '', defaultValue: '' })
 const testDialog = ref(false)
 const testForm = ref({ workflowId: null, workOrderId: null, event: 'work_order.test' })
+const searchedWorkOrders = ref([])
+const searchLoading = ref(false)
 
 // Monaco editors for JavaScript actions
 const monacoEditors = ref({})
@@ -653,9 +821,34 @@ const parseActions = (json) => {
   try { return JSON.parse(json) } catch { return [] }
 }
 
+// 缓存行数据解析结果，避免重复解析
+const rowCache = ref(new Map())
+
+const getRowEvents = (row) => {
+  const cacheKey = `events_${row.id}_${row.events}`
+  if (rowCache.value.has(cacheKey)) {
+    return rowCache.value.get(cacheKey)
+  }
+  const result = parseEvents(row.events)
+  rowCache.value.set(cacheKey, result)
+  return result
+}
+
+const getRowActionsCount = (row) => {
+  const cacheKey = `actions_${row.id}_${row.actions_json?.substring(0, 50)}`
+  if (rowCache.value.has(cacheKey)) {
+    return rowCache.value.get(cacheKey)
+  }
+  const result = parseActions(row.actions_json).length
+  rowCache.value.set(cacheKey, result)
+  return result
+}
+
 const load = async () => {
   const res = await getWorkOrderWorkflows()
   workflows.value = res.data || []
+  // 清除行缓存
+  rowCache.value.clear()
 }
 
 const openCreate = () => {
@@ -687,7 +880,15 @@ const openEdit = (row) => {
   }
 
   actions.value = acts.map((a, idx) => {
-    const action = { type: a.type, configJSON: JSON.stringify(a.config, null, 2), useBuilder: true, builder: {} }
+    const action = {
+      type: a.type,
+      configJSON: JSON.stringify(a.config, null, 2),
+      useBuilder: true,
+      builder: {},
+      condition: a.condition || '', // 加载执行条件
+      collapsed: true, // 默认收起以提升性能
+      activeTab: 'visual' // 初始化 activeTab
+    }
 
     // Initialize builder based on action type
     if (a.type === 'call_endpoint' && a.config?.endpoint_id) {
@@ -695,13 +896,13 @@ const openEdit = (row) => {
         endpointId: a.config.endpoint_id,
         params: a.config.params || {},
         saveToContext: a.config.save_to_context || '',
-        paramList: null
+        paramList: [] // 初始化为空数组而不是 null
       }
     } else if (a.type === 'call_data_interface' && a.config?.interface_id) {
       action.builder = {
         interfaceId: a.config.interface_id,
         params: a.config.params || {},
-        paramList: null
+        paramList: [] // 初始化为空数组而不是 null
       }
     } else if (a.type === 'execute_js' && a.config?.code) {
       action.builder = {
@@ -714,10 +915,20 @@ const openEdit = (row) => {
         action.builder.updateTarget = 'specified'
         action.builder.workOrderId = a.config.work_order_id
       }
-      if (a.config.updates) {
+      // 支持新格式（数组）和旧格式（对象）
+      if (Array.isArray(a.config.updates)) {
+        action.builder.updateFields = a.config.updates.map(u => ({
+          name: u.field || '',
+          value: String(u.value || ''),
+          mode: u.mode || 'replace',
+          separator: u.separator || ','
+        }))
+      } else if (a.config.updates) {
         action.builder.updateFields = Object.entries(a.config.updates).map(([name, value]) => ({
           name,
-          value: String(value)
+          value: String(value),
+          mode: 'replace',
+          separator: ','
         }))
       }
     } else if (a.type === 'create_work_order') {
@@ -736,15 +947,147 @@ const openEdit = (row) => {
 
     return action
   })
+
+  // 延迟打开对话框，让 Vue 有时间处理数据更新
+  nextTick(() => {
+    dialog.value = true
+  })
+}
+
+const copyWorkflow = (row) => {
+  form.value = {
+    ...row,
+    id: null,
+    name: row.name + ' (复制)'
+  }
+  eventList.value = parseEvents(row.events)
+  const acts = parseActions(row.actions_json)
+
+  // Extract context variables from workflow metadata
+  contextVars.value = []
+  try {
+    const firstAction = acts[0]
+    if (firstAction?.config?.context) {
+      contextVars.value = firstAction.config.context.map(c => ({
+        name: c.name || c,
+        description: c.description || '',
+        defaultValue: c.defaultValue || c.default_value || ''
+      }))
+    }
+  } catch (e) {
+    // Ignore
+  }
+
+  actions.value = acts.map((a, idx) => {
+    const action = {
+      type: a.type,
+      configJSON: JSON.stringify(a.config, null, 2),
+      useBuilder: true,
+      builder: {},
+      condition: a.condition || '',
+      collapsed: true, // 默认收起以提升性能
+      activeTab: 'visual' // 初始化 activeTab
+    }
+
+    // Initialize builder based on action type
+    if (a.type === 'call_endpoint' && a.config?.endpoint_id) {
+      action.builder = {
+        endpointId: a.config.endpoint_id,
+        params: a.config.params || {},
+        saveToContext: a.config.save_to_context || '',
+        paramList: [] // 初始化为空数组而不是 null
+      }
+    } else if (a.type === 'call_data_interface' && a.config?.interface_id) {
+      action.builder = {
+        interfaceId: a.config.interface_id,
+        params: a.config.params || {},
+        paramList: [] // 初始化为空数组而不是 null
+      }
+    } else if (a.type === 'execute_js' && a.config?.code) {
+      action.builder = {
+        code: a.config.code || ''
+      }
+    } else if (a.type === 'update_work_order') {
+      action.builder = { updateTarget: 'current', workOrderId: '', updateFields: [] }
+      if (a.config.work_order_id) {
+        action.builder.updateTarget = 'specified'
+        action.builder.workOrderId = a.config.work_order_id
+      }
+      if (Array.isArray(a.config.updates)) {
+        action.builder.updateFields = a.config.updates.map(u => ({
+          name: u.field || '',
+          value: String(u.value || ''),
+          mode: u.mode || 'replace',
+          separator: u.separator || ','
+        }))
+      } else if (a.config.updates) {
+        action.builder.updateFields = Object.entries(a.config.updates).map(([name, value]) => ({
+          name,
+          value: String(value),
+          mode: 'replace',
+          separator: ','
+        }))
+      }
+    } else if (a.type === 'create_work_order') {
+      action.builder = { typeCode: '', createFields: [], saveToContext: '' }
+      if (a.config.fields) {
+        action.builder.typeCode = a.config.fields.type_code || ''
+        action.builder.createFields = Object.entries(a.config.fields)
+          .filter(([name]) => name !== 'type_code')
+          .map(([name, value]) => ({ name, value: String(value) }))
+      }
+      action.builder.saveToContext = a.config.save_to_context || ''
+    } else {
+      action.useBuilder = false
+    }
+
+    return action
+  })
   dialog.value = true
 }
 
 const addAction = () => {
-  actions.value.push({ type: '', configJSON: '{}', useBuilder: false, builder: {} })
+  actions.value.push({ type: '', configJSON: '{}', useBuilder: false, builder: {}, condition: '', collapsed: false, activeTab: 'visual' })
+}
+
+const insertAction = (idx, position) => {
+  const newAction = { type: '', configJSON: '{}', useBuilder: false, builder: {}, condition: '', collapsed: false, activeTab: 'visual' }
+  if (position === 'before') {
+    actions.value.splice(idx, 0, newAction)
+  } else {
+    actions.value.splice(idx + 1, 0, newAction)
+  }
 }
 
 const removeAction = (idx) => {
   actions.value.splice(idx, 1)
+}
+
+const toggleActionCollapse = (idx) => {
+  const action = actions.value[idx]
+  action.collapsed = !action.collapsed
+
+  // 如果展开了 execute_js 类型的动作，且尚未初始化 Monaco 编辑器，则初始化
+  if (!action.collapsed && action.type === 'execute_js' && action.useBuilder) {
+    nextTick(() => {
+      if (!monacoEditors.value[idx]) {
+        initJsBuilder(idx)
+      }
+    })
+  }
+}
+
+const actionTypeLabel = (type) => {
+  const labels = {
+    'call_endpoint': '调用第三方接口',
+    'call_connector': '调用连接器',
+    'call_data_interface': '调用数据接口',
+    'execute_js': '执行 JavaScript',
+    'update_work_order': '更新工单',
+    'create_work_order': '创建工单',
+    'query_work_orders': '查询工单'
+  }
+  return labels[type] || type
 }
 
 const moveAction = (idx, direction) => {
@@ -774,16 +1117,22 @@ const saveContextVar = () => {
 }
 
 const onDialogOpened = () => {
-  // 对话框打开后，初始化所有 execute_js 类型的 Monaco 编辑器
+  // 对话框打开后，只初始化已展开的 execute_js 类型的 Monaco 编辑器
+  // 收起的动作会在展开时再初始化，避免一次性初始化太多编辑器导致卡顿
   nextTick(() => {
     actions.value.forEach((action, idx) => {
-      if (action.type === 'execute_js' && action.useBuilder) {
+      if (action.type === 'execute_js' && action.useBuilder && !action.collapsed) {
         setTimeout(() => {
           initJsBuilder(idx)
         }, 100)
       }
     })
   })
+}
+
+const onDialogClosed = () => {
+  // 对话框完全关闭后清理状态和 Monaco 编辑器
+  cleanupMonacoEditors()
 }
 
 const removeContextVar = (idx) => {
@@ -795,16 +1144,19 @@ const onActionTypeChange = (idx) => {
   const action = actions.value[idx]
   if (action.type === 'call_endpoint') {
     action.useBuilder = true
-    action.builder = { endpointId: null, params: {}, saveToContext: '', paramList: null }
+    action.builder = { endpointId: null, params: {}, saveToContext: '', paramList: [] }
     action.configJSON = '{}'
+    action.activeTab = 'visual' // 确保 activeTab 存在
   } else if (action.type === 'call_data_interface') {
     action.useBuilder = true
-    action.builder = { interfaceId: null, params: {}, paramList: null }
+    action.builder = { interfaceId: null, params: {}, paramList: [] }
     action.configJSON = '{}'
+    action.activeTab = 'visual'
   } else if (action.type === 'execute_js') {
     action.useBuilder = true
     action.builder = { code: '' }
     action.configJSON = '{"code": ""}'
+    action.activeTab = 'visual'
     // 自动初始化 Monaco 编辑器
     nextTick(() => {
       initJsBuilder(idx)
@@ -813,13 +1165,16 @@ const onActionTypeChange = (idx) => {
     action.useBuilder = true
     action.builder = { updateTarget: 'current', workOrderId: '', updateFields: [] }
     action.configJSON = '{}'
+    action.activeTab = 'visual'
   } else if (action.type === 'create_work_order') {
     action.useBuilder = true
     action.builder = { typeCode: '', createFields: [], saveToContext: '' }
     action.configJSON = '{"fields": {}}'
+    action.activeTab = 'visual'
   } else {
     action.useBuilder = false
     action.configJSON = '{}'
+    action.activeTab = 'visual'
   }
 }
 
@@ -903,11 +1258,21 @@ declare const workOrder: {
   code: string;
   title: string;
   description: string;
-  device_id: string;
+  device_id: number;
   status: string;
   priority: string;
-  assignee_id: number;
+  visibility: string;
+  type_code: string;
+  assigned_to?: number;
+  assignee_id?: number;
   other_codes: string;
+  business_no: string;
+  external_ref: string;
+  device_name_snap: string;
+  device_alias_server: string;
+  device_alias_agent: string;
+  device_group: string;
+  data_json: string;
   created_at: string;
   updated_at: string;
 };
@@ -916,9 +1281,44 @@ declare const ctx: {
 ${ctxFields}
 };
 
-declare const actions: Array<{result: any}>;
+declare const actions: Array<{type: string; result: any; error?: string}>;
 
-declare function log(...args: any[]): void;
+declare const event: string;
+declare const actor: string;
+
+/** 打印日志到工作流执行日志 */
+declare function log(message: string): void;
+
+/** 设置上下文变量 */
+declare function setVariable(key: string, value: any): void;
+
+/** 获取上下文变量 */
+declare function getVariable(key: string): any;
+
+/** 追加字符串（带分隔符） */
+declare function appendString(str1: string, str2: string, separator?: string): string;
+
+/** 分割字符串 */
+declare function splitString(str: string, separator?: string): string[];
+
+/** 连接字符串数组 */
+declare function joinString(arr: string[], separator?: string): string;
+
+/** 更新工单字段 */
+declare function updateWorkOrder(workOrderId: number, updates: {[field: string]: any}): Promise<void>;
+
+/** 查询工单 */
+declare function queryWorkOrders(conditions: {[field: string]: any}, limit?: number): Promise<any[]>;
+
+/** 给工单添加标签 */
+declare function addWorkOrderTag(workOrderId: number, tagCode: string): Promise<void>;
+
+/** 移除工单标签 */
+declare function removeWorkOrderTag(workOrderId: number, tagCode: string): Promise<void>;
+
+/** 获取工单的所有标签 */
+declare function getWorkOrderTags(workOrderId: number): Promise<string[]>;
+
 declare const console: Console;
 `
 
@@ -961,10 +1361,20 @@ const initUpdateWorkOrderBuilder = async (idx) => {
       action.builder.updateTarget = 'specified'
       action.builder.workOrderId = config.work_order_id
     }
-    if (config.updates) {
+    // 支持新格式（数组）和旧格式（对象）
+    if (Array.isArray(config.updates)) {
+      action.builder.updateFields = config.updates.map(u => ({
+        name: u.field || '',
+        value: String(u.value || ''),
+        mode: u.mode || 'replace',
+        separator: u.separator || ','
+      }))
+    } else if (config.updates) {
       action.builder.updateFields = Object.entries(config.updates).map(([name, value]) => ({
         name,
-        value: String(value)
+        value: String(value),
+        mode: 'replace',
+        separator: ','
       }))
     }
   } catch (e) {
@@ -974,7 +1384,7 @@ const initUpdateWorkOrderBuilder = async (idx) => {
 
 const addUpdateField = (idx) => {
   const action = actions.value[idx]
-  action.builder.updateFields.push({ name: '', value: '' })
+  action.builder.updateFields.push({ name: '', value: '', mode: 'replace', separator: ',' })
 }
 
 const removeUpdateField = (idx, fieldIdx) => {
@@ -989,6 +1399,19 @@ const insertWorkOrderIdTemplate = (idx, template) => {
   updateWorkOrderBuilderJSON(idx)
 }
 
+const insertUpdateFieldTemplate = (idx, fieldIdx, template) => {
+  const action = actions.value[idx]
+  const field = action.builder.updateFields[fieldIdx]
+  if (!field) return
+  field.value = (field.value || '') + template
+  updateWorkOrderBuilderJSON(idx)
+}
+
+const insertConditionTemplate = (idx, template) => {
+  const action = actions.value[idx]
+  action.condition = (action.condition || '') + template
+}
+
 const updateWorkOrderBuilderJSON = (idx) => {
   const action = actions.value[idx]
   const config = {}
@@ -997,14 +1420,23 @@ const updateWorkOrderBuilderJSON = (idx) => {
     config.work_order_id = action.builder.workOrderId
   }
 
-  const updates = {}
+  // 使用新的数组格式，支持 mode 和 separator
+  const updates = []
   action.builder.updateFields.forEach(field => {
     if (field.name && field.value) {
-      updates[field.name] = field.value
+      const update = {
+        field: field.name,
+        value: field.value,
+        mode: field.mode || 'replace'
+      }
+      if (field.mode === 'append') {
+        update.separator = field.separator || ','
+      }
+      updates.push(update)
     }
   })
 
-  if (Object.keys(updates).length > 0) {
+  if (updates.length > 0) {
     config.updates = updates
   }
 
@@ -1065,7 +1497,7 @@ const updateCreateWorkOrderBuilderJSON = (idx) => {
 
 const initEndpointBuilder = async (idx) => {
   const action = actions.value[idx]
-  action.builder = { endpointId: null, params: {}, saveToContext: '', paramList: null }
+  action.builder = { endpointId: null, params: {}, saveToContext: '', paramList: [] }
 
   // Try to parse existing config
   try {
@@ -1083,7 +1515,7 @@ const initEndpointBuilder = async (idx) => {
 
 const initDataInterfaceBuilder = async (idx) => {
   const action = actions.value[idx]
-  action.builder = { interfaceId: null, params: {}, paramList: null }
+  action.builder = { interfaceId: null, params: {}, paramList: [] }
 
   // Try to parse existing config
   try {
@@ -1113,6 +1545,7 @@ const onEndpointSelected = async (idx) => {
 
 const loadEndpointParams = async (idx, endpointId) => {
   const action = actions.value[idx]
+  action.builder.paramList = null // 设置为 null 显示加载中
   try {
     const res = await getEndpointParamSchema(endpointId)
     console.log('Endpoint param schema response:', res)
@@ -1124,7 +1557,7 @@ const loadEndpointParams = async (idx, endpointId) => {
   } catch (e) {
     console.error('Failed to load endpoint params:', e)
     ElMessage.warning('加载接口参数失败: ' + e.message)
-    action.builder.paramList = []
+    action.builder.paramList = [] // 失败时设置为空数组，不再显示加载中
   }
 }
 
@@ -1159,6 +1592,7 @@ const onInterfaceSelected = async (idx) => {
 
 const loadInterfaceParams = async (idx, interfaceId) => {
   const action = actions.value[idx]
+  action.builder.paramList = null // 设置为 null 显示加载中
   try {
     const res = await getInterfaceParamSchema(interfaceId)
     console.log('Interface param schema response:', res)
@@ -1170,7 +1604,7 @@ const loadInterfaceParams = async (idx, interfaceId) => {
   } catch (e) {
     console.error('Failed to load interface params:', e)
     ElMessage.warning('加载接口参数失败: ' + e.message)
-    action.builder.paramList = []
+    action.builder.paramList = [] // 失败时设置为空数组，不再显示加载中
   }
 }
 
@@ -1230,7 +1664,12 @@ const save = async () => {
       ElMessage.error('动作配置 JSON 格式错误: ' + e.message)
       return
     }
-    actionsData.push({ type: a.type, config })
+    const actionData = { type: a.type, config }
+    // 添加执行条件（如果有）
+    if (a.condition?.trim()) {
+      actionData.condition = a.condition.trim()
+    }
+    actionsData.push(actionData)
   }
   const payload = {
     name: form.value.name,
@@ -1249,12 +1688,32 @@ const save = async () => {
     ElMessage.success('已创建')
   }
   dialog.value = false
+  // watch(dialog) 会自动触发清理，不需要在这里重复调用
   load()
 }
 
 const toggleEnabled = async (row) => {
-  await updateWorkOrderWorkflow(row.id, { enabled: row.enabled })
-  ElMessage.success('已更新')
+  const originalEnabled = row.enabled
+  try {
+    await updateWorkOrderWorkflow(row.id, {
+      name: row.name,
+      type_code: row.type_code,
+      events: row.events,
+      actions_json: row.actions_json,
+      description: row.description,
+      enabled: row.enabled,
+      sort_order: row.sort_order
+    })
+    ElMessage.success('已更新')
+    // 重新加载列表以确保数据一致，但不要在这里直接调用 load()
+    // 因为可能导致响应式循环
+    setTimeout(() => {
+      load()
+    }, 100)
+  } catch (e) {
+    ElMessage.error('更新失败')
+    row.enabled = originalEnabled // 回滚开关状态
+  }
 }
 
 const remove = async (row) => {
@@ -1269,18 +1728,179 @@ const remove = async (row) => {
 const openTest = (row) => {
   testForm.value.workflowId = row.id
   testForm.value.workOrderId = null
-  testForm.value.event = 'work_order.test'
+  searchedWorkOrders.value = []
+
+  // 根据工作流配置的事件设置默认值
+  const configuredEvents = parseEvents(row.events)
+  if (configuredEvents.length > 0) {
+    // 如果工作流配置了特定事件，使用第一个作为默认值
+    testForm.value.event = configuredEvents[0]
+  } else {
+    // 如果工作流监听所有事件，使用 test 事件
+    testForm.value.event = 'work_order.test'
+  }
+
   testDialog.value = true
+}
+
+const searchWorkOrders = async (query) => {
+  if (!query) {
+    searchedWorkOrders.value = []
+    return
+  }
+  searchLoading.value = true
+  try {
+    const res = await getWorkOrders({
+      search_key: query,
+      page: 1,
+      limit: 20
+    })
+    searchedWorkOrders.value = res.data || []
+  } catch (e) {
+    console.error('Search work orders failed:', e)
+    searchedWorkOrders.value = []
+  } finally {
+    searchLoading.value = false
+  }
+}
+
+const getStatusLabel = (status) => {
+  const labels = {
+    'open': '待处理',
+    'in_progress': '处理中',
+    'pending': '待处理',
+    'resolved': '已解决',
+    'closed': '已关闭',
+    'cancelled': '已取消'
+  }
+  return labels[status] || status
+}
+
+const getStatusType = (status) => {
+  const types = {
+    'open': '',
+    'in_progress': 'warning',
+    'pending': 'info',
+    'resolved': 'success',
+    'closed': 'info',
+    'cancelled': 'info'
+  }
+  return types[status] || ''
+}
+
+const cleanupMonacoEditors = () => {
+  // 清理所有 Monaco 编辑器实例
+  const editorKeys = Object.keys(monacoEditors.value)
+  if (editorKeys.length === 0) return
+
+  editorKeys.forEach(key => {
+    const editor = monacoEditors.value[key]
+    if (editor && typeof editor.dispose === 'function') {
+      try {
+        editor.dispose()
+      } catch (e) {
+        console.warn('[Monaco] Failed to dispose editor:', key, e)
+      }
+    }
+  })
+  monacoEditors.value = {}
+}
+
+const getCurrentWorkflowEvents = () => {
+  const currentWorkflow = workflows.value.find(w => w.id === testForm.value.workflowId)
+  if (!currentWorkflow) return []
+  return parseEvents(currentWorkflow.events)
+}
+
+const getAvailableEventsForTest = () => {
+  const configuredEvents = getCurrentWorkflowEvents()
+
+  // 如果工作流配置了特定事件，只显示这些事件
+  if (configuredEvents.length > 0) {
+    return configuredEvents.map(evt => ({
+      label: eventLabel(evt) + ` (${evt})`,
+      value: evt
+    }))
+  }
+
+  // 如果工作流监听所有事件（未配置或配置为空），显示所有可用事件
+  return [
+    { label: '测试事件 (work_order.test)', value: 'work_order.test' },
+    { label: '创建事件 (work_order.created)', value: 'work_order.created' },
+    { label: '更新事件 (work_order.updated)', value: 'work_order.updated' },
+    { label: '状态变更 (work_order.status_changed)', value: 'work_order.status_changed' },
+    { label: '关闭事件 (work_order.closed)', value: 'work_order.closed' }
+  ]
 }
 
 const runTest = async () => {
   if (!testForm.value.workOrderId) {
-    ElMessage.warning('请输入工单 ID')
+    ElMessage.warning('请选择工单')
     return
   }
-  await testWorkOrderWorkflow(testForm.value.workflowId, testForm.value.workOrderId, testForm.value.event)
-  testDialog.value = false
-  ElMessage.success('工作流已触发，请查看执行日志')
+  if (!testForm.value.event) {
+    ElMessage.warning('请选择触发事件')
+    return
+  }
+
+  // 获取当前工作流信息
+  const currentWorkflow = workflows.value.find(w => w.id === testForm.value.workflowId)
+
+  // 获取选中的工单信息
+  const selectedWorkOrder = searchedWorkOrders.value.find(wo => wo.id === testForm.value.workOrderId)
+
+  // 验证工单类型是否匹配工作流配置
+  if (currentWorkflow && currentWorkflow.type_code && selectedWorkOrder) {
+    if (currentWorkflow.type_code !== selectedWorkOrder.type_code) {
+      try {
+        await ElMessageBox.confirm(
+          `当前工单类型为 "${selectedWorkOrder.type_code}"，与工作流配置的类型 "${currentWorkflow.type_code}" 不匹配。是否强制执行？`,
+          '工单类型不匹配',
+          {
+            confirmButtonText: '强制执行',
+            cancelButtonText: '取消',
+            type: 'warning'
+          }
+        )
+      } catch {
+        return // 用户取消
+      }
+    }
+  }
+
+  console.log('Testing workflow:', {
+    workflowId: testForm.value.workflowId,
+    workOrderId: testForm.value.workOrderId,
+    event: testForm.value.event
+  })
+
+  try {
+    const res = await testWorkOrderWorkflow(
+      testForm.value.workflowId,
+      testForm.value.workOrderId,
+      testForm.value.event
+    )
+    console.log('Test workflow response:', res)
+
+    testDialog.value = false
+    ElMessage.success('工作流已触发，正在跳转到执行日志...')
+
+    // 异步执行需要等待一下，让日志有时间创建
+    // 跳转到执行日志页面，并筛选当前工作流和工单
+    setTimeout(() => {
+      router.push({
+        path: '/work-orders/workflow-logs',
+        query: {
+          workflow_id: testForm.value.workflowId,
+          work_order_id: testForm.value.workOrderId,
+          _t: Date.now() // 添加时间戳避免缓存
+        }
+      })
+    }, 1500) // 增加延迟到1.5秒，确保日志有足够时间创建
+  } catch (e) {
+    console.error('Test workflow failed:', e)
+    ElMessage.error('执行失败: ' + (e.response?.data?.error || e.message || '未知错误'))
+  }
 }
 
 onMounted(async () => {
@@ -1321,7 +1941,34 @@ onBeforeUnmount(() => {
 .toolbar { margin-bottom: 16px; }
 .section-title { font-weight: bold; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; }
 .action-item { border: 1px solid #dcdfe6; border-radius: 4px; padding: 12px; margin-bottom: 12px; }
-.action-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; font-weight: bold; }
+.action-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; font-weight: bold; cursor: pointer; user-select: none; }
+.action-head:hover { background: #f5f7fa; }
+.action-head-left { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.action-head-buttons { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.collapse-icon { transition: transform 0.3s ease; }
+.collapse-icon.collapsed { transform: rotate(-90deg); }
+.condition-preview {
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  color: #909399;
+  font-weight: normal;
+  margin-left: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 300px;
+}
+.condition-preview code {
+  background: #f5f7fa;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.action-content { margin-top: 12px; }
 .hint { font-size: 12px; color: #909399; margin-top: 4px; }
 
 .context-section {
@@ -1379,5 +2026,41 @@ onBeforeUnmount(() => {
 }
 .field-row:last-child {
   margin-bottom: 0;
+}
+
+/* 工单选择器选项样式 */
+.work-order-option {
+  padding: 8px 0;
+  line-height: 1.4;
+}
+.work-order-option .wo-main {
+  font-weight: 500;
+  color: #303133;
+  margin-bottom: 4px;
+}
+.work-order-option .wo-meta {
+  font-size: 12px;
+  color: #909399;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.work-order-option .wo-field {
+  white-space: nowrap;
+}
+.work-order-option .wo-separator {
+  color: #dcdfe6;
+}
+.work-order-option .wo-status {
+  margin-left: auto;
+}
+</style>
+
+<style>
+/* 全局样式 - 工单选择器下拉面板 */
+.work-order-select-popper .el-select-dropdown__item {
+  height: auto !important;
+  line-height: normal !important;
+  padding: 0 20px !important;
 }
 </style>

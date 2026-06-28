@@ -7,8 +7,9 @@ import { WS_BASE } from '@/utils/ws'
  * priority/device_id/device_name/tags/other_codes/created_at/...
  * @param {(payload: object) => void} onEvent
  * @param {() => string | null | undefined} getToken
+ * @param {{ share?: boolean }} [opts]  share=true 时 token 为工单报告分享 token，用 ?wo_share_token=
  */
-export function createWorkOrdersStomp(onEvent, getToken) {
+export function createWorkOrdersStomp(onEvent, getToken, opts = {}) {
   let client = null
   function tearDown() {
     try {
@@ -23,8 +24,11 @@ export function createWorkOrdersStomp(onEvent, getToken) {
       const token = getToken?.()
       if (!token) return
       tearDown()
+      const tokenParam = opts.share
+        ? `wo_share_token=${encodeURIComponent(token)}`
+        : `token=${encodeURIComponent(token)}`
       client = new Client({
-        brokerURL: `${WS_BASE}/ws/stomp?token=${encodeURIComponent(token)}`,
+        brokerURL: `${WS_BASE}/ws/stomp?${tokenParam}`,
         reconnectDelay: 5000,
         heartbeatIncoming: 0,
         heartbeatOutgoing: 0,

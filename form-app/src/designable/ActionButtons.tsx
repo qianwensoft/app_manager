@@ -321,3 +321,98 @@ NavigateButton.Resource = createResource({
     },
   ],
 })
+
+// ── 一键反馈按钮 ──────────────────────────────────────────────────────
+
+export const FeedbackButton: DnFC<any> = (props) => {
+  const p = props?.['x-component-props'] || props || {}
+  return (
+    <Button
+      variant={p.variant || 'default'}
+      className={p.block ? 'w-full' : ''}
+      type="button"
+    >
+      {p.text || '一键反馈'}
+    </Button>
+  )
+}
+
+FeedbackButton.Behavior = createBehavior({
+  name: 'FeedbackButton',
+  extends: ['Field'],
+  selector: node => node.props?.['x-component'] === 'FeedbackButton',
+  designerProps: {
+    propsSchema: createVoidFieldSchema({
+      type: 'object',
+      properties: {
+        ...commonButtonProps,
+        feedbackType: {
+          type: 'string',
+          'x-decorator': 'FormItem',
+          'x-component': 'Input',
+        },
+        businessNoField: {
+          type: 'string',
+          'x-decorator': 'FormItem',
+          'x-component': 'Input',
+        },
+        otherCodesField: {
+          type: 'string',
+          'x-decorator': 'FormItem',
+          'x-component': 'Input',
+        },
+        titleField: {
+          type: 'string',
+          'x-decorator': 'FormItem',
+          'x-component': 'Input',
+        },
+        descriptionField: {
+          type: 'string',
+          'x-decorator': 'FormItem',
+          'x-component': 'Input',
+        },
+      },
+    }),
+  },
+  designerLocales: {
+    'zh-CN': {
+      title: '一键反馈按钮',
+      settings: {
+        'x-component-props': '按钮属性',
+        'x-component-props.text': '按钮文本',
+        'x-component-props.variant': '按钮样式',
+        'x-component-props.block': '撑满整行',
+        'x-component-props.feedbackType': '反馈类型code',
+        'x-component-props.businessNoField': '业务单号字段（$form.xxx）',
+        'x-component-props.otherCodesField': '其他编码字段（$form.xxx）',
+        'x-component-props.titleField': '标题字段（$form.xxx）',
+        'x-component-props.descriptionField': '描述字段（$form.xxx）',
+      },
+    },
+    'en-US': { title: 'FeedbackButton' },
+  },
+})
+
+FeedbackButton.Resource = createResource({
+  icon: 'TextSource',
+  elements: [
+    {
+      componentName: 'Field',
+      props: {
+        type: 'void',
+        title: '一键反馈按钮',
+        'x-component': 'FeedbackButton',
+        'x-component-props': {
+          text: '一键反馈',
+          type: 'default',
+          feedbackType: '',
+          businessNoField: '',
+          otherCodesField: '',
+          titleField: '',
+          descriptionField: '',
+        },
+      },
+    },
+  ],
+})
+

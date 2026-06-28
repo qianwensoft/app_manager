@@ -22,6 +22,9 @@
           <WorkOrderWebhooks embedded />
         </div>
       </el-tab-pane>
+      <el-tab-pane label="分享管理" name="shares">
+        <WorkOrderReportShareManage v-if="loaded.shares" />
+      </el-tab-pane>
       <el-tab-pane label="工作流" name="workflows">
         <div v-if="loaded.workflows" style="padding:16px">
           <el-alert type="info" :closable="false" style="margin-bottom:16px">
@@ -46,14 +49,15 @@ import { Document } from '@element-plus/icons-vue'
 import WorkOrderTypes from './WorkOrderTypes.vue'
 import WorkOrderTags from './WorkOrderTags.vue'
 import WorkOrderWebhooks from './WorkOrderWebhooks.vue'
+import WorkOrderReportShareManage from './WorkOrderReportShareManage.vue'
 
 const route = useRoute()
 const router = useRouter()
 
-const validTabs = ['types', 'tags', 'webhooks', 'workflows']
+const validTabs = ['types', 'tags', 'webhooks', 'shares', 'workflows']
 const activeTab = ref('types')
 // 懒加载各面板：切到哪个才挂载哪个，避免一次性发起三套请求。
-const loaded = reactive({ types: false, tags: false, webhooks: false, workflows: false })
+const loaded = reactive({ types: false, tags: false, webhooks: false, shares: false, workflows: false })
 
 const onTabChange = (name) => {
   loaded[name] = true

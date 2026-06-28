@@ -139,14 +139,14 @@ const loadData = async () => {
   loadPendingWorkOrders()
 }
 
-// 待处理工单数 = open + reopened（仅取 total，limit=1 省带宽）。
+// 待处理工单数 = open(待处理) + in_progress(处理中)（仅取 total，limit=1 省带宽）。
 const loadPendingWorkOrders = async () => {
   try {
-    const [open, reopened] = await Promise.all([
+    const [open, inProgress] = await Promise.all([
       getWorkOrders({ status: 'open', limit: 1 }),
-      getWorkOrders({ status: 'reopened', limit: 1 })
+      getWorkOrders({ status: 'in_progress', limit: 1 })
     ])
-    pendingWorkOrders.value = (open.total || 0) + (reopened.total || 0)
+    pendingWorkOrders.value = (open.total || 0) + (inProgress.total || 0)
   } catch {
     pendingWorkOrders.value = 0
   }

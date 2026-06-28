@@ -8,6 +8,7 @@
     </div>
 
     <el-table :data="providers" border stripe>
+      <el-table-column prop="id" label="ID" width="64" />
       <el-table-column prop="name" label="名称" min-width="120" />
       <el-table-column label="类型" width="140">
         <template #default="{ row }">
@@ -24,8 +25,13 @@
                 {{ t.valid ? '有效' : '已过期' }}
               </el-tag>
               <span style="color:#606266">
-                {{ t.authorizer_appid && t.authorizer_appid !== '__component__' ? t.authorizer_appid + ' · ' : '' }}
-                {{ t.expires_at ? '到期 ' + formatTime(t.expires_at) : '未授权' }}
+                <template v-if="t.source === 'outbound_app'">
+                  使用外部应用: {{ t.outbound_app_name }}
+                </template>
+                <template v-else>
+                  {{ t.authorizer_appid && t.authorizer_appid !== '__component__' ? t.authorizer_appid + ' · ' : '' }}
+                  {{ t.expires_at ? '到期 ' + formatTime(t.expires_at) : '未授权' }}
+                </template>
               </span>
             </div>
           </div>
@@ -39,10 +45,11 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="260" fixed="right">
+      <el-table-column label="操作" width="340" fixed="right">
         <template #default="{ row }">
           <el-button size="small" @click="openEdit(row)">编辑</el-button>
           <el-button size="small" type="primary" @click="authorize(row)">授权</el-button>
+          <el-button size="small" type="success" @click="openTestSso(row)">测试 SSO</el-button>
           <el-button size="small" type="warning" @click="manualRefresh(row)">刷新 Token</el-button>
           <el-popconfirm title="确认删除？" @confirm="remove(row.id)">
             <template #reference>
@@ -72,6 +79,19 @@
         </el-form-item>
         <el-form-item label="描述">
           <el-input v-model="form.description" type="textarea" :rows="2" />
+        </el-form-item>
+        <el-form-item label="关联外部应用">
+          <el-select v-model="form.outbound_app_id" placeholder="选择外部应用（用于 token 管理）" clearable filterable style="width: 100%">
+            <el-option
+              v-for="app in outboundApps"
+              :key="app.id"
+              :label="`${app.name} (${app.base_url})`"
+              :value="app.id"
+            />
+          </el-select>
+          <div style="font-size:11px;color:#909399;margin-top:4px">
+            选择外部应用后，第三方平台将复用该应用的 token 管理机制，无需单独配置 token 获取逻辑。
+          </div>
         </el-form-item>
         <el-form-item label="回调地址">
           <el-input v-model="form.callback_url" placeholder="https://your-platform.com/api/thirdparty/{id}/xxx/callback" />
@@ -124,6 +144,87 @@
         <el-button type="primary" @click="submitTicket">保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- SSO Test dialog -->
+    <el-dialog v-model="showTestDialog" title="测试 SSO 免登链接" width="680px">
+      <el-alert type="info" :closable="false" show-icon style="margin-bottom:16px">
+        生成 SSO 免登链接，可在 eTeams 等第三方平台中发送此链接，用户点击后自动登录到本系统指定页面。
+      </el-alert>
+
+      <el-form label-width="120px">
+        <el-form-item label="目标页面">
+          <el-radio-group v-model="testForm.targetType" @change="handleTargetTypeChange">
+            <el-radio value="work-order">工单详情</el-radio>
+            <el-radio value="custom">自定义路径</el-radio>
+            <el-radio value="home">首页</el-radio>
+          </el-radio-group>
+        </el-form-item>
+
+        <el-form-item v-if="testForm.targetType === 'work-order'" label="选择工单">
+          <el-select
+            v-model="testForm.workOrderId"
+            placeholder="搜索工单编号、业务编号或其他编码"
+            filterable
+            remote
+            :remote-method="searchWorkOrders"
+            :loading="searchLoading"
+            style="width: 100%"
+            clearable
+            popper-class="work-order-select-popper"
+          >
+            <el-option
+              v-for="wo in searchedWorkOrders"
+              :key="wo.id"
+              :label="`${wo.code} - ${wo.title}`"
+              :value="wo.id"
+            >
+              <div class="work-order-option">
+                <div class="wo-main">{{ wo.code }} - {{ wo.title }}</div>
+                <div class="wo-meta">
+                  <span v-if="wo.business_no" class="wo-field">业务编号: {{ wo.business_no }}</span>
+                  <span v-if="wo.business_no && wo.other_codes" class="wo-separator">|</span>
+                  <span v-if="wo.other_codes" class="wo-field">其他编码: {{ wo.other_codes }}</span>
+                  <el-tag size="small" class="wo-status" :type="getStatusType(wo.status)">{{ getStatusLabel(wo.status) }}</el-tag>
+                </div>
+              </div>
+            </el-option>
+          </el-select>
+          <div style="font-size:11px;color:#909399;margin-top:4px">
+            可搜索工单编号、业务编号、其他编码
+          </div>
+        </el-form-item>
+
+        <el-form-item v-if="testForm.targetType === 'custom'" label="目标路径">
+          <el-input v-model="testForm.customPath" placeholder="如: /devices 或 /work-orders/123" />
+          <div style="font-size:11px;color:#909399;margin-top:4px">
+            输入相对路径，如 /devices、/work-orders/123 等
+          </div>
+        </el-form-item>
+
+        <el-form-item v-if="testForm.targetType === 'work-order'" label="操作权限">
+          <el-switch v-model="testForm.operable" active-text="可操作" inactive-text="只读" @change="generatedSsoUrl = ''" />
+          <div style="font-size:11px;color:#909399;margin-top:4px">
+            关闭后用户只能查看工单内容，不能修改状态或添加进展
+          </div>
+        </el-form-item>
+
+        <el-form-item label="生成的链接" v-if="generatedSsoUrl">
+          <el-input v-model="generatedSsoUrl" readonly>
+            <template #append>
+              <el-button @click="copySsoUrl">复制</el-button>
+            </template>
+          </el-input>
+          <div style="font-size:11px;color:#909399;margin-top:4px">
+            将此链接发送到 eTeams IM 中，用户点击后自动免登到指定页面
+          </div>
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <el-button @click="showTestDialog = false">关闭</el-button>
+        <el-button type="primary" @click="generateSsoUrl">生成链接</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -142,15 +243,31 @@ import {
   refreshWechatToken,
   setWechatTicket
 } from '@/api/thirdparty'
+import { listOutboundApps } from '@/api/outbound'
+import { getWorkOrders } from '@/api/workOrder'
 
 const providers = ref([])
 const tokenMap = reactive({})
+const outboundApps = ref([])
 const showDialog = ref(false)
 const saving = ref(false)
 const editingId = ref(null)
 const showTicketDialog = ref(false)
 const ticketValue = ref('')
 const ticketProviderId = ref(null)
+const showTestDialog = ref(false)
+const testProviderId = ref(null)
+const generatedSsoUrl = ref('')
+
+const testForm = ref({
+  targetType: 'work-order',
+  workOrderId: null,
+  customPath: '',
+  operable: false
+})
+
+const searchedWorkOrders = ref([])
+const searchLoading = ref(false)
 
 const defaultForm = () => ({
   name: '',
@@ -163,6 +280,7 @@ const defaultForm = () => ({
   component_app_id: '',
   component_app_secret: '',
   callback_url: '',
+  outbound_app_id: null,
   enabled: true
 })
 const form = ref(defaultForm())
@@ -179,6 +297,15 @@ const load = async () => {
     } catch {
       tokenMap[p.id] = []
     }
+  }
+}
+
+const loadOutboundApps = async () => {
+  try {
+    const res = await listOutboundApps()
+    outboundApps.value = res.data || []
+  } catch {
+    outboundApps.value = []
   }
 }
 
@@ -205,6 +332,7 @@ const openEdit = (row) => {
     component_app_id: row.component_app_id || '',
     component_app_secret: '',
     callback_url: row.callback_url || '',
+    outbound_app_id: row.outbound_app_id ? Number(row.outbound_app_id) : null,
     enabled: row.enabled
   }
   showDialog.value = true
@@ -275,5 +403,152 @@ const submitTicket = async () => {
   showTicketDialog.value = false
 }
 
-onMounted(load)
+const openTestSso = (row) => {
+  testProviderId.value = row.id
+  generatedSsoUrl.value = ''
+  testForm.value = {
+    targetType: 'work-order',
+    workOrderId: null,
+    customPath: '',
+    operable: false
+  }
+  searchedWorkOrders.value = []
+  showTestDialog.value = true
+}
+
+const handleTargetTypeChange = () => {
+  generatedSsoUrl.value = ''
+}
+
+const searchWorkOrders = async (query) => {
+  if (!query) {
+    searchedWorkOrders.value = []
+    return
+  }
+  searchLoading.value = true
+  try {
+    const res = await getWorkOrders({
+      search_key: query,
+      page: 1,
+      limit: 20
+    })
+    searchedWorkOrders.value = res.data || []
+  } catch (e) {
+    console.error('Search work orders failed:', e)
+    searchedWorkOrders.value = []
+  } finally {
+    searchLoading.value = false
+  }
+}
+
+const getStatusType = (status) => {
+  const map = {
+    open: '',
+    in_progress: 'warning',
+    pending: 'info',
+    resolved: 'success',
+    closed: 'info'
+  }
+  return map[status] || ''
+}
+
+const getStatusLabel = (status) => {
+  const map = {
+    open: '待处理',
+    in_progress: '处理中',
+    pending: '待审核',
+    resolved: '已解决',
+    closed: '已关闭'
+  }
+  return map[status] || status
+}
+
+const generateSsoUrl = async () => {
+  const provider = providers.value.find(p => p.id === testProviderId.value)
+  if (!provider) {
+    ElMessage.error('平台配置不存在')
+    return
+  }
+
+  let redirectTo = '/'
+
+  if (testForm.value.targetType === 'work-order') {
+    if (!testForm.value.workOrderId) {
+      ElMessage.warning('请选择工单')
+      return
+    }
+    const readonlyParam = testForm.value.operable ? '' : '?readonly=1'
+    redirectTo = `/embed/work-orders/${testForm.value.workOrderId}${readonlyParam}`
+  } else if (testForm.value.targetType === 'custom') {
+    if (!testForm.value.customPath.trim()) {
+      ElMessage.warning('请输入目标路径')
+      return
+    }
+    redirectTo = testForm.value.customPath.trim()
+    if (!redirectTo.startsWith('/')) {
+      redirectTo = '/' + redirectTo
+    }
+  }
+
+  // 构建回调 URL
+  const callbackUrl = `${window.location.origin}/auth-eteams-callback.html?provider_id=${provider.id}&redirect_to=${encodeURIComponent(redirectTo)}`
+
+  // 构建 eTeams 免登 URL
+  const baseUrl = provider.open_api_origin.replace(/\/$/, '')
+  generatedSsoUrl.value = `${baseUrl}/api/bs/open/auth/third?app_key=${encodeURIComponent(provider.app_key)}&redirect_uri=${encodeURIComponent(callbackUrl)}`
+
+  ElMessage.success('链接已生成')
+}
+
+const copySsoUrl = () => {
+  if (!generatedSsoUrl.value) return
+  navigator.clipboard.writeText(generatedSsoUrl.value).then(() => {
+    ElMessage.success('已复制到剪贴板')
+  }).catch(() => {
+    ElMessage.error('复制失败，请手动复制')
+  })
+}
+
+onMounted(() => {
+  load()
+  loadOutboundApps()
+})
 </script>
+
+<style scoped>
+.work-order-option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.wo-main {
+  font-size: 14px;
+  font-weight: 500;
+  color: #303133;
+}
+.wo-meta {
+  font-size: 12px;
+  color: #909399;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.wo-field {
+  white-space: nowrap;
+}
+.wo-separator {
+  color: #dcdfe6;
+}
+.wo-status {
+  margin-left: auto;
+}
+</style>
+
+<style>
+.work-order-select-popper .el-select-dropdown__item {
+  height: auto;
+  padding: 8px 12px;
+  line-height: 1.4;
+}
+</style>

@@ -30,7 +30,7 @@
         </el-table-column>
         <el-table-column label="工单" width="140">
           <template #default="{ row }">
-            <el-link :href="`/work-orders/${row.work_order_id}`" type="primary">{{ row.work_order_code }}</el-link>
+            <el-link type="primary" @click="$router.push(`/work-orders/${row.work_order_id}`)">{{ row.work_order_code }}</el-link>
           </template>
         </el-table-column>
         <el-table-column prop="event" label="事件" width="140" />
@@ -75,7 +75,7 @@
           <el-descriptions-item label="ID">{{ detail.id }}</el-descriptions-item>
           <el-descriptions-item label="Webhook">{{ detail.webhook_name }}</el-descriptions-item>
           <el-descriptions-item label="工单编号">
-            <el-link :href="`/work-orders/${detail.work_order_id}`" type="primary">{{ detail.work_order_code }}</el-link>
+            <el-link type="primary" @click="$router.push(`/work-orders/${detail.work_order_id}`)">{{ detail.work_order_code }}</el-link>
           </el-descriptions-item>
           <el-descriptions-item label="事件">{{ detail.event }}</el-descriptions-item>
           <el-descriptions-item label="目标">{{ detail.target === 'connector' ? '连接器' : '接口' }}</el-descriptions-item>

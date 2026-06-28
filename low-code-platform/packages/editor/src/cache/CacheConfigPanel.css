@@ -1,0 +1,137 @@
+.cache-config-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: white;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.cache-config-panel .panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e5e7eb;
+  background: #f9fafb;
+}
+
+.cache-config-panel .panel-header h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.cache-config-panel .close-btn {
+  padding: 4px 8px;
+  background: none;
+  border: none;
+  font-size: 20px;
+  color: #6b7280;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.cache-config-panel .close-btn:hover {
+  background: #e5e7eb;
+}
+
+.cache-config-panel .panel-body {
+  flex: 1;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.cache-config-panel .config-section {
+  margin-bottom: 24px;
+}
+
+.cache-config-panel .config-section:last-child {
+  margin-bottom: 0;
+}
+
+.cache-config-panel .config-section h4 {
+  margin: 0 0 16px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #374151;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.cache-config-panel .config-item {
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cache-config-panel .config-item:last-child {
+  margin-bottom: 0;
+}
+
+.cache-config-panel .config-item > label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #374151;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cache-config-panel .config-item input[type='number'],
+.cache-config-panel .config-item input[type='text'],
+.cache-config-panel .config-item select {
+  padding: 8px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 14px;
+  color: #111827;
+  transition: all 0.2s;
+}
+
+.cache-config-panel .config-item input[type='number']:focus,
+.cache-config-panel .config-item input[type='text']:focus,
+.cache-config-panel .config-item select:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.cache-config-panel .config-item input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+.cache-config-panel .hint {
+  font-size: 12px;
+  color: #6b7280;
+  font-style: italic;
+}
+
+.cache-config-panel .panel-footer {
+  padding: 16px 20px;
+  border-top: 1px solid #e5e7eb;
+  background: #f9fafb;
+}
+
+.cache-config-panel .info-box {
+  padding: 12px;
+  background: #eff6ff;
+  border-left: 3px solid #3b82f6;
+  border-radius: 4px;
+}
+
+.cache-config-panel .info-box p {
+  margin: 0;
+  font-size: 13px;
+  color: #1e40af;
+  line-height: 1.6;
+}
+
+.cache-config-panel .info-box p + p {
+  margin-top: 4px;
+}

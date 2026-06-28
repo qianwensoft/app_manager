@@ -1,0 +1,417 @@
+/**
+ * Phase 5: 应用发布 - 应用构建页样式
+ */
+
+.app-builder-page {
+  min-height: 100vh;
+  background: #f5f5f5;
+}
+
+.builder-header {
+  background: white;
+  padding: 20px 24px;
+  border-bottom: 1px solid #e8e8e8;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.btn-back {
+  padding: 8px 16px;
+  background: white;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 14px;
+}
+
+.btn-back:hover {
+  border-color: #1890ff;
+  color: #1890ff;
+}
+
+.builder-header h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: #262626;
+}
+
+.builder-content {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.builder-section {
+  background: white;
+  border-radius: 8px;
+  padding: 24px;
+  margin-bottom: 24px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.builder-section h2 {
+  margin: 0 0 20px 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #262626;
+}
+
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.section-header h2 {
+  margin: 0;
+}
+
+.auto-scroll-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #595959;
+  cursor: pointer;
+}
+
+.auto-scroll-toggle input {
+  cursor: pointer;
+}
+
+/* 构建表单 */
+.build-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.form-field label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #595959;
+}
+
+.form-field input[type='text'] {
+  padding: 10px 12px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  font-size: 14px;
+  transition: all 0.3s;
+}
+
+.form-field input[type='text']:focus {
+  outline: none;
+  border-color: #1890ff;
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.1);
+}
+
+.form-field input:disabled {
+  background: #f5f5f5;
+  cursor: not-allowed;
+}
+
+/* 构建类型选项 */
+.build-type-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.build-type-options label {
+  position: relative;
+  padding: 16px;
+  border: 2px solid #e8e8e8;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.build-type-options label:hover {
+  border-color: #1890ff;
+  background: #f0f7ff;
+}
+
+.build-type-options label.active {
+  border-color: #1890ff;
+  background: #e6f4ff;
+}
+
+.build-type-options input[type='radio'] {
+  position: absolute;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.option-icon {
+  font-size: 32px;
+  margin-bottom: 8px;
+}
+
+.option-label {
+  font-size: 16px;
+  font-weight: 600;
+  color: #262626;
+}
+
+.option-desc {
+  font-size: 12px;
+  color: #8c8c8c;
+  line-height: 1.4;
+}
+
+.btn-build {
+  padding: 12px 32px;
+  font-size: 16px;
+  font-weight: 600;
+  align-self: flex-start;
+}
+
+.btn-build:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* 构建日志 */
+.build-logs {
+  background: #1e1e1e;
+  border-radius: 4px;
+  padding: 16px;
+  max-height: 400px;
+  overflow-y: auto;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.log-entry {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.log-time {
+  color: #858585;
+  flex-shrink: 0;
+}
+
+.log-level {
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.log-message {
+  color: #d4d4d4;
+}
+
+.log-info .log-level {
+  color: #4ec9b0;
+}
+
+.log-warn .log-level {
+  color: #dcdcaa;
+}
+
+.log-error .log-level {
+  color: #f48771;
+}
+
+.log-debug .log-level {
+  color: #858585;
+}
+
+/* 构建历史 */
+.builds-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.build-item {
+  padding: 16px;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.build-item:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.build-item-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.build-status {
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.status-success {
+  background: #f6ffed;
+  color: #52c41a;
+  border: 1px solid #b7eb8f;
+}
+
+.status-failed {
+  background: #fff1f0;
+  color: #ff4d4f;
+  border: 1px solid #ffccc7;
+}
+
+.status-building {
+  background: #e6f4ff;
+  color: #1890ff;
+  border: 1px solid #91caff;
+}
+
+.status-pending {
+  background: #fafafa;
+  color: #8c8c8c;
+  border: 1px solid #d9d9d9;
+}
+
+.status-cancelled {
+  background: #fff7e6;
+  color: #fa8c16;
+  border: 1px solid #ffd591;
+}
+
+.build-type {
+  padding: 2px 8px;
+  background: #f0f0f0;
+  color: #595959;
+  font-size: 12px;
+  border-radius: 3px;
+}
+
+.build-version {
+  font-size: 14px;
+  font-weight: 600;
+  color: #262626;
+  font-family: 'Courier New', monospace;
+}
+
+.build-item-meta {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: #8c8c8c;
+}
+
+.build-item-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.build-item-actions button {
+  padding: 6px 16px;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  background: white;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.build-item-actions button:hover {
+  border-color: #1890ff;
+  color: #1890ff;
+}
+
+.build-item-actions button.btn-primary {
+  background: #1890ff;
+  border-color: #1890ff;
+  color: white;
+}
+
+.build-item-actions button.btn-primary:hover {
+  background: #40a9ff;
+  border-color: #40a9ff;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 40px 20px;
+  color: #8c8c8c;
+}
+
+.empty-state p {
+  margin: 0;
+  font-size: 14px;
+}
+
+.loading-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid #f0f0f0;
+  border-top-color: #1890ff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading-container p {
+  margin-top: 16px;
+  color: #8c8c8c;
+  font-size: 14px;
+}
+
+/* 响应式 */
+@media (max-width: 768px) {
+  .builder-content {
+    padding: 16px;
+  }
+
+  .builder-section {
+    padding: 16px;
+  }
+
+  .build-type-options {
+    grid-template-columns: 1fr;
+  }
+
+  .build-item-header {
+    flex-wrap: wrap;
+  }
+
+  .build-item-meta {
+    flex-direction: column;
+    gap: 4px;
+  }
+}

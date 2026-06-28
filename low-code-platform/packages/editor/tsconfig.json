@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "skipLibCheck": true,
+    "noImplicitAny": false,
+    "strict": false,
+    "paths": {
+      "@/*": ["./src/*"],
+      "@lowcode/schema": ["../schema/src"]
+    }
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../schema" }
+  ]
+}

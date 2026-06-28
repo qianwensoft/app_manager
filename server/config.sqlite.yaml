@@ -5,6 +5,10 @@ server:
     allow_register: false
     public_base_url: ""
     trusted_proxies: []
+    # 静态文件路径配置（可选，未配置时使用默认值）
+    web_dist_dir: ../web/dist           # Vue 主应用目录
+    scada_editor_dir: ../web/dist/scada-editor  # SCADA 编辑器目录
+    form_app_dir: ../form-app/dist  # 表单应用目录
 database:
     type: sqlite
     dsn: ./data/app-manager.db
@@ -15,6 +19,8 @@ adb:
     path: adb
     timeout: 30
 ffmpeg:
+    path: ""
+chrome:
     path: ""
 jwt:
     secret: change-me-in-production
@@ -30,9 +36,10 @@ mqtt:
     client_id: app-manager
     qos: 1
 claude:
-    api_key: ""  # Set via CLAUDE_API_KEY environment variable
+    api_key: PROXY_MANAGED
     model: claude-sonnet-4-6
-    base_url: ""  # Optional: set custom API base URL
+    base_url: http://127.0.0.1:15721
+    proxy_url: ""
 channel:
     kafka:
         brokers: []
@@ -52,3 +59,5 @@ cluster:
     enabled: false
     node_id: ""
     redis_url: redis://127.0.0.1:6379/0
+webrtc:
+    ice_servers: []

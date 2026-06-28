@@ -29,10 +29,15 @@ type Hub struct {
 	connections map[string]*Connection
 	mu          sync.RWMutex
 	onMessage   func(deviceID string, msg map[string]interface{})
+
+	// 命令回调映射：commandId -> callback function
+	callbacks  map[string]func(map[string]interface{})
+	callbackMu sync.RWMutex
 }
 
 var AgentHub = &Hub{
 	connections: make(map[string]*Connection),
+	callbacks:   make(map[string]func(map[string]interface{})),
 }
 
 var (
@@ -69,6 +74,21 @@ var OnAgentConnect func(deviceID string)
 
 func SetMessageHandler(fn func(deviceID string, msg map[string]interface{})) {
 	AgentHub.onMessage = fn
+}
+
+// RegisterCallback 注册命令回调函数
+// 用于工作流等场景等待特定命令的执行结果
+func (h *Hub) RegisterCallback(commandID string, callback func(map[string]interface{})) {
+	h.callbackMu.Lock()
+	defer h.callbackMu.Unlock()
+	h.callbacks[commandID] = callback
+}
+
+// UnregisterCallback 取消注册命令回调
+func (h *Hub) UnregisterCallback(commandID string) {
+	h.callbackMu.Lock()
+	defer h.callbackMu.Unlock()
+	delete(h.callbacks, commandID)
 }
 
 func (h *Hub) Register(deviceID string, conn *websocket.Conn) <-chan struct{} {
@@ -313,6 +333,26 @@ func (h *Hub) readPump(c *Connection) {
 		if err := json.Unmarshal(data, &msg); err != nil {
 			continue
 		}
+
+		// 先检查是否有匹配的命令回调
+		if cmdID, ok := msg["commandId"].(string); ok && cmdID != "" {
+			h.callbackMu.RLock()
+			callback, exists := h.callbacks[cmdID]
+			h.callbackMu.RUnlock()
+			if exists {
+				// 在新 goroutine 中调用回调，避免阻塞 readPump
+				go func(cb func(map[string]interface{}), message map[string]interface{}) {
+					defer func() {
+						if r := recover(); r != nil {
+							log.Printf("agent callback panic device=%s cmdID=%s: %v", c.DeviceID, cmdID, r)
+						}
+					}()
+					cb(message)
+				}(callback, msg)
+			}
+		}
+
+		// 然后调用全局 onMessage 处理器
 		if h.onMessage != nil {
 			func() {
 				defer func() {

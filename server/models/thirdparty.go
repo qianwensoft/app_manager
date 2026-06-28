@@ -10,6 +10,9 @@ type ThirdPartyProvider struct {
 	Type        string `gorm:"size:32;not null;index" json:"type"` // freepass | wechat
 	Description string `gorm:"type:text" json:"description"`
 
+	// ── 关联外部应用（统一管理 token）──────────────────────────────
+	OutboundAppID uint `gorm:"index;default:0" json:"outbound_app_id"` // 关联的外部应用 ID，用于统一管理 token
+
 	// ── FreePass 字段 ──────────────────────────────────────────────
 	// OpenApiOrigin 如 https://xxx.freepass.com
 	OpenApiOrigin string `gorm:"size:255" json:"open_api_origin"`
@@ -23,6 +26,19 @@ type ThirdPartyProvider struct {
 
 	// 授权回调地址（本平台），用于拼接授权 URL
 	CallbackURL string `gorm:"size:500" json:"callback_url"`
+
+	// ── 用户同步配置 ────────────────────────────────────────────────
+	// UserSyncEnabled 是否启用用户自动同步
+	UserSyncEnabled bool `gorm:"default:false" json:"user_sync_enabled"`
+	// UserInfoEndpoint 获取用户信息的 API 端点路径（相对于 OpenApiOrigin）
+	UserInfoEndpoint string `gorm:"size:500" json:"user_info_endpoint"`
+	// UserListEndpoint 获取用户列表的 API 端点路径（用于批量同步）
+	UserListEndpoint string `gorm:"size:500" json:"user_list_endpoint"`
+	// RoleMappingJSON 角色映射配置（JSON 对象），第三方平台角色 -> 本系统角色
+	// 例如: {"admin": "admin", "user": "viewer"}
+	RoleMappingJSON string `gorm:"column:role_mapping_json;type:text" json:"-"`
+	// DefaultRole 未映射角色的默认角色
+	DefaultRole string `gorm:"size:20;default:viewer" json:"default_role"`
 
 	Enabled   bool      `gorm:"default:true" json:"enabled"`
 	CreatedBy uint      `json:"created_by"`

@@ -21,9 +21,10 @@
           <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '是' : '否' }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="140">
+      <el-table-column label="操作" width="200">
         <template #default="{ row }">
           <el-button size="small" @click="openEdit(row)">编辑</el-button>
+          <el-button size="small" @click="copyType(row)">复制</el-button>
           <el-button size="small" type="danger" @click="remove(row)">删除</el-button>
         </template>
       </el-table-column>
@@ -91,6 +92,16 @@ const openCreate = () => {
   dialog.value = true
 }
 const openEdit = (row) => { editing.value = { ...row }; dialog.value = true }
+
+const copyType = (row) => {
+  editing.value = {
+    ...row,
+    id: undefined,
+    code: row.code + '_copy',
+    name: row.name + ' (复制)'
+  }
+  dialog.value = true
+}
 
 const save = async () => {
   const e = editing.value

@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录中...</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #f0f2f5;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .card {
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+            width: 360px;
+            padding: 48px 40px;
+            text-align: center;
+        }
+
+        .icon {
+            width: 64px;
+            height: 64px;
+            border-radius: 50%;
+            margin: 0 auto 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+        }
+        .icon.loading { background: #e8f4ff; }
+        .icon.success { background: #e6f7ee; }
+        .icon.error   { background: #fff2f0; }
+
+        .spinner {
+            width: 28px;
+            height: 28px;
+            border: 3px solid #d0e8ff;
+            border-top-color: #1677ff;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        h2 {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1a1a1a;
+            margin-bottom: 8px;
+        }
+
+        .desc {
+            font-size: 14px;
+            color: #666;
+            line-height: 1.6;
+        }
+
+        .username {
+            font-size: 15px;
+            color: #1677ff;
+            font-weight: 500;
+            margin-top: 4px;
+        }
+
+        .countdown {
+            margin-top: 20px;
+            font-size: 13px;
+            color: #999;
+        }
+
+        .error-msg {
+            margin-top: 12px;
+            font-size: 13px;
+            color: #cf1322;
+            background: #fff2f0;
+            border: 1px solid #ffd3d0;
+            border-radius: 6px;
+            padding: 10px 14px;
+            text-align: left;
+            line-height: 1.6;
+            word-break: break-all;
+        }
+
+        .retry-btn {
+            margin-top: 20px;
+            display: inline-block;
+            padding: 8px 20px;
+            border-radius: 6px;
+            border: 1px solid #d9d9d9;
+            background: #fff;
+            font-size: 14px;
+            color: #555;
+            cursor: pointer;
+            text-decoration: none;
+            transition: border-color 0.2s;
+        }
+        .retry-btn:hover { border-color: #1677ff; color: #1677ff; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="icon loading" id="icon">
+            <div class="spinner"></div>
+        </div>
+        <h2 id="title">正在登录...</h2>
+        <div class="desc" id="desc">请稍候</div>
+        <div id="extra"></div>
+    </div>
+
+    <script>
+        const providerId = (() => {
+            const v = new URLSearchParams(window.location.search).get('provider_id')
+            return v ? parseInt(v) : 1
+        })()
+        const redirectTo = new URLSearchParams(window.location.search).get('redirect_to') || '/'
+
+        function setIcon(type) {
+            const el = document.getElementById('icon')
+            el.className = 'icon ' + type
+            el.innerHTML = type === 'loading'
+                ? '<div class="spinner"></div>'
+                : type === 'success' ? '✓' : '✗'
+            if (type === 'success') el.style.cssText += ';font-size:32px;color:#52c41a;'
+            if (type === 'error')   el.style.cssText += ';font-size:32px;color:#ff4d4f;'
+        }
+
+        function showError(msg) {
+            setIcon('error')
+            document.getElementById('title').textContent = '登录失败'
+            document.getElementById('desc').textContent = '无法完成身份验证'
+            document.getElementById('extra').innerHTML =
+                `<div class="error-msg">${escapeHtml(msg)}</div>` +
+                `<a class="retry-btn" href="javascript:history.back()">返回重试</a>`
+        }
+
+        function escapeHtml(s) {
+            const d = document.createElement('div')
+            d.textContent = s
+            return d.innerHTML
+        }
+
+        async function run() {
+            const token = new URLSearchParams(window.location.search).get('eteams_token')
+            if (!token) {
+                showError('未获取到 eteams_token，请从 eTeams 中点击链接访问。')
+                return
+            }
+
+            try {
+                const res = await fetch(window.location.origin + '/api/auth/thirdparty/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ provider_id: providerId, eteams_token: token })
+                })
+                const data = await res.json()
+                if (!res.ok) {
+                    showError(data.error || '登录请求失败')
+                    return
+                }
+
+                localStorage.setItem('token', data.token)
+                localStorage.setItem('user', JSON.stringify(data.user))
+
+                setIcon('success')
+                document.getElementById('title').textContent = '登录成功'
+                const name = data.user?.external_username || data.user?.username || ''
+                document.getElementById('desc').innerHTML =
+                    `欢迎回来${name ? '，' : ''}` +
+                    (name ? `<span class="username">${escapeHtml(name)}</span>` : '')
+
+                let n = 3
+                const extra = document.getElementById('extra')
+                extra.innerHTML = `<div class="countdown">${n} 秒后自动跳转...</div>`
+                const timer = setInterval(() => {
+                    n--
+                    if (n > 0) {
+                        extra.querySelector('.countdown').textContent = `${n} 秒后自动跳转...`
+                    } else {
+                        clearInterval(timer)
+                        window.location.href = redirectTo
+                    }
+                }, 1000)
+                setTimeout(() => { window.location.href = redirectTo }, 3000)
+
+            } catch (e) {
+                showError('网络错误，请检查连接后重试。')
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', run)
+    </script>
+</body>
+</html>

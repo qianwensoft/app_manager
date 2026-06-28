@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react'
 import legacy from '@vitejs/plugin-legacy'
 import path from 'path'
 import patchReactVersion from './vite-plugin-patch-react-version.js'
+import fixLegacyBundle from './vite-plugin-fix-legacy.js'
 import { visualizer } from 'rollup-plugin-visualizer'
 
 export default defineConfig(({ mode }) => {
@@ -15,10 +16,10 @@ export default defineConfig(({ mode }) => {
       legacy({
         targets: ['chrome >= 67', 'android >= 5'],
         modernPolyfills: true,
-        // 禁用现代浏览器检测脚本，Android 9 WebView 对 import.meta 支持不完整
         renderModernChunks: false,
       }),
       patchReactVersion(),
+      fixLegacyBundle(),
       visualizer({
         filename: './dist/stats.html',
         open: false,
@@ -57,9 +58,6 @@ export default defineConfig(({ mode }) => {
       target: 'es2015',
     },
     optimizeDeps: {
-      // 禁用依赖发现和预构建，让 legacy plugin 处理所有转译
-      noDiscovery: true,
-      include: [],
       esbuildOptions: {
         target: 'es2015',
       },
@@ -93,13 +91,13 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: 'dist',
       sourcemap: false,
+      target: 'es2015',
       rollupOptions: {
         output: {
           // 强制生成新的文件名（添加时间戳避免缓存）
           entryFileNames: `assets/[name]-[hash]-${Date.now()}.js`,
           chunkFileNames: `assets/[name]-[hash]-${Date.now()}.js`,
           assetFileNames: `assets/[name]-[hash].[ext]`,
-          // 禁用代码分割，将所有代码打成一个 bundle 强制 Babel 转译
           manualChunks: undefined,
           inlineDynamicImports: true,
         },

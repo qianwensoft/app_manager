@@ -102,6 +102,44 @@ type ServerConfig struct {
 	// TrustedProxies 受信任的反向代理 CIDR/IP 列表，用于解析 X-Forwarded-For 得到真实客户端 IP（影响 IP 限流与审计）。
 	// 留空表示不信任任何代理（直接用 RemoteAddr，最安全）；部署在 nginx 等代理后时填入代理地址，如 ["127.0.0.1"]。
 	TrustedProxies []string `yaml:"trusted_proxies"`
+	// 静态文件路径配置
+	WebDistDir     string `yaml:"web_dist_dir"`     // Vue 主应用目录，默认 ./web/dist
+	ScadaEditorDir string `yaml:"scada_editor_dir"` // SCADA 编辑器目录，默认 ./web/dist/scada-editor
+	FormAppDir     string `yaml:"form_app_dir"`     // 表单应用目录，默认 ./web/dist/form-app
+}
+
+// WebDistPath 返回 Vue 主应用目录，未配置时使用默认值
+func (s ServerConfig) WebDistPath() string {
+	if s.WebDistDir != "" {
+		return s.WebDistDir
+	}
+	return "./web/dist"
+}
+
+// ScadaEditorPath 返回 SCADA 编辑器目录，未配置时使用默认值，支持开发模式 fallback
+func (s ServerConfig) ScadaEditorPath() string {
+	if s.ScadaEditorDir != "" {
+		return s.ScadaEditorDir
+	}
+	// 默认：优先 web/dist/scada-editor（make 构建后），fallback 到 scada-editor/dist（开发模式）
+	dir := "./web/dist/scada-editor"
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		dir = "../scada-editor/dist"
+	}
+	return dir
+}
+
+// FormAppPath 返回表单应用目录，未配置时使用默认值，支持开发模式 fallback
+func (s ServerConfig) FormAppPath() string {
+	if s.FormAppDir != "" {
+		return s.FormAppDir
+	}
+	// 默认：优先 web/dist/form-app（make 构建后），fallback 到 form-app/dist（开发模式）
+	dir := "./web/dist/form-app"
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		dir = "../form-app/dist"
+	}
+	return dir
 }
 
 type DatabaseConfig struct {

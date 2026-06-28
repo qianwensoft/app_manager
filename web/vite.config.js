@@ -1,7 +1,6 @@
 import { defineConfig, loadEnv, createLogger } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import path from 'path'
-import monacoEditorPlugin from 'vite-plugin-monaco-editor'
 
 /** 关闭页签、HMR、后端重启时 /ws 代理常被 RST，Vite 会打 ECONNRESET —— 多为噪声 */
 function isBenignWsProxyLog(msg) {
@@ -36,10 +35,7 @@ export default defineConfig(({ mode }) => {
   return {
     customLogger: createFilteredLogger(),
     plugins: [
-      vue(),
-      monacoEditorPlugin({
-        languageWorkers: ['editorWorkerService', 'json', 'css', 'html', 'typescript']
-      })
+      vue()
     ],
     resolve: {
       alias: { '@': path.resolve(__dirname, 'src') }

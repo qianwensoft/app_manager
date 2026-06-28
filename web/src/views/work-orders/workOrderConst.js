@@ -15,9 +15,8 @@ export const statusType = (s) => ({
   open: 'info',
   in_progress: 'warning',
   resolved: 'success',
-  closed: '',
   reopened: 'warning'
-}[s] || '')
+}[s])
 
 export const priorityType = (p) => ({ normal: 'info', high: 'warning', urgent: 'danger' }[p] || 'info')
 

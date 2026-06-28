@@ -42,6 +42,7 @@ type thirdPartyProviderReq struct {
 	ComponentAppID     string `json:"component_app_id"`
 	ComponentAppSecret string `json:"component_app_secret"`
 	CallbackURL        string `json:"callback_url"`
+	OutboundAppID      *uint  `json:"outbound_app_id"`
 	Enabled            *bool  `json:"enabled"`
 }
 
@@ -64,6 +65,9 @@ func CreateThirdPartyProvider(c *gin.Context) {
 		CallbackURL:        req.CallbackURL,
 		Enabled:            true,
 		CreatedBy:          c.GetUint("user_id"),
+	}
+	if req.OutboundAppID != nil {
+		p.OutboundAppID = *req.OutboundAppID
 	}
 	if req.Enabled != nil {
 		p.Enabled = *req.Enabled
@@ -90,6 +94,9 @@ func UpdateThirdPartyProvider(c *gin.Context) {
 		"name":         req.Name,
 		"description":  req.Description,
 		"callback_url": req.CallbackURL,
+	}
+	if req.OutboundAppID != nil {
+		updates["outbound_app_id"] = *req.OutboundAppID
 	}
 	if req.OpenApiOrigin != "" {
 		updates["open_api_origin"] = req.OpenApiOrigin
@@ -125,6 +132,36 @@ func DeleteThirdPartyProvider(c *gin.Context) {
 
 // GetThirdPartyTokenStatus 返回 token 状态（不含明文）
 func GetThirdPartyTokenStatus(c *gin.Context) {
+	var p models.ThirdPartyProvider
+	if err := database.DB.First(&p, c.Param("id")).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "provider not found"})
+		return
+	}
+
+	// 如果关联了外部应用，返回外部应用的 token 状态
+	if p.OutboundAppID > 0 {
+		var outboundApp models.OutboundApp
+		if err := database.DB.First(&outboundApp, p.OutboundAppID).Error; err == nil {
+			// 返回虚拟 token 状态，标识使用外部应用
+			result := []map[string]interface{}{
+				{
+					"id":                0,
+					"authorizer_appid":  fmt.Sprintf("outbound_app_%d", p.OutboundAppID),
+					"expires_at":        time.Now().Add(365 * 24 * time.Hour), // 外部应用 token 由外部应用管理
+					"last_refreshed_at": time.Now(),
+					"last_error":        "",
+					"valid":             true,
+					"source":            "outbound_app",
+					"outbound_app_id":   p.OutboundAppID,
+					"outbound_app_name": outboundApp.Name,
+				},
+			}
+			c.JSON(http.StatusOK, result)
+			return
+		}
+	}
+
+	// 传统 OAuth token 状态
 	var tokens []models.ThirdPartyToken
 	database.DB.Where("provider_id = ?", c.Param("id")).Find(&tokens)
 	type tokenStatus struct {
@@ -191,6 +228,18 @@ func FreePassRefresh(c *gin.Context) {
 	if !ok {
 		return
 	}
+
+	// 如果关联了外部应用，使用外部应用的 token
+	if p.OutboundAppID > 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"ok":      true,
+			"message": "使用关联外部应用的 token，无需刷新",
+			"outbound_app_id": p.OutboundAppID,
+		})
+		return
+	}
+
+	// 传统 OAuth token 刷新流程
 	var t models.ThirdPartyToken
 	if err := database.DB.Where("provider_id = ?", p.ID).First(&t).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "no token found, authorize first"})

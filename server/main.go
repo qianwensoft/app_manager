@@ -133,11 +133,12 @@ func runSetupMode() {
 		c.Next()
 	})
 
-	// 静态文件
-	r.Static("/assets", "./web/dist/assets")
-	r.StaticFile("/", "./web/dist/index.html")
+	// 静态文件（setup 模式使用默认路径）
+	webDistPath := "./web/dist"
+	r.Static("/assets", webDistPath+"/assets")
+	r.StaticFile("/", webDistPath+"/index.html")
 	r.NoRoute(func(c *gin.Context) {
-		c.File("./web/dist/index.html")
+		c.File(webDistPath + "/index.html")
 	})
 
 	// 安装 API

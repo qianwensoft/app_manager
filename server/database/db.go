@@ -194,6 +194,13 @@ var migrateGroups = [][]interface{}{
 		&models.WorkOrderTagLink{},
 		&models.WorkOrderProgress{},
 		&models.WorkOrderProgressAttachment{},
+		&models.WorkOrderReportShare{},
+		&models.WorkOrderReportShareView{},
+	},
+	// Group 10 — workflow engine
+	{
+		&models.WorkflowDefinition{},
+		&models.WorkflowExecution{},
 	},
 }
 
@@ -250,6 +257,9 @@ func initSchema(db *gorm.DB) error {
 		MigrateFormAppToV2,
 		MigrateWirelessAdbPort,
 		MigrateConnectorInterfaceCodeIndex,
+		MigrateLowCode,
+		MigrateUserThirdParty,
+		MigrateThirdPartyOutbound,
 	}
 	if strings.ToLower(strings.TrimSpace(db.Dialector.Name())) == "mysql" {
 		// MySQL 支持并发写，并行执行加速启动。

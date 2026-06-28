@@ -1,0 +1,28 @@
+{
+  "name": "@lowcode/runtime",
+  "version": "0.1.0",
+  "description": "Runtime engine for rendering low-code pages",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@lowcode/schema": "workspace:*",
+    "@measured/puck": "^0.16.0",
+    "@formily/core": "^2.3.2",
+    "@formily/react": "^2.3.2",
+    "@formily/antd-v5": "^1.2.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "yjs": "^13.6.18"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.3"
+  }
+}

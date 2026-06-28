@@ -30,9 +30,10 @@
           <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '是' : '否' }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="140">
+      <el-table-column label="操作" width="200">
         <template #default="{ row }">
           <el-button size="small" @click="openEdit(row)">编辑</el-button>
+          <el-button size="small" @click="copyWebhook(row)">复制</el-button>
           <el-button size="small" type="danger" @click="remove(row)">删除</el-button>
         </template>
       </el-table-column>
@@ -390,6 +391,24 @@ const openEdit = (row) => {
   editing.value = { ...row }
   try { selectedEvents.value = row.events ? JSON.parse(row.events) : [] } catch { selectedEvents.value = [] }
   // params_json 能解析成对象则用表格模式，否则退回原始 JSON 模式
+  const parsedRows = jsonToRows(row.params_json)
+  if (row.params_json && parsedRows.length === 0) {
+    paramRawMode.value = true
+  } else {
+    paramRawMode.value = false
+    paramRows.value = parsedRows
+  }
+  dialog.value = true
+  loadTargetParams()
+}
+
+const copyWebhook = (row) => {
+  editing.value = {
+    ...row,
+    id: undefined,
+    name: row.name + ' (复制)'
+  }
+  try { selectedEvents.value = row.events ? JSON.parse(row.events) : [] } catch { selectedEvents.value = [] }
   const parsedRows = jsonToRows(row.params_json)
   if (row.params_json && parsedRows.length === 0) {
     paramRawMode.value = true

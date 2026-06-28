@@ -215,9 +215,38 @@ type WorkOrderWorkflowLog struct {
 	// ErrorMsg 错误信息（失败时）。
 	ErrorMsg string `gorm:"type:text" json:"error_msg"`
 	// ExecutionLogs JS 执行日志（JSON 数组）。
-	ExecutionLogs string    `gorm:"type:text" json:"execution_logs"`
-	DurationMs    int64     `json:"duration_ms"`
-	CreatedAt     time.Time `json:"created_at"`
+	ExecutionLogs string `gorm:"type:text" json:"execution_logs"`
+	// ActionDetails 每个动作的详细执行信息（JSON 数组）。
+	ActionDetails string `gorm:"type:text" json:"action_details"`
+	// ContextSnapshot 上下文变量快照（JSON 对象）。
+	ContextSnapshot string    `gorm:"type:text" json:"context_snapshot"`
+	DurationMs      int64     `json:"duration_ms"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 func (WorkOrderWorkflowLog) TableName() string { return "work_order_workflow_logs" }
+
+// WorkOrderReportShare 工单报告分享链接
+type WorkOrderReportShare struct {
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	Token       string    `gorm:"uniqueIndex;size:64;not null" json:"token"`
+	Title       string    `gorm:"size:200" json:"title"`
+	FiltersJSON string    `gorm:"type:text" json:"filters_json"` // 查询条件（JSON）
+	CreatedBy   uint      `gorm:"index" json:"created_by"`
+	ViewCount   int       `gorm:"default:0" json:"view_count"` // 浏览次数
+	ExpiresAt   time.Time `gorm:"index" json:"expires_at"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+func (WorkOrderReportShare) TableName() string { return "work_order_report_shares" }
+
+// WorkOrderReportShareView 分享链接浏览记录
+type WorkOrderReportShareView struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	ShareID   uint      `gorm:"index;not null" json:"share_id"`
+	IPAddress string    `gorm:"size:100" json:"ip_address"`
+	UserAgent string    `gorm:"type:text" json:"user_agent"`
+	ViewedAt  time.Time `gorm:"index" json:"viewed_at"`
+}
+
+func (WorkOrderReportShareView) TableName() string { return "work_order_report_share_views" }

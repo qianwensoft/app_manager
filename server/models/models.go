@@ -9,6 +9,12 @@ type User struct {
 	Role        string     `gorm:"size:20;default:'viewer'" json:"role"`
 	CreatedAt   time.Time  `json:"created_at"`
 	LastLoginAt *time.Time `json:"last_login_at"`
+	// 第三方平台关联字段
+	ProviderID       uint       `gorm:"index;default:0" json:"provider_id"`       // 关联的第三方平台 ID（0 表示本地用户）
+	ExternalUserID   string     `gorm:"size:128;index" json:"external_user_id"`   // 第三方平台的用户 ID
+	ExternalUsername string     `gorm:"size:128" json:"external_username"`        // 第三方平台的用户名
+	UserInfoJSON     string     `gorm:"column:user_info_json;type:text" json:"-"` // 第三方平台返回的完整用户信息（JSON）
+	SyncedAt         *time.Time `json:"synced_at"`                                // 最后一次从第三方平台同步的时间
 }
 
 type Device struct {

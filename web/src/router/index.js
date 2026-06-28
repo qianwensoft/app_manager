@@ -15,6 +15,20 @@ const routes = [
     component: () => import('@/views/Screen.vue')
   },
   {
+    path: '/work-order-report-share/:token',
+    name: 'WorkOrderReportShare',
+    meta: { requiresAuth: false, title: '工单统计报告' },
+    component: () => import('@/views/WorkOrderReportShare.vue')
+  },
+  {
+    path: '/embed',
+    component: () => import('@/components/layout/EmbedLayout.vue'),
+    meta: { requiresAuth: true },
+    children: [
+      { path: 'work-orders/:id', name: 'EmbedWorkOrderDetail', meta: { title: '工单详情', embed: true }, component: () => import('@/views/work-orders/WorkOrderDetail.vue') }
+    ]
+  },
+  {
     path: '/',
     component: () => import('@/components/layout/Layout.vue'),
     meta: { requiresAuth: true },

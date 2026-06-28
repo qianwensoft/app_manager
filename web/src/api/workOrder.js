@@ -76,3 +76,15 @@ export const uploadWorkOrderProgressAttachment = (progressId, file, kind, metaJS
 export const workOrderProgressAttachmentDownloadUrl = (attId) =>
   `/api/work-orders/progress/attachments/${attId}/download?token=${encodeURIComponent(localStorage.getItem('token') || '')}`
 
+// 统计分析报告
+export const getWorkOrderStatistics = (params = {}) => http.get('/work-orders/statistics', { params })
+
+// 报告分享
+export const createWorkOrderReportShare = (data) => http.post('/work-orders/report-shares', data)
+export const listWorkOrderReportShares = () => http.get('/work-orders/report-shares')
+export const getWorkOrderReportShareViews = (id) => http.get(`/work-orders/report-shares/${id}/views`)
+export const deleteWorkOrderReportShare = (id) => http.delete(`/work-orders/report-shares/${id}`)
+export const getWorkOrderReportShare = (token) => http.get(`/share/work-order-reports/${token}`)
+export const getSharedWorkOrders = (token, params = {}) => http.get(`/share/work-order-reports/${token}/work-orders`, { params })
+export const getSharedWorkOrderStatistics = (token, params = {}) => http.get(`/share/work-order-reports/${token}/statistics`, { params })
+export const getSharedWorkOrderProgress = (token, workOrderId) => http.get(`/share/work-order-reports/${token}/work-orders/${workOrderId}/progress`)

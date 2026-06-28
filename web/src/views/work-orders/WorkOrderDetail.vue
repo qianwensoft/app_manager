@@ -1,6 +1,7 @@
 <template>
   <div v-loading="loading">
-    <el-page-header :content="wo.code || '工单详情'" @back="goBack" style="margin-bottom:16px" />
+    <el-page-header v-if="!isEmbed" :content="wo.code || '工单详情'" @back="goBack" style="margin-bottom:16px" />
+    <div v-else style="margin-bottom:16px;font-size:16px;font-weight:600;color:#303133">{{ wo.code ? `${wo.code} · ${wo.title}` : (wo.title || '工单详情') }}</div>
 
     <el-row :gutter="16">
       <el-col :span="16">
@@ -8,7 +9,7 @@
           <template #header>
             <div class="card-head">
               <b>{{ wo.title }}</b>
-              <el-button text type="primary" size="small" @click="openEdit">编辑</el-button>
+              <el-button v-if="!readonly" text type="primary" size="small" @click="openEdit">编辑</el-button>
             </div>
           </template>
           <el-descriptions :column="2" border>
@@ -20,6 +21,7 @@
                 :model-value="wo.priority"
                 size="small"
                 style="width: 100px"
+                :disabled="readonly"
                 @change="changePriority"
               >
                 <el-option label="普通" value="normal" />
@@ -27,7 +29,7 @@
                 <el-option label="紧急" value="urgent" />
               </el-select>
             </el-descriptions-item>
-            <el-descriptions-item label="类型">{{ wo.type_code || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="类型">{{ types.find(t => t.code === wo.type_code)?.name || wo.type_code || '-' }}</el-descriptions-item>
             <el-descriptions-item label="设备">{{ wo.device_id || '-' }}</el-descriptions-item>
             <el-descriptions-item label="业务单号" :span="2">
               <div v-if="!editBusinessNo" class="business-no-view">
@@ -46,7 +48,7 @@
                   </el-popover>
                 </template>
                 <span v-else>-</span>
-                <el-button text type="primary" size="small" @click="startEditBusinessNo">编辑</el-button>
+                <el-button v-if="!readonly" text type="primary" size="small" @click="startEditBusinessNo">编辑</el-button>
               </div>
               <div v-else class="business-no-edit">
                 <el-input v-model="businessNoDraft" placeholder="请输入业务单号" style="max-width:300px" />
@@ -60,6 +62,7 @@
               <el-switch
                 :model-value="wo.visibility === 'public'"
                 active-text="公开" inactive-text="私有"
+                :disabled="readonly"
                 @change="toggleVisibility"
               />
             </el-descriptions-item>
@@ -83,7 +86,7 @@
                   </span>
                 </template>
                 <span v-else>-</span>
-                <el-button text type="primary" size="small" @click="startEditCodes">编辑</el-button>
+                <el-button v-if="!readonly" text type="primary" size="small" @click="startEditCodes">编辑</el-button>
               </div>
               <div v-else class="codes-edit">
                 <el-input v-model="codesDraft" type="textarea" :rows="2" placeholder="多个编码用逗号分隔" />
@@ -153,7 +156,7 @@
           <template #header>
             <div class="card-head">
               <b>标签</b>
-              <el-button text type="primary" size="small" @click="openTagEdit">编辑</el-button>
+              <el-button v-if="!readonly" text type="primary" size="small" @click="openTagEdit">编辑</el-button>
             </div>
           </template>
           <div class="tags-box">
@@ -166,7 +169,7 @@
           </div>
         </el-card>
 
-        <el-card shadow="never" style="margin-bottom:16px">
+        <el-card v-if="!readonly" shadow="never" style="margin-bottom:16px">
           <template #header><b>处理操作</b></template>
           <div class="actions">
             <el-button :disabled="wo.status==='in_progress'" @click="setStatus('in_progress')">开始处理</el-button>
@@ -181,7 +184,7 @@
           <template #header>
             <div class="card-head">
               <b>工单进展（{{ progressList.length }}）</b>
-              <el-button text type="primary" size="small" @click="openProgressAdd">新增进展</el-button>
+              <el-button v-if="!readonly" text type="primary" size="small" @click="openProgressAdd">新增进展</el-button>
             </div>
           </template>
           <el-empty v-if="!progressList.length" description="暂无进展" />
@@ -322,7 +325,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Grid } from '@element-plus/icons-vue'
@@ -335,10 +338,14 @@ import {
 } from '@/api/workOrder'
 import { statusLabel, statusType, priorityType, priorityLabel } from './workOrderConst'
 import ImagePreviewWithRotate from '@/components/ImagePreviewWithRotate.vue'
+import { createWorkOrdersStomp } from '@/utils/workOrdersStomp'
 
 const route = useRoute()
 const router = useRouter()
 const id = route.params.id
+
+const isEmbed = computed(() => !!route.meta.embed)
+const readonly = computed(() => isEmbed.value && route.query.readonly === '1')
 
 // 返回列表，如果有 from 参数则返回原页面（保持筛选状态），否则默认返回列表首页
 const goBack = () => {
@@ -583,6 +590,34 @@ const openProgressImagePreview = (attId) => {
   window.open(progressAttDownloadUrl(attId), '_blank')
 }
 
+// STOMP实时更新
+const woStomp = createWorkOrdersStomp(onWorkOrderEvent, () => localStorage.getItem('token'))
+
+function onWorkOrderEvent(payload) {
+  if (!payload || !payload.id) return
+
+  // 只处理当前工单的更新
+  if (payload.id !== parseInt(id)) return
+
+  console.log('[WorkOrderDetail] STOMP event:', payload)
+
+  // 实时更新工单字段
+  wo.value = {
+    ...wo.value,
+    ...payload,
+    // 保持复杂字段不被覆盖（如 items, activities, tag_links）
+    items: wo.value.items,
+    activities: wo.value.activities,
+    tag_links: wo.value.tag_links,
+    tags: payload.tags || wo.value.tags
+  }
+
+  // 状态变更或重大更新时重新加载完整数据
+  if (payload.event === 'work_order.status_changed' || payload.event === 'work_order.closed') {
+    load()
+  }
+}
+
 const setStatus = async (status) => {
   let comment = ''
   if (status === 'closed' || status === 'resolved' || status === 'reopened') {
@@ -624,6 +659,14 @@ onMounted(async () => {
   types.value = t.data || []
   try { tagDict.value = (await getWorkOrderTagDict()).data || [] } catch { tagDict.value = [] }
   load()
+
+  // 连接STOMP实时推送
+  woStomp.connect()
+})
+
+onBeforeUnmount(() => {
+  // 断开STOMP连接
+  woStomp.disconnect()
 })
 </script>
 

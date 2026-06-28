@@ -42,7 +42,18 @@
             {{ t.name }}
           </el-option>
         </el-select>
+        <el-date-picker
+          v-model="filters.createdRange"
+          type="datetimerange"
+          range-separator="-"
+          start-placeholder="创建开始"
+          end-placeholder="创建结束"
+          style="width:360px"
+          @change="reload"
+          clearable
+        />
         <el-button @click="reload">查询</el-button>
+        <el-button type="success" @click="showStatistics">统计报告</el-button>
         <el-radio-group v-model="view" style="margin-left:8px">
           <el-radio-button value="list">列表</el-radio-button>
           <el-radio-button value="board">看板</el-radio-button>
@@ -113,6 +124,9 @@
               >{{ tagName(code) }}</el-tag>
               <span v-if="!(row.tags || []).length">-</span>
             </template>
+          </el-table-column>
+          <el-table-column label="处理耗时" width="110" sortable :sort-method="sortByDuration">
+            <template #default="{ row }">{{ formatDuration(row) }}</template>
           </el-table-column>
           <el-table-column prop="created_at" label="提交时间" width="180" />
           <el-table-column label="操作" width="100" fixed="right">
@@ -195,6 +209,9 @@
                     <div v-if="element.other_codes" class="board-card-codes" :title="element.other_codes">
                       编码：{{ element.other_codes }}
                     </div>
+                    <div class="board-card-duration">
+                      耗时：{{ formatDuration(element) }}
+                    </div>
                     <div v-if="(element.tags || []).length" class="board-card-tags">
                       <el-tag
                         v-for="code in element.tags" :key="code"
@@ -268,6 +285,9 @@
         <el-button type="primary" @click="saveContextMenuChanges">保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- 统计报告弹窗 -->
+    <WorkOrderStatsDialog ref="statsDialog" :filters="buildStatsFilters()" />
   </div>
 </template>
 
@@ -282,6 +302,7 @@ import { statusOptions, statusLabel, statusType, priorityType, priorityLabel } f
 import { useAuthStore } from '@/stores/auth'
 import { createWorkOrdersStomp } from '@/utils/workOrdersStomp'
 import QRCodePopover from '@/components/QRCodePopover.vue'
+import WorkOrderStatsDialog from '@/components/WorkOrderStatsDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -299,7 +320,65 @@ const page = ref(1)
 const limit = ref(20)
 const loading = ref(false)
 const view = ref('list')
-const filters = ref({ status: '', type_code: '', device_id: '', business_no: '', tags: [], search_key: '' })
+const filters = ref({ status: '', type_code: '', device_id: '', business_no: '', tags: [], search_key: '', createdRange: null })
+const statsDialog = ref(null)
+
+// 格式化处理耗时
+const formatDuration = (row) => {
+  if (!row.created_at) return '-'
+  const endTime = row.closed_at || row.archived_at || new Date().toISOString()
+  if (!endTime) return '-'
+
+  const start = new Date(row.created_at)
+  const end = new Date(endTime)
+  const diffMs = end - start
+  if (diffMs < 0) return '-'
+
+  const hours = Math.floor(diffMs / (1000 * 60 * 60))
+  const days = Math.floor(hours / 24)
+  const remainHours = hours % 24
+
+  if (days > 0) {
+    return remainHours > 0 ? `${days}天${remainHours}小时` : `${days}天`
+  }
+  if (hours > 0) {
+    const mins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60))
+    return mins > 0 ? `${hours}小时${mins}分` : `${hours}小时`
+  }
+  const mins = Math.floor(diffMs / (1000 * 60))
+  return `${mins}分钟`
+}
+
+// 耗时排序方法
+const sortByDuration = (a, b) => {
+  const getDuration = (row) => {
+    if (!row.created_at) return 0
+    const endTime = row.closed_at || row.archived_at || new Date().toISOString()
+    const start = new Date(row.created_at)
+    const end = new Date(endTime)
+    return end - start
+  }
+  return getDuration(a) - getDuration(b)
+}
+
+// 构建统计报告的查询参数
+const buildStatsFilters = () => {
+  const params = {}
+  if (filters.value.status) params.status = filters.value.status
+  if (filters.value.type_code) params.type_code = filters.value.type_code
+  if (filters.value.device_id) params.device_id = filters.value.device_id
+  if (filters.value.tags.length) params.tags = filters.value.tags.join(',')
+  if (filters.value.createdRange && filters.value.createdRange.length === 2) {
+    params.created_start = filters.value.createdRange[0].toISOString()
+    params.created_end = filters.value.createdRange[1].toISOString()
+  }
+  return params
+}
+
+// 显示统计报告
+const showStatistics = () => {
+  statsDialog.value?.show()
+}
 
 const onTagFilter = () => { page.value = 1; syncQuery(); load() }
 
@@ -457,6 +536,10 @@ const load = async () => {
       if (filters.value.type_code) params.type_code = filters.value.type_code
       if (filters.value.tags.length) params.tags = filters.value.tags.join(',')
       if (filters.value.search_key) params.search_key = filters.value.search_key
+      if (filters.value.createdRange && filters.value.createdRange.length === 2) {
+        params.created_start = filters.value.createdRange[0].toISOString()
+        params.created_end = filters.value.createdRange[1].toISOString()
+      }
       const res = await getWorkOrders(params)
       rows.value = filterNone(res.data || [])
       total.value = res.total || 0
@@ -477,6 +560,10 @@ const loadBoard = async () => {
   if (filters.value.device_id) params.device_id = filters.value.device_id
   if (filters.value.tags.length) params.tags = filters.value.tags.join(',')
   if (filters.value.search_key) params.search_key = filters.value.search_key
+  if (filters.value.createdRange && filters.value.createdRange.length === 2) {
+    params.created_start = filters.value.createdRange[0].toISOString()
+    params.created_end = filters.value.createdRange[1].toISOString()
+  }
   const res = await getWorkOrders(params)
   let data = filterNone(res.data || [])
   const next = { pending: [], in_progress: [], resolved: [], closed: [] }
@@ -714,6 +801,7 @@ onUnmounted(() => {
 .board-card-sub { font-size: 12px; color: #c0c4cc; margin-top: 4px; }
 .board-card-business { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #909399; margin-top: 4px; }
 .board-card-codes { font-size: 12px; color: #909399; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-card-duration { font-size: 12px; color: #909399; margin-top: 4px; }
 .board-card-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .board-empty { text-align: center; color: #c0c4cc; font-size: 13px; padding: 16px 0; }
 .qr-trigger { cursor: pointer; text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }

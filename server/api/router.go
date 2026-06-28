@@ -5,10 +5,10 @@ import (
 	"app-manager/config"
 	"app-manager/database"
 	"app-manager/datastack"
+	"app-manager/lowcode"
 	"app-manager/mcp"
 	"app-manager/ratelimit"
 	"log"
-	"os"
 
 	"github.com/gin-gonic/gin"
 )
@@ -41,21 +41,15 @@ func SetupRouter() *gin.Engine {
 	// 接口调用量埋点（内存累加，定期 flush；仅统计 /api/*）
 	r.Use(MetricsMiddleware())
 
-	// 静态文件
-	r.Static("/assets", "./web/dist/assets")
-	r.StaticFile("/", "./web/dist/index.html")
-	// scada-editor: 优先 web/dist/scada-editor（make 构建后），fallback 到 scada-editor/dist（开发模式）
-	scadaEditorDir := "./web/dist/scada-editor"
-	if _, err := os.Stat(scadaEditorDir); os.IsNotExist(err) {
-		scadaEditorDir = "../scada-editor/dist"
-	}
-	r.Static("/scada-editor", scadaEditorDir)
-	// form-app: 优先 web/dist/form-app（make 构建后），fallback 到 form-app/dist（开发模式）
-	// 禁用缓存以避免浏览器加载旧版本的 JavaScript 文件
-	formAppDir := "./web/dist/form-app"
-	if _, err := os.Stat(formAppDir); os.IsNotExist(err) {
-		formAppDir = "../form-app/dist"
-	}
+	// 静态文件（路径可通过配置文件配置，未配置时使用默认值）
+	webDistPath := config.C.Server.WebDistPath()
+	r.Static("/assets", webDistPath+"/assets")
+	r.StaticFile("/", webDistPath+"/index.html")
+	r.StaticFile("/auth-eteams-callback.html", webDistPath+"/auth-eteams-callback.html")
+	// scada-editor
+	r.Static("/scada-editor", config.C.Server.ScadaEditorPath())
+	// form-app: 禁用缓存以避免浏览器加载旧版本的 JavaScript 文件
+	formAppDir := config.C.Server.FormAppPath()
 	formAppGroup := r.Group("/form-app")
 	formAppGroup.Use(func(c *gin.Context) {
 		c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
@@ -90,12 +84,16 @@ func SetupRouter() *gin.Engine {
 	r.GET("/api/agent/menu-manifest", AgentMenuManifest)
 	r.POST("/api/agent/menu-execution/report", AgentMenuExecutionReport)
 	r.GET("/api/agent/update/check", AgentUpdateCheck)
-	r.GET("/api/agent/work-orders", AgentListWorkOrders)
 
 	// 免登录：组态分享
 	r.GET("/api/scada/info/share/:token", GetScadaInfoByShareToken)
 	// 免登录：表单分享
 	r.GET("/api/form-app/info/share/:token", GetFormAppByShareToken)
+	// 免登录：工单报告分享
+	r.GET("/api/share/work-order-reports/:token", GetWorkOrderReportShare)
+	r.GET("/api/share/work-order-reports/:token/work-orders", GetSharedWorkOrders)
+	r.GET("/api/share/work-order-reports/:token/statistics", GetSharedWorkOrderStatistics)
+	r.GET("/api/share/work-order-reports/:token/work-orders/:id/progress", GetSharedWorkOrderProgress)
 	// 组态静态资源（上传目录映射）
 	r.Static("/api/scada/resource", config.C.Storage.Path)
 
@@ -120,6 +118,7 @@ func SetupRouter() *gin.Engine {
 			ratelimit.Middleware(ratelimit.KeyByClientIP, rl.LoginRPM(), rl.LoginBurstSize()),
 			Login,
 		)
+		a.POST("/thirdparty/login", ThirdPartyLogin) // 第三方平台 SSO 登录
 		a.GET("/me", auth.AuthMiddleware(), Me)
 		a.GET("/scope-catalog", auth.AuthMiddleware(), ScopeCatalog)
 		a.POST("/apikey", auth.AuthMiddleware(), CreateAPIKey)
@@ -517,6 +516,12 @@ func SetupRouter() *gin.Engine {
 		woRuntime.GET("/tags", ListWorkOrderTagDict)
 		woRuntime.PUT("/:id/tags", SetWorkOrderTags)
 	}
+	// Agent 端工单列表和详情：支持 JWT(admin可查看所有) 或 device-token(仅查看本设备)
+	agentWO := r.Group("/api/agent/work-orders", auth.FormRuntimeAuthMiddleware())
+	{
+		agentWO.GET("", AgentListWorkOrders)
+		agentWO.GET("/:id", AgentGetWorkOrder)
+	}
 	// 管理/处理：登录用户
 	wo := r.Group("/api/work-orders", auth.AuthMiddleware())
 	{
@@ -546,6 +551,13 @@ func SetupRouter() *gin.Engine {
 		// 批量归档/取消归档（静态段，须在 /:id 之前避免路由歧义）
 		wo.POST("/batch/archive", auth.RequireRole("admin", "operator"), BatchArchiveWorkOrders)
 		wo.POST("/batch/unarchive", auth.RequireRole("admin", "operator"), BatchUnarchiveWorkOrders)
+		// 统计分析报告
+		wo.GET("/statistics", GetWorkOrderStatistics)
+		// 报告分享管理
+		wo.POST("/report-shares", CreateWorkOrderReportShare)
+		wo.GET("/report-shares", ListWorkOrderReportShares)
+		wo.GET("/report-shares/:id/views", GetWorkOrderReportShareViews)
+		wo.DELETE("/report-shares/:id", DeleteWorkOrderReportShare)
 		wo.GET("/:id", GetWorkOrder)
 		wo.PUT("/:id", auth.RequireRole("admin", "operator"), UpdateWorkOrder)
 		wo.DELETE("/:id", auth.RequireRole("admin", "operator"), DeleteWorkOrder)
@@ -675,6 +687,8 @@ func SetupRouter() *gin.Engine {
 		tp.GET("/:id/wechat/callback", WechatCallback)
 		tp.POST("/:id/wechat/refresh", WechatRefresh)
 		tp.POST("/:id/wechat/ticket", WechatTicket)
+		// eTeams/FreePass SSO
+		tp.GET("/:id/eteams/auth-url", GetETeamsAuthURL)
 
 		// API Endpoints
 		tp.GET("/endpoints", ListThirdPartyApiEndpoints)
@@ -682,6 +696,10 @@ func SetupRouter() *gin.Engine {
 		tp.GET("/endpoints/:id", GetThirdPartyApiEndpoint)
 		tp.PUT("/endpoints/:id", UpdateThirdPartyApiEndpoint)
 		tp.DELETE("/endpoints/:id", DeleteThirdPartyApiEndpoint)
+
+		// User Sync
+		tp.POST("/:id/sync-users", SyncUsersFromProvider)
+		tp.GET("/:id/sync-status", GetUserSyncStatus)
 	}
 
 	// Third party API call (accessible to operators for form-app scanner)
@@ -699,6 +717,7 @@ func SetupRouter() *gin.Engine {
 	r.GET("/ws/agent-fs/:deviceId", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"), AgentFsWS)
 	r.GET("/ws/camera/:deviceId", auth.AuthMiddleware(), CameraWS)
 	r.GET("/ws/channel", ChannelWS)
+	r.GET("/ws/yjs/:room", YjsWS)
 
 	// 缓冲入站 Webhook（免 API Key，凭 X-Webhook-Secret）
 	r.POST("/api/open/v1/ingress/buffer/:dataset_code", datastack.OpenBufferWebhook(database.DB))
@@ -730,6 +749,35 @@ func SetupRouter() *gin.Engine {
 		open.POST("/work-orders/:code/close", auth.RequireOpenScope(auth.OpenWorkOrderWrite), OpenCloseWorkOrder)
 	}
 
+	// Workflow Engine (兼容原有事件系统)
+	wf := r.Group("/api/workflows", auth.AuthMiddleware())
+	{
+		wf.GET("", ListWorkflows)
+		wf.POST("", auth.RequireRole("admin", "operator"), CreateWorkflow)
+		wf.GET("/:id", GetWorkflow)
+		wf.PUT("/:id", auth.RequireRole("admin", "operator"), UpdateWorkflow)
+		wf.DELETE("/:id", auth.RequireRole("admin", "operator"), DeleteWorkflow)
+
+		// 执行
+		wf.POST("/:id/execute", auth.RequireRole("admin", "operator"), ExecuteWorkflow)
+		wf.GET("/:id/executions", ListExecutions)
+		wf.GET("/executions/:exec_id", GetExecution)
+		wf.POST("/executions/:exec_id/cancel", auth.RequireRole("admin", "operator"), CancelExecution)
+		wf.GET("/executions/:exec_id/status", GetExecutionLiveStatus)
+
+		// 测试
+		wf.POST("/:id/test", auth.RequireRole("admin", "operator"), TestWorkflow)
+	}
+
+	// Workflow WebSocket
+	r.GET("/ws/workflow/executions/:exec_id", auth.AuthMiddleware(), WorkflowExecutionWS)
+	r.GET("/api/workflows/executions/:exec_id/events", auth.AuthMiddleware(), WorkflowExecutionEventsSSE)
+
+	// Workflow 绑定到现有事件（扩展原有 API）
+	r.POST("/api/custom-events/:id/bind-workflow", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"), BindWorkflowToCustomEvent)
+	r.DELETE("/api/custom-events/:id/unbind-workflow", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"), UnbindWorkflowFromCustomEvent)
+	r.POST("/api/form-apps/:id/event-routes/:route_id/bind-workflow", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"), BindWorkflowToFormEvent)
+
 	// MCP — Model Context Protocol (X-API-Key auth)
 	mcpGroup := r.Group("/mcp/v1",
 		auth.APIKeyMiddleware(),
@@ -739,18 +787,22 @@ func SetupRouter() *gin.Engine {
 		mcpGroup.POST("/", mcp.Handle)
 	}
 
+	// Low-Code Platform API
+	api := r.Group("/api")
+	lowcode.RegisterRoutes(api)
+
 	// SPA 回退放最后，避免未匹配 API 被误判为前端路由
 	r.NoRoute(func(c *gin.Context) {
 		path := c.Request.URL.Path
 		if len(path) >= 14 && path[:14] == "/scada-editor/" {
-			c.File(scadaEditorDir + "/index.html")
+			c.File(config.C.Server.ScadaEditorPath() + "/index.html")
 			return
 		}
 		if len(path) >= 10 && path[:10] == "/form-app/" {
-			c.File(formAppDir + "/index.html")
+			c.File(config.C.Server.FormAppPath() + "/index.html")
 			return
 		}
-		c.File("./web/dist/index.html")
+		c.File(config.C.Server.WebDistPath() + "/index.html")
 	})
 
 	return r

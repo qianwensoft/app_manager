@@ -20,6 +20,7 @@ import { Label } from '@/components/ui/label'
 import PrintButton from '../PrintButton'
 import SubmitButton from '../SubmitButton'
 import { ActionButton, EventButton, NavigateButton } from '../ActionButtons'
+import { FeedbackButton } from '../FeedbackButton'
 import { CustomButton } from '../Button'
 import { PageHeader, Section, Divider, StaticImage, StaticText } from '../layout'
 
@@ -160,6 +161,7 @@ export const sharedComponents = {
   ActionButton,
   EventButton,
   NavigateButton,
+  FeedbackButton,
   CustomButton,
   PageHeader,
   Section,
