@@ -14,7 +14,9 @@ export default defineConfig(({ mode }) => {
     plugins: [
       react(),
       legacy({
-        targets: ['chrome >= 67', 'android >= 5'],
+        // X5 内核 48445 基于 Chromium 77，不支持可选链(?.)和空值合并(??)
+        // 这两个特性在 Chrome 80 才引入，通过 vite-plugin-fix-legacy.js 后处理转译
+        targets: ['chrome >= 77'],
         modernPolyfills: true,
         renderModernChunks: false,
       }),

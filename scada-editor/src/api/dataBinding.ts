@@ -8,6 +8,7 @@ export interface DataInterfaceItem {
   kind: string
   enabled: boolean
   schema_json?: string
+  param_contract_json?: string  // ParamSpec[] 参数契约
   group_id?: number
 }
 
@@ -22,6 +23,18 @@ export interface OutboundWebhookItem {
   app_id: number
   name: string
   description?: string
+  response_schema?: string
+  enabled: boolean
+}
+
+export interface OutboundEndpointItem {
+  id: number
+  app_id: number
+  app_name?: string
+  name: string
+  method: string
+  path: string
+  param_schema?: string
   response_schema?: string
   enabled: boolean
 }
@@ -49,6 +62,9 @@ export const dataBindingApi = {
 
   listOutboundWebhooks: (appId: number): Promise<{ data: OutboundWebhookItem[] }> =>
     http.get(`/outbound/apps/${appId}/webhooks`),
+
+  listOutboundEndpoints: (appId: number): Promise<{ data: OutboundEndpointItem[] }> =>
+    http.get('/outbound/endpoints', { params: { app_id: appId } }),
 
   listSimPoints: (scadaCode?: string): Promise<{ data: ScadaSimPointItem[] }> =>
     http.get('/scada/sim-points', { params: scadaCode ? { scada_code: scadaCode } : {} }),

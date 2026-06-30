@@ -9,63 +9,67 @@
         </div>
       </div>
       <el-menu :router="true" :default-active="menuActive" background-color="#1d2935" text-color="#aaa" active-text-color="#fff">
-        <el-menu-item index="/">
-          <el-icon><Monitor /></el-icon><span>总览</span>
-        </el-menu-item>
-        <el-menu-item index="/devices">
-          <el-icon><Phone /></el-icon><span>设备管理</span>
-        </el-menu-item>
-        <el-menu-item index="/qrcode">
-          <el-icon><Connection /></el-icon><span>扫码接入</span>
-        </el-menu-item>
-        <el-menu-item index="/screen">
-          <el-icon><VideoCamera /></el-icon><span>屏幕查看</span>
-        </el-menu-item>
-        <el-menu-item index="/shell">
-          <el-icon><Cpu /></el-icon><span>Shell 终端</span>
-        </el-menu-item>
-        <el-menu-item index="/logcat">
-          <el-icon><Document /></el-icon><span>Logcat</span>
-        </el-menu-item>
-        <el-menu-item index="/events">
-          <el-icon><Bell /></el-icon><span>自定义事件</span>
-        </el-menu-item>
-        <el-menu-item index="/event-definitions">
-          <el-icon><Setting /></el-icon><span>事件定义</span>
-        </el-menu-item>
-        <el-menu-item index="/outbound/apps">
-          <el-icon><Link /></el-icon><span>外部应用</span>
-        </el-menu-item>
-        <el-menu-item index="/data">
-          <el-icon><Histogram /></el-icon><span>数据源与接口</span>
-        </el-menu-item>
-        <el-menu-item index="/outbound">
-          <el-icon><Share /></el-icon><span>连接器</span>
-        </el-menu-item>
-        <div class="menu-item-external menu-item-flat" @click="openScadaEditor">
-          <el-icon><Histogram /></el-icon><span>组态编辑器 ↗</span>
-        </div>
-        <div class="menu-item-external menu-item-flat" @click="openFormApp">
-          <el-icon><EditPen /></el-icon><span>表单设计器 ↗</span>
-        </div>
-        <el-menu-item index="/agent-menus">
-          <el-icon><Menu /></el-icon><span>Agent 菜单</span>
-        </el-menu-item>
-        <el-menu-item index="/apps">
-          <el-icon><Box /></el-icon><span>APK 管理</span>
-        </el-menu-item>
-        <el-menu-item index="/tasks">
-          <el-icon><List /></el-icon><span>任务队列</span>
-        </el-menu-item>
+        <template v-if="!auth.isViewer">
+          <el-menu-item index="/">
+            <el-icon><Monitor /></el-icon><span>总览</span>
+          </el-menu-item>
+          <el-menu-item index="/devices">
+            <el-icon><Phone /></el-icon><span>设备管理</span>
+          </el-menu-item>
+          <el-menu-item index="/qrcode">
+            <el-icon><Connection /></el-icon><span>扫码接入</span>
+          </el-menu-item>
+          <el-menu-item index="/screen">
+            <el-icon><VideoCamera /></el-icon><span>屏幕查看</span>
+          </el-menu-item>
+          <el-menu-item index="/shell">
+            <el-icon><Cpu /></el-icon><span>Shell 终端</span>
+          </el-menu-item>
+          <el-menu-item index="/logcat">
+            <el-icon><Document /></el-icon><span>Logcat</span>
+          </el-menu-item>
+          <el-menu-item index="/events">
+            <el-icon><Bell /></el-icon><span>自定义事件</span>
+          </el-menu-item>
+          <el-menu-item index="/event-definitions">
+            <el-icon><Setting /></el-icon><span>事件定义</span>
+          </el-menu-item>
+          <el-menu-item index="/outbound/apps">
+            <el-icon><Link /></el-icon><span>外部应用</span>
+          </el-menu-item>
+          <el-menu-item index="/data">
+            <el-icon><Histogram /></el-icon><span>数据源与接口</span>
+          </el-menu-item>
+          <el-menu-item index="/outbound">
+            <el-icon><Share /></el-icon><span>连接器</span>
+          </el-menu-item>
+          <div class="menu-item-external menu-item-flat" @click="openScadaEditor">
+            <el-icon><Histogram /></el-icon><span>组态编辑器 ↗</span>
+          </div>
+          <div class="menu-item-external menu-item-flat" @click="openFormApp">
+            <el-icon><EditPen /></el-icon><span>表单设计器 ↗</span>
+          </div>
+          <el-menu-item index="/agent-menus">
+            <el-icon><Menu /></el-icon><span>Agent 菜单</span>
+          </el-menu-item>
+          <el-menu-item index="/apps">
+            <el-icon><Box /></el-icon><span>APK 管理</span>
+          </el-menu-item>
+          <el-menu-item index="/tasks">
+            <el-icon><List /></el-icon><span>任务队列</span>
+          </el-menu-item>
+        </template>
         <el-menu-item index="/work-orders">
           <el-icon><Tickets /></el-icon><span>工单管理</span>
         </el-menu-item>
-        <el-menu-item index="/apikeys">
-          <el-icon><Key /></el-icon><span>授权管理</span>
-        </el-menu-item>
-        <el-menu-item index="/thirdparty">
-          <el-icon><Connection /></el-icon><span>第三方平台</span>
-        </el-menu-item>
+        <template v-if="!auth.isViewer">
+          <el-menu-item index="/apikeys">
+            <el-icon><Key /></el-icon><span>授权管理</span>
+          </el-menu-item>
+          <el-menu-item index="/thirdparty">
+            <el-icon><Connection /></el-icon><span>第三方平台</span>
+          </el-menu-item>
+        </template>
         <!-- admin 专属 -->
         <template v-if="auth.isAdmin">
           <el-menu-item index="/users">

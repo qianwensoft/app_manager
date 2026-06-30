@@ -196,6 +196,7 @@ export default function CanvasViewer({
             zoom={z}
             pointData={pointData}
             liveRows={tableLiveData[el.id]}
+            isPreview
           />
         ))}
         {formFieldElements.map((el) => (

@@ -559,10 +559,10 @@ func SetupRouter() *gin.Engine {
 		wo.GET("/report-shares/:id/views", GetWorkOrderReportShareViews)
 		wo.DELETE("/report-shares/:id", DeleteWorkOrderReportShare)
 		wo.GET("/:id", GetWorkOrder)
-		wo.PUT("/:id", auth.RequireRole("admin", "operator"), UpdateWorkOrder)
+		wo.PUT("/:id", auth.RequireRoleOrWoWrite("admin", "operator"), UpdateWorkOrder)
 		wo.DELETE("/:id", auth.RequireRole("admin", "operator"), DeleteWorkOrder)
 		wo.POST("/:id/assign", auth.RequireRole("admin", "operator"), AssignWorkOrder)
-		wo.POST("/:id/status", auth.RequireRole("admin", "operator"), ChangeWorkOrderStatus)
+		wo.POST("/:id/status", auth.RequireRoleOrWoWrite("admin", "operator"), ChangeWorkOrderStatus)
 	}
 	fapp := r.Group("/api/form-app", auth.AuthMiddleware(), auth.RequireRole("admin", "operator", "viewer"))
 	{
@@ -786,6 +786,9 @@ func SetupRouter() *gin.Engine {
 	{
 		mcpGroup.POST("/", mcp.Handle)
 	}
+
+	// X5 内核管理
+	RegisterX5KernelRoutes(r)
 
 	// Low-Code Platform API
 	api := r.Group("/api")

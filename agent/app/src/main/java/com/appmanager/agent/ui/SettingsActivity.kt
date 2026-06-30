@@ -13,16 +13,21 @@ import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.SwitchCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.appmanager.agent.R
 import com.appmanager.agent.config.AgentConfig
 import com.appmanager.agent.config.AgentRegistration
 import com.appmanager.agent.util.DeviceMachineId
 import com.appmanager.agent.service.AgentService
 import com.appmanager.agent.util.WirelessAdbHelper
+import com.appmanager.agent.x5.X5KernelManager
+import com.appmanager.agent.x5.X5Preferences
 import com.google.android.material.appbar.MaterialToolbar
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 class SettingsActivity : AppCompatActivity() {
@@ -35,6 +40,13 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var rgScanMode: RadioGroup
     private lateinit var tvConnState: TextView
     private lateinit var tvConnDetail: TextView
+
+    // X5 内核相关
+    private lateinit var tvX5State: TextView
+    private lateinit var tvX5Version: TextView
+    private lateinit var switchX5Enabled: SwitchCompat
+    private lateinit var switchX5AutoUpdate: SwitchCompat
+    private lateinit var btnX5CheckUpdate: Button
 
     /** 连接状态变更广播：实时刷新设置页的状态显示。 */
     private val connStateReceiver = object : BroadcastReceiver() {
@@ -105,6 +117,37 @@ class SettingsActivity : AppCompatActivity() {
         val btnSave = findViewById<Button>(R.id.btnSave)
         val btnReconnect = findViewById<Button>(R.id.btnReconnect)
         val btnReverseRegister = findViewById<Button>(R.id.btnReverseRegister)
+
+        // X5 内核控件
+        tvX5State = findViewById(R.id.tvX5State)
+        tvX5Version = findViewById(R.id.tvX5Version)
+        switchX5Enabled = findViewById(R.id.switchX5Enabled)
+        switchX5AutoUpdate = findViewById(R.id.switchX5AutoUpdate)
+        btnX5CheckUpdate = findViewById(R.id.btnX5CheckUpdate)
+
+        // 初始化 X5 状态
+        updateX5State()
+        switchX5Enabled.isChecked = X5Preferences.isX5Enabled(this)
+        switchX5AutoUpdate.isChecked = X5Preferences.isAutoUpdateEnabled(this)
+
+        // X5 开关监听
+        switchX5Enabled.setOnCheckedChangeListener { _, isChecked ->
+            X5Preferences.setX5Enabled(this, isChecked)
+            Toast.makeText(
+                this,
+                if (isChecked) "已启用 X5 内核，重启 App 生效" else "已禁用 X5 内核，重启 App 生效",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+
+        switchX5AutoUpdate.setOnCheckedChangeListener { _, isChecked ->
+            X5Preferences.setAutoUpdateEnabled(this, isChecked)
+        }
+
+        // 手动检查更新
+        btnX5CheckUpdate.setOnClickListener {
+            checkX5Update()
+        }
 
         btnReverseRegister.setOnClickListener {
             startActivity(Intent(this, ReverseRegisterActivity::class.java))
@@ -201,5 +244,85 @@ class SettingsActivity : AppCompatActivity() {
         } else {
             tvConnDetail.visibility = android.view.View.GONE
         }
+    }
+
+    private fun updateX5State() {
+        val state = X5KernelManager.getState()
+        val version = X5KernelManager.getLocalVersion()
+
+        val (stateText, stateColor) = when (state) {
+            X5KernelManager.KernelState.INSTALLED -> "已安装" to 0xFF2E7D32.toInt()
+            X5KernelManager.KernelState.DOWNLOADING -> "下载中..." to 0xFFF57C00.toInt()
+            X5KernelManager.KernelState.INSTALLING -> "安装中..." to 0xFFF57C00.toInt()
+            X5KernelManager.KernelState.NOT_INSTALLED -> "未安装" to 0xFF9E9E9E.toInt()
+            X5KernelManager.KernelState.FAILED -> "安装失败" to 0xFFC62828.toInt()
+            X5KernelManager.KernelState.SYSTEM_WEBVIEW -> "使用系统 WebView" to 0xFF9E9E9E.toInt()
+        }
+
+        tvX5State.text = stateText
+        tvX5State.setTextColor(stateColor)
+
+        if (version > 0) {
+            tvX5Version.text = "版本: $version (${version / 10000}.${(version / 100) % 100}.${version % 100})"
+        } else {
+            tvX5Version.text = "版本: 未安装"
+        }
+    }
+
+    private fun checkX5Update() {
+        val config = AgentConfig.get(this)
+        if (config.serverUrl.isBlank()) {
+            Toast.makeText(this, "请先配置服务器地址", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        if (config.deviceToken.isBlank()) {
+            Toast.makeText(this, "设备未注册", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        btnX5CheckUpdate.isEnabled = false
+        btnX5CheckUpdate.text = "检查中..."
+
+        lifecycleScope.launch {
+            try {
+                X5KernelManager.checkAndUpdate(
+                    context = this@SettingsActivity,
+                    serverUrl = config.serverUrl,
+                    token = config.deviceToken
+                )
+
+                // 等待一秒让状态更新
+                kotlinx.coroutines.delay(1000)
+                updateX5State()
+
+                btnX5CheckUpdate.isEnabled = true
+                btnX5CheckUpdate.text = "手动检查更新"
+
+                val state = X5KernelManager.getState()
+                when (state) {
+                    X5KernelManager.KernelState.DOWNLOADING,
+                    X5KernelManager.KernelState.INSTALLING -> {
+                        Toast.makeText(this@SettingsActivity, "正在下载/安装内核，请稍候", Toast.LENGTH_LONG).show()
+                    }
+                    X5KernelManager.KernelState.INSTALLED -> {
+                        Toast.makeText(this@SettingsActivity, "内核已是最新版本", Toast.LENGTH_SHORT).show()
+                    }
+                    else -> {
+                        Toast.makeText(this@SettingsActivity, "已触发检查，请稍后查看状态", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (e: Exception) {
+                btnX5CheckUpdate.isEnabled = true
+                btnX5CheckUpdate.text = "手动检查更新"
+                Toast.makeText(this@SettingsActivity, "检查失败: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // 每次回到前台刷新 X5 状态
+        updateX5State()
     }
 }

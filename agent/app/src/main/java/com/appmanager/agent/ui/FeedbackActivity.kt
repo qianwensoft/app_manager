@@ -63,10 +63,29 @@ class FeedbackActivity : AppCompatActivity() {
     private lateinit var etOtherCodes: TextInputEditText
     private lateinit var tilBusinessNo: com.google.android.material.textfield.TextInputLayout
     private lateinit var tilOtherCodes: com.google.android.material.textfield.TextInputLayout
+    private lateinit var cbQuickSubmit: android.widget.CheckBox
     private lateinit var attachmentList: LinearLayout
     private lateinit var tvTarget: TextView
     private lateinit var recyclerMine: RecyclerView
     private lateinit var panelSubmit: View
+    private lateinit var panelMine: androidx.drawerlayout.widget.DrawerLayout
+    private lateinit var fabFilter: com.google.android.material.floatingactionbutton.FloatingActionButton
+    private lateinit var fabScan: com.google.android.material.floatingactionbutton.FloatingActionButton
+
+    // 抽屉中的复选框
+    private lateinit var cbOpen: android.widget.CheckBox
+    private lateinit var cbInProgress: android.widget.CheckBox
+    private lateinit var cbResolved: android.widget.CheckBox
+    private lateinit var cbClosed: android.widget.CheckBox
+    private lateinit var cbReopened: android.widget.CheckBox
+
+    // 我的工单查询条件
+    private var filterStatuses = mutableSetOf("open", "in_progress")  // 默认：待处理、进行中
+    private var filterSearchKey = ""  // 搜索关键字
+
+    // 快速提交：记录上次确认的标题和描述，避免重复确认
+    private var lastConfirmedTitle = ""
+    private var lastConfirmedDesc = ""
 
     private var targetPackage: String = ""
     private var targetLabel: String = ""
@@ -99,13 +118,22 @@ class FeedbackActivity : AppCompatActivity() {
     }
 
     private fun handleScanResult(code: String) {
-        // 硬件扫码模式：根据输入框焦点判断填入目标
+        // 在"我的工单"标签页时，扫码触发搜索
+        val currentTab = findViewById<TabLayout>(R.id.tabs).selectedTabPosition
+        if (currentTab == 1) {
+            filterSearchKey = code
+            Toast.makeText(this, "搜索：$code", Toast.LENGTH_SHORT).show()
+            loadMine()
+            return
+        }
+
+        // 提交反馈页面的扫码逻辑
         if (scanTarget.isEmpty()) {
             val focusedView = currentFocus
             scanTarget = when (focusedView?.id) {
                 R.id.etBusinessNo -> "business_no"
                 R.id.etOtherCodes -> "other_codes"
-                else -> "business_no"  // 默认填业务单号
+                else -> "business_no"
             }
         }
 
@@ -113,6 +141,11 @@ class FeedbackActivity : AppCompatActivity() {
             "business_no" -> {
                 etBusinessNo.setText(code)
                 Toast.makeText(this, "已填入业务单号", Toast.LENGTH_SHORT).show()
+
+                // 如果勾选了"扫码后立即提交"，则自动提交
+                if (cbQuickSubmit.isChecked) {
+                    quickSubmitWithBusinessNo()
+                }
             }
             "other_codes" -> {
                 mergeOtherCodes(listOf(code))
@@ -120,6 +153,39 @@ class FeedbackActivity : AppCompatActivity() {
             }
         }
         scanTarget = ""
+    }
+
+    /**
+     * 扫码后快速提交（保留标题和问题描述，仅填入业务单号后提交）
+     * 智能确认：仅在标题或描述改变时弹确认对话框，内容不变则直接提交
+     */
+    private fun quickSubmitWithBusinessNo() {
+        val title = etTitle.text?.toString()?.trim() ?: ""
+        val desc = etDesc.text?.toString()?.trim() ?: ""
+
+        if (title.isEmpty()) {
+            Toast.makeText(this, "请先填写标题", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        // 检查标题和描述是否与上次确认的相同
+        if (title == lastConfirmedTitle && desc == lastConfirmedDesc) {
+            // 内容未变，直接提交，不弹确认对话框
+            submitQuick()
+        } else {
+            // 内容改变，显示确认对话框
+            AlertDialog.Builder(this)
+                .setTitle("确认提交")
+                .setMessage("业务单号: ${etBusinessNo.text}\n标题: $title\n描述: ${if (desc.isEmpty()) "（无）" else desc}\n\n确定立即提交反馈？")
+                .setPositiveButton("提交") { _, _ ->
+                    // 记录本次确认的内容
+                    lastConfirmedTitle = title
+                    lastConfirmedDesc = desc
+                    submitQuick()
+                }
+                .setNegativeButton("取消", null)
+                .show()
+        }
     }
 
     // ── 录屏结果广播 ──
@@ -176,17 +242,42 @@ class FeedbackActivity : AppCompatActivity() {
         etOtherCodes = findViewById(R.id.etOtherCodes)
         tilBusinessNo = etBusinessNo.parent.parent as com.google.android.material.textfield.TextInputLayout
         tilOtherCodes = etOtherCodes.parent.parent as com.google.android.material.textfield.TextInputLayout
+        cbQuickSubmit = findViewById(R.id.cbQuickSubmit)
         attachmentList = findViewById(R.id.attachmentList)
         tvTarget = findViewById(R.id.tvTarget)
         recyclerMine = findViewById(R.id.recyclerMine)
         panelSubmit = findViewById(R.id.panelSubmit)
+        panelMine = findViewById(R.id.drawerLayout)
+        fabFilter = findViewById(R.id.fabFilter)
+        fabScan = findViewById(R.id.fabScan)
         recyclerMine.layoutManager = LinearLayoutManager(this)
+
+        // 初始化抽屉中的复选框
+        val drawerView = panelMine.getChildAt(1)  // 第二个子视图是抽屉
+        cbOpen = drawerView.findViewById(R.id.cbOpen)
+        cbInProgress = drawerView.findViewById(R.id.cbInProgress)
+        cbResolved = drawerView.findViewById(R.id.cbResolved)
+        cbClosed = drawerView.findViewById(R.id.cbClosed)
+        cbReopened = drawerView.findViewById(R.id.cbReopened)
+
+        // 抽屉按钮事件
+        drawerView.findViewById<Button>(R.id.btnApply).setOnClickListener {
+            applyFilter()
+            panelMine.closeDrawers()
+        }
+        drawerView.findViewById<Button>(R.id.btnReset).setOnClickListener {
+            resetFilter()
+        }
+
+        // 悬浮按钮点击事件
+        fabFilter.setOnClickListener { panelMine.openDrawer(android.view.Gravity.END) }
+        fabScan.setOnClickListener { launchScan("mine_search") }
 
         findViewById<TabLayout>(R.id.tabs).addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
             override fun onTabSelected(tab: TabLayout.Tab) {
                 val mine = tab.position == 1
                 panelSubmit.visibility = if (mine) View.GONE else View.VISIBLE
-                recyclerMine.visibility = if (mine) View.VISIBLE else View.GONE
+                panelMine.visibility = if (mine) View.VISIBLE else View.GONE
                 if (mine) loadMine()
             }
             override fun onTabUnselected(tab: TabLayout.Tab) {}
@@ -533,9 +624,11 @@ class FeedbackActivity : AppCompatActivity() {
         if (scanMode == "hardware") {
             tilBusinessNo.endIconMode = com.google.android.material.textfield.TextInputLayout.END_ICON_NONE
             tilOtherCodes.endIconMode = com.google.android.material.textfield.TextInputLayout.END_ICON_NONE
+            fabScan.visibility = View.GONE  // 隐藏"我的工单"页面的扫码按钮
         } else {
             tilBusinessNo.endIconMode = com.google.android.material.textfield.TextInputLayout.END_ICON_CUSTOM
             tilOtherCodes.endIconMode = com.google.android.material.textfield.TextInputLayout.END_ICON_CUSTOM
+            fabScan.visibility = View.VISIBLE  // 显示"我的工单"页面的扫码按钮
         }
     }
 
@@ -613,13 +706,99 @@ class FeedbackActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * 快速提交（快速提交模式下保留标题和描述）
+     */
+    private fun submitQuick() {
+        val title = etTitle.text?.toString()?.trim().orEmpty()
+        if (title.isEmpty()) { Toast.makeText(this, "请填写标题", Toast.LENGTH_SHORT).show(); return }
+        val typeCode = types.getOrNull(spinnerType.selectedItemPosition)?.code ?: ""
+        val desc = etDesc.text?.toString()?.trim().orEmpty()
+        val businessNo = etBusinessNo.text?.toString()?.trim().orEmpty()
+        val otherCodes = etOtherCodes.text?.toString()?.trim().orEmpty()
+        val cfg = AgentConfig.get(this)
+        val base = ServerUrlUtil.httpBaseFromWs(cfg.serverUrl)
+        val token = cfg.deviceToken.trim()
+        if (base.isEmpty() || token.isEmpty()) { Toast.makeText(this, "未配置服务器/设备令牌", Toast.LENGTH_SHORT).show(); return }
+
+        val dialog = AlertDialog.Builder(this).setMessage("提交中…").setCancelable(false).create()
+        dialog.show()
+        thread {
+            try {
+                val body = JSONObject()
+                    .put("type_code", typeCode)
+                    .put("title", title)
+                    .put("description", desc)
+                    .put("business_no", businessNo)
+                    .put("other_codes", otherCodes)
+                val resp = AgentCatalogApi.postJson(base, "/api/work-orders", token, body.toString())
+                val wo = JSONObject(resp).optJSONObject("data") ?: JSONObject()
+                val id = wo.optInt("id")
+                for (a in attachments) {
+                    AgentCatalogApi.uploadFile(base, "/api/work-orders/$id/items", token, a.file, a.contentType,
+                        mapOf("kind" to a.kind, "target_pkg" to a.targetPkg))
+                }
+                runOnUiThread {
+                    dialog.dismiss()
+                    Toast.makeText(this, "提交成功", Toast.LENGTH_SHORT).show()
+                    attachments.clear(); renderAttachments()
+                    // 快速提交模式：仅清空业务单号和其他编码，保留标题和描述
+                    etBusinessNo.setText(""); etOtherCodes.setText("")
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    dialog.dismiss()
+                    Toast.makeText(this, "提交失败：${e.message}", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+    }
+
     // ── 我的工单 ──
+    private fun applyFilter() {
+        // 从复选框读取选中的状态
+        filterStatuses.clear()
+        if (cbOpen.isChecked) filterStatuses.add("open")
+        if (cbInProgress.isChecked) filterStatuses.add("in_progress")
+        if (cbResolved.isChecked) filterStatuses.add("resolved")
+        if (cbClosed.isChecked) filterStatuses.add("closed")
+        if (cbReopened.isChecked) filterStatuses.add("reopened")
+
+        loadMine()
+    }
+
+    private fun resetFilter() {
+        // 重置为默认状态
+        cbOpen.isChecked = true
+        cbInProgress.isChecked = true
+        cbResolved.isChecked = false
+        cbClosed.isChecked = false
+        cbReopened.isChecked = false
+
+        filterStatuses.clear()
+        filterStatuses.addAll(listOf("open", "in_progress"))
+        filterSearchKey = ""
+
+        loadMine()
+    }
+
     private fun loadMine() {
         thread {
             try {
                 val cfg = AgentConfig.get(this)
                 val base = ServerUrlUtil.httpBaseFromWs(cfg.serverUrl)
-                val json = AgentCatalogApi.getJson(base, "/api/work-orders/mine", cfg.deviceToken.trim())
+
+                // 构建查询参数
+                val params = mutableListOf<String>()
+                if (filterStatuses.isNotEmpty()) {
+                    params.add("status=${filterStatuses.joinToString(",")}")
+                }
+                if (filterSearchKey.isNotBlank()) {
+                    params.add("search=${java.net.URLEncoder.encode(filterSearchKey, "UTF-8")}")
+                }
+                val queryString = if (params.isNotEmpty()) "?${params.joinToString("&")}" else ""
+
+                val json = AgentCatalogApi.getJson(base, "/api/work-orders/mine$queryString", cfg.deviceToken.trim())
                 val arr = JSONObject(json).optJSONArray("data") ?: JSONArray()
                 val rows = mutableListOf<WoRow>()
                 for (i in 0 until arr.length()) {

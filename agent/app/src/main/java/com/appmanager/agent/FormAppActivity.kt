@@ -10,26 +10,22 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
-import android.webkit.ConsoleMessage
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceError
-import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.appmanager.agent.config.AgentConfig
 import com.appmanager.agent.util.ScanBroadcastHelper
+import com.appmanager.agent.x5.WebViewWrapper
+import com.appmanager.agent.x5.X5WebViewFactory
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 
 class FormAppActivity : AppCompatActivity() {
 
     private val tag = "FormAppActivity"
-    private lateinit var webView: WebView
+    private lateinit var webViewWrapper: WebViewWrapper
     private lateinit var bridge: FormAppBridge
     private var formAppCode: String = ""
 
@@ -64,8 +60,14 @@ class FormAppActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        webView = WebView(this)
-        setContentView(webView)
+        // 使用 X5WebViewFactory 创建 WebView
+        webViewWrapper = X5WebViewFactory.createWebView(this)
+        setContentView(webViewWrapper.getView())
+
+        // 显示使用的 WebView 类型
+        val webViewType = X5WebViewFactory.getCurrentWebViewType(this)
+        Toast.makeText(this, "使用: $webViewType", Toast.LENGTH_SHORT).show()
+        Log.i(tag, "Using WebView type: $webViewType")
 
         formAppCode = intent.getStringExtra("form_app_code") ?: "test_app"
         val pageKey = intent.getStringExtra("page_key") ?: "form"
@@ -76,52 +78,87 @@ class FormAppActivity : AppCompatActivity() {
         val localFormBase = AgentConfig.get(this).formAppBaseUrl.trim().trimEnd('/')
         val base = menuFormBase.ifEmpty { localFormBase }.ifEmpty { serverUrl }
 
-        bridge = FormAppBridge(this, this, webView, formAppCode)
+        bridge = FormAppBridge(this, this, webViewWrapper, formAppCode)
 
-        webView.settings.apply {
-            javaScriptEnabled = true
-            domStorageEnabled = true
-            databaseEnabled = true
-            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-            loadWithOverviewMode = true
-            useWideViewPort = true
-            allowFileAccess = true
-            allowContentAccess = true
-            // 启用调试模式（仅在开发时，生产环境可关闭）
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-                WebView.setWebContentsDebuggingEnabled(true)
-            }
+        webViewWrapper.getSettings().apply {
+            setJavaScriptEnabled(true)
+            setDomStorageEnabled(true)
+            setDatabaseEnabled(true)
+            setAllowFileAccess(true)
+            setAllowContentAccess(true)
+            setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE)
+            setLoadWithOverviewMode(true)
+            setUseWideViewPort(true)
         }
 
-        webView.addJavascriptInterface(bridge, "AndroidBridge")
-
-        webView.webViewClient = object : WebViewClient() {
-            override fun onReceivedError(
-                view: WebView?,
-                request: WebResourceRequest?,
-                error: WebResourceError?
-            ) {
-                super.onReceivedError(view, request, error)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    Log.e(tag, "WebView error: ${error?.description} (${error?.errorCode}) for ${request?.url}")
-                }
-            }
+        // 启用调试模式
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            // 系统 WebView 调试
+            android.webkit.WebView.setWebContentsDebuggingEnabled(true)
+            // X5 WebView 调试（X5 SDK 没有 setWebContentsDebuggingEnabled 方法，调试通过 QbSdk.setNeedInitX5FirstTime 等初始化配置）
         }
 
-        webView.webChromeClient = object : WebChromeClient() {
-            override fun onConsoleMessage(message: ConsoleMessage?): Boolean {
-                message?.let {
-                    Log.d(tag, "JS Console [${it.messageLevel()}]: ${it.message()} -- ${it.sourceId()}:${it.lineNumber()}")
-                }
-                return true
-            }
-        }
+        webViewWrapper.addJavascriptInterface(bridge, "AndroidBridge")
+
+        // 设置 WebViewClient 和 WebChromeClient
+        setupWebViewClients()
 
         // 注册到跨 app 事件中继注册表（第 7a 步）
-        FormAppRegistry.register(formAppCode, webView)
+        FormAppRegistry.register(formAppCode, webViewWrapper)
 
         val url = "$base/form-app/runtime/$formAppCode?page=$pageKey"
-        webView.loadUrl(url)
+        Log.i(tag, "Loading URL: $url (base=$base, menuFormBase=$menuFormBase, localFormBase=$localFormBase)")
+        webViewWrapper.loadUrl(url)
+    }
+
+    private fun setupWebViewClients() {
+        // 根据 WebView 类型设置不同的 Client
+        if (X5WebViewFactory.isUsingX5(this)) {
+            // X5 WebView
+            webViewWrapper.setWebViewClient(object : com.tencent.smtt.sdk.WebViewClient() {
+                override fun onReceivedError(
+                    view: com.tencent.smtt.sdk.WebView?,
+                    errorCode: Int,
+                    description: String?,
+                    failingUrl: String?
+                ) {
+                    super.onReceivedError(view, errorCode, description, failingUrl)
+                    Log.e(tag, "X5 WebView error: $description ($errorCode) for $failingUrl")
+                }
+            })
+
+            webViewWrapper.setWebChromeClient(object : com.tencent.smtt.sdk.WebChromeClient() {
+                override fun onConsoleMessage(message: com.tencent.smtt.export.external.interfaces.ConsoleMessage?): Boolean {
+                    message?.let {
+                        Log.d(tag, "JS Console [${it.messageLevel()}]: ${it.message()} -- ${it.sourceId()}:${it.lineNumber()}")
+                    }
+                    return true
+                }
+            })
+        } else {
+            // 系统 WebView
+            webViewWrapper.setWebViewClient(object : android.webkit.WebViewClient() {
+                override fun onReceivedError(
+                    view: android.webkit.WebView?,
+                    request: android.webkit.WebResourceRequest?,
+                    error: android.webkit.WebResourceError?
+                ) {
+                    super.onReceivedError(view, request, error)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        Log.e(tag, "System WebView error: ${error?.description} (${error?.errorCode}) for ${request?.url}")
+                    }
+                }
+            })
+
+            webViewWrapper.setWebChromeClient(object : android.webkit.WebChromeClient() {
+                override fun onConsoleMessage(message: android.webkit.ConsoleMessage?): Boolean {
+                    message?.let {
+                        Log.d(tag, "JS Console [${it.messageLevel()}]: ${it.message()} -- ${it.sourceId()}:${it.lineNumber()}")
+                    }
+                    return true
+                }
+            })
+        }
     }
 
     override fun onResume() {
@@ -172,8 +209,8 @@ class FormAppActivity : AppCompatActivity() {
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        if (webView.canGoBack()) {
-            webView.goBack()
+        if (webViewWrapper.canGoBack()) {
+            webViewWrapper.goBack()
         } else {
             @Suppress("DEPRECATION")
             super.onBackPressed()
@@ -183,8 +220,11 @@ class FormAppActivity : AppCompatActivity() {
     override fun onDestroy() {
         if (::bridge.isInitialized) bridge.release()
         // 从跨 app 事件中继注册表移除（第 7a 步）
-        if (::webView.isInitialized && formAppCode.isNotEmpty()) {
-            FormAppRegistry.unregister(formAppCode, webView)
+        if (::webViewWrapper.isInitialized && formAppCode.isNotEmpty()) {
+            FormAppRegistry.unregister(formAppCode, webViewWrapper)
+        }
+        if (::webViewWrapper.isInitialized) {
+            webViewWrapper.destroy()
         }
         super.onDestroy()
     }

@@ -154,10 +154,18 @@
             }
 
             try {
+                const params = new URLSearchParams(window.location.search)
+                const woScopesRaw = params.get('wo_scopes')
+                const woScopes = woScopesRaw
+                    ? woScopesRaw.split(',').map(s => s.trim()).filter(Boolean)
+                    : []
+                const loginBody = { provider_id: providerId, eteams_token: token }
+                if (woScopes.length) loginBody.wo_scopes = woScopes
+
                 const res = await fetch(window.location.origin + '/api/auth/thirdparty/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ provider_id: providerId, eteams_token: token })
+                    body: JSON.stringify(loginBody)
                 })
                 const data = await res.json()
                 if (!res.ok) {

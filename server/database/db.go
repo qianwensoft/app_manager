@@ -2,6 +2,7 @@ package database
 
 import (
 	"app-manager/config"
+	"app-manager/migrations"
 	"app-manager/models"
 	"fmt"
 	"log"
@@ -202,6 +203,10 @@ var migrateGroups = [][]interface{}{
 		&models.WorkflowDefinition{},
 		&models.WorkflowExecution{},
 	},
+	// Group 11 — x5 kernel
+	{
+		&models.X5KernelVersion{},
+	},
 }
 
 func runAutoMigrate(db *gorm.DB) error {
@@ -260,6 +265,7 @@ func initSchema(db *gorm.DB) error {
 		MigrateLowCode,
 		MigrateUserThirdParty,
 		MigrateThirdPartyOutbound,
+		migrations.MigrateDeviceX5Fields,
 	}
 	if strings.ToLower(strings.TrimSpace(db.Dialector.Name())) == "mysql" {
 		// MySQL 支持并发写，并行执行加速启动。

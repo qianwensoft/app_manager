@@ -295,6 +295,13 @@ func HandleHeartbeat(deviceID string, info map[string]interface{}) {
 	if fg, ok := strFromInfo(info["foreground_package"]); ok && fg != "" {
 		updates["foreground_package"] = fg
 	}
+	// X5 内核版本和状态
+	if x5Version, ok := info["x5_kernel_version"].(float64); ok {
+		updates["x5_kernel_version"] = int(x5Version)
+	}
+	if x5State, ok := strFromInfo(info["x5_kernel_state"]); ok && x5State != "" {
+		updates["x5_kernel_state"] = x5State
+	}
 	if caps, ok := info["capabilities"].([]interface{}); ok {
 		arr := make([]string, 0, len(caps))
 		for _, c := range caps {

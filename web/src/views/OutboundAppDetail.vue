@@ -1356,7 +1356,7 @@ function applyTokenStatus(src) {
   startCountdown(src.seconds_until_expiry)
 }
 
-async function loadApp() {
+async function loadApp(opts = {}) {
   loading.value = true
   try {
     const r = await ob.getOutboundApp(appId.value)
@@ -1389,7 +1389,8 @@ async function loadApp() {
     }
     applyExtensionScriptsFromApi(a.extension_scripts)
     applyAppParamsFromApi(a.app_params || [])
-    if (autoRefreshEnabled.value) scheduleAutoRefresh()
+    // 仅在初始加载或明确要求时重新调度自动刷新
+    if (opts.scheduleAutoRefresh && autoRefreshEnabled.value) scheduleAutoRefresh()
   } finally {
     loading.value = false
   }
@@ -1423,10 +1424,11 @@ function scheduleAutoRefresh() {
         if (tokenStatus.has_refresh_token) await ob.postOutboundAppTokenRefresh(appId.value)
         else await ob.postOutboundAppTokenFetch(appId.value)
         await loadApp()
+        // 仅在成功后才重新调度
+        scheduleAutoRefresh()
       } catch {
-        /* ElMessage from interceptor */
+        /* ElMessage from interceptor - 失败后不再重试，避免无限循环 */
       }
-      scheduleAutoRefresh()
     }, 15000)
     return
   }
@@ -1436,15 +1438,18 @@ function scheduleAutoRefresh() {
     try {
       await ob.postOutboundAppTokenRefresh(appId.value)
       await loadApp()
+      // 仅在成功后才重新调度
+      scheduleAutoRefresh()
     } catch {
       try {
         await ob.postOutboundAppTokenFetch(appId.value)
         await loadApp()
+        // 仅在成功后才重新调度
+        scheduleAutoRefresh()
       } catch {
-        /* */
+        /* 失败后不再重试，避免无限循环 */
       }
     }
-    scheduleAutoRefresh()
   }, ms)
 }
 
@@ -1572,7 +1577,7 @@ async function saveTokenProvider() {
       extension_scripts: buildExtensionScriptsPayload()
     })
     ElMessage.success('Token 配置已保存')
-    await loadApp()
+    await loadApp({ scheduleAutoRefresh: true })
   } finally {
     savingTp.value = false
   }
@@ -1893,13 +1898,13 @@ async function viewWhConfig(row) {
 
 watch(appId, async () => {
   clearAutoTimer()
-  await loadApp()
+  await loadApp({ scheduleAutoRefresh: true })
   await loadEndpoints()
   await loadWebhooks()
 })
 
 onMounted(async () => {
-  await loadApp()
+  await loadApp({ scheduleAutoRefresh: true })
   await loadEndpoints()
   await loadWebhooks()
   // 订阅 webhook 列表刷新 STOMP 主题（last_received_at 实时更新）

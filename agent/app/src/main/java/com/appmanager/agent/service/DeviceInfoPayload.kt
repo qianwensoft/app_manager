@@ -83,6 +83,11 @@ fun collectDeviceInfoData(context: Context): DeviceInfoData {
     val (rw, rh) = DisplayUtil.getPhysicalDisplaySize(context)
     val resolution = "${rw}x${rh}"
     val foregroundPackage = ForegroundAppDetector.getForegroundPackageName(context)
+
+    // 获取 X5 内核状态
+    val x5Version = com.appmanager.agent.x5.X5KernelManager.getLocalVersion()
+    val x5State = com.appmanager.agent.x5.X5KernelManager.getState().name
+
     return DeviceInfoData(
         battery = battery,
         cpuUsage = cpuUsage(),
@@ -106,6 +111,8 @@ fun collectDeviceInfoData(context: Context): DeviceInfoData {
         allowRemoteScreen = config.allowRemoteScreen,
         agentVersion = AppVersions.displayLabel(context),
         androidSerial = DeviceMachineId.get(context),
-        foregroundPackage = foregroundPackage
+        foregroundPackage = foregroundPackage,
+        x5KernelVersion = x5Version,
+        x5KernelState = x5State
     )
 }

@@ -78,6 +78,7 @@
                 android:orientation="horizontal"
                 android:gravity="center_vertical">
                 <com.google.android.material.textfield.TextInputLayout
+                    android:id="@+id/tilBusinessNo"
                     android:layout_width="0dp"
                     android:layout_weight="1"
                     android:layout_height="wrap_content"
@@ -97,6 +98,15 @@
                         android:cursorVisible="false" />
                 </com.google.android.material.textfield.TextInputLayout>
             </LinearLayout>
+
+            <!-- 扫码即提交复选框 -->
+            <CheckBox
+                android:id="@+id/cbQuickSubmit"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="扫码后立即提交（保留标题和问题描述）"
+                android:textSize="14sp" />
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -161,12 +171,57 @@
     </ScrollView>
 
     <!-- 我的工单 -->
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/recyclerMine"
+    <androidx.drawerlayout.widget.DrawerLayout
+        android:id="@+id/drawerLayout"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:visibility="gone"
-        android:padding="8dp" />
+        android:visibility="gone">
+
+        <!-- 主内容区 -->
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="match_parent">
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/recyclerMine"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:padding="8dp" />
+
+            <!-- 悬浮按钮：查询条件配置（mini，右侧中间偏上） -->
+            <com.google.android.material.floatingactionbutton.FloatingActionButton
+                android:id="@+id/fabFilter"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="end|center_vertical"
+                android:layout_marginEnd="16dp"
+                android:layout_marginBottom="100dp"
+                android:contentDescription="查询条件"
+                app:srcCompat="@android:drawable/ic_menu_search"
+                app:fabSize="mini" />
+
+            <!-- 扫码悬浮按钮（仅摄像头扫码模式显示，位于筛选按钮下方） -->
+            <com.google.android.material.floatingactionbutton.FloatingActionButton
+                android:id="@+id/fabScan"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="end|center_vertical"
+                android:layout_marginEnd="16dp"
+                android:layout_marginBottom="36dp"
+                android:contentDescription="扫码搜索"
+                app:srcCompat="@android:drawable/ic_menu_camera"
+                app:fabSize="mini"
+                android:visibility="gone" />
+        </FrameLayout>
+
+        <!-- 右侧抽屉：过滤条件 -->
+        <include
+            layout="@layout/drawer_filter"
+            android:layout_width="280dp"
+            android:layout_height="match_parent"
+            android:layout_gravity="end" />
+
+    </androidx.drawerlayout.widget.DrawerLayout>
 
 </LinearLayout>

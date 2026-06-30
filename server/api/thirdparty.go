@@ -232,8 +232,8 @@ func FreePassRefresh(c *gin.Context) {
 	// 如果关联了外部应用，使用外部应用的 token
 	if p.OutboundAppID > 0 {
 		c.JSON(http.StatusOK, gin.H{
-			"ok":      true,
-			"message": "使用关联外部应用的 token，无需刷新",
+			"ok":              true,
+			"message":         "使用关联外部应用的 token，无需刷新",
 			"outbound_app_id": p.OutboundAppID,
 		})
 		return

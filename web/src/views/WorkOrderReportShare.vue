@@ -13,18 +13,18 @@
     <div v-else class="share-content">
       <el-card shadow="never">
         <template #header>
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <div>
+          <div class="card-header">
+            <div class="card-header-title">
               <h2 style="margin:0">{{ shareInfo.title }}</h2>
               <div style="color:#909399; font-size:13px; margin-top:8px">
                 分享时间：{{ new Date(shareInfo.created_at).toLocaleString() }} |
                 过期时间：{{ new Date(shareInfo.expires_at).toLocaleString() }}
               </div>
             </div>
-            <el-radio-group v-model="viewMode" size="default">
-              <el-radio-button value="statistics">统计报告</el-radio-button>
-              <el-radio-button value="list">工单列表</el-radio-button>
-              <el-radio-button value="board">看板视图</el-radio-button>
+            <el-radio-group v-model="viewMode" size="default" class="view-mode-group">
+              <el-radio-button value="statistics">统计</el-radio-button>
+              <el-radio-button value="list">列表</el-radio-button>
+              <el-radio-button value="board">看板</el-radio-button>
             </el-radio-group>
           </div>
         </template>
@@ -32,7 +32,7 @@
         <!-- 统计报告视图 -->
         <div v-if="viewMode === 'statistics'" v-loading="statsLoading">
           <div v-if="stats" class="stats-content">
-            <el-descriptions :column="3" border>
+            <el-descriptions :column="isMobile ? 1 : 3" border>
               <el-descriptions-item label="总计工单">{{ stats.total }}</el-descriptions-item>
               <el-descriptions-item label="平均处理耗时">
                 {{ stats.avg_processing_hours ? (stats.avg_processing_hours).toFixed(1) + ' 小时' : '-' }}
@@ -152,14 +152,14 @@
     </div>
 
     <!-- 工单详情对话框 -->
-    <el-dialog v-model="detailDialogVisible" :title="`工单详情 - ${currentWorkOrder?.code}`" width="900px">
+    <el-dialog v-model="detailDialogVisible" :title="`工单详情 - ${currentWorkOrder?.code}`" :width="isMobile ? '95%' : '900px'">
       <div v-if="currentWorkOrder" v-loading="detailLoading">
-        <el-descriptions :column="2" border>
+        <el-descriptions :column="isMobile ? 1 : 2" border>
           <el-descriptions-item label="工单编号">{{ currentWorkOrder.code }}</el-descriptions-item>
           <el-descriptions-item label="状态">
             <el-tag :type="statusType(currentWorkOrder.status)">{{ statusLabel(currentWorkOrder.status) }}</el-tag>
           </el-descriptions-item>
-          <el-descriptions-item label="标题" :span="2">{{ currentWorkOrder.title }}</el-descriptions-item>
+          <el-descriptions-item label="标题" :span="isMobile ? 1 : 2">{{ currentWorkOrder.title }}</el-descriptions-item>
           <el-descriptions-item label="类型">{{ currentWorkOrder.type_name || '-' }}</el-descriptions-item>
           <el-descriptions-item label="优先级">
             <el-tag v-if="currentWorkOrder.priority === 'high'" type="danger">高</el-tag>
@@ -181,7 +181,7 @@
             </template>
             <span v-else>-</span>
           </el-descriptions-item>
-          <el-descriptions-item label="其他编码" :span="2">
+          <el-descriptions-item label="其他编码" :span="isMobile ? 1 : 2">
             <template v-if="currentWorkOrder.other_codes">
               <span v-for="(code, idx) in currentWorkOrder.other_codes.split(',').map(s => s.trim()).filter(Boolean)" :key="idx" class="code-chip">
                 <el-tag size="small">{{ code }}</el-tag>
@@ -204,7 +204,7 @@
           <el-descriptions-item label="更新时间">
             {{ new Date(currentWorkOrder.updated_at).toLocaleString() }}
           </el-descriptions-item>
-          <el-descriptions-item label="描述" :span="2">
+          <el-descriptions-item label="描述" :span="isMobile ? 1 : 2">
             <div style="white-space: pre-wrap">{{ currentWorkOrder.description || '-' }}</div>
           </el-descriptions-item>
         </el-descriptions>
@@ -274,6 +274,9 @@ import * as echarts from 'echarts'
 
 const route = useRoute()
 const token = route.params.token
+
+const isMobile = ref(window.innerWidth < 768)
+const onResize = () => { isMobile.value = window.innerWidth < 768 }
 
 const loading = ref(true)
 const error = ref('')
@@ -541,11 +544,13 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+
+  window.addEventListener('resize', onResize)
 })
 
 onBeforeUnmount(() => {
-  // 断开STOMP连接
   woStomp.disconnect()
+  window.removeEventListener('resize', onResize)
 })
 </script>
 
@@ -830,5 +835,86 @@ onBeforeUnmount(() => {
   color: #606266;
   word-break: break-all;
   text-align: center;
+}
+
+/* 卡片头部布局 */
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.card-header-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.card-header-title h2 {
+  font-size: 18px;
+  word-break: break-word;
+}
+
+/* 手机端适配 */
+@media (max-width: 767px) {
+  .share-page {
+    padding: 8px;
+  }
+
+  .card-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .card-header-title h2 {
+    font-size: 15px;
+  }
+
+  .card-header-title div {
+    font-size: 11px !important;
+  }
+
+  .view-mode-group {
+    align-self: flex-start;
+  }
+
+  .stats-content {
+    padding: 12px 0;
+  }
+
+  .section-content {
+    flex-direction: column;
+  }
+
+  .table-wrapper {
+    min-width: 0;
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .chart-wrapper {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .pie-chart {
+    height: 240px;
+  }
+
+  .board-column {
+    flex: 0 0 85vw;
+  }
+
+  .progress-att-img {
+    max-width: 100%;
+  }
+
+  .progress-att-video {
+    max-width: 100%;
+  }
+
+  .progress-att-audio {
+    max-width: 100%;
+  }
 }
 </style>

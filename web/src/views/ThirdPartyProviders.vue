@@ -124,6 +124,17 @@
           </el-form-item>
         </template>
 
+        <el-form-item label="SSO 用户默认角色">
+          <el-radio-group v-model="form.default_role">
+            <el-radio value="viewer">只读 (viewer)</el-radio>
+            <el-radio value="operator">操作员 (operator)</el-radio>
+            <el-radio value="admin">管理员 (admin)</el-radio>
+          </el-radio-group>
+          <div style="font-size:11px;color:#909399;margin-top:4px">
+            通过 SSO 首次登录的用户将被赋予此角色。若需发送「可操作」工单链接，请选择 operator 或以上。
+          </div>
+        </el-form-item>
+
         <el-form-item v-if="editingId" label="状态">
           <el-switch v-model="form.enabled" active-text="启用" inactive-text="禁用" />
         </el-form-item>
@@ -281,6 +292,7 @@ const defaultForm = () => ({
   component_app_secret: '',
   callback_url: '',
   outbound_app_id: null,
+  default_role: 'viewer',
   enabled: true
 })
 const form = ref(defaultForm())
@@ -333,6 +345,7 @@ const openEdit = (row) => {
     component_app_secret: '',
     callback_url: row.callback_url || '',
     outbound_app_id: row.outbound_app_id ? Number(row.outbound_app_id) : null,
+    default_role: row.default_role || 'viewer',
     enabled: row.enabled
   }
   showDialog.value = true
@@ -490,8 +503,11 @@ const generateSsoUrl = async () => {
     }
   }
 
-  // 构建回调 URL
-  const callbackUrl = `${window.location.origin}/auth-eteams-callback.html?provider_id=${provider.id}&redirect_to=${encodeURIComponent(redirectTo)}`
+  // 构建回调 URL（工单可操作时附带 wo_scopes）
+  let callbackUrl = `${window.location.origin}/auth-eteams-callback.html?provider_id=${provider.id}&redirect_to=${encodeURIComponent(redirectTo)}`
+  if (testForm.value.targetType === 'work-order' && testForm.value.operable && testForm.value.workOrderId) {
+    callbackUrl += `&wo_scopes=${encodeURIComponent('wo:rw:' + testForm.value.workOrderId)}`
+  }
 
   // 构建 eTeams 免登 URL
   const baseUrl = provider.open_api_origin.replace(/\/$/, '')

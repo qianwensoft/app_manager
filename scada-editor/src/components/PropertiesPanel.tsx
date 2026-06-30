@@ -1120,6 +1120,111 @@ function DataBindingTabContent({ el, onUpdate }: {
             />
           </>
         )}
+
+        {/* 表格事件配置 */}
+        <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>
+            表格事件
+          </div>
+
+          <Row label="行点击">
+            <button
+              onClick={() => {
+                const event = el.tableRowClickEvent ?? { trigger: 'click', action: 'script', script: '// row, rowIndex 可用\nconsole.log(row, rowIndex)' }
+                onUpdate('tableRowClickEvent', event)
+              }}
+              style={{
+                padding: '3px 8px', fontSize: 10, cursor: 'pointer',
+                background: el.tableRowClickEvent ? 'var(--accent-muted)' : 'var(--bg-surface)',
+                color: el.tableRowClickEvent ? 'var(--accent)' : 'var(--text-secondary)',
+                border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+              }}
+            >
+              {el.tableRowClickEvent ? '已配置' : '+ 添加'}
+            </button>
+            {el.tableRowClickEvent && (
+              <button
+                onClick={() => onUpdate('tableRowClickEvent', undefined)}
+                style={{
+                  padding: '3px 6px', fontSize: 10, cursor: 'pointer', marginLeft: 4,
+                  background: 'var(--danger-muted)', color: 'var(--danger)',
+                  border: '1px solid rgba(239,68,68,0.25)', borderRadius: 'var(--radius-sm)',
+                }}
+              >×</button>
+            )}
+          </Row>
+
+          {el.tableRowClickEvent && (
+            <div style={{ marginBottom: 6 }}>
+              <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 3 }}>
+                脚本（可访问 row, rowIndex）
+              </div>
+              <textarea
+                value={el.tableRowClickEvent.script ?? ''}
+                onChange={(e) => onUpdate('tableRowClickEvent', { ...el.tableRowClickEvent!, script: e.target.value })}
+                rows={3}
+                placeholder="console.log(row, rowIndex)"
+                style={{
+                  width: '100%', background: 'var(--bg-base)', border: '1px solid var(--border)',
+                  color: 'var(--text-primary)', borderRadius: 'var(--radius-sm)',
+                  fontSize: 10, fontFamily: 'var(--font-mono)', padding: '5px 7px',
+                  resize: 'vertical', outline: 'none', boxSizing: 'border-box',
+                }}
+              />
+            </div>
+          )}
+
+          <Row label="单元格点击">
+            <button
+              onClick={() => {
+                const event = el.tableCellClickEvent ?? { trigger: 'click', action: 'script', script: '// row, rowIndex, column, cellValue 可用\nconsole.log(column, cellValue)' }
+                onUpdate('tableCellClickEvent', event)
+              }}
+              style={{
+                padding: '3px 8px', fontSize: 10, cursor: 'pointer',
+                background: el.tableCellClickEvent ? 'var(--accent-muted)' : 'var(--bg-surface)',
+                color: el.tableCellClickEvent ? 'var(--accent)' : 'var(--text-secondary)',
+                border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+              }}
+            >
+              {el.tableCellClickEvent ? '已配置' : '+ 添加'}
+            </button>
+            {el.tableCellClickEvent && (
+              <button
+                onClick={() => onUpdate('tableCellClickEvent', undefined)}
+                style={{
+                  padding: '3px 6px', fontSize: 10, cursor: 'pointer', marginLeft: 4,
+                  background: 'var(--danger-muted)', color: 'var(--danger)',
+                  border: '1px solid rgba(239,68,68,0.25)', borderRadius: 'var(--radius-sm)',
+                }}
+              >×</button>
+            )}
+          </Row>
+
+          {el.tableCellClickEvent && (
+            <div style={{ marginBottom: 6 }}>
+              <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 3 }}>
+                脚本（可访问 row, rowIndex, column, cellValue）
+              </div>
+              <textarea
+                value={el.tableCellClickEvent.script ?? ''}
+                onChange={(e) => onUpdate('tableCellClickEvent', { ...el.tableCellClickEvent!, script: e.target.value })}
+                rows={3}
+                placeholder="if (column === 'status') { alert(cellValue) }"
+                style={{
+                  width: '100%', background: 'var(--bg-base)', border: '1px solid var(--border)',
+                  color: 'var(--text-primary)', borderRadius: 'var(--radius-sm)',
+                  fontSize: 10, fontFamily: 'var(--font-mono)', padding: '5px 7px',
+                  resize: 'vertical', outline: 'none', boxSizing: 'border-box',
+                }}
+              />
+            </div>
+          )}
+
+          <div style={{ fontSize: 9, color: 'var(--text-muted)', lineHeight: 1.5, marginTop: 6 }}>
+            提示：列表头点击可通过单元格事件 + 判断行索引实现
+          </div>
+        </div>
       </div>
     )
   }

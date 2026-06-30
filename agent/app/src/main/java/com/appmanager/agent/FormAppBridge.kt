@@ -4,11 +4,11 @@ import android.content.Context
 import android.speech.tts.TextToSpeech
 import android.util.Log
 import android.webkit.JavascriptInterface
-import android.webkit.WebView
 import com.appmanager.agent.config.AgentConfig
 import com.appmanager.agent.printer.PrinterManager
 import com.appmanager.agent.printer.ProtocolBuilder
 import com.appmanager.agent.util.CustomEventBroadcastHelper
+import com.appmanager.agent.x5.WebViewWrapper
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Locale
@@ -16,7 +16,7 @@ import java.util.Locale
 class FormAppBridge(
     private val activity: FormAppActivity,
     private val context: Context,
-    private val webView: WebView,
+    private val webView: WebViewWrapper,
     private val formAppCode: String
 ) {
     // ── 语音播报（TextToSpeech，懒初始化，中文优先） ──────────────────
@@ -131,7 +131,7 @@ class FormAppBridge(
     }
 
     fun onScanResult(data: String, eventType: String = "barcode") {
-        webView.post {
+        webView.getView().post {
             val quoted = JSONObject.quote(data)
             val typeQuoted = JSONObject.quote(eventType)
             val js = "if(window.eventManager){window.eventManager.emit($typeQuoted,$quoted)}"
@@ -264,7 +264,7 @@ class FormAppBridge(
             val cleanPayload = json.toString()
 
             // 4. 调用目标 WebView 的 JS（需在其线程）
-            targetWebView.post {
+            targetWebView.getView().post {
                 // 转义单引号防止注入（JSONObject.quote 会加外层双引号，这里手动转义）
                 val escaped = cleanPayload
                     .replace("\\", "\\\\")

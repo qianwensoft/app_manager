@@ -19,11 +19,12 @@ import (
 
 // ETeamsLoginRequest eTeams SSO 登录请求
 type ETeamsLoginRequest struct {
-	ProviderID   uint   `json:"provider_id" binding:"required"`
-	ETeamsToken  string `json:"eteams_token" binding:"required"`  // 从 redirect_uri 获取的 token
-	Account      string `json:"account"`                          // 可选：直接使用账号登录
-	AppKey       string `json:"app_key"`                          // 可选：配合 account 使用
-	AppSecret    string `json:"app_secret"`                       // 可选：配合 account 使用
+	ProviderID  uint     `json:"provider_id" binding:"required"`
+	ETeamsToken string   `json:"eteams_token" binding:"required"` // 从 redirect_uri 获取的 token
+	Account     string   `json:"account"`                         // 可选：直接使用账号登录
+	AppKey      string   `json:"app_key"`                         // 可选：配合 account 使用
+	AppSecret   string   `json:"app_secret"`                      // 可选：配合 account 使用
+	WoScopes    []string `json:"wo_scopes"`                       // 工单级写权限，格式 "wo:rw:<id>"
 }
 
 // ThirdPartyLogin POST /api/auth/thirdparty/login
@@ -66,7 +67,7 @@ func ThirdPartyLogin(c *gin.Context) {
 		}
 		// 使用 loginToken 获取用户信息（eTeams 可能需要额外接口）
 		userInfo = map[string]interface{}{
-			"account": req.Account,
+			"account":      req.Account,
 			"etLoginToken": loginToken,
 		}
 	} else {
@@ -86,8 +87,8 @@ func ThirdPartyLogin(c *gin.Context) {
 		return
 	}
 
-	// 4. 生成本系统 JWT
-	token, err := auth.GenerateToken(user.ID, user.Username, user.Role)
+	// 4. 生成本系统 JWT（含工单级写权限 scope）
+	token, err := auth.GenerateTokenWithScopes(user.ID, user.Username, user.Role, req.WoScopes)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate token"})
 		return
@@ -275,14 +276,16 @@ func syncOrCreateETeamsUser(provider *models.ThirdPartyProvider, userInfo map[st
 			return nil, err
 		}
 	} else {
-		// 更新现有用户
+		// 更新现有用户；同步 default_role，使平台配置变更对已有用户立即生效
 		updates := map[string]interface{}{
 			"external_username": externalUsername,
 			"user_info_json":    string(userInfoJSON),
 			"synced_at":         &now,
+			"role":              role,
 		}
 		database.DB.Model(&user).Updates(updates)
 		user.ExternalUsername = externalUsername
+		user.Role = role
 	}
 
 	return &user, nil

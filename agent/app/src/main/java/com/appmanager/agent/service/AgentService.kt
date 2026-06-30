@@ -169,6 +169,13 @@ class AgentService : LifecycleService() {
         createNotificationChannel()
         // 恢复上次持久化的菜单 intent_action 监听（App 重启后重新注册）
         com.appmanager.agent.MenuIntentReceiver.reregister(this)
+
+        // 初始化 X5 内核（仅 Android 9+ 启用）
+        try {
+            com.appmanager.agent.x5.X5KernelManager.init(this)
+        } catch (e: Exception) {
+            Log.e(TAG, "X5 kernel init failed", e)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -306,6 +313,7 @@ class AgentService : LifecycleService() {
         )
 
         heartbeatManager = HeartbeatManager(webSocket, tok)
+        heartbeatManager.setContext(this, url)
         deviceInfoCollector = DeviceInfoCollector(this, webSocket, tok)
 
         activeWsServerUrl = url

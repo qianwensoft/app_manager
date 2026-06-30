@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
+    <title>磐石 表单设计器</title>
+    <script>
+      // globalThis polyfill for older browsers (Chrome < 71, X5 Chromium 77)
+      (function() {
+        if (typeof globalThis === 'undefined') {
+          if (typeof self !== 'undefined') { self.globalThis = self; }
+          else if (typeof window !== 'undefined') { window.globalThis = window; }
+          else if (typeof global !== 'undefined') { global.globalThis = global; }
+          else { this.globalThis = this; }
+        }
+      })();
+
+      // 必须在所有脚本加载前定义 process 和 React 相关变量
+      window.process = window.process || {
+        env: {},
+        version: 'v16.0.0',
+        versions: { node: '16.0.0' },
+        platform: 'browser',
+        browser: true,
+        nextTick: function(fn) { setTimeout(fn, 0); }
+      };
+      window.global = window.global || window;
+
+      // 监听模块加载，为 React 添加 version 属性
+      (function() {
+        const originalDefine = window.define;
+        if (originalDefine) {
+          window.define = function() {
+            const result = originalDefine.apply(this, arguments);
+            // 检查并修补 React
+            if (window.React && !window.React.version) {
+              window.React.version = '18.0.0';
+            }
+            return result;
+          };
+        }
+      })();
+    </script>
+    
+    <link rel="stylesheet" crossorigin href="/form-app/assets/index-BKHh6m7p.css">
+  </head>
+  <body>
+    <div id="root"></div>
+    <script crossorigin id="vite-legacy-polyfill" src="/form-app/assets/polyfills-legacy-DHXK2crD-1782822018604.js"></script>
+    <script crossorigin id="vite-legacy-entry" data-src="/form-app/assets/index-legacy-CPOQ4IVU-1782822018604.js">System.import(document.getElementById('vite-legacy-entry').getAttribute('data-src'))</script>
+  </body>
+</html>

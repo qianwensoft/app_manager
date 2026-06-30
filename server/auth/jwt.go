@@ -9,18 +9,24 @@ import (
 )
 
 type Claims struct {
-	UserID   uint   `json:"user_id"`
-	Username string `json:"username"`
-	Role     string `json:"role"`
+	UserID   uint     `json:"user_id"`
+	Username string   `json:"username"`
+	Role     string   `json:"role"`
+	WoScopes []string `json:"wo_scopes,omitempty"` // SSO 工单级写权限，格式 "wo:rw:<id>"
 	jwt.RegisteredClaims
 }
 
 func GenerateToken(userID uint, username, role string) (string, error) {
+	return GenerateTokenWithScopes(userID, username, role, nil)
+}
+
+func GenerateTokenWithScopes(userID uint, username, role string, woScopes []string) (string, error) {
 	expire := time.Duration(config.C.JWT.ExpireHour) * time.Hour
 	claims := Claims{
 		UserID:   userID,
 		Username: username,
 		Role:     role,
+		WoScopes: woScopes,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(expire)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

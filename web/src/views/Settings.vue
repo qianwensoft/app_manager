@@ -317,6 +317,11 @@
         </el-table>
       </el-tab-pane>
 
+      <!-- X5 内核管理 -->
+      <el-tab-pane label="X5 内核" name="x5kernel">
+        <X5KernelManagement />
+      </el-tab-pane>
+
       <el-tab-pane label="AI 配置" name="ai">
         <h3 style="margin: 0 0 16px">Claude（Anthropic）配置</h3>
         <el-form label-width="120px" style="max-width: 560px">
@@ -477,6 +482,7 @@ import { getHeartbeatSettings, updateHeartbeatSettings, getSystemInfo, updateEnv
 import { uploadAgentAPK, listAgentUpdates, downloadAgentAPK, deleteAgentUpdate } from '@/api/agentUpdate'
 import { getRegisterSetting, updateRegisterSetting } from '@/api/user'
 import TrendChart from '@/components/TrendChart.vue'
+import X5KernelManagement from '@/views/X5KernelManagement.vue'
 import { Client } from '@stomp/stompjs'
 import { WS_BASE } from '@/utils/ws'
 

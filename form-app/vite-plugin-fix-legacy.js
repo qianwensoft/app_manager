@@ -1,6 +1,7 @@
 // Vite plugin to post-process legacy bundles and remove any remaining ES6 syntax
 import fs from 'fs';
 import path from 'path';
+import { transformSync } from '@babel/core';
 
 export default function fixLegacyBundle() {
   return {
@@ -15,6 +16,31 @@ export default function fixLegacyBundle() {
         const filePath = path.join(distDir, file);
         let content = fs.readFileSync(filePath, 'utf8');
         let modified = false;
+
+        // Transform optional chaining and nullish coalescing using Babel
+        if (/\?\.|\?\?/.test(content)) {
+          console.log(`[fix-legacy] Found optional chaining or nullish coalescing in ${file}, transforming...`);
+          try {
+            const result = transformSync(content, {
+              filename: file,
+              plugins: [
+                '@babel/plugin-transform-optional-chaining',
+                '@babel/plugin-transform-nullish-coalescing-operator'
+              ],
+              // 不添加额外的 import 语句
+              configFile: false,
+              babelrc: false,
+              compact: false,
+              comments: true,
+            });
+            if (result && result.code) {
+              content = result.code;
+              modified = true;
+            }
+          } catch (err) {
+            console.warn(`[fix-legacy] Failed to transform ${file}:`, err.message);
+          }
+        }
 
         // Replace any remaining export statements
         // SystemJS doesn't use export/module.exports, so we just remove them

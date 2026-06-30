@@ -15,8 +15,8 @@ android {
         applicationId "com.appmanager.agent"
         minSdk 21
         targetSdk 34
-        versionCode 235
-        versionName "2.2.100"
+        versionCode 247
+        versionName "2.2.112"
     }
 
     signingConfigs {
@@ -71,4 +71,7 @@ dependencies {
 
     // 反向注册（电视等无摄像头端）：端上起轻量 HTTP 服务，等管理端浏览器直连认领
     implementation 'org.nanohttpd:nanohttpd:2.3.1'
+
+    // 腾讯 X5 内核 SDK (动态加载版本)
+    implementation 'com.tencent.tbs:tbssdk:44286'
 }

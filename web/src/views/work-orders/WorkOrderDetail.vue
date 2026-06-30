@@ -4,7 +4,7 @@
     <div v-else style="margin-bottom:16px;font-size:16px;font-weight:600;color:#303133">{{ wo.code ? `${wo.code} · ${wo.title}` : (wo.title || '工单详情') }}</div>
 
     <el-row :gutter="16">
-      <el-col :span="16">
+      <el-col :xs="24" :sm="24" :md="16" :lg="16" :xl="16">
         <el-card shadow="never" style="margin-bottom:16px">
           <template #header>
             <div class="card-head">
@@ -12,7 +12,7 @@
               <el-button v-if="!readonly" text type="primary" size="small" @click="openEdit">编辑</el-button>
             </div>
           </template>
-          <el-descriptions :column="2" border>
+          <el-descriptions :column="isMobile ? 1 : 2" border>
             <el-descriptions-item label="状态">
               <el-tag :type="statusType(wo.status)">{{ statusLabel(wo.status) }}</el-tag>
             </el-descriptions-item>
@@ -31,7 +31,7 @@
             </el-descriptions-item>
             <el-descriptions-item label="类型">{{ types.find(t => t.code === wo.type_code)?.name || wo.type_code || '-' }}</el-descriptions-item>
             <el-descriptions-item label="设备">{{ wo.device_id || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="业务单号" :span="2">
+            <el-descriptions-item label="业务单号" :span="isMobile ? 1 : 2">
               <div v-if="!editBusinessNo" class="business-no-view">
                 <template v-if="wo.business_no">
                   <span>{{ wo.business_no }}</span>
@@ -67,7 +67,7 @@
               />
             </el-descriptions-item>
             <el-descriptions-item label="外部单号">{{ wo.external_ref || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="其他编码" :span="2">
+            <el-descriptions-item label="其他编码" :span="isMobile ? 1 : 2">
               <div v-if="!editCodes" class="codes-view">
                 <template v-if="otherCodesList.length">
                   <span v-for="(c, i) in otherCodesList" :key="i" class="code-chip">
@@ -96,7 +96,7 @@
                 </div>
               </div>
             </el-descriptions-item>
-            <el-descriptions-item label="描述" :span="2">
+            <el-descriptions-item label="描述" :span="isMobile ? 1 : 2">
               <span style="white-space:pre-wrap">{{ wo.description || '-' }}</span>
             </el-descriptions-item>
           </el-descriptions>
@@ -138,7 +138,7 @@
         </el-card>
       </el-col>
 
-      <el-col :span="8">
+      <el-col :xs="24" :sm="24" :md="8" :lg="8" :xl="8">
         <el-card shadow="never" style="margin-bottom:16px">
           <template #header><b>提交信息</b></template>
           <el-descriptions :column="1" border size="small">
@@ -343,6 +343,9 @@ import { createWorkOrdersStomp } from '@/utils/workOrdersStomp'
 const route = useRoute()
 const router = useRouter()
 const id = route.params.id
+
+const isMobile = ref(window.innerWidth < 768)
+const onResize = () => { isMobile.value = window.innerWidth < 768 }
 
 const isEmbed = computed(() => !!route.meta.embed)
 const readonly = computed(() => isEmbed.value && route.query.readonly === '1')
@@ -662,11 +665,13 @@ onMounted(async () => {
 
   // 连接STOMP实时推送
   woStomp.connect()
+
+  window.addEventListener('resize', onResize)
 })
 
 onBeforeUnmount(() => {
-  // 断开STOMP连接
   woStomp.disconnect()
+  window.removeEventListener('resize', onResize)
 })
 </script>
 
@@ -707,4 +712,15 @@ onBeforeUnmount(() => {
 .progress-att-img { width: 100%; max-width: 320px; margin-top: 6px; border-radius: 4px; cursor: zoom-in; }
 .progress-att-video { width: 100%; max-width: 400px; margin-top: 6px; border-radius: 4px; }
 .progress-att-audio { width: 100%; max-width: 300px; margin-top: 6px; }
+
+/* 手机端适配 */
+@media (max-width: 767px) {
+  .item-img { max-width: 100%; }
+  .item-video { max-height: 240px; }
+  .form-frame { height: 280px; }
+  .progress-att-img { max-width: 100%; }
+  .progress-att-video { max-width: 100%; }
+  .progress-att-audio { max-width: 100%; }
+  .actions { gap: 8px; }
+}
 </style>

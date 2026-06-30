@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useEditorStore } from '@/store/editorStore'
-import type { PointBinding, DataBindingMode, InterfaceFieldMapping, InterfaceSourceType, ValueFormatter, ElementType } from '@/types'
+import type { PointBinding, DataBindingMode, InterfaceFieldMapping, InterfaceSourceType, ValueFormatter, ElementType, ParamSpec } from '@/types'
 import { getChartSchema, type BindingFieldDef } from '@/schema/chartSchema'
-import { dataBindingApi, type DataInterfaceItem, type OutboundAppItem, type OutboundWebhookItem, type ScadaSimPointItem } from '@/api/dataBinding'
+import { dataBindingApi, type DataInterfaceItem, type OutboundAppItem, type OutboundWebhookItem, type OutboundEndpointItem, type ScadaSimPointItem } from '@/api/dataBinding'
 import type { PointDataMap } from '@/hooks/useStompPointData'
 import SimPointsModal from './SimPointsModal'
 
@@ -80,6 +80,99 @@ const Hint = ({ children }: { children: React.ReactNode }) => (
     {children}
   </div>
 )
+
+// ── JSON Tree viewer with path selector ───────────────────────────────────────
+
+function JsonTree({ data, onSelectPath }: { data: unknown; onSelectPath: (path: string) => void }) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set(['']))
+
+  const toggleExpand = (path: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path)
+      else next.add(path)
+      return next
+    })
+  }
+
+  const renderValue = (val: unknown, path: string, key: string, depth: number): React.ReactNode => {
+    const indent = depth * 16
+
+    if (val === null || val === undefined) {
+      return (
+        <div key={path} style={{ paddingLeft: indent, display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0' }}>
+          <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{key}:</span>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontStyle: 'italic' }}>{String(val)}</span>
+          <button
+            onClick={() => onSelectPath(path)}
+            style={{
+              fontSize: 9, padding: '1px 6px', cursor: 'pointer',
+              background: 'var(--accent-muted)', color: 'var(--accent)',
+              border: '1px solid var(--border-accent)', borderRadius: 3,
+            }}
+          >映射</button>
+        </div>
+      )
+    }
+
+    if (typeof val !== 'object') {
+      return (
+        <div key={path} style={{ paddingLeft: indent, display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0' }}>
+          <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{key}:</span>
+          <span style={{
+            fontSize: 11, fontFamily: 'var(--font-mono)',
+            color: typeof val === 'number' ? '#4ade80' : typeof val === 'boolean' ? '#a78bfa' : 'var(--text-primary)',
+          }}>
+            {typeof val === 'string' ? `"${val}"` : String(val)}
+          </span>
+          <button
+            onClick={() => onSelectPath(path)}
+            style={{
+              fontSize: 9, padding: '1px 6px', cursor: 'pointer',
+              background: 'var(--accent-muted)', color: 'var(--accent)',
+              border: '1px solid var(--border-accent)', borderRadius: 3,
+            }}
+          >映射</button>
+        </div>
+      )
+    }
+
+    const isArray = Array.isArray(val)
+    const isExpanded = expanded.has(path)
+    const entries = isArray ? val.map((v, i) => [String(i), v] as const) : Object.entries(val as Record<string, unknown>)
+
+    return (
+      <div key={path}>
+        <div
+          style={{
+            paddingLeft: indent, display: 'flex', alignItems: 'center', gap: 4,
+            padding: '2px 0', cursor: 'pointer',
+          }}
+          onClick={() => toggleExpand(path)}
+        >
+          <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth={2.5}
+            style={{ transform: isExpanded ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s', flexShrink: 0 }}>
+            <path d="M9 18l6-6-6-6" />
+          </svg>
+          <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{key}:</span>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+            {isArray ? `Array(${entries.length})` : `Object {${entries.length}}`}
+          </span>
+        </div>
+        {isExpanded && (
+          <div>
+            {entries.map(([k, v]) => {
+              const childPath = path ? `${path}.${k}` : k
+              return renderValue(v, childPath, k, depth + 1)
+            })}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return <div>{renderValue(data, '', 'response', 0)}</div>
+}
 
 // ── Mode tab bar ───────────────────────────────────────────────────────────────
 
@@ -820,15 +913,21 @@ function buildInterfaceTargets(isChart: boolean, schema: ReturnType<typeof getCh
   return ['text', 'fill', 'stroke', 'value']
 }
 
-function IfaceModePanel({ draft, setDraft, isChart, schema }: {
+function IfaceModePanel({ draft, setDraft, isChart, schema, isText, isTable }: {
   draft: PointBinding
   setDraft: (fn: (prev: PointBinding) => PointBinding) => void
   isChart: boolean
   schema: ReturnType<typeof getChartSchema>
+  isText: boolean
+  isTable: boolean
 }) {
   const [apps, setApps] = useState<OutboundAppItem[]>([])
   const [dataIfaces, setDataIfaces] = useState<DataInterfaceItem[]>([])
   const [webhooks, setWebhooks] = useState<OutboundWebhookItem[]>([])
+  const [endpoints, setEndpoints] = useState<OutboundEndpointItem[]>([])
+  const [testLoading, setTestLoading] = useState(false)
+  const [testResponse, setTestResponse] = useState<Record<string, unknown> | null>(null)
+  const [testError, setTestError] = useState<string>('')
 
   const sourceType = draft.ifaceSourceType ?? 'data_iface'
 
@@ -840,6 +939,9 @@ function IfaceModePanel({ draft, setDraft, isChart, schema }: {
   useEffect(() => {
     if (sourceType === 'webhook' && draft.ifaceAppId) {
       dataBindingApi.listOutboundWebhooks(draft.ifaceAppId).then((r) => setWebhooks(r.data ?? [])).catch(() => {})
+    }
+    if (sourceType === 'open_api' && draft.ifaceAppId) {
+      dataBindingApi.listOutboundEndpoints(draft.ifaceAppId).then((r) => setEndpoints(r.data ?? [])).catch(() => {})
     }
   }, [sourceType, draft.ifaceAppId])
 
@@ -872,6 +974,12 @@ function IfaceModePanel({ draft, setDraft, isChart, schema }: {
           const s = JSON.parse(iface.schema_json)
           if (s.properties) return Object.keys(s.properties)
         }
+      } else if (sourceType === 'open_api') {
+        const ep = endpoints.find((e) => e.id === draft.ifaceId)
+        if (ep?.response_schema) {
+          const s = JSON.parse(ep.response_schema)
+          if (s.properties) return Object.keys(s.properties)
+        }
       } else if (sourceType === 'webhook') {
         const wh = webhooks.find((w) => w.id === draft.ifaceId)
         if (wh?.response_schema) {
@@ -885,6 +993,131 @@ function IfaceModePanel({ draft, setDraft, isChart, schema }: {
 
   const schemaFields = getSchemaFields()
 
+  // Parse param specs from selected interface
+  const getParamSpecs = (): ParamSpec[] => {
+    try {
+      if (sourceType === 'data_iface') {
+        const iface = dataIfaces.find((i) => i.id === draft.ifaceId)
+        if (iface?.param_contract_json) {
+          return JSON.parse(iface.param_contract_json)
+        }
+      } else if (sourceType === 'open_api') {
+        const ep = endpoints.find((e) => e.id === draft.ifaceId)
+        if (ep?.param_schema) {
+          // param_schema 是 JSON Schema 格式，从 properties 提取参数
+          const schema = JSON.parse(ep.param_schema)
+          if (schema.properties) {
+            const params: ParamSpec[] = []
+            const required = schema.required || []
+            for (const [name, prop] of Object.entries(schema.properties)) {
+              const p = prop as any
+              params.push({
+                name,
+                type: p.type || 'string',
+                required: required.includes(name),
+                enum: p.enum,
+                min: p.minimum,
+                max: p.maximum,
+                pattern: p.pattern,
+                default: p.default,
+              })
+            }
+            return params
+          }
+        }
+      }
+      // webhook 模式暂时返回空数组，允许自由添加键值对
+    } catch {}
+    return []
+  }
+
+  const paramSpecs = getParamSpecs()
+  const hasParams = paramSpecs.length > 0 || sourceType === 'webhook' || sourceType === 'open_api'
+
+  const setParamValue = (name: string, value: string) => {
+    const params = { ...(draft.ifaceParamValues ?? {}), [name]: value }
+    update({ ifaceParamValues: params })
+  }
+
+  const addFreeParam = () => {
+    const params = { ...(draft.ifaceParamValues ?? {}), '': '' }
+    update({ ifaceParamValues: params })
+  }
+
+  const removeFreeParam = (key: string) => {
+    const params = { ...(draft.ifaceParamValues ?? {}) }
+    delete params[key]
+    update({ ifaceParamValues: params })
+  }
+
+  const renameFreeParam = (oldKey: string, newKey: string) => {
+    const params = { ...(draft.ifaceParamValues ?? {}) }
+    const val = params[oldKey]
+    delete params[oldKey]
+    if (newKey) params[newKey] = val
+    update({ ifaceParamValues: params })
+  }
+
+  // Test interface call
+  const testInterfaceCall = async () => {
+    if (!draft.ifaceId || sourceType !== 'data_iface') return
+
+    setTestLoading(true)
+    setTestError('')
+    setTestResponse(null)
+
+    try {
+      const token = localStorage.getItem('token') ?? ''
+      const url = `/api/data/interfaces/${draft.ifaceId}/invoke`
+      const params = draft.ifaceParamValues ?? {}
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ param_values: params, limit: 10 }),
+      })
+
+      if (!res.ok) {
+        const err = await res.text()
+        throw new Error(err || `HTTP ${res.status}`)
+      }
+
+      const json = await res.json()
+      setTestResponse(json)
+    } catch (err) {
+      setTestError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setTestLoading(false)
+    }
+  }
+
+  // Auto-fill sourceField from JSON path
+  const fillFieldPath = (path: string, mappingIdx: number) => {
+    setMapping(mappingIdx, 'sourceField', path)
+  }
+
+  // Table column operations
+  const addTableColumn = () => {
+    const cols = [...(draft.tableColumns ?? []), { key: '', title: '', align: 'left' as const }]
+    update({ tableColumns: cols })
+  }
+
+  const setTableColumn = (idx: number, field: string, value: any) => {
+    const cols = [...(draft.tableColumns ?? [])]
+    if (cols[idx]) {
+      cols[idx] = { ...cols[idx], [field]: value }
+      update({ tableColumns: cols })
+    }
+  }
+
+  const removeTableColumn = (idx: number) => {
+    const cols = (draft.tableColumns ?? []).filter((_, i) => i !== idx)
+    update({ tableColumns: cols })
+  }
+
   return (
     <div>
       <Field label="数据源类型">
@@ -893,7 +1126,7 @@ function IfaceModePanel({ draft, setDraft, isChart, schema }: {
           onChange={(v) => update({ ifaceSourceType: v as InterfaceSourceType, ifaceId: undefined, ifaceCode: undefined, ifaceAppId: undefined, ifaceName: undefined })}
         >
           <option value="data_iface">平台数据接口</option>
-          <option value="open_api">外部应用开放接口（预留）</option>
+          <option value="open_api">外部应用开放接口</option>
           <option value="webhook">外部应用 Webhook</option>
         </Sel>
       </Field>
@@ -914,6 +1147,43 @@ function IfaceModePanel({ draft, setDraft, isChart, schema }: {
           </Sel>
           {draft.ifaceCode && <Hint>调用路径：/api/open/v1/data/{draft.ifaceCode}</Hint>}
         </Field>
+      )}
+
+      {sourceType === 'open_api' && (
+        <>
+          <Field label="选择外部应用">
+            <Sel
+              val={String(draft.ifaceAppId ?? '')}
+              onChange={(v) => update({ ifaceAppId: Number(v) || undefined, ifaceId: undefined, ifaceName: undefined })}
+            >
+              <option value="">-- 选择应用 --</option>
+              {apps.map((a) => (
+                <option key={a.id} value={a.id}>{a.name} ({a.code})</option>
+              ))}
+            </Sel>
+          </Field>
+          {draft.ifaceAppId && (
+            <Field label="选择开放接口">
+              <Sel
+                val={String(draft.ifaceId ?? '')}
+                onChange={(v) => {
+                  const ep = endpoints.find((e) => e.id === Number(v))
+                  update({ ifaceId: Number(v) || undefined, ifaceName: ep?.name })
+                }}
+              >
+                <option value="">-- 选择接口 --</option>
+                {endpoints.filter((e) => e.enabled).map((e) => (
+                  <option key={e.id} value={e.id}>{e.name} ({e.method} {e.path})</option>
+                ))}
+              </Sel>
+              {draft.ifaceId && endpoints.find(e => e.id === draft.ifaceId) && (
+                <Hint>
+                  {endpoints.find(e => e.id === draft.ifaceId)?.method} {endpoints.find(e => e.id === draft.ifaceId)?.path}
+                </Hint>
+              )}
+            </Field>
+          )}
+        </>
       )}
 
       {sourceType === 'webhook' && (
@@ -958,62 +1228,304 @@ function IfaceModePanel({ draft, setDraft, isChart, schema }: {
         <Hint>仅对接口数据有效，0 表示不轮询（依赖 Webhook 推送）</Hint>
       </Field>
 
-      {/* 字段映射 */}
-      <div style={{ marginTop: 4 }}>
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          marginBottom: 8,
-        }}>
-          <Label>字段映射</Label>
-          <button
-            onClick={addMapping}
-            style={{
-              padding: '2px 8px', fontSize: 11, cursor: 'pointer',
-              background: 'var(--accent-muted)', color: 'var(--accent)',
-              border: '1px solid var(--border-accent)', borderRadius: 'var(--radius-sm)',
-            }}
-          >+ 添加映射</button>
-        </div>
-
-        {(draft.ifaceFieldMappings ?? []).length === 0 && (
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>
-            点击"添加映射"将接口返回字段绑定到组件属性
+      {/* 接口参数 */}
+      {hasParams && draft.ifaceId && (
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <Label>接口参数</Label>
+            {(sourceType === 'webhook' || (sourceType === 'open_api' && paramSpecs.length === 0)) && (
+              <button
+                onClick={addFreeParam}
+                style={{
+                  padding: '2px 8px', fontSize: 10, cursor: 'pointer',
+                  background: 'var(--accent-muted)', color: 'var(--accent)',
+                  border: '1px solid var(--border-accent)', borderRadius: 'var(--radius-sm)',
+                }}
+              >+ 添加参数</button>
+            )}
           </div>
-        )}
 
-        {(draft.ifaceFieldMappings ?? []).map((m, idx) => (
-          <div key={idx} style={{
-            display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 6, marginBottom: 6, alignItems: 'end',
-          }}>
-            <div>
-              {idx === 0 && <Label>目标属性</Label>}
-              <Sel val={m.target} onChange={(v) => setMapping(idx, 'target', v)}>
-                <option value="">-- 目标 --</option>
-                {targets.map((t) => <option key={t} value={t}>{t}</option>)}
-              </Sel>
-            </div>
-            <div>
-              {idx === 0 && <Label>接口字段（点分隔路径）</Label>}
-              {schemaFields.length > 0 ? (
-                <Sel val={m.sourceField} onChange={(v) => setMapping(idx, 'sourceField', v)}>
-                  <option value="">-- 字段 --</option>
-                  {schemaFields.map((f) => <option key={f} value={f}>{f}</option>)}
-                </Sel>
-              ) : (
-                <Inp val={m.sourceField} onChange={(v) => setMapping(idx, 'sourceField', v)} placeholder="data.value" />
+          {paramSpecs.length === 0 && sourceType !== 'webhook' && sourceType !== 'open_api' && (
+            <Hint>此接口无需参数</Hint>
+          )}
+
+          {/* Schema-based params (data_iface) */}
+          {paramSpecs.map((param) => {
+            const val = draft.ifaceParamValues?.[param.name] ?? String(param.default ?? '')
+            return (
+              <div key={param.name} style={{ marginBottom: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
+                  <Label>{param.name}</Label>
+                  {param.required && (
+                    <span style={{ fontSize: 10, color: 'var(--danger)', fontWeight: 600 }}>*</span>
+                  )}
+                  {param.type && param.type !== 'any' && (
+                    <span style={{
+                      fontSize: 9, color: 'var(--text-muted)', background: 'var(--bg-overlay)',
+                      padding: '1px 4px', borderRadius: 2, border: '1px solid var(--border)',
+                      fontFamily: 'var(--font-mono)',
+                    }}>{param.type}</span>
+                  )}
+                </div>
+                {param.enum && param.enum.length > 0 ? (
+                  <Sel val={val} onChange={(v) => setParamValue(param.name, v)}>
+                    <option value="">-- 选择 --</option>
+                    {param.enum.map((e, i) => (
+                      <option key={i} value={String(e)}>{String(e)}</option>
+                    ))}
+                  </Sel>
+                ) : param.type === 'boolean' ? (
+                  <Sel val={val} onChange={(v) => setParamValue(param.name, v)}>
+                    <option value="">-- 选择 --</option>
+                    <option value="true">true</option>
+                    <option value="false">false</option>
+                  </Sel>
+                ) : (
+                  <Inp
+                    val={val}
+                    onChange={(v) => setParamValue(param.name, v)}
+                    placeholder={param.default ? String(param.default) : `输入 ${param.name}`}
+                    type={param.type === 'number' || param.type === 'integer' ? 'number' : 'text'}
+                  />
+                )}
+                {(param.min !== undefined || param.max !== undefined) && (
+                  <Hint>
+                    范围：{param.min !== undefined ? `最小 ${param.min}` : ''}
+                    {param.min !== undefined && param.max !== undefined ? '，' : ''}
+                    {param.max !== undefined ? `最大 ${param.max}` : ''}
+                  </Hint>
+                )}
+              </div>
+            )
+          })}
+
+          {/* Free-form params (webhook / open_api without schema) */}
+          {(sourceType === 'webhook' || sourceType === 'open_api') && (
+            <>
+              {Object.entries(draft.ifaceParamValues ?? {}).map(([key, val]) => (
+                <div key={key} style={{
+                  display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 6, marginBottom: 6, alignItems: 'center',
+                }}>
+                  <Inp
+                    val={key}
+                    onChange={(v) => renameFreeParam(key, v)}
+                    placeholder="参数名"
+                  />
+                  <Inp
+                    val={String(val)}
+                    onChange={(v) => setParamValue(key, v)}
+                    placeholder="参数值"
+                  />
+                  <button
+                    onClick={() => removeFreeParam(key)}
+                    style={{
+                      padding: '4px 6px', fontSize: 11, cursor: 'pointer',
+                      background: 'var(--danger-muted)', color: 'var(--danger)',
+                      border: '1px solid rgba(239,68,68,0.25)', borderRadius: 'var(--radius-sm)',
+                    }}
+                  >×</button>
+                </div>
+              ))}
+              {Object.keys(draft.ifaceParamValues ?? {}).length === 0 && (
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>
+                  点击"添加参数"为接口添加请求参数
+                </div>
               )}
-            </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* 测试调用 */}
+      {draft.ifaceId && sourceType === 'data_iface' && (
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <Label>测试调用</Label>
             <button
-              onClick={() => removeMapping(idx)}
+              onClick={testInterfaceCall}
+              disabled={testLoading}
               style={{
-                padding: '4px 6px', fontSize: 11, cursor: 'pointer', marginTop: idx === 0 ? 16 : 0,
-                background: 'var(--danger-muted)', color: 'var(--danger)',
-                border: '1px solid rgba(239,68,68,0.25)', borderRadius: 'var(--radius-sm)',
+                padding: '4px 12px', fontSize: 11, cursor: testLoading ? 'not-allowed' : 'pointer',
+                background: testLoading ? 'var(--bg-surface)' : 'var(--accent)',
+                color: testLoading ? 'var(--text-muted)' : '#fff',
+                border: 'none', borderRadius: 'var(--radius-sm)',
+                opacity: testLoading ? 0.6 : 1,
               }}
-            >×</button>
+            >
+              {testLoading ? '调用中...' : '测试接口'}
+            </button>
           </div>
-        ))}
-      </div>
+
+          {testError && (
+            <div style={{
+              padding: '8px 10px', fontSize: 11, color: 'var(--danger)',
+              background: 'var(--danger-muted)', border: '1px solid rgba(239,68,68,0.25)',
+              borderRadius: 'var(--radius-sm)', marginBottom: 8, fontFamily: 'var(--font-mono)',
+            }}>
+              错误：{testError}
+            </div>
+          )}
+
+          {testResponse && (
+            <div style={{
+              maxHeight: 240, overflowY: 'auto',
+              background: 'var(--bg-base)', border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-sm)', padding: '8px',
+            }}>
+              <JsonTree
+                data={testResponse}
+                onSelectPath={(path) => {
+                  // Auto-fill the first empty mapping, or add a new one
+                  const emptyIdx = (draft.ifaceFieldMappings ?? []).findIndex(m => !m.sourceField)
+                  if (emptyIdx >= 0) {
+                    fillFieldPath(path, emptyIdx)
+                  } else {
+                    addMapping()
+                    setTimeout(() => fillFieldPath(path, (draft.ifaceFieldMappings ?? []).length), 0)
+                  }
+                }}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 文本模板（仅文本组件在 interface 模式显示）*/}
+      {isText && (
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+          <Field label="文本模板">
+            <Inp
+              val={draft.textTemplate ?? ''}
+              onChange={(v) => update({ textTemplate: v })}
+              placeholder="{{field1}} - {{field2}}"
+            />
+            <Hint>
+              使用 {'{{'} {'}}'}包裹字段名进行多字段拼接，如：{'{{'} name {'}}'}  -  {'{{'} status {'}}'}<br />
+              留空则使用字段映射中的第一个 text 字段
+            </Hint>
+          </Field>
+        </div>
+      )}
+
+      {/* 表格列定义（仅表格组件显示）*/}
+      {isTable && (
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            marginBottom: 8,
+          }}>
+            <Label>表格列定义</Label>
+            <button
+              onClick={addTableColumn}
+              style={{
+                padding: '2px 8px', fontSize: 11, cursor: 'pointer',
+                background: 'var(--accent-muted)', color: 'var(--accent)',
+                border: '1px solid var(--border-accent)', borderRadius: 'var(--radius-sm)',
+              }}
+            >+ 添加列</button>
+          </div>
+
+          {(draft.tableColumns ?? []).length === 0 && (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>
+              点击"添加列"定义表格列（key 对应接口返回数据中的字段名）
+            </div>
+          )}
+
+          {(draft.tableColumns ?? []).map((col, idx) => (
+            <div key={idx} style={{
+              display: 'grid', gridTemplateColumns: '1.2fr 1.2fr 0.8fr 0.8fr auto', gap: 6, marginBottom: 8, alignItems: 'end',
+            }}>
+              <div>
+                {idx === 0 && <Label>字段名(key)</Label>}
+                <Inp val={col.key} onChange={(v) => setTableColumn(idx, 'key', v)} placeholder="name" />
+              </div>
+              <div>
+                {idx === 0 && <Label>列标题</Label>}
+                <Inp val={col.title} onChange={(v) => setTableColumn(idx, 'title', v)} placeholder="名称" />
+              </div>
+              <div>
+                {idx === 0 && <Label>宽度</Label>}
+                <Inp val={col.width ? String(col.width) : ''} onChange={(v) => setTableColumn(idx, 'width', v ? Number(v) : undefined)} placeholder="auto" type="number" />
+              </div>
+              <div>
+                {idx === 0 && <Label>对齐</Label>}
+                <Sel val={col.align ?? 'left'} onChange={(v) => setTableColumn(idx, 'align', v as 'left' | 'center' | 'right')}>
+                  <option value="left">左</option>
+                  <option value="center">中</option>
+                  <option value="right">右</option>
+                </Sel>
+              </div>
+              <button
+                onClick={() => removeTableColumn(idx)}
+                style={{
+                  padding: '4px 6px', fontSize: 11, cursor: 'pointer', marginTop: idx === 0 ? 16 : 0,
+                  background: 'var(--danger-muted)', color: 'var(--danger)',
+                  border: '1px solid rgba(239,68,68,0.25)', borderRadius: 'var(--radius-sm)',
+                }}
+              >×</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 字段映射（非表格组件显示）*/}
+      {!isTable && (
+        <div style={{ marginTop: 4 }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            marginBottom: 8,
+          }}>
+            <Label>字段映射</Label>
+            <button
+              onClick={addMapping}
+              style={{
+                padding: '2px 8px', fontSize: 11, cursor: 'pointer',
+                background: 'var(--accent-muted)', color: 'var(--accent)',
+                border: '1px solid var(--border-accent)', borderRadius: 'var(--radius-sm)',
+              }}
+            >+ 添加映射</button>
+          </div>
+
+          {(draft.ifaceFieldMappings ?? []).length === 0 && (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>
+              点击"添加映射"将接口返回字段绑定到组件属性
+            </div>
+          )}
+
+          {(draft.ifaceFieldMappings ?? []).map((m, idx) => (
+            <div key={idx} style={{
+              display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 6, marginBottom: 6, alignItems: 'end',
+            }}>
+              <div>
+                {idx === 0 && <Label>目标属性</Label>}
+                <Sel val={m.target} onChange={(v) => setMapping(idx, 'target', v)}>
+                  <option value="">-- 目标 --</option>
+                  {targets.map((t) => <option key={t} value={t}>{t}</option>)}
+                </Sel>
+              </div>
+              <div>
+                {idx === 0 && <Label>接口字段（点分隔路径）</Label>}
+                {schemaFields.length > 0 ? (
+                  <Sel val={m.sourceField} onChange={(v) => setMapping(idx, 'sourceField', v)}>
+                    <option value="">-- 字段 --</option>
+                    {schemaFields.map((f) => <option key={f} value={f}>{f}</option>)}
+                  </Sel>
+                ) : (
+                  <Inp val={m.sourceField} onChange={(v) => setMapping(idx, 'sourceField', v)} placeholder="data.value" />
+                )}
+              </div>
+              <button
+                onClick={() => removeMapping(idx)}
+                style={{
+                  padding: '4px 6px', fontSize: 11, cursor: 'pointer', marginTop: idx === 0 ? 16 : 0,
+                  background: 'var(--danger-muted)', color: 'var(--danger)',
+                  border: '1px solid rgba(239,68,68,0.25)', borderRadius: 'var(--radius-sm)',
+                }}
+              >×</button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -1029,13 +1541,21 @@ export default function BindingDrawer({ elementId, scadaCode, pointData, onClose
   const pb = el.pointBinding ?? { mode: 'point', pointKey: '', deviceCode: '' }
   const schema = getChartSchema(el.type)
   const isChart = !!schema
+  const isTable = el.type === 'table'
+  const isText = el.type === 'text'
 
   const maxSeriesIdx = schema
     ? Math.max(0, ...schema.bindingFields.filter((f) => f.kind !== 'category').map((f) => f.seriesIndex ?? 0))
     : 0
 
   const [mode, setMode] = useState<DataBindingMode>(pb.mode ?? 'point')
-  const [draft, setDraft] = useState<PointBinding>({ ...pb })
+  const [draft, setDraft] = useState<PointBinding>(() => {
+    // Initialize draft with tableColumns from element if table type
+    if (isTable && el.tableColumns) {
+      return { ...pb, tableColumns: el.tableColumns }
+    }
+    return { ...pb }
+  })
   const [chartState, setChartState] = useState<ChartBindingState>(() => initChartState(pb, maxSeriesIdx + 1))
 
   const handleModeChange = (m: DataBindingMode) => {
@@ -1060,7 +1580,16 @@ export default function BindingDrawer({ elementId, scadaCode, pointData, onClose
       binding.chartSeriesKeys = undefined
       binding.chartCategoryKey = undefined
     }
-    store.updateElement(elementId, { pointBinding: binding })
+
+    // Save table columns to element (not in binding)
+    if (isTable && mode === 'interface') {
+      store.updateElement(elementId, {
+        pointBinding: binding,
+        tableColumns: draft.tableColumns ?? []
+      })
+    } else {
+      store.updateElement(elementId, { pointBinding: binding })
+    }
     onClose()
   }
 
@@ -1257,7 +1786,7 @@ export default function BindingDrawer({ elementId, scadaCode, pointData, onClose
           <SimModePanel draft={draft} setDraft={setDraft} scadaCode={scadaCode} pointData={pointData} onApply={applySimPoint} onManage={() => setShowSimManager(true)} />
         )}
         {mode === 'interface' && (
-          <IfaceModePanel draft={draft} setDraft={setDraft} isChart={isChart} schema={schema} />
+          <IfaceModePanel draft={draft} setDraft={setDraft} isChart={isChart} schema={schema} isText={isText} isTable={isTable} />
         )}
         {mode === 'trend' && (
           <TrendModePanel draft={draft} setDraft={setDraft} scadaCode={scadaCode} />

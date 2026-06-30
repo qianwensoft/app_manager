@@ -33,6 +33,7 @@ func AuthMiddleware() gin.HandlerFunc {
 		c.Set("user_id", claims.UserID)
 		c.Set("username", claims.Username)
 		c.Set("role", claims.Role)
+		c.Set("wo_scopes", claims.WoScopes)
 		c.Next()
 	}
 }
@@ -52,6 +53,7 @@ func FormRuntimeAuthMiddleware() gin.HandlerFunc {
 				c.Set("user_id", claims.UserID)
 				c.Set("username", claims.Username)
 				c.Set("role", claims.Role)
+				c.Set("wo_scopes", claims.WoScopes)
 				c.Set("auth_kind", "jwt")
 				c.Next()
 				return
@@ -86,6 +88,36 @@ func RequireRole(roles ...string) gin.HandlerFunc {
 			if role == r {
 				c.Next()
 				return
+			}
+		}
+		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+		c.Abort()
+	}
+}
+
+// RequireRoleOrWoWrite 允许指定角色通过，或 JWT wo_scopes 中含 "wo:rw:<id>" 对应当前工单。
+// 路由参数名固定为 "id"。
+func RequireRoleOrWoWrite(roles ...string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		role := c.GetString("role")
+		for _, r := range roles {
+			if role == r {
+				c.Next()
+				return
+			}
+		}
+		woID := strings.TrimSpace(c.Param("id"))
+		if woID != "" {
+			if v, ok := c.Get("wo_scopes"); ok {
+				if scopes, ok := v.([]string); ok {
+					scopeKey := "wo:rw:" + woID
+					for _, s := range scopes {
+						if s == scopeKey {
+							c.Next()
+							return
+						}
+					}
+				}
 			}
 		}
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})

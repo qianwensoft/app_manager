@@ -8,6 +8,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   const isAdmin = computed(() => user.value?.role === 'admin')
   const isOperator = computed(() => user.value?.role === 'admin' || user.value?.role === 'operator')
+  const isViewer = computed(() => user.value?.role === 'viewer')
 
   const login = async (username, password) => {
     const res = await http.post('/auth/login', { username, password })
@@ -30,5 +31,5 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.setItem('user', JSON.stringify(res.data))
   }
 
-  return { token, user, isAdmin, isOperator, login, logout, fetchMe }
+  return { token, user, isAdmin, isOperator, isViewer, login, logout, fetchMe }
 })

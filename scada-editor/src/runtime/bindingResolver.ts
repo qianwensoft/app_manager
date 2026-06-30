@@ -67,6 +67,23 @@ export function resolveBindingNumericValue(el: CanvasElement, pointData: PointDa
   }
 }
 
+/** 解析模板字符串，替换 {{field}} 占位符 */
+function resolveTemplate(template: string, data: PointDataMap): string {
+  return template.replace(/\{\{([^}]+)\}\}/g, (_, fieldPath) => {
+    const key = fieldPath.trim()
+    // 尝试从 interface 模式的特殊键中查找
+    const ifaceKey = `__iface_${key}`
+    if (ifaceKey in data) {
+      return String(data[ifaceKey])
+    }
+    // 直接查找
+    if (key in data) {
+      return String(data[key])
+    }
+    return `{{${key}}}`  // 未找到则保留原样
+  })
+}
+
 /** 解析元件显示文本（text/button 等） */
 export function resolveElementDisplayValue(el: CanvasElement, pointData: PointDataMap): string | undefined {
   const binding = el.pointBinding
@@ -88,6 +105,11 @@ export function resolveElementDisplayValue(el: CanvasElement, pointData: PointDa
       return applyFormatter(applyTransform(raw, binding.transform), fmt)
     }
     case 'interface': {
+      // 文本组件：优先使用模板
+      if (el.type === 'text' && binding.textTemplate) {
+        return resolveTemplate(binding.textTemplate, pointData)
+      }
+      // 否则使用字段映射
       const mapped = pointData.__iface_value ?? pointData.__iface_text
       if (mapped === undefined) return el.text
       return applyFormatter(typeof mapped === 'number' ? mapped : String(mapped), fmt)

@@ -259,15 +259,24 @@ func workOrderEventPayload(event string, wo *models.WorkOrder, actor string, cha
 	// 补充提交用户信息（创建人）
 	if wo.CreatedBy > 0 {
 		var u models.User
-		if err := database.DB.Select("id", "username", "role").First(&u, wo.CreatedBy).Error; err == nil {
+		if err := database.DB.Select("id", "username", "external_username", "role").First(&u, wo.CreatedBy).Error; err == nil {
+			displayName := u.Username
+			if u.ExternalUsername != "" {
+				displayName = u.ExternalUsername
+			}
 			payload["created_by_id"] = u.ID
-			payload["created_by_username"] = u.Username
+			payload["created_by_username"] = displayName
 			payload["created_by_role"] = u.Role
-			// 兼容旧字段名
-			payload["submitter"] = u.Username
+			payload["submitter"] = displayName
+		} else {
+			// 用户已删除，降级到 actor
+			payload["created_by_id"] = wo.CreatedBy
+			payload["created_by_username"] = actor
+			payload["created_by_role"] = ""
+			payload["submitter"] = actor
 		}
 	} else {
-		// device-token 提交或用户未查到时，使用 actor 作为降级
+		// device-token 提交或无用户身份时，使用 actor 作为降级
 		payload["created_by_id"] = 0
 		payload["created_by_username"] = actor
 		payload["created_by_role"] = "device"

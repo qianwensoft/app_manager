@@ -67,7 +67,11 @@ data class DeviceInfoData(
     /** 手机硬件序列号（Build.SERIAL），服务端用于跨重装唯一识别设备 */
     @SerializedName("android_serial") val androidSerial: String = "",
     /** 当前前台应用包名 */
-    @SerializedName("foreground_package") val foregroundPackage: String = ""
+    @SerializedName("foreground_package") val foregroundPackage: String = "",
+    /** X5 内核版本号（0 表示未安装） */
+    @SerializedName("x5_kernel_version") val x5KernelVersion: Int = 0,
+    /** X5 内核状态 */
+    @SerializedName("x5_kernel_state") val x5KernelState: String = ""
 )
 
 data class ScreenFrameMessage(

@@ -67,8 +67,11 @@ type Device struct {
 	// Agent 菜单下发 revision（单调递增，与 agent_menu 分配变更同步）
 	AgentMenuRevision uint `gorm:"default:0" json:"agent_menu_revision"`
 	// 当前前台应用包名（Agent 心跳上报）
-	ForegroundPackage string    `gorm:"column:foreground_package;size:200" json:"foreground_package"`
-	CreatedAt         time.Time `json:"created_at"`
+	ForegroundPackage string `gorm:"column:foreground_package;size:200" json:"foreground_package"`
+	// X5 内核版本号（0 表示未安装）
+	X5KernelVersion int    `gorm:"column:x5_kernel_version;default:0" json:"x5_kernel_version"`
+	X5KernelState   string `gorm:"column:x5_kernel_state;size:50" json:"x5_kernel_state"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 type App struct {

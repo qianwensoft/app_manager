@@ -119,6 +119,14 @@ export interface CanvasElement {
   tableStriped?: boolean
   tableBordered?: boolean
   tablePageSize?: number
+  // Table events: script 中可访问的变量
+  // - row: 当前行数据对象 Record<string, unknown>
+  // - rowIndex: 行索引 number
+  // - column: 列 key string (仅 cell/columnHeader)
+  // - cellValue: 单元格值 unknown (仅 cell)
+  tableRowClickEvent?: ElementEvent        // 行点击事件
+  tableCellClickEvent?: ElementEvent       // 单元格点击事件
+  tableColumnHeaderEvents?: Record<string, ElementEvent>  // 列表头点击事件，key 为列的 key
   // Form field controls (form-input / form-number / form-select / form-textarea / form-date / form-switch / form-submit)
   formGroupId?: string       // links controls into the same logical form
   formFieldKey?: string      // the data key submitted with the form value
@@ -159,6 +167,18 @@ export type DataBindingMode = 'point' | 'static' | 'simulation' | 'interface' | 
 
 // 接口数据源类型：data_iface=平台数据接口 | open_api=外部应用开放接口 | webhook=外部应用 Webhook
 export type InterfaceSourceType = 'data_iface' | 'open_api' | 'webhook'
+
+// 参数规范（对应后端 datastack.ParamSpec）
+export interface ParamSpec {
+  name: string
+  type: 'string' | 'number' | 'integer' | 'boolean' | 'any'
+  required: boolean
+  enum?: unknown[]
+  min?: number
+  max?: number
+  pattern?: string
+  default?: unknown
+}
 
 // 接口字段映射：将接口返回字段映射到图表绑定键或元素属性
 export interface InterfaceFieldMapping {
@@ -218,6 +238,12 @@ export interface PointBinding {
   ifaceParamValues?: Record<string, string>  // 调用接口的参数
   ifaceFieldMappings?: InterfaceFieldMapping[]  // 字段映射
   ifaceRefreshMs?: number       // 轮询间隔（ms），0=不轮询
+
+  // === 表格列定义（interface 模式 + table 组件专用）===
+  tableColumns?: TableColumn[]  // 表格列定义
+
+  // === 文本模板（interface 模式专用）===
+  textTemplate?: string         // 模板字符串，如 "{{name}} - {{status}}"，用于文本组件多字段拼接
 
   // === 渲染格式化（单点显示，point/simulation 模式有效）===
   formatter?: ValueFormatter

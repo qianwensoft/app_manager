@@ -7,9 +7,10 @@ interface Props {
   zoom: number
   pointData?: PointDataMap
   liveRows?: Record<string, unknown>[]
+  isPreview?: boolean
 }
 
-export default function TableWidget({ el, zoom, pointData = {}, liveRows }: Props) {
+export default function TableWidget({ el, zoom, pointData = {}, liveRows, isPreview = false }: Props) {
   const columns = el.tableColumns ?? []
   const data = liveRows ?? el.tableData ?? []
   const striped = el.tableStriped ?? false
@@ -18,6 +19,38 @@ export default function TableWidget({ el, zoom, pointData = {}, liveRows }: Prop
   const fontSize = (el.fontSize ?? 12) * zoom
   const bg = el.fill || 'transparent'
   const borderStyle = bordered ? `1px solid rgba(255,255,255,0.15)` : 'none'
+
+  // Handle row click
+  const handleRowClick = (row: Record<string, unknown>, rowIndex: number) => {
+    if (!isPreview || !el.tableRowClickEvent) return
+
+    const event = el.tableRowClickEvent
+    if (event.action === 'script' && event.script) {
+      try {
+        // eslint-disable-next-line no-new-func
+        const fn = new Function('row', 'rowIndex', event.script)
+        fn(row, rowIndex)
+      } catch (err) {
+        console.error('Table row click script error:', err)
+      }
+    }
+  }
+
+  // Handle cell click
+  const handleCellClick = (row: Record<string, unknown>, rowIndex: number, column: string, cellValue: unknown) => {
+    if (!isPreview || !el.tableCellClickEvent) return
+
+    const event = el.tableCellClickEvent
+    if (event.action === 'script' && event.script) {
+      try {
+        // eslint-disable-next-line no-new-func
+        const fn = new Function('row', 'rowIndex', 'column', 'cellValue', event.script)
+        fn(row, rowIndex, column, cellValue)
+      } catch (err) {
+        console.error('Table cell click script error:', err)
+      }
+    }
+  }
 
   const cellStyle = (isHeader: boolean, rowIdx?: number): React.CSSProperties => ({
     padding: `${2 * zoom}px ${6 * zoom}px`,
@@ -48,7 +81,7 @@ export default function TableWidget({ el, zoom, pointData = {}, liveRows }: Prop
         zIndex: el.zIndex,
         background: bg,
         overflow: 'hidden',
-        pointerEvents: 'none',
+        pointerEvents: isPreview ? 'auto' : 'none',
         opacity: el.opacity ?? 1,
         transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
         display: 'flex',
@@ -97,15 +130,32 @@ export default function TableWidget({ el, zoom, pointData = {}, liveRows }: Prop
                 </tr>
               ) : (
                 data.map((row, rowIdx) => (
-                  <tr key={rowIdx}>
-                    {columns.map((col) => (
-                      <td
-                        key={col.key}
-                        style={{ ...cellStyle(false, rowIdx), textAlign: col.align ?? 'left' }}
-                      >
-                        {String(row[col.key] ?? '')}
-                      </td>
-                    ))}
+                  <tr
+                    key={rowIdx}
+                    onClick={() => handleRowClick(row, rowIdx)}
+                    style={{ cursor: isPreview && el.tableRowClickEvent ? 'pointer' : 'default' }}
+                  >
+                    {columns.map((col) => {
+                      const cellValue = row[col.key]
+                      return (
+                        <td
+                          key={col.key}
+                          onClick={(e) => {
+                            if (el.tableCellClickEvent) {
+                              e.stopPropagation()
+                              handleCellClick(row, rowIdx, col.key, cellValue)
+                            }
+                          }}
+                          style={{
+                            ...cellStyle(false, rowIdx),
+                            textAlign: col.align ?? 'left',
+                            cursor: isPreview && el.tableCellClickEvent ? 'pointer' : 'default',
+                          }}
+                        >
+                          {String(cellValue ?? '')}
+                        </td>
+                      )
+                    })}
                   </tr>
                 ))
               )}
