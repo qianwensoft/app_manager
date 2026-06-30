@@ -75,6 +75,7 @@ func main() {
 		scada.StartBatcher()
 		go scada.StartUDPIngress(9000)
 		agent.StartStaleDeviceReaper()
+		agent.StartRealtimeCacheFlusher(5 * time.Second) // 每5秒批量刷新实时状态到数据库
 		go func() {
 			ticker := time.NewTicker(30 * time.Minute)
 			defer ticker.Stop()

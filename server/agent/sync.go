@@ -60,7 +60,7 @@ func SyncDeviceStatus(deviceID string, connected bool) {
 	}
 
 	// 推送 Agent 连接状态变化到 STOMP（用于实时更新监控页面）
-	publishAgentConnectionChange()
+	PublishAgentConnectionChange()
 
 	// 同时推送设备资料更新到 /topic/devices，触发设备详情/列表页实时 reload 状态。
 	if id, ok := ResolveConnDeviceID(deviceID); ok {
@@ -112,7 +112,7 @@ func reapStaleDevices() {
 		PublishDeviceProfileUpdated(d.ID)
 	}
 	if len(devices) > 0 {
-		publishAgentConnectionChange()
+		PublishAgentConnectionChange()
 	}
 }
 
@@ -194,14 +194,45 @@ func ensureAgentDevice(deviceKey, androidSerial string) error {
 		return database.DB.Create(&d).Error
 	}
 
-	var d models.Device
-	return database.DB.Where("agent_token = ?", key).FirstOrCreate(&d, models.Device{
-		Serial:     "agent-" + key,
+	// 显式查找：优先按 serial，其次按 agent_token
+	serial := "agent-" + key
+	var existing models.Device
+
+	// 先按 serial 查找
+	err := database.DB.Where("serial = ?", serial).First(&existing).Error
+	if err == nil && existing.ID > 0 {
+		// 找到了，更新 agent_token 和时间戳
+		return database.DB.Model(&existing).Updates(map[string]interface{}{
+			"agent_token":  key,
+			"last_seen_at": now,
+		}).Error
+	}
+
+	// 再按 agent_token 查找
+	err = database.DB.Where("agent_token = ?", key).First(&existing).Error
+	if err == nil && existing.ID > 0 {
+		// 找到了，更新 serial 和时间戳
+		return database.DB.Model(&existing).Updates(map[string]interface{}{
+			"serial":       serial,
+			"last_seen_at": now,
+		}).Error
+	}
+
+	// 都没找到，创建新记录
+	d := models.Device{
+		Serial:     serial,
 		Name:       "Agent 设备",
 		AgentToken: key,
 		LastSeenAt: &now,
 		CreatedAt:  now,
-	}).Error
+	}
+	err = database.DB.Create(&d).Error
+	if err != nil && strings.Contains(err.Error(), "Duplicate entry") {
+		// 并发冲突：在我们检查和插入之间，另一个 goroutine 已创建了该设备
+		// 此时设备已存在，静默返回成功（后续心跳会更新状态）
+		return nil
+	}
+	return err
 }
 
 func strFromInfo(v interface{}) (string, bool) {
@@ -220,28 +251,43 @@ func HandleHeartbeat(deviceID string, info map[string]interface{}) {
 		_ = database.DB.First(&old, dbID).Error
 	}
 
-	updates := map[string]interface{}{
-		"last_seen_at":    time.Now(),
+	now := time.Now()
+
+	// 高频更新字段：写入实时状态表，避免频繁更新 Device 主表
+	realtimeUpdates := map[string]interface{}{
+		"last_seen_at":    now, // 仅在内存中记录，不写数据库
 		"agent_connected": true,
 		"status":          "online",
 	}
 	if battery, ok := info["battery"].(float64); ok {
-		updates["battery"] = int(battery)
+		realtimeUpdates["battery"] = int(battery)
 	}
 	if cpu, ok := info["cpu_usage"].(float64); ok {
-		updates["cpu_usage"] = cpu
+		realtimeUpdates["cpu_usage"] = cpu
 	}
 	if memUsed, ok := info["memory_used"].(float64); ok {
-		updates["memory_used"] = int64(memUsed)
+		realtimeUpdates["memory_used"] = int64(memUsed)
 	}
+	if stUsed, ok := info["storage_used"].(float64); ok {
+		realtimeUpdates["storage_used"] = int64(stUsed)
+	}
+	if wifiSignal, ok := info["wifi_signal"].(float64); ok {
+		realtimeUpdates["wifi_signal"] = int(wifiSignal)
+	}
+	if wifiSpeed, ok := info["wifi_speed"].(float64); ok {
+		realtimeUpdates["wifi_speed"] = int(wifiSpeed)
+	}
+	if fg, ok := strFromInfo(info["foreground_package"]); ok && fg != "" {
+		realtimeUpdates["foreground_package"] = fg
+	}
+
+	// 低频/静态字段：仅在变化时更新 Device 主表
+	updates := map[string]interface{}{}
 	if memTotal, ok := info["memory_total"].(float64); ok {
 		mt := int64(memTotal)
 		updates["memory_total"] = mt
 		// Web 设备详情「内存」列与 ADB 入库字段 total_memory 对齐
 		updates["total_memory"] = mt
-	}
-	if stUsed, ok := info["storage_used"].(float64); ok {
-		updates["storage_used"] = int64(stUsed)
 	}
 	if stTotal, ok := info["storage_total"].(float64); ok {
 		updates["total_storage"] = int64(stTotal)
@@ -267,12 +313,6 @@ func HandleHeartbeat(deviceID string, info map[string]interface{}) {
 	if wifiSSID, ok := info["wifi_ssid"].(string); ok {
 		updates["wifi_ssid"] = wifiSSID
 	}
-	if wifiSignal, ok := info["wifi_signal"].(float64); ok {
-		updates["wifi_signal"] = int(wifiSignal)
-	}
-	if wifiSpeed, ok := info["wifi_speed"].(float64); ok {
-		updates["wifi_speed"] = int(wifiSpeed)
-	}
 	if networkConnected, ok := info["network_connected"].(bool); ok {
 		updates["network_connected"] = networkConnected
 	}
@@ -291,9 +331,8 @@ func HandleHeartbeat(deviceID string, info map[string]interface{}) {
 	if av, ok := strFromInfo(info["agent_version"]); ok && av != "" {
 		updates["agent_version"] = av
 	}
-	// 前台应用包名：只有明确传递了值时才更新（避免空值覆盖）
-	if fg, ok := strFromInfo(info["foreground_package"]); ok && fg != "" {
-		updates["foreground_package"] = fg
+	if wv, ok := strFromInfo(info["webview_version"]); ok && wv != "" {
+		updates["webview_version"] = wv
 	}
 	// X5 内核版本和状态
 	if x5Version, ok := info["x5_kernel_version"].(float64); ok {
@@ -332,24 +371,39 @@ func HandleHeartbeat(deviceID string, info map[string]interface{}) {
 		}
 	}
 
-	result := DeviceScopeByConnKey(deviceID).Updates(updates)
-	if result.Error != nil {
-		log.Printf("HandleHeartbeat [%s]: %v", deviceID, result.Error)
-		return
+	// 更新实时状态到内存缓存（高频字段，异步批量写入数据库）
+	if haveID {
+		UpdateRealtimeStatus(dbID, realtimeUpdates)
 	}
-	if result.RowsAffected == 0 {
-		// 传入 androidSerial，支持重装 App 后按物理设备合并记录
+
+	// 只在低频字段有变化时才更新 Device 主表
+	if len(updates) > 0 {
+		result := DeviceScopeByConnKey(deviceID).Updates(updates)
+		if result.Error != nil {
+			log.Printf("HandleHeartbeat [%s]: %v", deviceID, result.Error)
+			return
+		}
+		if result.RowsAffected == 0 {
+			// 传入 androidSerial，支持重装 App 后按物理设备合并记录
+			if err := ensureAgentDevice(deviceID, androidSerial); err != nil {
+				log.Printf("HandleHeartbeat ensureAgentDevice [%s]: %v", deviceID, err)
+				return
+			}
+			if err := DeviceScopeByConnKey(deviceID).Updates(updates).Error; err != nil {
+				log.Printf("HandleHeartbeat retry [%s]: %v", deviceID, err)
+			}
+		}
+	} else if !haveID {
+		// 没有低频字段更新但设备不存在时，仍需自动注册
 		if err := ensureAgentDevice(deviceID, androidSerial); err != nil {
 			log.Printf("HandleHeartbeat ensureAgentDevice [%s]: %v", deviceID, err)
 			return
-		}
-		if err := DeviceScopeByConnKey(deviceID).Updates(updates).Error; err != nil {
-			log.Printf("HandleHeartbeat retry [%s]: %v", deviceID, err)
 		}
 	}
 
 	profileChanged := false
 	foregroundAppChanged := false
+	agentVersionChanged := false
 	if haveID {
 		if v, ok := updates["agent_alias"].(string); ok && v != old.AgentAlias {
 			profileChanged = true
@@ -357,31 +411,25 @@ func HandleHeartbeat(deviceID string, info map[string]interface{}) {
 		if v, ok := updates["group_name"].(string); ok && v != old.GroupName {
 			profileChanged = true
 		}
-		if v, ok := updates["foreground_package"].(string); ok && v != old.ForegroundPackage {
+		if v, ok := updates["agent_version"].(string); ok && v != old.AgentVersion {
+			agentVersionChanged = true
+		}
+		if v, ok := realtimeUpdates["foreground_package"].(string); ok && v != old.ForegroundPackage {
 			foregroundAppChanged = true
 		}
 	}
 	if profileChanged {
 		PublishDeviceProfileUpdated(dbID)
 	}
-	if foregroundAppChanged {
-		// 前台应用变化时推送到监控页面
-		publishAgentConnectionChange()
+	if foregroundAppChanged || agentVersionChanged {
+		// 前台应用变化或 Agent 版本变化时推送到监控页面
+		PublishAgentConnectionChange()
 	}
 }
 
-// publishAgentConnectionChange 推送 Agent 连接状态变化事件到 STOMP
-func publishAgentConnectionChange() {
-	// 查询当前在线设备数量
-	var onlineCount int64
-	database.DB.Model(&models.Device{}).Where("agent_connected = ?", true).Count(&onlineCount)
-
-	// 查询在线设备列表（最多100个）
-	var devices []models.Device
-	database.DB.Where("agent_connected = ?", true).
-		Order("last_seen_at DESC").
-		Limit(100).
-		Find(&devices)
+// PublishAgentConnectionChange 推送 Agent 连接状态变化事件到 STOMP
+func PublishAgentConnectionChange() {
+	keys := AgentHub.ConnectedDeviceIDs()
 
 	// 预加载所有 APK 应用的包名-名称映射
 	var apps []models.App
@@ -393,31 +441,42 @@ func publishAgentConnectionChange() {
 		}
 	}
 
-	// 构建简化的设备信息列表（包含前台应用信息）
-	agents := make([]map[string]interface{}, 0, len(devices))
-	for _, d := range devices {
-		agent := map[string]interface{}{
-			"device_id":          d.ID,
-			"conn_key":           "", // 填充后续可从 AgentHub 获取
-			"name":               d.Name,
-			"serial":             d.Serial,
-			"android_serial":     d.AndroidSerial,
-			"status":             d.Status,
-			"last_seen_at":       d.LastSeenAt,
-			"foreground_package": d.ForegroundPackage,
-		}
-		// 如果前台应用包名在 APK 管理中存在，填充应用名称
-		if d.ForegroundPackage != "" {
-			if appName, ok := appNameMap[d.ForegroundPackage]; ok {
-				agent["foreground_app_name"] = appName
+	// 构建设备信息列表
+	agents := make([]map[string]interface{}, 0, len(keys))
+	for _, k := range keys {
+		if d, ok := LookupDeviceByConnectionKey(k); ok {
+			agent := map[string]interface{}{
+				"device_id":          d.ID,
+				"conn_key":           k,
+				"name":               d.Name,
+				"serial":             d.Serial,
+				"android_serial":     d.AndroidSerial,
+				"os_version":         d.OSVersion,
+				"status":             d.Status,
+				"last_seen_at":       d.LastSeenAt,
+				"foreground_package": d.ForegroundPackage,
+				"agent_version":      d.AgentVersion,
+				"webview_version":    d.WebViewVersion,
+				"x5_kernel_version":  d.X5KernelVersion,
+				"x5_kernel_state":    d.X5KernelState,
 			}
+			// 如果前台应用包名在 APK 管理中存在，填充应用名称
+			if d.ForegroundPackage != "" {
+				if appName, ok := appNameMap[d.ForegroundPackage]; ok {
+					agent["foreground_app_name"] = appName
+				}
+			}
+			// 计算在线时长（从连接时间到现在）
+			if connTime, ok := AgentHub.GetConnectionTime(k); ok {
+				agent["online_duration"] = int64(time.Since(connTime).Seconds())
+			}
+			agents = append(agents, agent)
 		}
-		agents = append(agents, agent)
 	}
 
 	payload := map[string]interface{}{
 		"type":         "agent_connection_change",
-		"online_count": onlineCount,
+		"online_count": len(keys),
 		"agents":       agents,
 		"timestamp":    time.Now().UTC().Format(time.RFC3339),
 	}

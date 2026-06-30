@@ -232,6 +232,24 @@ func GetDeviceInfo(c *gin.Context) {
 
 	// 如果是 Agent 连接的设备，直接返回数据库信息（含 Agent 心跳上报的网络/Wi‑Fi）
 	if device.AgentConnected {
+		// 优先从内存缓存读取实时状态
+		realtimeData := map[string]interface{}{
+			"battery":      device.Battery,
+			"cpu_usage":    device.CPUUsage,
+			"memory_used":  device.MemoryUsed,
+			"storage_used": device.StorageUsed,
+			"wifi_signal":  device.WifiSignal,
+			"wifi_speed":   device.WifiSpeed,
+		}
+		if cached, ok := agent.GetRealtimeStatus(device.ID); ok {
+			realtimeData["battery"] = cached.Battery
+			realtimeData["cpu_usage"] = cached.CPUUsage
+			realtimeData["memory_used"] = cached.MemoryUsed
+			realtimeData["storage_used"] = cached.StorageUsed
+			realtimeData["wifi_signal"] = cached.WifiSignal
+			realtimeData["wifi_speed"] = cached.WifiSpeed
+		}
+
 		c.JSON(http.StatusOK, gin.H{"data": map[string]interface{}{
 			"model":             device.Model,
 			"brand":             device.Brand,
@@ -239,17 +257,17 @@ func GetDeviceInfo(c *gin.Context) {
 			"sdk_version":       device.SDKVersion,
 			"resolution":        device.Resolution,
 			"ip_address":        device.IP,
-			"battery":           device.Battery,
-			"cpu_usage":         device.CPUUsage,
-			"memory_used":       device.MemoryUsed,
+			"battery":           realtimeData["battery"],
+			"cpu_usage":         realtimeData["cpu_usage"],
+			"memory_used":       realtimeData["memory_used"],
 			"memory_total":      device.MemoryTotal,
 			"total_memory":      device.TotalMemory,
 			"total_storage":     device.TotalStorage,
-			"storage_used":      device.StorageUsed,
+			"storage_used":      realtimeData["storage_used"],
 			"network_type":      device.NetworkType,
 			"wifi_ssid":         device.WifiSSID,
-			"wifi_signal":       device.WifiSignal,
-			"wifi_speed":        device.WifiSpeed,
+			"wifi_signal":       realtimeData["wifi_signal"],
+			"wifi_speed":        realtimeData["wifi_speed"],
 			"network_connected": device.NetworkConnected,
 		}})
 		return
@@ -618,17 +636,86 @@ func TriggerAgentMenuOnAgent(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "已下发菜单触发", "intent_action": action})
 }
 
+// PushAgentUpdate 推送 Agent 更新到设备
+func PushAgentUpdate(c *gin.Context) {
+	var req struct {
+		Version string `json:"version" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 version 参数"})
+		return
+	}
+
+	version := strings.TrimSpace(req.Version)
+	if version == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "version 不能为空"})
+		return
+	}
+
+	// 解析版本号：如果是 "2.3.3 (250)" 格式，提取 "2.3.3"
+	versionStr := version
+	if idx := strings.Index(version, " ("); idx > 0 {
+		versionStr = version[:idx]
+	}
+
+	// 查找对应版本的 APK
+	var update models.AgentUpdate
+	if err := database.DB.Where("version = ?", versionStr).Order("version_code DESC").First(&update).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "未找到指定版本的 Agent APK"})
+		return
+	}
+
+	// 构造下载路径（Agent 将通过此路径下载 APK）
+	downloadPath := fmt.Sprintf("/api/agent-updates/%d/download", update.ID)
+
+	// 生成唯一的命令 ID
+	commandID := randomAgentRequestID()
+
+	// 发送更新命令到 Agent
+	if !sendAgentCommand(c, "install_app", map[string]interface{}{
+		"download_path": downloadPath,
+		"command_id":    commandID,
+	}) {
+		return
+	}
+
+	logAudit(c, "Agent 更新", fmt.Sprintf("设备 %s 推送更新 %s", c.Param("id"), version), nil)
+	c.JSON(http.StatusOK, gin.H{
+		"message":       "已下发更新命令",
+		"version":       version,
+		"download_path": downloadPath,
+	})
+}
+
+func getBaseURL(c *gin.Context) string {
+	scheme := "http"
+	if c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https" {
+		scheme = "https"
+	}
+	host := c.Request.Host
+	if fwdHost := c.GetHeader("X-Forwarded-Host"); fwdHost != "" {
+		host = fwdHost
+	}
+	return fmt.Sprintf("%s://%s", scheme, host)
+}
+
 func sendAgentCommand(c *gin.Context, action string, data map[string]interface{}) bool {
 	device := getDeviceByID(c)
 	if device == nil {
 		return false
 	}
 	devID := device.ID
-	if !agent.AgentHub.SendToDevice(devID, map[string]interface{}{
+	msg := map[string]interface{}{
 		"type":   "command",
 		"action": action,
 		"data":   data,
-	}) {
+	}
+	// 如果 data 中有 command_id，提取到顶层作为 commandId
+	if cmdID, ok := data["command_id"]; ok {
+		msg["commandId"] = cmdID
+		delete(data, "command_id") // 从 data 中移除，避免重复
+	}
+	if !agent.AgentHub.SendToDevice(devID, msg) {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Agent 未在线，无法下发命令"})
 		return false
 	}

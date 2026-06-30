@@ -32,10 +32,16 @@ func GetAgentConnections(c *gin.Context) {
 		Name              string     `json:"name"`
 		Serial            string     `json:"serial"`
 		AndroidSerial     string     `json:"android_serial"`
+		OsVersion         string     `json:"os_version"`
 		Status            string     `json:"status"`
 		LastSeenAt        *time.Time `json:"last_seen_at"`
 		ForegroundPackage string     `json:"foreground_package"`
 		ForegroundAppName string     `json:"foreground_app_name,omitempty"`
+		AgentVersion      string     `json:"agent_version"`
+		WebViewVersion    string     `json:"webview_version"`
+		X5KernelVersion   int        `json:"x5_kernel_version"`
+		X5KernelState     string     `json:"x5_kernel_state"`
+		OnlineDuration    int64      `json:"online_duration"` // seconds
 	}
 	agents := make([]agentEntry, 0, len(keys))
 
@@ -56,15 +62,29 @@ func GetAgentConnections(c *gin.Context) {
 			e.Name = d.Name
 			e.Serial = d.Serial
 			e.AndroidSerial = d.AndroidSerial
+			e.OsVersion = d.OSVersion
 			e.Status = d.Status
-			e.LastSeenAt = d.LastSeenAt
+			// 优先从内存缓存读取 last_seen_at
+			if cached, cacheOk := agent.GetRealtimeStatus(d.ID); cacheOk {
+				e.LastSeenAt = &cached.LastSeenAt
+			} else {
+				e.LastSeenAt = d.LastSeenAt
+			}
 			e.ForegroundPackage = d.ForegroundPackage
+			e.AgentVersion = d.AgentVersion
+			e.WebViewVersion = d.WebViewVersion
+			e.X5KernelVersion = d.X5KernelVersion
+			e.X5KernelState = d.X5KernelState
 			// 如果前台应用包名在 APK 管理中存在，填充应用名称
 			if d.ForegroundPackage != "" {
 				if appName, ok := appNameMap[d.ForegroundPackage]; ok {
 					e.ForegroundAppName = appName
 				}
 			}
+		}
+		// 计算在线时长（从连接时间到现在）
+		if connTime, ok := agent.AgentHub.GetConnectionTime(k); ok {
+			e.OnlineDuration = int64(time.Since(connTime).Seconds())
 		}
 		agents = append(agents, e)
 	}
