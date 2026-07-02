@@ -91,6 +91,7 @@ export default function EventsConfigSection({
   onChange,
   fields,
   printers,
+  buttons = [],
   interfaceOptions,
   thirdPartyEndpointOptions,
   connectorInterfaceOptions,
@@ -105,6 +106,7 @@ export default function EventsConfigSection({
   onChange: (next: PageEvent[]) => void
   fields: FieldDef[]
   printers: PrinterTemplate[]
+  buttons?: Array<{ buttonId: string; text: string; component: string }>
   interfaceOptions: IfaceOpt[]
   thirdPartyEndpointOptions: IfaceOpt[]
   connectorInterfaceOptions: IfaceOpt[]
@@ -197,7 +199,7 @@ export default function EventsConfigSection({
                     ]} />
                 </div>
 
-                <SourceEditor source={ev.source} fields={fields} onChange={s => updEvent(idx, { source: s })} />
+                <SourceEditor source={ev.source} fields={fields} buttons={buttons} onChange={s => updEvent(idx, { source: s })} />
 
                 <ConditionEditor when={ev.when} onChange={w => updEvent(idx, { when: w })} fields={fields} />
 
@@ -240,8 +242,11 @@ function sourceLabel(s: EventSource): string {
 }
 
 // ── 事件源 ──────────────────────────────────────────────────────────
-function SourceEditor({ source, fields, onChange }: {
-  source: EventSource; fields: FieldDef[]; onChange: (s: EventSource) => void
+function SourceEditor({ source, fields, buttons = [], onChange }: {
+  source: EventSource
+  fields: FieldDef[]
+  buttons?: Array<{ buttonId: string; text: string; component: string }>
+  onChange: (s: EventSource) => void
 }) {
   return (
     <div>
@@ -288,8 +293,23 @@ function SourceEditor({ source, fields, onChange }: {
               value={source.event_name} onChange={e => onChange({ kind: 'custom_event', event_name: e.target.value })} />
           )}
           {source.kind === 'button' && (
-            <Input size="small" placeholder="按钮 ID（PrintButton 的触发事件 ID）"
-              value={source.button_id} onChange={e => onChange({ kind: 'button', button_id: e.target.value })} />
+            <AutoComplete
+              size="small"
+              style={{ width: '100%' }}
+              placeholder="选择或输入按钮 ID"
+              value={source.button_id}
+              onChange={v => onChange({ kind: 'button', button_id: v || '' })}
+              options={buttons.map(b => ({
+                value: b.buttonId,
+                label: `${b.buttonId} - ${b.text} (${b.component})`,
+              }))}
+              filterOption={(input, option) => {
+                const val = option?.value?.toString().toLowerCase() || ''
+                const lbl = option?.label?.toString().toLowerCase() || ''
+                const inp = input.toLowerCase()
+                return val.includes(inp) || lbl.includes(inp)
+              }}
+            />
           )}
           {source.kind === 'field_change' && (
             <Select size="small" style={{ width: '100%' }} placeholder="选择字段"

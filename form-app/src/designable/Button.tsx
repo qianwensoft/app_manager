@@ -7,6 +7,13 @@ import { Button } from '@/components/ui/button'
 import { createBehavior, createResource } from '@designable/core'
 import type { DnFC } from '@designable/react'
 
+/** 生成唯一按钮 ID */
+const generateButtonId = () => {
+  const timestamp = Date.now().toString(36)
+  const random = Math.random().toString(36).substr(2, 5)
+  return `btn_${timestamp}_${random}`
+}
+
 export const CustomButton: DnFC<any> = (props) => {
   const p = props?.['x-component-props'] || props || {}
   return (
@@ -26,11 +33,13 @@ const ButtonComponentSchema = {
   properties: {
     text: {
       type: 'string',
+      title: '按钮文本',
       'x-decorator': 'FormItem',
       'x-component': 'Input',
     },
     variant: {
       type: 'string',
+      title: '按钮样式',
       'x-decorator': 'FormItem',
       'x-component': 'Select',
       enum: [
@@ -44,52 +53,18 @@ const ButtonComponentSchema = {
     },
     block: {
       type: 'boolean',
+      title: '撑满整行',
       'x-decorator': 'FormItem',
       'x-component': 'Switch',
     },
     buttonId: {
       type: 'string',
+      title: '按钮ID',
+      description: '用于事件编排中匹配按钮触发源',
       'x-decorator': 'FormItem',
       'x-component': 'Input',
     },
   },
-}
-
-// 创建 void field schema（参考 @designable/formily-antd 的实现）
-const createVoidFieldSchema = (component: any) => {
-  return {
-    type: 'object',
-    properties: {
-      'field-group': {
-        type: 'void',
-        'x-component': 'CollapseItem',
-        properties: {
-          name: {
-            type: 'string',
-            'x-decorator': 'FormItem',
-            'x-component': 'Input',
-          },
-          title: {
-            type: 'string',
-            'x-decorator': 'FormItem',
-            'x-component': 'Input',
-          },
-          description: {
-            type: 'string',
-            'x-decorator': 'FormItem',
-            'x-component': 'Input.TextArea',
-          },
-        },
-      },
-      'component-group': component && {
-        type: 'void',
-        'x-component': 'CollapseItem',
-        properties: {
-          'x-component-props': component,
-        },
-      },
-    },
-  }
 }
 
 CustomButton.Behavior = createBehavior({
@@ -98,7 +73,24 @@ CustomButton.Behavior = createBehavior({
   selector: (node) => node.props?.['x-component'] === 'CustomButton',
   designerProps: {
     droppable: false,
-    propsSchema: createVoidFieldSchema(ButtonComponentSchema),
+    propsSchema: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          title: '字段名',
+          'x-decorator': 'FormItem',
+          'x-component': 'Input',
+        },
+        title: {
+          type: 'string',
+          title: '标题',
+          'x-decorator': 'FormItem',
+          'x-component': 'Input',
+        },
+        'x-component-props': ButtonComponentSchema,
+      },
+    },
   },
   designerLocales: {
     'zh-CN': {
@@ -128,7 +120,7 @@ CustomButton.Resource = createResource({
           text: '按钮',
           variant: 'default',
           block: false,
-          buttonId: '',
+          buttonId: generateButtonId(),
         },
       },
     },

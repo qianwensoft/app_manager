@@ -113,6 +113,7 @@ export default function PageDesignerPage() {
   const [formCode, setFormCode] = useState<string>('')
   const [eventFields, setEventFields] = useState<FieldDef[]>([])
   const [eventPrinters, setEventPrinters] = useState<PrinterTemplate[]>([])
+  const [eventButtons, setEventButtons] = useState<Array<{ buttonId: string; text: string; component: string }>>([])
   const [savingEvents, setSavingEvents] = useState(false)
   const ifaceOpts = useInterfaceOptions()
 
@@ -348,7 +349,7 @@ export default function PageDesignerPage() {
     }
   }
 
-  // 打开事件编排 Drawer：拉取当前页 config 的 events/fields/printers
+  // 打开事件编排 Drawer：拉取当前页 config 的 events/fields/printers，并提取按钮列表
   const openEvents = async () => {
     try {
       const res = await authed(`/api/form-app/pages/${pageId}`, 'GET')
@@ -356,13 +357,18 @@ export default function PageDesignerPage() {
       setEvents(Array.isArray(cfg.events) ? cfg.events : [])
       setEventFields(cfg.field_definitions || [])
       setEventPrinters(Array.isArray(cfg.printers) ? cfg.printers : [])
+
+      // 从当前画布 schema 提取按钮列表
+      const currentSchema = (transformToSchema as any)(engine.getCurrentTree(), DESIGNABLE_OPTS)
+      const buttons = extractButtons(currentSchema)
+      setEventButtons(buttons)
+
       setEventsOpen(true)
     } catch (e: any) {
       message.error(e.message || '加载事件失败')
     }
   }
 
-  // 仅更新 config_json.events，合并保留其他键（布局 schema 不在 config_json，互不影响）
   const saveEvents = async () => {
     setSavingEvents(true)
     try {
@@ -377,6 +383,39 @@ export default function PageDesignerPage() {
     } finally {
       setSavingEvents(false)
     }
+  }
+
+  // 从当前 schema 中提取所有按钮节点（用于事件配置中的下拉选择）
+  const extractButtons = (schema: any): Array<{ buttonId: string; text: string; component: string }> => {
+    const buttons: Array<{ buttonId: string; text: string; component: string }> = []
+    const buttonComponents = ['ActionButton', 'EventButton', 'NavigateButton', 'CustomButton', 'SubmitButton']
+
+    const traverse = (node: any) => {
+      if (!node) return
+
+      // 检查当前节点是否是按钮
+      const component = node['x-component']
+      if (component && buttonComponents.includes(component)) {
+        const props = node['x-component-props'] || {}
+        const buttonId = props.buttonId || props.id
+        const text = props.text || node.title || '未命名'
+
+        if (buttonId) {
+          buttons.push({ buttonId, text, component })
+        }
+      }
+
+      // 递归遍历子节点
+      if (node.properties) {
+        Object.values(node.properties).forEach(child => traverse(child))
+      }
+    }
+
+    if (schema?.schema?.properties) {
+      traverse(schema.schema.properties)
+    }
+
+    return buttons
   }
 
   return (
@@ -507,6 +546,7 @@ export default function PageDesignerPage() {
           onChange={setEvents}
           fields={eventFields}
           printers={eventPrinters}
+          buttons={eventButtons}
           interfaceOptions={ifaceOpts.interfaceOptions}
           thirdPartyEndpointOptions={ifaceOpts.thirdPartyEndpointOptions}
           connectorInterfaceOptions={ifaceOpts.connectorInterfaceOptions}
