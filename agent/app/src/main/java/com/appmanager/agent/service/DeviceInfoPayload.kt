@@ -88,6 +88,26 @@ fun collectDeviceInfoData(context: Context): DeviceInfoData {
     val x5Version = com.appmanager.agent.x5.X5KernelManager.getLocalVersion()
     val x5State = com.appmanager.agent.x5.X5KernelManager.getState().name
 
+    // 获取 WebView 版本
+    val webViewVersion = try {
+        val pm = context.packageManager
+        val webViewPackage = "com.google.android.webview"
+        val chromePackage = "com.android.chrome"
+        // 尝试获取 Android System WebView 版本
+        try {
+            pm.getPackageInfo(webViewPackage, 0).versionName ?: ""
+        } catch (_: Exception) {
+            // 如果没有安装，尝试获取 Chrome 版本（Android 7+ Chrome 可作为 WebView 提供者）
+            try {
+                pm.getPackageInfo(chromePackage, 0).versionName ?: ""
+            } catch (_: Exception) {
+                ""
+            }
+        }
+    } catch (_: Exception) {
+        ""
+    }
+
     return DeviceInfoData(
         battery = battery,
         cpuUsage = cpuUsage(),
@@ -110,6 +130,7 @@ fun collectDeviceInfoData(context: Context): DeviceInfoData {
         resolution = resolution,
         allowRemoteScreen = config.allowRemoteScreen,
         agentVersion = AppVersions.displayLabel(context),
+        webViewVersion = webViewVersion,
         androidSerial = DeviceMachineId.get(context),
         foregroundPackage = foregroundPackage,
         x5KernelVersion = x5Version,

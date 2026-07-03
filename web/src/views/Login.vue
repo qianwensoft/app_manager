@@ -14,7 +14,7 @@
           </svg>
         </div>
         <div class="brand-name">磐石 <span class="brand-en">BEDROCK</span></div>
-        <div class="brand-tag">设备管控 · 组态可视化 · 数据连接中枢</div>
+        <div class="brand-tag">企业级现场管理与数字化平台 · 可内网自托管</div>
       </div>
 
       <div class="feature-list">
@@ -28,7 +28,7 @@
       </div>
 
       <div class="left-footer">
-        © 2025 磐石 Bedrock · 设备管控与数据连接中枢平台
+        © 2025 磐石 Bedrock · 企业现场数字化一体方案
       </div>
     </div>
 
@@ -100,11 +100,11 @@ const router = useRouter()
 const auth = useAuthStore()
 
 const features = [
-  { icon: '📱', title: '实时屏幕投影', desc: '浏览器内查看 & 操控设备屏幕，支持触控转发' },
-  { icon: '📦', title: 'APK 批量部署', desc: '一键推送安装包到多台设备，自动追踪安装状态' },
-  { icon: '🔧', title: '远程 ADB 指令', desc: '执行 Shell 命令、文件传输、日志抓取' },
-  { icon: '📊', title: '设备状态监控', desc: '实时电量、CPU、内存、网络多维度监控' },
-  { icon: '🔒', title: '多角色权限管理', desc: '管理员 / 操作员 / 查看者，精细化访问控制' },
+  { icon: '📱', title: 'Android 设备管理', desc: 'PDA / 工业手持终端远程画面、触控、Shell、APK 分发、屏幕分享' },
+  { icon: '🔗', title: 'ESB 系统集成', desc: '出站连接器、数据栈、第三方 SSO、双向对接外部 ERP / MES / 钉钉' },
+  { icon: '📝', title: 'PDA 低码平台', desc: 'Form App 小屏表单设计器、扫码联动、蓝牙打印机、一键下发到设备' },
+  { icon: '📋', title: '工单全生命周期', desc: '工单派发、扫码定位、设备快照、状态流转、实时看板、时间线追踪' },
+  { icon: '🎛️', title: '多屏联动工作流', desc: '组态 SCADA 编辑器、DAG 工作流编排、事件引擎、实时数据可视化' },
 ]
 
 onMounted(async () => {

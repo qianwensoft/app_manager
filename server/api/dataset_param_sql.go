@@ -108,8 +108,8 @@ func MockParamsInterface(c *gin.Context) {
 	}
 	// 优先从绑定数据集提取 SQL 参数
 	var dsKind, dsDef, dsSteps, dsParamSchema string
-	if iface.DatasetID != 0 {
-		ds, e := firstDatasetByID(iface.DatasetID)
+	if iface.DatasetID != nil && *iface.DatasetID != 0 {
+		ds, e := firstDatasetByID(*iface.DatasetID)
 		if e == nil {
 			dsKind, dsDef, dsSteps, dsParamSchema = ds.Kind, ds.Definition, ds.StepsJSON, ds.ParamSchema
 		}
@@ -168,8 +168,8 @@ func GetInterfaceParamSchema(c *gin.Context) {
 	}
 
 	// from dataset SQL / steps
-	if iface.DatasetID != 0 {
-		ds, e := firstDatasetByID(iface.DatasetID)
+	if iface.DatasetID != nil && *iface.DatasetID != 0 {
+		ds, e := firstDatasetByID(*iface.DatasetID)
 		if e == nil {
 			for _, item := range parseSchemaJSONItems(ds.ParamSchema) {
 				schemaItems[item.Name] = item

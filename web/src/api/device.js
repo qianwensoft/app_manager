@@ -209,3 +209,6 @@ export const adbWirelessDisconnect = (id, clearRecord = false) =>
 
 /** 通过 ADB 在设备上执行单条 shell 命令 */
 export const adbShellRun = (id, command) => http.post(`/devices/${id}/adb/shell`, { command })
+
+/** 推送 Agent 更新到设备 */
+export const pushAgentUpdate = (id, version) => http.post(`/devices/${id}/agent/push-update`, { version })

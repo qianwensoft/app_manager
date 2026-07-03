@@ -53,6 +53,9 @@ func RewriteNamedSQLParams(dialect string, sqlStr string, params map[string]inte
 		case "postgres":
 			n++
 			b.WriteString(fmt.Sprintf("$%d", n))
+		case "mssql", "sqlserver":
+			n++
+			b.WriteString(fmt.Sprintf("@p%d", n))
 		default:
 			b.WriteString("?")
 		}

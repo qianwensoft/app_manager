@@ -175,13 +175,75 @@
                 <el-tag type="success" size="small">当前在线 {{ agentConn.online_count }}</el-tag>
               </div>
             </template>
-            <TrendChart v-if="agentTrendOption" :option="agentTrendOption" :height="220" />
-            <el-empty v-else description="暂无在线数趋势数据" :image-size="60" />
-            <el-table :data="agentConn.agents" border size="small" style="margin-top: 12px" max-height="300">
-              <el-table-column prop="device_id" label="设备 ID" width="90" />
+            <div style="margin-bottom: 12px">
+              <el-input
+                v-model="agentSearchKeyword"
+                placeholder="搜索设备ID、设备名、序列号、别名..."
+                clearable
+                style="max-width: 400px"
+                @input="filterAgents"
+              >
+                <template #prefix>
+                  <el-icon><Search /></el-icon>
+                </template>
+              </el-input>
+            </div>
+            <el-table :data="filteredAgents" border size="small" style="margin-bottom: 12px" max-height="300">
+              <el-table-column label="设备 ID" width="90">
+                <template #default="{ row }">
+                  <el-link type="primary" :underline="false" @click="goToDevice(row.device_id)">
+                    {{ row.device_id }}
+                  </el-link>
+                </template>
+              </el-table-column>
               <el-table-column prop="name" label="设备名" min-width="140" show-overflow-tooltip />
-              <el-table-column prop="serial" label="序列号" min-width="140" show-overflow-tooltip />
               <el-table-column prop="android_serial" label="硬件串号" min-width="140" show-overflow-tooltip />
+              <el-table-column label="Android版本" width="120" show-overflow-tooltip>
+                <template #default="{ row }">
+                  <span v-if="row.os_version">{{ row.os_version }}</span>
+                  <span v-else style="color: #c0c4cc">-</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="Agent版本" width="150" show-overflow-tooltip>
+                <template #default="{ row }">
+                  <div v-if="row.agent_version">
+                    <div style="font-weight: 500">{{ row.agent_version }}</div>
+                    <el-button
+                      v-if="isAgentVersionOutdated(row.agent_version)"
+                      size="small"
+                      type="warning"
+                      link
+                      @click="updateAgent(row)"
+                    >
+                      更新到 {{ latestAgentVersion }}
+                    </el-button>
+                  </div>
+                  <span v-else style="color: #c0c4cc">-</span>
+                </template>
+              </el-table-column>
+              <el-table-column prop="webview_version" label="WebView版本" width="130" show-overflow-tooltip>
+                <template #default="{ row }">
+                  <span v-if="row.webview_version">{{ row.webview_version }}</span>
+                  <span v-else style="color: #c0c4cc">-</span>
+                </template>
+              </el-table-column>
+              <el-table-column label="X5内核" width="150" show-overflow-tooltip>
+                <template #default="{ row }">
+                  <div v-if="row.x5_kernel_version && row.x5_kernel_version > 0">
+                    <div style="font-weight: 500">{{ formatX5Version(row.x5_kernel_version) }}</div>
+                    <el-tag v-if="row.x5_kernel_state && row.x5_kernel_state.trim()" size="small" :type="getX5StateType(row.x5_kernel_state)">
+                      {{ getX5StateLabel(row.x5_kernel_state) }}
+                    </el-tag>
+                  </div>
+                  <el-tag v-else size="small" type="info">未安装</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="在线时长" width="110">
+                <template #default="{ row }">
+                  <span v-if="row.online_duration !== undefined">{{ formatDuration(getRealtimeDuration(row)) }}</span>
+                  <span v-else style="color: #c0c4cc">-</span>
+                </template>
+              </el-table-column>
               <el-table-column label="前台应用" min-width="180" show-overflow-tooltip>
                 <template #default="{ row }">
                   <div v-if="row.foreground_package">
@@ -195,6 +257,8 @@
                 <template #default="{ row }">{{ row.last_seen_at ? new Date(row.last_seen_at).toLocaleString() : '-' }}</template>
               </el-table-column>
             </el-table>
+            <TrendChart v-if="agentTrendOption" :option="agentTrendOption" :height="220" style="margin-top: 12px" />
+            <el-empty v-else description="暂无在线数趋势数据" :image-size="60" style="margin-top: 12px" />
           </el-card>
 
           <!-- 接口调用量 -->
@@ -477,10 +541,11 @@
 import { ref, onMounted, computed, watch, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowRight } from '@element-plus/icons-vue'
+import { ArrowRight, Search } from '@element-plus/icons-vue'
 import { getHeartbeatSettings, updateHeartbeatSettings, getSystemInfo, updateEnvSettings, checkFFmpeg, installFFmpeg, getAgentConnections, getAgentOnlineTrend, getApiCallTrend, getApiCallDetails, getStompStats, getClaudeConfig, updateClaudeConfig } from '@/api/settings'
 import { uploadAgentAPK, listAgentUpdates, downloadAgentAPK, deleteAgentUpdate } from '@/api/agentUpdate'
 import { getRegisterSetting, updateRegisterSetting } from '@/api/user'
+import { pushAgentUpdate } from '@/api/device'
 import TrendChart from '@/components/TrendChart.vue'
 import X5KernelManagement from '@/views/X5KernelManagement.vue'
 import { Client } from '@stomp/stompjs'
@@ -636,6 +701,52 @@ const agentTrend = ref([])
 const apiTrend = ref([])
 const apiDetails = ref([])
 
+// Agent 搜索
+const agentSearchKeyword = ref('')
+const filteredAgents = ref([])
+
+// 在线时长实时更新定时器
+let durationUpdateTimer = null
+const durationTick = ref(0) // 用于触发响应式更新的计数器
+
+const startDurationTimer = () => {
+  if (durationUpdateTimer) return
+  // 每秒触发一次强制更新以刷新在线时长显示
+  durationUpdateTimer = setInterval(() => {
+    // 更新计数器触发响应式更新
+    durationTick.value++
+  }, 1000)
+}
+
+const stopDurationTimer = () => {
+  if (durationUpdateTimer) {
+    clearInterval(durationUpdateTimer)
+    durationUpdateTimer = null
+  }
+}
+
+const filterAgents = () => {
+  const keyword = agentSearchKeyword.value.toLowerCase().trim()
+  if (!keyword) {
+    filteredAgents.value = agentConn.value.agents
+    return
+  }
+  filteredAgents.value = agentConn.value.agents.filter(agent => {
+    return (
+      String(agent.device_id).includes(keyword) ||
+      (agent.name && agent.name.toLowerCase().includes(keyword)) ||
+      (agent.serial && agent.serial.toLowerCase().includes(keyword)) ||
+      (agent.android_serial && agent.android_serial.toLowerCase().includes(keyword)) ||
+      (agent.server_alias && agent.server_alias.toLowerCase().includes(keyword)) ||
+      (agent.agent_alias && agent.agent_alias.toLowerCase().includes(keyword))
+    )
+  })
+}
+
+const goToDevice = (deviceId) => {
+  router.push(`/devices/${deviceId}`)
+}
+
 // STOMP 主题监控
 const stompGroups = ref([])
 const stompTimestamp = ref('')
@@ -682,17 +793,26 @@ const loadMonitor = async () => {
   monitorLoading.value = true
   try {
     const gran = monitorHours.value > 24 ? 'hour' : 'minute'
-    const [conn, aTrend, cTrend, details, sStats] = await Promise.all([
+    const [conn, aTrend, cTrend, details, sStats, agentUpdates] = await Promise.all([
       getAgentConnections(),
       getAgentOnlineTrend(monitorHours.value),
       getApiCallTrend(monitorHours.value, gran),
       getApiCallDetails(monitorHours.value),
-      getStompStats()
+      getStompStats(),
+      listAgentUpdates()
     ])
     agentConn.value = conn || { online_count: 0, agents: [] }
+    // 记录数据获取时间用于实时计算在线时长
+    const fetchTime = Math.floor(Date.now() / 1000)
+    agentConn.value.agents = agentConn.value.agents.map(agent => ({
+      ...agent,
+      _fetchTime: fetchTime
+    }))
+    filteredAgents.value = agentConn.value.agents
     agentTrend.value = aTrend?.points || []
     apiTrend.value = cTrend?.points || []
     apiDetails.value = details?.details || []
+    updates.value = agentUpdates?.items || []
     stompGroups.value = sStats?.groups || []
     stompTimestamp.value = sStats?.timestamp || ''
   } catch (e) {
@@ -723,10 +843,15 @@ const connectMonitorStomp = () => {
         try {
           const data = JSON.parse(message.body)
           if (data.type === 'agent_connection_change') {
+            const fetchTime = Math.floor(Date.now() / 1000)
             agentConn.value = {
               online_count: data.online_count,
-              agents: data.agents || []
+              agents: (data.agents || []).map(agent => ({
+                ...agent,
+                _fetchTime: fetchTime
+              }))
             }
+            filterAgents()
           }
         } catch (e) {
           console.warn('[Monitor] Parse STOMP message error:', e)
@@ -765,6 +890,7 @@ const disconnectMonitorStomp = () => {
     stompClient = null
     console.log('[Monitor] STOMP disconnected manually')
   }
+  stopDurationTimer()
 }
 
 let monitorLoaded = false
@@ -776,9 +902,10 @@ watch(activeTab, (tab) => {
   if (tab === 'monitor' && !monitorLoaded) {
     monitorLoaded = true
     loadMonitor()
-    connectMonitorStomp() // 启动 STOMP 实时推送
+    connectMonitorStomp()
+    startDurationTimer()
   } else if (tab !== 'monitor') {
-    disconnectMonitorStomp() // 离开监控标签时断开 STOMP
+    stopDurationTimer()
   }
 })
 
@@ -795,12 +922,14 @@ onMounted(async () => {
     monitorLoaded = true
     loadMonitor()
     connectMonitorStomp()
+    startDurationTimer()
   }
 })
 
 // 组件卸载时断开 STOMP
 onBeforeUnmount(() => {
   disconnectMonitorStomp()
+  stopDurationTimer()
 })
 
 const loadSystemInfo = async () => {
@@ -898,6 +1027,132 @@ const formatUptime = (seconds) => {
   if (d > 0) return `${d}天 ${h}时 ${m}分 ${s}秒`
   if (h > 0) return `${h}时 ${m}分 ${s}秒`
   return `${m}分 ${s}秒`
+}
+
+const formatDuration = (seconds) => {
+  if (!seconds || seconds < 0) return '-'
+  const d = Math.floor(seconds / 86400)
+  const h = Math.floor((seconds % 86400) / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  const s = Math.floor(seconds % 60)
+  if (d > 0) return `${d}天${h}时${m}分`
+  if (h > 0) return `${h}时${m}分`
+  if (m > 0) return `${m}分${s}秒`
+  return `${s}秒`
+}
+
+// 实时计算在线时长（每秒更新）
+const getRealtimeDuration = (row) => {
+  // 读取 durationTick 以建立响应式依赖
+  const _ = durationTick.value
+
+  if (!row.online_duration || row.online_duration < 0) return 0
+  // online_duration 是连接时的初始秒数，加上当前时间流逝的秒数
+  const now = Math.floor(Date.now() / 1000)
+  const baseTime = row._fetchTime || now // 记录数据获取时间
+  const elapsed = now - baseTime
+  return row.online_duration + elapsed
+}
+
+// 格式化 X5 内核版本号
+const formatX5Version = (version) => {
+  if (!version || version === 0) return '-'
+  // X5 版本格式类似: 46313
+  return `v${version}`
+}
+
+// 获取 X5 内核状态标签
+const getX5StateLabel = (state) => {
+  const labels = {
+    'INSTALLED': '已安装',
+    'ACTIVATED': '已启用',
+    'NOT_INSTALLED': '未安装',
+    'DOWNLOADING': '下载中',
+    'INSTALLING': '安装中',
+    'FAILED': '失败'
+  }
+  return labels[state] || state
+}
+
+// 获取 X5 内核状态标签类型
+const getX5StateType = (state) => {
+  const types = {
+    'INSTALLED': 'info',
+    'ACTIVATED': 'success',
+    'NOT_INSTALLED': 'info',
+    'DOWNLOADING': 'warning',
+    'INSTALLING': 'warning',
+    'FAILED': 'danger'
+  }
+  return types[state] || 'info'
+}
+
+// 安装 X5 内核
+const installX5Kernel = async (device) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要为设备 ${device.name || device.device_id} 安装 X5 内核吗？`,
+      '安装确认',
+      { type: 'warning' }
+    )
+    // TODO: 调用安装 X5 内核的 API
+    ElMessage.info('正在向设备发送安装指令...')
+  } catch {
+    // 用户取消
+  }
+}
+
+// 计算最新的 Agent 版本
+const latestAgentVersion = computed(() => {
+  if (!updates.value || updates.value.length === 0) return ''
+  // 找到版本号最高的更新
+  const sorted = [...updates.value].sort((a, b) => {
+    // 使用 version_code 字段比较，如果没有则解析版本字符串
+    const vA = a.version_code || parseVersionCode(a.version)
+    const vB = b.version_code || parseVersionCode(b.version)
+    return vB - vA
+  })
+  // 构建完整版本字符串：如果 version 不包含版本码，则添加上
+  const latestUpdate = sorted[0]
+  if (!latestUpdate) return ''
+  const version = latestUpdate.version
+  const versionCode = latestUpdate.version_code
+  // 如果版本字符串中没有括号，且有 version_code，则添加
+  return version && versionCode && !version.includes('(')
+    ? `${version} (${versionCode})`
+    : version
+})
+
+// 解析版本号，提取版本码用于比较（例如 "2.3.1 (248)" -> 248）
+const parseVersionCode = (versionStr) => {
+  if (!versionStr) return 0
+  const match = versionStr.match(/\((\d+)\)/)
+  return match ? parseInt(match[1]) : 0
+}
+
+// 判断 Agent 版本是否过期
+const isAgentVersionOutdated = (currentVersion) => {
+  if (!currentVersion || !latestAgentVersion.value) return false
+  const current = parseVersionCode(currentVersion)
+  const latest = parseVersionCode(latestAgentVersion.value)
+  return current > 0 && latest > 0 && current < latest
+}
+
+// 更新 Agent
+const updateAgent = async (device) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要将设备 ${device.name || device.device_id} 的 Agent 从 ${device.agent_version} 更新到 ${latestAgentVersion.value} 吗？`,
+      '更新确认',
+      { type: 'warning' }
+    )
+    await pushAgentUpdate(device.device_id, latestAgentVersion.value)
+    ElMessage.success('更新指令已发送到设备，请稍候...')
+  } catch (e) {
+    if (e !== 'cancel') {
+      ElMessage.error('发送更新指令失败: ' + (e?.response?.data?.error || e.message))
+    }
+  }
 }
 
 const loadUpdates = async () => {

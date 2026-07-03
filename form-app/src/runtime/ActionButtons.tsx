@@ -161,21 +161,36 @@ interface NavigateButtonProps {
   text?: string
   type?: ButtonType
   block?: boolean
+  navigateType?: 'internal' | 'url'
   targetPage?: string
+  targetUrl?: string
   paramMapping?: Record<string, string>
 }
 
 export function NavigateButton(props: NavigateButtonProps) {
-  const { text = '跳转', type = 'default', block, targetPage, paramMapping } = props
+  const { text = '跳转', type = 'default', block, navigateType = 'internal', targetPage, targetUrl, paramMapping } = props
   const { navigate, getFormValues } = useFormAction()
+
+  const handleClick = () => {
+    if (navigateType === 'url') {
+      // 外部 URL 跳转
+      if (targetUrl) {
+        window.open(targetUrl, '_blank')
+      }
+    } else {
+      // App 内页面跳转
+      if (targetPage) {
+        navigate?.(targetPage, resolveParamMapping(paramMapping, getFormValues?.() || {}))
+      }
+    }
+  }
+
   return (
     <Button
       variant={getVariant(type)}
       className={block ? 'w-full' : ''}
       type="button"
-      onClick={() => {
-        if (targetPage) navigate?.(targetPage, resolveParamMapping(paramMapping, getFormValues?.() || {}))
-      }}
+      onClick={handleClick}
     >
       {text}
     </Button>

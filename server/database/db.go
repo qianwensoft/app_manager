@@ -96,6 +96,7 @@ var migrateGroups = [][]interface{}{
 	{
 		&models.User{},
 		&models.Device{},
+		&models.DeviceRealTimeStatus{},
 		&models.App{},
 		&models.ApiKey{},
 		&models.OAuthClient{},
@@ -202,6 +203,8 @@ var migrateGroups = [][]interface{}{
 	{
 		&models.WorkflowDefinition{},
 		&models.WorkflowExecution{},
+		&models.WorkflowExecutionLog{},
+		&models.CompensationDeadLetter{},
 	},
 	// Group 11 — x5 kernel
 	{
@@ -266,6 +269,7 @@ func initSchema(db *gorm.DB) error {
 		MigrateUserThirdParty,
 		MigrateThirdPartyOutbound,
 		migrations.MigrateDeviceX5Fields,
+		func(db *gorm.DB) { migrations.AddWorkflowInterfaceFields(db) },
 	}
 	if strings.ToLower(strings.TrimSpace(db.Dialector.Name())) == "mysql" {
 		// MySQL 支持并发写，并行执行加速启动。

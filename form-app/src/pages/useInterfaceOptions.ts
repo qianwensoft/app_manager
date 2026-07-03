@@ -60,6 +60,7 @@ export function useInterfaceOptions(): InterfaceOptionsData {
               value: it.code,
               label: `${it.code}${it.name ? `（${it.name}）` : ''}`,
             }))
+            .filter((opt: any) => opt.value != null) // 二次过滤确保没有 null
         )
         const schemas: Record<string, string> = {}
         const paramSchemas: Record<string, string> = {}
@@ -84,6 +85,7 @@ export function useInterfaceOptions(): InterfaceOptionsData {
               value: String(it.id),
               label: `${it.name}${it.app?.name ? ` [${it.app.name}]` : ''}`,
             }))
+            .filter((opt: any) => opt.value != null && opt.value !== 'null') // 二次过滤确保没有 null
         )
         const schemas: Record<string, string> = {}
         const paramSchemas: Record<string, string> = {}
@@ -108,6 +110,7 @@ export function useInterfaceOptions(): InterfaceOptionsData {
               value: it.interface_code,
               label: `${it.interface_code}${it.name ? ` - ${it.name}` : ''}`,
             }))
+            .filter((opt: any) => opt.value != null) // 二次过滤确保没有 null
         )
         const schemas: Record<string, string> = {}
         const paramSchemas: Record<string, string> = {}

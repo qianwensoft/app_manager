@@ -65,3 +65,64 @@ func (WorkflowDefinition) TableName() string {
 func (WorkflowExecution) TableName() string {
 	return "workflow_executions"
 }
+
+// WorkflowExecutionLog 数据接口工作流执行日志
+type WorkflowExecutionLog struct {
+	ID            uint      `gorm:"primaryKey" json:"id"`
+	RequestID     string    `gorm:"size:64;uniqueIndex" json:"request_id"`
+	InterfaceID   uint      `gorm:"index" json:"interface_id"`
+	InterfaceCode string    `gorm:"size:120;index" json:"interface_code"`
+	UserID        *uint     `gorm:"index" json:"user_id"`
+
+	// 请求信息
+	ParamValuesJSON string `gorm:"type:text" json:"param_values_json"`
+	ClientIP        string `gorm:"size:45" json:"client_ip"`
+	UserAgent       string `gorm:"size:255" json:"user_agent"`
+
+	// 执行结果
+	Status         string `gorm:"size:32;index" json:"status"` // success, failed, compensated, timeout
+	TotalSteps     int    `gorm:"default:0" json:"total_steps"`
+	CompletedSteps int    `gorm:"default:0" json:"completed_steps"`
+	FailedStepID   string `gorm:"size:120" json:"failed_step_id"`
+	ErrorMessage   string `gorm:"type:text" json:"error_message"`
+
+	// 性能指标
+	ElapsedMS      int64 `gorm:"index" json:"elapsed_ms"`
+	CompensationMS int64 `json:"compensation_ms"` // 补偿耗时
+
+	// 详细步骤日志（JSON）
+	StepLogsJSON string `gorm:"type:text" json:"step_logs_json"`
+
+	// 标记
+	Compensated    bool `gorm:"default:false;index" json:"compensated"`
+	ManualResolved bool `gorm:"default:false" json:"manual_resolved"`
+
+	CreatedAt time.Time `gorm:"index" json:"created_at"`
+}
+
+// CompensationDeadLetter 补偿死信记录
+type CompensationDeadLetter struct {
+	ID              uint      `gorm:"primaryKey" json:"id"`
+	RequestID       string    `gorm:"size:64;index" json:"request_id"`
+	InterfaceID     uint      `gorm:"index" json:"interface_id"`
+	InterfaceCode   string    `gorm:"size:120;index" json:"interface_code"`
+	FailedStepID    string    `gorm:"size:120" json:"failed_step_id"`
+	CompensationSQL string    `gorm:"type:text" json:"compensation_sql"`
+	Datasource      string    `gorm:"size:80" json:"datasource"`
+	ContextJSON     string    `gorm:"type:text" json:"context_json"` // 执行上下文快照
+
+	RetryCount  int       `gorm:"default:0" json:"retry_count"`
+	MaxRetries  int       `gorm:"default:3" json:"max_retries"`
+	NextRetryAt time.Time `gorm:"index" json:"next_retry_at"`
+	LastError   string    `gorm:"type:text" json:"last_error"`
+
+	Status   string `gorm:"size:32;index" json:"status"` // pending, retrying, success, failed, manual_required
+	Priority int    `gorm:"default:0;index" json:"priority"`
+
+	AssignedTo  *uint      `gorm:"index" json:"assigned_to"` // 分配给哪个运维人员处理
+	ResolvedAt  *time.Time `json:"resolved_at"`
+	ResolveNote string     `gorm:"type:text" json:"resolve_note"`
+
+	CreatedAt time.Time `gorm:"index" json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}

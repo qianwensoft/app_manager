@@ -49,8 +49,9 @@ type Dataset struct {
 	Definition   string          `gorm:"type:text" json:"definition"`       // static: JSON 行数组；query/buffer: SQL
 	StepsJSON    string          `gorm:"type:text" json:"steps_json"`       // 事务：步骤数组 JSON
 	ParamSchema  string          `gorm:"type:text" json:"param_schema"`
-	MetaJSON     string          `gorm:"type:text" json:"meta_json"` // 入站、缓冲表名等扩展 JSON
-	Structures   []DataStructure `gorm:"foreignKey:DatasetID" json:"structures,omitempty"`
+	MetaJSON         string          `gorm:"type:text" json:"meta_json"`          // 入站、缓冲表名等扩展 JSON
+	MultiSourcesJSON string          `gorm:"type:text" json:"multi_sources_json"` // 多数据源配置：[{"alias":"db_hz","data_source_id":1},...]；非空时 kind 须为 query/queryOne/transaction
+	Structures       []DataStructure `gorm:"foreignKey:DatasetID" json:"structures,omitempty"`
 	CreatedAt    time.Time       `json:"created_at"`
 	UpdatedAt    time.Time       `json:"updated_at"`
 }
@@ -85,8 +86,8 @@ type DataInterface struct {
 	Name              string         `gorm:"size:200" json:"name"`
 	Code              string         `gorm:"uniqueIndex;size:120" json:"code"` // 开放 API 路径主键；可与 slug 相同
 	Slug              string         `gorm:"uniqueIndex;size:120" json:"slug"`
-	Kind              string         `gorm:"size:32;default:query" json:"kind"` // query — returns []row; queryOne — returns first row as object (or null); transaction
-	DatasetID         uint           `gorm:"index" json:"dataset_id"`
+	Kind              string         `gorm:"size:32;default:query" json:"kind"` // query — returns []row; queryOne — returns first row as object (or null); transaction; workflow
+	DatasetID         *uint          `gorm:"index" json:"dataset_id"` // workflow类型时可为NULL
 	Dataset           *Dataset       `gorm:"foreignKey:DatasetID" json:"dataset,omitempty"`
 	DataStructureID   *uint          `gorm:"index" json:"data_structure_id"`
 	DataStructure     *DataStructure `gorm:"foreignKey:DataStructureID" json:"data_structure,omitempty"`
@@ -101,12 +102,16 @@ type DataInterface struct {
 	// 自动生成的接口由 GenerateCrudInterfaces 写入；手动接口可自由编辑。
 	StepsJSON  string `gorm:"type:text" json:"steps_json"` // 事务接口：SQL 步骤数组 JSON
 	SchemaJSON string `gorm:"type:text" json:"schema_json"`
+	// workflow类型专用字段
+	WorkflowJSON      string `gorm:"type:text" json:"workflow_json"`      // 工作流定义JSON
+	DatasourcesJSON   string `gorm:"type:text" json:"datasources_json"`   // 多数据源配置JSON
 	// 声明式整形（数据集深度定制）：空值=关闭，向后兼容。仅作用于 query/queryOne（部分作用于 static）。
 	ParamContractJSON string    `gorm:"type:text" json:"param_contract_json"` // []ParamSpec：参数契约（类型/必填/枚举/范围/正则/默认）
 	FieldMappingJSON  string    `gorm:"type:text" json:"field_mapping_json"`  // ProjectionSpec：输出字段投影/重命名
 	ExtraFiltersJSON  string    `gorm:"type:text" json:"extra_filters_json"`  // []ShapeFilter：附加过滤条件
 	SortJSON          string    `gorm:"type:text" json:"sort_json"`           // []SortSpec：排序
-	PaginationJSON    string    `gorm:"type:text" json:"pagination_json"`     // PaginationSpec：分页默认值+上限
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	PaginationJSON          string    `gorm:"type:text" json:"pagination_json"`           // PaginationSpec：分页默认值+上限
+	PinnedDatasourceAlias   string    `gorm:"size:80;default:''" json:"pinned_datasource_alias"` // 多数据源：非空时固定使用该别名；空=调用时必传 datasource_alias
+	CreatedAt               time.Time `json:"created_at"`
+	UpdatedAt               time.Time `json:"updated_at"`
 }

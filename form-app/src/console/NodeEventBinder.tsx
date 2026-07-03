@@ -15,7 +15,16 @@ import { observer } from '@formily/reactive-react'
 import { useCurrentNode } from '@designable/react'
 import type { PageEvent } from '@/runtime/eventTypes'
 
-const BUTTON_COMPONENTS = new Set(['ActionButton', 'EventButton', 'SubmitButton', 'PrintButton'])
+const BUTTON_COMPONENTS = new Set([
+  'ActionButton',
+  'EventButton',
+  'SubmitButton',
+  'PrintButton',
+  'NavigateButton',
+  'FeedbackButton',
+  'CustomButton',
+  'ConfirmDialogButton',
+])
 
 async function authed(path: string, method: string, body?: any) {
   const token = localStorage.getItem('token') || ''

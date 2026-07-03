@@ -366,6 +366,8 @@ func emitAgentSystemEvent(eventType, deviceKey string) {
 func init() {
 	agent.OnAgentConnect = func(deviceID string) {
 		RestoreDeviceCustomEventListenForAgentKey(deviceID)
+		// 推送 Agent 连接变化到监控页面
+		agent.PublishAgentConnectionChange()
 	}
 	agent.OnAgentDisconnect = func(deviceID string) {
 		routeKey := agent.CanonicalRouteKeyFromWS(deviceID)
@@ -380,6 +382,8 @@ func init() {
 		wrtc.CameraHub.RemoveAllPublishers(routeKey)
 		cluster.PublishWebRTCStopCamera(routeKey, wrtc.CameraBack)
 		cluster.PublishWebRTCStopCamera(routeKey, wrtc.CameraFront)
+		// 推送 Agent 连接变化到监控页面
+		agent.PublishAgentConnectionChange()
 	}
 	// Handle uplink messages from agents
 	agent.SetMessageHandler(func(deviceID string, msg map[string]interface{}) {

@@ -135,6 +135,7 @@ export default function BasicInfoPanel({ app, pages, onSaved }: Props) {
             onChange={setAppEvents}
             fields={[]}
             printers={globalPrinters}
+            buttons={[]}
             interfaceOptions={iface.interfaceOptions}
             thirdPartyEndpointOptions={iface.thirdPartyEndpointOptions}
             connectorInterfaceOptions={iface.connectorInterfaceOptions}

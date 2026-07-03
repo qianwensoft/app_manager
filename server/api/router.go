@@ -145,6 +145,7 @@ func SetupRouter() *gin.Engine {
 		d.POST("/:id/agent/refresh-info", RefreshAgentDeviceInfoFromAgent)
 		d.POST("/:id/agent/open-wireless-adb", auth.RequireRole("admin", "operator"), OpenWirelessAdbOnAgent)
 		d.POST("/:id/agent/trigger-menu", auth.RequireRole("admin", "operator"), TriggerAgentMenuOnAgent)
+		d.POST("/:id/agent/push-update", auth.RequireRole("admin", "operator"), PushAgentUpdate)
 		d.POST("/:id/agent/nav-key", auth.RequireRole("admin", "operator"), AgentNavKey)
 		d.POST("/:id/speed-test", auth.RequireRole("admin", "operator"), DeviceSpeedTest)
 		d.GET("/:id/file-hub", ListDeviceFileHub)
@@ -481,6 +482,32 @@ func SetupRouter() *gin.Engine {
 		dstack.PUT("/interfaces/:id", auth.RequireRole("admin", "operator"), UpdateDataInterface)
 		dstack.DELETE("/interfaces/:id", auth.RequireRole("admin", "operator"), DeleteDataInterface)
 		dstack.POST("/interfaces/batch-delete", auth.RequireRole("admin", "operator"), BatchDeleteDataInterfaces)
+
+		// Workflow execution logs
+		dstack.GET("/workflow-executions", ListWorkflowExecutionLogs)
+		dstack.GET("/workflow-executions/recent", GetRecentWorkflowExecutions)
+		dstack.GET("/workflow-executions/stats", GetWorkflowExecutionStats)
+		dstack.GET("/workflow-executions/:request_id", GetWorkflowExecutionLog)
+		dstack.GET("/workflow-executions/:request_id/progress", GetWorkflowExecutionProgress)
+		dstack.GET("/workflow-executions/:request_id/timeline", GetWorkflowExecutionTimeline)
+		dstack.POST("/workflow-executions/:request_id/retry", auth.RequireRole("admin", "operator"), RetryWorkflowExecution)
+		dstack.DELETE("/workflow-executions/:request_id", auth.RequireRole("admin"), DeleteWorkflowExecutionLog)
+
+		// Compensation dead letter queue
+		dstack.GET("/compensation-deadletters", ListCompensationDeadLetters)
+		dstack.GET("/compensation-deadletters/stats", GetCompensationDeadLetterStats)
+		dstack.GET("/compensation-deadletters/:id", GetCompensationDeadLetter)
+		dstack.POST("/compensation-deadletters/:id/retry", auth.RequireRole("admin", "operator"), RetryCompensationDeadLetter)
+		dstack.POST("/compensation-deadletters/:id/mark-processed", auth.RequireRole("admin", "operator"), MarkCompensationDeadLetterProcessed)
+		dstack.DELETE("/compensation-deadletters/:id", auth.RequireRole("admin"), DeleteCompensationDeadLetter)
+		dstack.POST("/compensation-deadletters/batch-delete", auth.RequireRole("admin"), BatchDeleteCompensationDeadLetters)
+		dstack.POST("/compensation-deadletters/purge-processed", auth.RequireRole("admin"), PurgeProcessedDeadLetters)
+
+		// 异步任务管理
+		dstack.GET("/async-tasks", auth.RequireRole("admin", "operator", "viewer"), ListRunningAsyncTasks)
+		dstack.GET("/async-tasks/stats", auth.RequireRole("admin", "operator", "viewer"), GetAsyncExecutorStats)
+		dstack.GET("/async-tasks/:request_id/:step_id", auth.RequireRole("admin", "operator", "viewer"), GetAsyncTaskStatus)
+		dstack.POST("/async-tasks/cleanup", auth.RequireRole("admin"), CleanupAsyncTasks)
 	}
 	amenu := r.Group("/api/agent-menus", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"))
 	{
@@ -612,6 +639,7 @@ func SetupRouter() *gin.Engine {
 		fapp.PUT("/skills/:skill_id", auth.RequireRole("admin", "operator"), UpdateAISkill)
 		fapp.DELETE("/skills/:skill_id", auth.RequireRole("admin", "operator"), DeleteAISkill)
 		fapp.POST("/ai/chat", FormAppAIChat)
+		fapp.POST("/ai/sql-generate", SQLAIGenerate)
 
 		fapp.GET("/infos/:id/event-routes", GetFormAppEventRoutes)
 		fapp.POST("/infos/:id/event-routes", auth.RequireRole("admin", "operator"), CreateFormAppEventRoute)

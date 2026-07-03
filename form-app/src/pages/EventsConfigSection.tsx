@@ -117,7 +117,10 @@ export default function EventsConfigSection({
   thirdPartyParamSchemas?: Record<string, string>
   connectorParamSchemas?: Record<string, string>
 }) {
-  const fieldOptions = fields.map(f => ({ value: f.field, label: f.label || f.field }))
+  const fieldOptions = fields
+    .filter(f => f.field != null)
+    .map(f => ({ value: f.field, label: f.label || f.field }))
+    .filter(opt => opt.value != null)
 
   // 本页已定义的自定义事件名（供「触发事件」动作选择），去重
   const customEventNames = Array.from(new Set(

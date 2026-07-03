@@ -128,7 +128,10 @@ export default function LinksEventsPanel({ app, pages, links, eventRoutes, reloa
         </div>
         <div>
           <label>参数映射 (JSON)</label>
-          <Input.TextArea value={newLink.param_mapping} onChange={e => setNewLink({ ...newLink, param_mapping: e.target.value })} rows={3} placeholder='{"id":"$row.id"}' />
+          <Input.TextArea value={newLink.param_mapping} onChange={e => setNewLink({ ...newLink, param_mapping: e.target.value })} rows={3} placeholder='{"id":"$row.id","device_id":"$url.device_id"}' />
+          <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+            支持: $row.xxx (列表行数据), $url.xxx (当前页面URL参数)
+          </div>
         </div>
       </Modal>
 

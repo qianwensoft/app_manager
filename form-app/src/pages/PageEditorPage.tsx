@@ -9,6 +9,7 @@ import FieldRenderer from '@/runtime/FieldRenderer'
 import type { FieldDef } from '@/runtime/types'
 import type { PageEvent } from '@/runtime/eventTypes'
 import type { PrinterTemplate } from '@/runtime/printerTypes'
+import { PrintButtonContext } from '@/runtime/PrintButtonContext'
 import { fieldDefsToSchema } from './schemaConverter'
 import { useInterfaceOptions } from './useInterfaceOptions'
 import EventsConfigSection from './EventsConfigSection'
@@ -75,6 +76,7 @@ export default function PageEditorPage() {
   const [enableDraft, setEnableDraft] = useState(false)
   const [pageEvents, setPageEvents] = useState<PageEvent[]>([])
   const [printers, setPrinters] = useState<PrinterTemplate[]>([])
+  const [paramSchema, setParamSchema] = useState('')
 
   // 字段编辑 modal
   const [modalVisible, setModalVisible] = useState(false)
@@ -119,6 +121,7 @@ export default function PageEditorPage() {
       setEnableDraft(!!config.enable_draft)
       setPageEvents(Array.isArray(config.events) ? config.events : [])
       setPrinters(Array.isArray(config.printers) ? config.printers : [])
+      setParamSchema(config.param_schema || '')
     } catch (e: any) {
       message.error(e.message)
     }
@@ -127,7 +130,7 @@ export default function PageEditorPage() {
   const save = async () => {
     setSaving(true)
     try {
-      const config = { field_definitions: fields, scanner: scannerConfig, events: pageEvents, printers, show_default_submit: showDefaultSubmit, enable_draft: enableDraft }
+      const config = { field_definitions: fields, scanner: scannerConfig, events: pageEvents, printers, show_default_submit: showDefaultSubmit, enable_draft: enableDraft, param_schema: paramSchema }
 
       // 同时生成并保存 design_schema
       const designSchema = fieldDefsToSchema(fields)
@@ -282,6 +285,25 @@ export default function PageEditorPage() {
             </div>
           )}
 
+          <div style={{ marginBottom: 20 }}>
+            <label style={{ display: 'block', marginBottom: 8, fontSize: 13, fontWeight: 500, color: '#374151' }}>
+              页面入参 Schema (JSON)
+              <Tooltip title="定义此页面接收的 URL 参数，用于跳转时的参数映射和页面内部引用">
+                <span style={{ marginLeft: 4, color: '#94a3b8', cursor: 'help' }}>ⓘ</span>
+              </Tooltip>
+            </label>
+            <Input.TextArea
+              value={paramSchema}
+              onChange={e => setParamSchema(e.target.value)}
+              rows={3}
+              placeholder='{"id": {"type": "string", "description": "设备ID"}, "status": {"type": "string"}}'
+              style={{ fontFamily: 'monospace', fontSize: 12 }}
+            />
+            <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>
+              定义页面接收的参数，可在参数映射中使用 $url.xxx 引用
+            </div>
+          </div>
+
           <Divider orientation="left" style={{ fontSize: 13, color: '#64748b' }}>字段定义</Divider>
 
           <Button size="small" type="dashed" onClick={addField} style={{ marginBottom: 12, width: '100%' }}>
@@ -344,6 +366,13 @@ export default function PageEditorPage() {
             onChange={setPageEvents}
             fields={fields}
             printers={printers}
+            buttons={fields
+              .filter(f => f.component === 'PrintButton' || f.button_id)
+              .map(f => ({
+                buttonId: f.button_id || f.field,
+                text: f.button_text || f.label || f.field,
+                component: f.component,
+              }))}
             interfaceOptions={interfaceOptions}
             thirdPartyEndpointOptions={thirdPartyEndpointOptions}
             connectorInterfaceOptions={connectorInterfaceOptions}
@@ -407,7 +436,7 @@ export default function PageEditorPage() {
           onApplyEvents={(e) => { setPageEvents(e); message.success('已应用 AI 生成的事件') }}
           onApplyPrinters={(p) => { setPrinters(p); message.success('已应用 AI 生成的打印模板') }}
           onSaveToPage={async (f, source, events, prn) => {
-            const config = { field_definitions: f, scanner: scannerConfig, events: events ?? pageEvents, printers: prn ?? printers, show_default_submit: showDefaultSubmit, enable_draft: enableDraft }
+            const config = { field_definitions: f, scanner: scannerConfig, events: events ?? pageEvents, printers: prn ?? printers, show_default_submit: showDefaultSubmit, enable_draft: enableDraft, param_schema: paramSchema }
             const designSchema = fieldDefsToSchema(f)
             await authed(`/api/form-app/pages/${pageId}/ai-save`, 'POST', {
               config_json: JSON.stringify(config),
@@ -496,23 +525,33 @@ function FormPreview({ fields, pageType, title }: { fields: FieldDef[]; pageType
     )
   }
 
+  // 为预览提供一个模拟的 PrintButtonContext（按钮可见但不执行）
+  const mockPrintButtonContext = {
+    print: undefined,
+    triggerButton: (buttonId: string) => {
+      console.log('[Preview] Button triggered:', buttonId)
+    },
+  }
+
   return (
-    <div style={{ background: '#fff', borderRadius: 10, padding: 24, border: '1px solid #e5e7eb', maxWidth: 520 }}>
-      {title && <h3 style={{ marginTop: 0, marginBottom: 20 }}>{title}</h3>}
-      {fields.map(f => (
-        <FieldRenderer
-          key={f.field}
-          def={f}
-          value={values[f.field]}
-          onChange={v => setValues(prev => ({ ...prev, [f.field]: v }))}
-        />
-      ))}
-      {pageType === 'form' && (
-        <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid #f0f0f0' }}>
-          <Button type="primary" style={{ width: '100%' }}>提交</Button>
-        </div>
-      )}
-    </div>
+    <PrintButtonContext.Provider value={mockPrintButtonContext}>
+      <div style={{ background: '#fff', borderRadius: 10, padding: 24, border: '1px solid #e5e7eb', maxWidth: 520 }}>
+        {title && <h3 style={{ marginTop: 0, marginBottom: 20 }}>{title}</h3>}
+        {fields.map(f => (
+          <FieldRenderer
+            key={f.field}
+            def={f}
+            value={values[f.field]}
+            onChange={v => setValues(prev => ({ ...prev, [f.field]: v }))}
+          />
+        ))}
+        {pageType === 'form' && (
+          <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid #f0f0f0' }}>
+            <Button type="primary" style={{ width: '100%' }}>提交</Button>
+          </div>
+        )}
+      </div>
+    </PrintButtonContext.Provider>
   )
 }
 

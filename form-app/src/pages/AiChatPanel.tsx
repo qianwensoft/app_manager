@@ -109,6 +109,24 @@ export default function AiChatPanel({ currentFields, currentEvents, currentPrint
     return false // 阻止真实上传
   }
 
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
+      if (item.type.indexOf('image') !== -1) {
+        const file = item.getAsFile()
+        if (file) {
+          e.preventDefault() // 阻止默认粘贴行为
+          beforeUpload(file)
+          message.success('图片已粘贴，可继续输入文字后发送')
+          break
+        }
+      }
+    }
+  }
+
   const send = async () => {
     if (streaming) return
     const text = input.trim()
@@ -395,9 +413,10 @@ export default function AiChatPanel({ currentFields, currentEvents, currentPrint
         <Input.TextArea
           value={input}
           onChange={e => setInput(e.target.value)}
-          placeholder="例如：做一个员工入职登记表，含姓名、部门；或：扫码后把值填入条码字段并提示成功"
+          placeholder="例如：做一个员工入职登记表，含姓名、部门；或：扫码后把值填入条码字段并提示成功（支持 Ctrl+V 粘贴图片）"
           autoSize={{ minRows: 2, maxRows: 4 }}
           onPressEnter={e => { if (!e.shiftKey) { e.preventDefault(); send() } }}
+          onPaste={handlePaste}
           disabled={streaming}
         />
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8 }}>

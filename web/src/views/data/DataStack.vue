@@ -921,7 +921,8 @@ const ifaceForm = ref({
   field_mapping_json: '',
   extra_filters_json: '',
   sort_json: '',
-  pagination_json: ''
+  pagination_json: '',
+  pinned_datasource_alias: ''
 })
 
 /** 查询接口：是否将所选 SQL 参数写入绑定数据集的 param_schema */
@@ -1922,7 +1923,8 @@ function normalizeDsFormFromRow (row) {
       definition: 'SELECT 1',
       steps_json: '[]',
       param_schema: '',
-      meta_json: ''
+      meta_json: '',
+      multi_sources_json: ''
     }
   }
   let kind = 'query'
@@ -1939,7 +1941,8 @@ function normalizeDsFormFromRow (row) {
     definition: row.definition ?? '',
     steps_json: row.steps_json || '[]',
     param_schema: row.param_schema != null ? String(row.param_schema) : '',
-    meta_json: row.meta_json != null ? String(row.meta_json) : ''
+    meta_json: row.meta_json != null ? String(row.meta_json) : '',
+    multi_sources_json: row.multi_sources_json != null ? String(row.multi_sources_json) : ''
   }
 }
 
@@ -2353,7 +2356,8 @@ async function runDsCreateDdl () {
 
 const openDs = row => {
   suppressDsDataSourceWatch.value = true
-  dsForm.value = normalizeDsFormFromRow(row)
+  const normalized = normalizeDsFormFromRow(row)
+  Object.assign(dsForm.value, normalized)
   const k = dsForm.value.kind
   if (k === 'buffer') {
     parseDsIngressFormFromMeta(dsForm.value.meta_json)
@@ -2445,11 +2449,9 @@ function extractNamedSqlParamsFromSql (sqlStr) {
   if (!sqlStr || typeof sqlStr !== 'string') return []
   const seen = new Set()
   const order = []
-  const re = /:([a-zA-Z_][a-zA-Z0-9_]*)/g
+  const re = /\{\{([a-zA-Z_][a-zA-Z0-9_]*)\}\}/g
   let m
   while ((m = re.exec(sqlStr)) !== null) {
-    const start = m.index
-    if (start > 0 && sqlStr[start - 1] === ':') continue
     const name = m[1]
     if (!seen.has(name)) {
       seen.add(name)
@@ -3022,7 +3024,8 @@ const saveIface = async () => {
     field_mapping_json: ifaceForm.value.field_mapping_json || '',
     extra_filters_json: ifaceForm.value.extra_filters_json || '',
     sort_json: ifaceForm.value.sort_json || '',
-    pagination_json: ifaceForm.value.pagination_json || ''
+    pagination_json: ifaceForm.value.pagination_json || '',
+    pinned_datasource_alias: ifaceForm.value.pinned_datasource_alias || ''
   }
   try {
     if (ifaceForm.value.id) await api.updateDataInterface(dataStackRouteKey(ifaceForm.value), ifacePayload)

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -863,15 +864,26 @@ func FormRuntimeQuery(c *gin.Context) {
 func FormRuntimeSubmit(c *gin.Context) {
 	var body formRuntimeRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
+		log.Printf("[FormRuntimeSubmit] JSON binding error: %v\nRequest body: %s", err, c.Request.Body)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	if strings.TrimSpace(body.InterfaceCode) == "" {
+		log.Printf("[FormRuntimeSubmit] Missing interface_code\nRequest: %+v", body)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "interface_code required"})
 		return
 	}
+
+	// 记录请求信息
+	clientIP := c.ClientIP()
+	log.Printf("[FormRuntimeSubmit] Request from %s\nInterface: %s\nParams: %+v\nForm: %s\nPageType: %s",
+		clientIP, body.InterfaceCode, body.ParamValues, body.FormCode, body.PageType)
+
 	out, err := executeFormRuntimeInterface(body.InterfaceCode, body.ParamValues, nil)
 	if err != nil {
+		// 打印完整错误上下文（已包含 SQL 和参数）
+		log.Printf("[FormRuntimeSubmit] Execution failed from %s\nInterface: %s\nParams: %+v\nError: %v",
+			clientIP, body.InterfaceCode, body.ParamValues, err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -1181,7 +1193,7 @@ func GenerateFormAppPagesFromTable(c *gin.Context) {
 		Code:       listCode,
 		Slug:       listCode,
 		Kind:       "query",
-		DatasetID:  dsList.ID,
+		DatasetID:  &dsList.ID,
 		Method:     "POST",
 		Enabled:    true,
 		SchemaJSON: string(metaJSONBytes),
@@ -1192,7 +1204,7 @@ func GenerateFormAppPagesFromTable(c *gin.Context) {
 		Code:       detailCode,
 		Slug:       detailCode,
 		Kind:       "queryOne",
-		DatasetID:  dsDetail.ID,
+		DatasetID:  &dsDetail.ID,
 		Method:     "POST",
 		Enabled:    true,
 		SchemaJSON: string(metaJSONBytes),
@@ -1203,7 +1215,7 @@ func GenerateFormAppPagesFromTable(c *gin.Context) {
 		Code:       submitCode,
 		Slug:       submitCode,
 		Kind:       "transaction",
-		DatasetID:  dsSubmit.ID,
+		DatasetID:  &dsSubmit.ID,
 		Method:     "POST",
 		Enabled:    true,
 		StepsJSON:  dsSubmit.StepsJSON,
@@ -1275,7 +1287,20 @@ func GenerateFormAppPagesFromTable(c *gin.Context) {
 	}
 	formConfigBytes, _ := json.Marshal(formConfig)
 
-	detailConfig := map[string]interface{}{}
+	detailFields := make([]map[string]interface{}, 0, len(cols))
+	for _, c := range cols {
+		name := strings.TrimSpace(c.Name)
+		if name == "" {
+			continue
+		}
+		detailFields = append(detailFields, map[string]interface{}{
+			"field": name,
+			"label": strings.ToUpper(name),
+		})
+	}
+	detailConfig := map[string]interface{}{
+		"fields": detailFields,
+	}
 	detailConfigBytes, _ := json.Marshal(detailConfig)
 
 	pageForm := models.FormAppPage{
@@ -1535,7 +1560,7 @@ func RegenerateSinglePage(c *gin.Context) {
 			Code:       ifaceCode,
 			Slug:       ifaceCode,
 			Kind:       "transaction",
-			DatasetID:  ds.ID,
+			DatasetID:  &ds.ID,
 			Method:     "POST",
 			Enabled:    true,
 			SchemaJSON: `{"schema_version":"1.0.0"}`,
@@ -1588,7 +1613,7 @@ func RegenerateSinglePage(c *gin.Context) {
 			Code:       ifaceCode,
 			Slug:       ifaceCode,
 			Kind:       "query",
-			DatasetID:  ds.ID,
+			DatasetID:  &ds.ID,
 			Method:     "POST",
 			Enabled:    true,
 			SchemaJSON: `{"schema_version":"1.0.0"}`,
@@ -1653,7 +1678,7 @@ func RegenerateSinglePage(c *gin.Context) {
 			Code:       ifaceCode,
 			Slug:       ifaceCode,
 			Kind:       "queryOne",
-			DatasetID:  ds.ID,
+			DatasetID:  &ds.ID,
 			Method:     "POST",
 			Enabled:    true,
 			SchemaJSON: `{"schema_version":"1.0.0"}`,

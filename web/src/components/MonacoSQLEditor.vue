@@ -128,7 +128,7 @@
                     <el-icon v-else color="#f56c6c">
                       <Warning />
                     </el-icon>
-                    <code class="param-name">:{{ param.name }}</code>
+                    <code class="param-name">{{ fmtParam(param.name) }}</code>
                   </div>
 
                   <div class="param-meta">
@@ -138,6 +138,24 @@
                     <el-text size="small" type="info">
                       出现 {{ param.count }} 次
                     </el-text>
+                  </div>
+
+                  <div class="param-type">
+                    <el-select
+                      :model-value="param.type || 'string'"
+                      size="small"
+                      placeholder="选择类型"
+                      @change="(val) => updateParamType(param.name, val)"
+                      @click.stop
+                    >
+                      <el-option label="字符串 (string)" value="string" />
+                      <el-option label="整数 (integer)" value="integer" />
+                      <el-option label="数字 (number)" value="number" />
+                      <el-option label="布尔 (boolean)" value="boolean" />
+                      <el-option label="日期 (date)" value="date" />
+                      <el-option label="时间 (datetime)" value="datetime" />
+                      <el-option label="数组 (array)" value="array" />
+                    </el-select>
                   </div>
 
                   <div class="param-actions">
@@ -209,7 +227,7 @@
                         size="small"
                         @click.stop="locateParam(p)"
                       >
-                        :{{ p }}
+                        {{ fmtParam(p) }}
                       </el-tag>
                     </div>
                   </div>
@@ -262,6 +280,87 @@
                 </el-button>
               </div>
             </el-tab-pane>
+
+            <!-- AI 助手 -->
+            <el-tab-pane name="ai">
+              <template #label>
+                <span>
+                  <el-icon><MagicStick /></el-icon>
+                  AI 助手
+                </span>
+              </template>
+
+              <div class="ai-panel">
+                <el-alert
+                  title="AI 辅助编写 SQL"
+                  type="info"
+                  :closable="false"
+                  style="margin-bottom: 12px"
+                >
+                  描述需求，AI 生成 SQL 并插入编辑器
+                </el-alert>
+
+                <el-input
+                  v-model="aiPrompt"
+                  type="textarea"
+                  :rows="4"
+                  placeholder="例如：查询最近7天订单金额大于100的记录，按时间倒序"
+                  :disabled="aiStreaming"
+                  style="margin-bottom: 12px"
+                />
+
+                <el-button
+                  type="primary"
+                  size="small"
+                  :loading="aiStreaming"
+                  :disabled="!aiPrompt.trim()"
+                  @click="sendAIRequest"
+                  style="width: 100%; margin-bottom: 12px"
+                >
+                  <el-icon><MagicStick /></el-icon>
+                  {{ aiMessages.length ? '继续对话' : '生成 SQL' }}
+                </el-button>
+
+                <div v-if="aiProgress" class="ai-progress">
+                  <el-icon class="is-loading"><Loading /></el-icon>
+                  <span>{{ aiProgress }}</span>
+                </div>
+
+                <div v-if="aiStreamText" class="ai-stream">
+                  {{ aiStreamText }}
+                </div>
+
+                <div v-if="aiGeneratedSql" class="ai-result">
+                  <el-divider content-position="left">生成的 SQL</el-divider>
+                  <pre class="ai-sql-preview">{{ aiGeneratedSql }}</pre>
+                  <div class="ai-actions">
+                    <el-button size="small" @click="insertAISql">
+                      <el-icon><Check /></el-icon>
+                      插入编辑器
+                    </el-button>
+                    <el-button size="small" @click="replaceWithAISql">
+                      <el-icon><RefreshRight /></el-icon>
+                      替换全部
+                    </el-button>
+                    <el-button size="small" @click="copyAISql">
+                      <el-icon><CopyDocument /></el-icon>
+                      复制
+                    </el-button>
+                  </div>
+                </div>
+
+                <el-button
+                  v-if="aiMessages.length > 0"
+                  size="small"
+                  type="danger"
+                  plain
+                  @click="resetAI"
+                  style="width: 100%; margin-top: 12px"
+                >
+                  重置对话
+                </el-button>
+              </div>
+            </el-tab-pane>
           </el-tabs>
         </div>
       </div>
@@ -283,7 +382,10 @@ import {
   Refresh,
   CopyDocument,
   CircleCheck,
-  Warning
+  Warning,
+  Loading,
+  Check,
+  RefreshRight
 } from '@element-plus/icons-vue'
 import * as monaco from 'monaco-editor'
 
@@ -295,6 +397,10 @@ const props = defineProps({
   dialect: {
     type: String,
     default: 'mysql'
+  },
+  aiContext: {
+    type: Object,
+    default: () => ({})
   }
 })
 
@@ -310,6 +416,14 @@ const cursorPosition = ref({ line: 1, column: 1 })
 const extractedParams = ref([])
 const optionalBlocks = ref([])
 const generatedSchema = ref('')
+
+// AI 助手状态
+const aiPrompt = ref('')
+const aiMessages = ref([])
+const aiStreaming = ref(false)
+const aiStreamText = ref('')
+const aiProgress = ref('')
+const aiGeneratedSql = ref('')
 
 // 快速插入项
 const insertItems = [
@@ -441,7 +555,9 @@ const analyzeSQL = (sql) => {
     if (paramMap.has(name)) {
       paramMap.get(name).count++
     } else {
-      paramMap.set(name, { name, count: 1, isOptional: false })
+      // 初始化参数对象，包含类型字段
+      const guessedType = guessParamType(name)
+      paramMap.set(name, { name, count: 1, isOptional: false, type: guessedType })
     }
   }
 
@@ -619,6 +735,16 @@ const convertToRequired = (paramName) => {
   ElMessage.success(`参数 {{${paramName}}} 已转为必需`)
 }
 
+// 更新参数类型
+const updateParamType = (paramName, type) => {
+  const param = extractedParams.value.find(p => p.name === paramName)
+  if (param) {
+    param.type = type
+    // 触发 params-changed 事件，让父组件知道参数类型已更新
+    emit('params-changed', extractedParams.value)
+  }
+}
+
 // 生成 Schema
 const generateSchema = () => {
   const properties = {}
@@ -626,7 +752,7 @@ const generateSchema = () => {
 
   extractedParams.value.forEach(param => {
     properties[param.name] = {
-      type: guessType(param.name),
+      type: param.type || guessType(param.name),
       description: formatDescription(param.name)
     }
 
@@ -653,6 +779,28 @@ const guessType = (name) => {
   return 'string'
 }
 
+// 推测参数类型（更详细）
+const guessParamType = (name) => {
+  const lower = name.toLowerCase()
+
+  // 日期时间类型
+  if (lower.includes('date') && !lower.includes('update') && !lower.includes('create')) return 'date'
+  if (lower.includes('time') || lower.includes('_at') || lower.includes('datetime')) return 'datetime'
+
+  // 数字类型
+  if (lower.includes('id') || lower.includes('count') || lower.includes('num') || lower.includes('index')) return 'integer'
+  if (lower.includes('amount') || lower.includes('price') || lower.includes('rate') || lower.includes('percent')) return 'number'
+
+  // 布尔类型
+  if (lower.includes('enabled') || lower.includes('active') || lower.includes('is_') || lower.startsWith('is')) return 'boolean'
+
+  // 数组类型
+  if (lower.includes('ids') || lower.includes('list') || lower.includes('array')) return 'array'
+
+  // 默认字符串
+  return 'string'
+}
+
 const formatDescription = (name) => {
   return name.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
 }
@@ -661,6 +809,132 @@ const formatDescription = (name) => {
 const copySchema = () => {
   navigator.clipboard.writeText(generatedSchema.value)
   ElMessage.success('Schema 已复制到剪贴板')
+}
+
+const fmtParam = (name) => '{{' + name + '}}'
+
+// AI 助手函数
+async function sendAIRequest() {
+  if (!aiPrompt.value.trim()) return
+
+  const userMessage = aiPrompt.value.trim()
+  aiMessages.value.push({ role: 'user', content: userMessage })
+  aiPrompt.value = ''
+  aiStreaming.value = true
+  aiStreamText.value = ''
+  aiProgress.value = '正在生成 SQL...'
+  aiGeneratedSql.value = ''
+
+  const token = localStorage.getItem('token') || ''
+  const payload = {
+    dialect: props.dialect,
+    current_sql: props.modelValue || '',
+    messages: aiMessages.value.map(m => ({ role: m.role, content: m.content })),
+    context: props.aiContext
+  }
+
+  let acc = ''
+  let gotSql = ''
+  try {
+    const resp = await fetch('/api/form-app/ai/sql-generate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {})
+      },
+      body: JSON.stringify(payload)
+    })
+
+    if (!resp.ok || !resp.body) {
+      let msg = `HTTP ${resp.status}`
+      try {
+        const d = await resp.json()
+        if (d?.error) msg = d.error
+      } catch { /* ignore */ }
+      ElMessage.error(msg)
+      aiStreaming.value = false
+      return
+    }
+
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    let buf = ''
+
+    for (;;) {
+      const { value, done } = await reader.read()
+      if (done) break
+
+      buf += decoder.decode(value, { stream: true })
+      const blocks = buf.split('\n\n')
+      buf = blocks.pop() || ''
+
+      for (const block of blocks) {
+        let event = 'message'
+        let data = ''
+        for (const line of block.split('\n')) {
+          if (line.startsWith('event:')) event = line.slice(6).trim()
+          else if (line.startsWith('data:')) data += line.slice(5).trim()
+        }
+        if (!data) continue
+
+        let parsed
+        try { parsed = JSON.parse(data) } catch { continue }
+
+        if (event === 'progress') {
+          aiProgress.value = parsed.message || ''
+        } else if (event === 'delta') {
+          acc += parsed.text || ''
+          aiStreamText.value = acc.length > 400 ? '…' + acc.slice(-400) : acc
+        } else if (event === 'done') {
+          gotSql = parsed.sql || ''
+        } else if (event === 'error') {
+          ElMessage.error(parsed.message || 'AI 生成失败')
+        }
+      }
+    }
+  } catch (e) {
+    ElMessage.error(e?.message || '请求失败')
+  } finally {
+    aiStreaming.value = false
+    aiStreamText.value = ''
+    aiProgress.value = ''
+
+    if (gotSql) {
+      aiMessages.value.push({ role: 'assistant', content: '已生成 SQL，请在下方预览后选择插入或替换。' })
+      aiGeneratedSql.value = gotSql
+    }
+  }
+}
+
+function insertAISql() {
+  if (!editor || !aiGeneratedSql.value) return
+  const position = editor.getPosition()
+  editor.executeEdits('', [{
+    range: new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column),
+    text: '\n' + aiGeneratedSql.value + '\n'
+  }])
+  ElMessage.success('已插入 AI 生成的 SQL')
+}
+
+function replaceWithAISql() {
+  if (!editor || !aiGeneratedSql.value) return
+  editor.setValue(aiGeneratedSql.value)
+  ElMessage.success('已替换为 AI 生成的 SQL')
+}
+
+function copyAISql() {
+  if (!aiGeneratedSql.value) return
+  navigator.clipboard.writeText(aiGeneratedSql.value)
+  ElMessage.success('已复制到剪贴板')
+}
+
+function resetAI() {
+  aiMessages.value = []
+  aiPrompt.value = ''
+  aiGeneratedSql.value = ''
+  aiProgress.value = ''
+  aiStreamText.value = ''
+  ElMessage.info('已重置 AI 对话')
 }
 
 // 监听 props 变化
@@ -797,6 +1071,14 @@ watch(() => props.modelValue, (newVal) => {
   margin-bottom: 8px;
 }
 
+.param-type {
+  margin-bottom: 8px;
+}
+
+.param-type .el-select {
+  width: 100%;
+}
+
 .param-actions {
   display: flex;
   gap: 8px;
@@ -829,4 +1111,54 @@ watch(() => props.modelValue, (newVal) => {
 .schema-panel {
   padding: 8px 0;
 }
+
+.ai-panel {
+  padding: 8px 0;
+}
+
+.ai-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--el-fill-color-light);
+  border-radius: 4px;
+  margin-bottom: 12px;
+}
+
+.ai-stream {
+  padding: 12px;
+  background: var(--el-fill-color-lighter);
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-bottom: 12px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.ai-result {
+  margin-top: 12px;
+}
+
+.ai-sql-preview {
+  padding: 12px;
+  background: #1e1e1e;
+  color: #d4d4d4;
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-x: auto;
+  margin-bottom: 12px;
+}
+
+.ai-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 </style>

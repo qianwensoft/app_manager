@@ -20,9 +20,10 @@ import (
 const agentReadTimeout = 75 * time.Second
 
 type Connection struct {
-	DeviceID string
-	Conn     *websocket.Conn
-	send     chan []byte
+	DeviceID      string
+	Conn          *websocket.Conn
+	send          chan []byte
+	ConnectedAt   time.Time
 }
 
 type Hub struct {
@@ -93,7 +94,7 @@ func (h *Hub) UnregisterCallback(commandID string) {
 
 func (h *Hub) Register(deviceID string, conn *websocket.Conn) <-chan struct{} {
 	done := make(chan struct{})
-	c := &Connection{DeviceID: deviceID, Conn: conn, send: make(chan []byte, 64)}
+	c := &Connection{DeviceID: deviceID, Conn: conn, send: make(chan []byte, 64), ConnectedAt: time.Now()}
 	h.mu.Lock()
 	// 同键已有连接（Android 重连/半开）：先剔除旧连接并关闭，避免旧连接的 readPump
 	// 退出时 Unregister 误删这条新连接，导致设备瞬间“离线”或连接数虚高/孤儿连接。
@@ -210,6 +211,16 @@ func (h *Hub) ConnectedDeviceIDs() []string {
 		ids = append(ids, id)
 	}
 	return ids
+}
+
+// GetConnectionTime 返回指定设备的连接时间。
+func (h *Hub) GetConnectionTime(deviceID string) (time.Time, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if c, ok := h.connections[deviceID]; ok {
+		return c.ConnectedAt, true
+	}
+	return time.Time{}, false
 }
 
 // DeliverRaw enqueues pre-serialized JSON to a local agent connection (cluster inbound).

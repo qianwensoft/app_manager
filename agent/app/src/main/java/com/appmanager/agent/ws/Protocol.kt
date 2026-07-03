@@ -64,6 +64,8 @@ data class DeviceInfoData(
     @SerializedName("allow_remote_screen") val allowRemoteScreen: Boolean = false,
     /** Agent APK 版本，供服务端设备档案展示 */
     @SerializedName("agent_version") val agentVersion: String = "",
+    /** WebView 版本，供服务端监控展示 */
+    @SerializedName("webview_version") val webViewVersion: String = "",
     /** 手机硬件序列号（Build.SERIAL），服务端用于跨重装唯一识别设备 */
     @SerializedName("android_serial") val androidSerial: String = "",
     /** 当前前台应用包名 */

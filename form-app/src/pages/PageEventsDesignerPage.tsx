@@ -128,6 +128,13 @@ export default function PageEventsDesignerPage() {
             onChange={setEvents}
             fields={fields}
             printers={printers}
+            buttons={fields
+              .filter(f => f.component === 'PrintButton' || f.button_id)
+              .map(f => ({
+                buttonId: f.button_id || f.field,
+                text: f.button_text || f.label || f.field,
+                component: f.component,
+              }))}
             interfaceOptions={interfaceOptions}
             thirdPartyEndpointOptions={thirdPartyEndpointOptions}
             connectorInterfaceOptions={connectorInterfaceOptions}

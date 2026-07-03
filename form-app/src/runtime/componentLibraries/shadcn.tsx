@@ -22,6 +22,7 @@ import SubmitButton from '../SubmitButton'
 import { ActionButton, EventButton, NavigateButton } from '../ActionButtons'
 import { FeedbackButton } from '../FeedbackButton'
 import { CustomButton } from '../Button'
+import ConfirmDialogButton from '../ConfirmDialogButton'
 import { PageHeader, Section, Divider, StaticImage, StaticText } from '../layout'
 
 /**
@@ -163,6 +164,7 @@ export const sharedComponents = {
   NavigateButton,
   FeedbackButton,
   CustomButton,
+  ConfirmDialogButton,
   PageHeader,
   Section,
   Divider,

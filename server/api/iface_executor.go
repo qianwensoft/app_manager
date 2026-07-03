@@ -12,6 +12,7 @@ import (
 	"app-manager/datastack"
 	"app-manager/dbdriver"
 	"app-manager/models"
+	"app-manager/workflow"
 
 	"github.com/gin-gonic/gin"
 )
@@ -100,7 +101,12 @@ func Execute(req InvokeRequest) (*InvokeResult, error) {
 	datastack.ApplyParamDefaultsFromContract(sh.Params, params)
 
 	res := &InvokeResult{
-		DatasetID: iface.DatasetID,
+		DatasetID: func() uint {
+			if iface.DatasetID != nil {
+				return *iface.DatasetID
+			}
+			return 0
+		}(),
 		IfaceName: iface.Name,
 		IfaceSlug: iface.Slug,
 		IfaceKind: iface.Kind,
@@ -140,14 +146,68 @@ func Execute(req InvokeRequest) (*InvokeResult, error) {
 	}
 	ds.Kind = normalizeDatasetKind(ds.Kind)
 
+	// 7) 多数据源路由：若数据集配置了多数据源，用 datasource_alias 参数选择目标数据源
+	if ds.MultiSourcesJSON != "" {
+		src, err := resolveMultiSource(&ds, &iface, params)
+		if err != nil {
+			return nil, err
+		}
+		// 临时覆盖 DataSourceID，让下游统一路径使用
+		ds.DataSourceID = &src.ID
+		ds.DataSource = src
+	}
+
 	switch iface.Kind {
 	case "query", "queryOne":
 		return executeQueryKind(res, &iface, &ds, sh, params, req, start)
 	case "transaction":
 		return executeTransactionKind(res, &iface, &ds, params, req, start)
+	case "workflow":
+		return executeWorkflowKind(res, &iface, params, start)
 	default:
 		return nil, fmt.Errorf("unsupported interface kind: %s", iface.Kind)
 	}
+}
+
+// resolveMultiSource 从数据集的 multi_sources_json 中根据 alias 找出目标 DataSource。
+// 优先级：接口固定别名 > 请求参数 datasource_alias。
+func resolveMultiSource(ds *models.Dataset, iface *models.DataInterface, params map[string]interface{}) (*models.DataSource, error) {
+	type sourceEntry struct {
+		Alias        string `json:"alias"`
+		DataSourceID uint   `json:"data_source_id"`
+	}
+	var entries []sourceEntry
+	if err := json.Unmarshal([]byte(ds.MultiSourcesJSON), &entries); err != nil || len(entries) == 0 {
+		return nil, fmt.Errorf("数据集 multi_sources_json 格式无效")
+	}
+
+	alias := strings.TrimSpace(iface.PinnedDatasourceAlias)
+	if alias == "" {
+		// 从请求参数中取
+		if v, ok := params["datasource_alias"]; ok {
+			alias = strings.TrimSpace(fmt.Sprintf("%v", v))
+		}
+	}
+	if alias == "" {
+		return nil, fmt.Errorf("该接口使用多数据源数据集，请求必须携带参数 datasource_alias")
+	}
+
+	var targetID uint
+	for _, e := range entries {
+		if e.Alias == alias {
+			targetID = e.DataSourceID
+			break
+		}
+	}
+	if targetID == 0 {
+		return nil, fmt.Errorf("datasource_alias %q 不在该数据集的可用数据源列表中", alias)
+	}
+
+	var src models.DataSource
+	if err := database.DB.First(&src, targetID).Error; err != nil {
+		return nil, fmt.Errorf("数据源(id=%d)不存在或已删除", targetID)
+	}
+	return &src, nil
 }
 
 func resolveStaticLimit(sh datastack.IfaceShaping, requestLimit int) int {
@@ -302,12 +362,12 @@ func executeTransactionKind(res *InvokeResult, iface *models.DataInterface, ds *
 		return nil, err
 	}
 	var lastInsertID int64
-	for _, s := range steps {
+	for stepIdx, s := range steps {
 		s = stripMissingInsertParams(s, params)
 		used, args, err := RewriteNamedSQLParams(dsSrc.Type, s, params)
 		if err != nil {
 			_ = tx.Rollback()
-			return nil, err
+			return nil, fmt.Errorf("step %d SQL rewrite failed: %w\nOriginal SQL: %s\nParams: %+v", stepIdx+1, err, s, params)
 		}
 		var r sql.Result
 		if len(args) > 0 {
@@ -317,7 +377,7 @@ func executeTransactionKind(res *InvokeResult, iface *models.DataInterface, ds *
 		}
 		if err != nil {
 			_ = tx.Rollback()
-			return nil, err
+			return nil, fmt.Errorf("step %d execution failed: %w\nSQL: %s\nArgs: %+v\nOriginal params: %+v", stepIdx+1, err, used, args, params)
 		}
 		if id, e := r.LastInsertId(); e == nil && id > 0 {
 			lastInsertID = id
@@ -353,9 +413,12 @@ func resolveTransactionSteps(iface *models.DataInterface, ds *models.Dataset, ds
 		effectiveSteps = strings.TrimSpace(ds.StepsJSON)
 	}
 	if effectiveSteps != "" && effectiveSteps != "[]" {
-		var steps []string
-		if err := json.Unmarshal([]byte(effectiveSteps), &steps); err != nil || len(steps) == 0 {
-			return nil, fmt.Errorf("invalid steps_json")
+		steps, err := parseStepsJSON(effectiveSteps)
+		if err != nil {
+			return nil, fmt.Errorf("invalid steps_json: %w", err)
+		}
+		if len(steps) == 0 {
+			return nil, fmt.Errorf("steps_json is empty")
 		}
 		return steps, nil
 	}
@@ -468,4 +531,41 @@ func InvokeDataInterfaceForClient(c *gin.Context) {
 		resp["sql"] = res.UsedSQL
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+// executeWorkflowKind executes workflow-type data interface
+func executeWorkflowKind(res *InvokeResult, iface *models.DataInterface, params map[string]interface{}, start time.Time) (*InvokeResult, error) {
+	// Execute workflow using the workflow engine
+	wfResult, err := workflow.DefaultDataIfEngine.Execute(iface, params)
+	if err != nil {
+		return nil, fmt.Errorf("workflow execution failed: %w", err)
+	}
+
+	// Save execution log to database
+	logJSON, _ := json.Marshal(wfResult.StepLogs)
+	execLog := models.WorkflowExecutionLog{
+		RequestID:      wfResult.RequestID,
+		InterfaceID:    iface.ID,
+		InterfaceCode:  iface.Code,
+		Status:         wfResult.Status,
+		TotalSteps:     wfResult.TotalSteps,
+		CompletedSteps: wfResult.CompletedSteps,
+		ElapsedMS:      wfResult.ElapsedMS,
+		StepLogsJSON:   string(logJSON),
+		Compensated:    wfResult.Compensated,
+		ErrorMessage:   wfResult.ErrorMessage,
+	}
+
+	if err := database.DB.Create(&execLog).Error; err != nil {
+		// Log error but don't fail the request
+		fmt.Printf("Failed to save workflow execution log: %v\n", err)
+	}
+
+	// Convert workflow result to InvokeResult
+	res.Kind = "workflow"
+	res.Row = wfResult.FinalOutput
+	res.HasRow = len(wfResult.FinalOutput) > 0
+	res.ElapsedMS = ElapsedMS(start)
+
+	return res, nil
 }

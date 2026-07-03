@@ -289,7 +289,7 @@ export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }:
   }
 
   const config = currentPage.config_json ? JSON.parse(currentPage.config_json) : {}
-  const fields: FieldDef[] = config.field_definitions || []
+  const fields: FieldDef[] = config.field_definitions || config.fields || []
   // 有 design_schema（Formily 布局）时运行时按布局渲染；否则回退扁平 field_definitions
   let designSchema: any = null
   if (currentPage.design_schema) {
@@ -319,16 +319,23 @@ export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }:
   const buttonLinks = pageLinks.filter(l => l.trigger_type === 'button_click')
   const rowClickLink = pageLinks.find(l => l.trigger_type === 'row_click')
 
-  // button_click link 的跳转：解析 param_mapping，支持 $row.xxx 占位
+  // button_click link 的跳转：解析 param_mapping，支持 $row.xxx 占位和 $url.xxx（从当前 URL 参数）
   const resolveLinkParams = (mapping: string | undefined, row?: any): Record<string, any> => {
     if (!mapping) return {}
     try {
       const m = JSON.parse(mapping)
-      if (!row) return m
       const out: Record<string, any> = {}
       for (const [k, v] of Object.entries(m)) {
-        if (typeof v === 'string' && v.startsWith('$row.')) {
-          out[k] = row[v.slice(5)]
+        if (typeof v === 'string') {
+          if (v.startsWith('$row.') && row) {
+            out[k] = row[v.slice(5)]
+          } else if (v.startsWith('$url.')) {
+            // 从当前页面 URL 参数中获取
+            const urlParamKey = v.slice(5)
+            out[k] = params[urlParamKey]
+          } else {
+            out[k] = v
+          }
         } else {
           out[k] = v
         }

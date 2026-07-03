@@ -3,6 +3,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
+import PrintButton from './PrintButton'
 import type { FieldDef } from './types'
 
 type FieldRendererProps = {
@@ -55,12 +56,22 @@ export default function FieldRenderer({ def, value, onChange, error }: FieldRend
             <Label htmlFor={def.field}>{def.label}</Label>
           </div>
         )
+      case 'PrintButton':
+        return (
+          <PrintButton
+            templateId={def.print_template_id}
+            buttonId={def.button_id}
+            text={def.button_text || def.label}
+            type={def.button_type || 'default'}
+            block={def.button_block}
+          />
+        )
       default:
         return <Input value={value || ''} onChange={e => onChange(e.target.value)} placeholder={def.placeholder} />
     }
   }
 
-  const hideLabel = def.component === 'Checkbox'
+  const hideLabel = def.component === 'Checkbox' || def.component === 'PrintButton'
 
   return (
     <div className="mb-4">

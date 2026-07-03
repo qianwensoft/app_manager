@@ -37,6 +37,7 @@ type Device struct {
 	AgentConnected        bool    `gorm:"default:false" json:"agent_connected"`
 	AgentToken            string  `gorm:"size:64;index" json:"agent_token"` // 扫码/Agent WebSocket 连接键，与自增 id 不同
 	AgentVersion          string  `gorm:"size:20" json:"agent_version"`
+	WebViewVersion        string  `gorm:"column:webview_version;size:50;default:''" json:"webview_version"`
 	AgentCapabilitiesJSON string  `gorm:"column:agent_capabilities_json;type:text" json:"agent_capabilities_json"`
 	Battery               int     `json:"battery"`
 	CPUUsage              float64 `json:"cpu_usage"`
@@ -72,6 +73,27 @@ type Device struct {
 	X5KernelVersion int    `gorm:"column:x5_kernel_version;default:0" json:"x5_kernel_version"`
 	X5KernelState   string `gorm:"column:x5_kernel_state;size:50" json:"x5_kernel_state"`
 	CreatedAt       time.Time `json:"created_at"`
+}
+
+// DeviceRealTimeStatus 设备实时状态（高频更新字段，从 Device 表分离以避免慢SQL）
+// 心跳每30秒更新此表，Device 表只在静态字段变化时更新
+type DeviceRealTimeStatus struct {
+	DeviceID          uint      `gorm:"primaryKey" json:"device_id"`
+	Battery           int       `json:"battery"`
+	CPUUsage          float64   `json:"cpu_usage"`
+	MemoryUsed        int64     `json:"memory_used"`
+	StorageUsed       int64     `json:"storage_used"`
+	WifiSignal        int       `json:"wifi_signal"`
+	WifiSpeed         int       `json:"wifi_speed"`
+	ForegroundPackage string    `gorm:"column:foreground_package;size:200" json:"foreground_package"`
+	LastSeenAt        time.Time `json:"last_seen_at"`
+	AgentConnected    bool      `gorm:"default:false" json:"agent_connected"`
+	Status            string    `gorm:"size:20;default:'offline'" json:"status"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
+
+func (DeviceRealTimeStatus) TableName() string {
+	return "device_realtime_status"
 }
 
 type App struct {

@@ -61,7 +61,12 @@ func ScanSQLRowsLimitedOffset(rows *sql.Rows, limit, offset int) ([]map[string]i
 		}
 		row := map[string]interface{}{}
 		for i, col := range cols {
-			row[col] = vals[i]
+			v := vals[i]
+			if b, ok := v.([]byte); ok {
+				row[col] = string(b)
+			} else {
+				row[col] = v
+			}
 		}
 		out = append(out, row)
 		n++
@@ -80,7 +85,7 @@ func QueryDatasetSQL(db *sql.DB, dialect, sqlStr string, params map[string]inter
 	}
 	used, args, err := RewriteNamedSQLParams(dialect, sqlStr, params)
 	if err != nil {
-		return nil, "", nil, err
+		return nil, "", nil, fmt.Errorf("SQL rewrite failed: %w\nOriginal SQL: %s\nParams: %+v", err, sqlStr, params)
 	}
 	var rows *sql.Rows
 	if len(args) > 0 {
@@ -89,7 +94,7 @@ func QueryDatasetSQL(db *sql.DB, dialect, sqlStr string, params map[string]inter
 		rows, err = db.Query(used)
 	}
 	if err != nil {
-		return nil, used, args, err
+		return nil, used, args, fmt.Errorf("query execution failed: %w\nSQL: %s\nArgs: %+v\nOriginal params: %+v", err, used, args, params)
 	}
 	defer rows.Close()
 	out, scanErr := ScanSQLRowsLimited(rows, limit)
@@ -121,10 +126,10 @@ func DebugTransactionStepsDryRun(db *sql.DB, dialect string, steps []string, par
 		} else {
 			_, err = tx.Exec(used)
 		}
-		if err != nil {
-			return executed, fmt.Errorf("步骤 %d 执行: %w", i+1, err)
-		}
 		executed = append(executed, used)
+		if err != nil {
+			return executed, fmt.Errorf("步骤 %d 执行: %w, SQL: %s", i+1, err, used)
+		}
 	}
 	return executed, nil
 }

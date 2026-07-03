@@ -40,6 +40,18 @@
           <el-menu-item index="/data">
             <el-icon><Histogram /></el-icon><span>数据源与接口</span>
           </el-menu-item>
+          <el-menu-item index="/workflow-designer">
+            <el-icon><Connection /></el-icon><span>工作流设计器</span>
+          </el-menu-item>
+          <el-menu-item index="/workflow-logs">
+            <el-icon><Document /></el-icon><span>工作流执行日志</span>
+          </el-menu-item>
+          <el-menu-item index="/async-tasks">
+            <el-icon><Loading /></el-icon><span>异步任务监控</span>
+          </el-menu-item>
+          <el-menu-item index="/deadletter-queue">
+            <el-icon><Warning /></el-icon><span>死信队列管理</span>
+          </el-menu-item>
           <el-menu-item index="/outbound">
             <el-icon><Share /></el-icon><span>连接器</span>
           </el-menu-item>
@@ -108,7 +120,7 @@
 import { computed, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useRoute, useRouter } from 'vue-router'
-import { Monitor, Phone, VideoCamera, Document, Box, List, Key, Notebook, Connection, Cpu, Bell, Setting, Share, Link, Tools, UserFilled, User, Histogram, Menu, EditPen, Tickets } from '@element-plus/icons-vue'
+import { Monitor, Phone, VideoCamera, Document, Box, List, Key, Notebook, Connection, Cpu, Bell, Setting, Share, Link, Tools, UserFilled, User, Histogram, Menu, EditPen, Tickets, Loading, Warning } from '@element-plus/icons-vue'
 import QuickSearch from './QuickSearch.vue'
 
 const auth = useAuthStore()
@@ -138,6 +150,10 @@ const menuActive = computed(() => {
   if (p.startsWith('/event-definitions')) return '/event-definitions'
   if (p.startsWith('/outbound/apps')) return '/outbound/apps'
   if (p.startsWith('/outbound')) return '/outbound'
+  if (p.startsWith('/workflow-designer')) return '/workflow-designer'
+  if (p.startsWith('/workflow-logs')) return '/workflow-logs'
+  if (p.startsWith('/async-tasks')) return '/async-tasks'
+  if (p.startsWith('/deadletter-queue')) return '/deadletter-queue'
   if (p.startsWith('/data')) return '/data'
   if (p.startsWith('/agent-menus')) return '/agent-menus'
   if (p.startsWith('/work-orders')) return '/work-orders'

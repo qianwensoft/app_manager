@@ -284,6 +284,31 @@ func validateDatasetForSave(body *models.Dataset) error {
 	if body.DataSourceID != nil && *body.DataSourceID == 0 {
 		body.DataSourceID = nil
 	}
+
+	// 多数据源校验：配置了 multi_sources_json 时，kind 须为 query 或 transaction；data_source_id 可空
+	if strings.TrimSpace(body.MultiSourcesJSON) != "" {
+		if body.Kind != "query" && body.Kind != "transaction" {
+			return fmt.Errorf("多数据源数据集 kind 须为 query 或 transaction")
+		}
+		// 验证 JSON 格式
+		var entries []struct {
+			Alias        string `json:"alias"`
+			DataSourceID uint   `json:"data_source_id"`
+		}
+		if err := json.Unmarshal([]byte(body.MultiSourcesJSON), &entries); err != nil {
+			return fmt.Errorf("multi_sources_json 格式无效: %v", err)
+		}
+		for _, e := range entries {
+			if strings.TrimSpace(e.Alias) == "" {
+				return fmt.Errorf("multi_sources_json 每条记录须有 alias")
+			}
+			if e.DataSourceID == 0 {
+				return fmt.Errorf("multi_sources_json 每条记录须有 data_source_id")
+			}
+		}
+		return nil
+	}
+
 	switch body.Kind {
 	case "static":
 		body.DataSourceID = nil
@@ -369,15 +394,16 @@ func UpdateDataset(c *gin.Context) {
 		return
 	}
 	if err := database.DB.Model(&models.Dataset{}).Where("id = ?", ex.ID).Updates(map[string]interface{}{
-		"code":           body.Code,
-		"data_source_id": body.DataSourceID,
-		"category":       body.Category,
-		"name":           body.Name,
-		"kind":           body.Kind,
-		"definition":     body.Definition,
-		"steps_json":     body.StepsJSON,
-		"param_schema":   body.ParamSchema,
-		"meta_json":      body.MetaJSON,
+		"code":               body.Code,
+		"data_source_id":     body.DataSourceID,
+		"category":           body.Category,
+		"name":               body.Name,
+		"kind":               body.Kind,
+		"definition":         body.Definition,
+		"steps_json":         body.StepsJSON,
+		"param_schema":       body.ParamSchema,
+		"meta_json":          body.MetaJSON,
+		"multi_sources_json": body.MultiSourcesJSON,
 	}).Error; err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -980,7 +1006,7 @@ func CreateDataInterface(c *gin.Context) {
 	}
 	if body.DataStructureID != nil && *body.DataStructureID != 0 {
 		var st models.DataStructure
-		if err := database.DB.First(&st, *body.DataStructureID).Error; err != nil || st.DatasetID != body.DatasetID {
+		if err := database.DB.First(&st, *body.DataStructureID).Error; err != nil || (body.DatasetID != nil && st.DatasetID != *body.DatasetID) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "data_structure_id 须属于所选数据集"})
 			return
 		}
@@ -1025,7 +1051,7 @@ func UpdateDataInterface(c *gin.Context) {
 	}
 	if body.DataStructureID != nil && *body.DataStructureID != 0 {
 		var st models.DataStructure
-		if err := database.DB.First(&st, *body.DataStructureID).Error; err != nil || st.DatasetID != body.DatasetID {
+		if err := database.DB.First(&st, *body.DataStructureID).Error; err != nil || (body.DatasetID != nil && st.DatasetID != *body.DatasetID) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "data_structure_id 须属于所选数据集"})
 			return
 		}
@@ -1039,6 +1065,7 @@ func UpdateDataInterface(c *gin.Context) {
 		"param_contract_json": body.ParamContractJSON, "field_mapping_json": body.FieldMappingJSON,
 		"extra_filters_json": body.ExtraFiltersJSON, "sort_json": body.SortJSON,
 		"pagination_json": body.PaginationJSON,
+		"pinned_datasource_alias": body.PinnedDatasourceAlias,
 	}).Error; err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -1125,7 +1152,11 @@ func OpenDataInterfaceInvoke(c *gin.Context) {
 		}
 	}
 	if crudOp != "" {
-		openStaticCrudInvoke(c, crudOp, iface.DatasetID)
+		if iface.DatasetID == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "static CRUD interface must have dataset_id"})
+			return
+		}
+		openStaticCrudInvoke(c, crudOp, *iface.DatasetID)
 		return
 	}
 	// 委托至统一执行器；保持开放 API 既有响应格式（query/queryOne 的 data 为 JSON 字符串）。
@@ -1576,7 +1607,7 @@ func GenerateStaticCrudInterfaces(c *gin.Context) {
 			Code:           slug,
 			Slug:           slug,
 			Kind:           "query",
-			DatasetID:      ds.ID,
+			DatasetID:      &ds.ID,
 			Method:         method,
 			Enabled:        true,
 			RequiredScopes: "",
@@ -1788,7 +1819,7 @@ func GenerateCrudInterfaces(c *gin.Context) {
 			Code:           slug,
 			Slug:           slug,
 			Kind:           spec.dsKind,
-			DatasetID:      parent.ID,
+			DatasetID:      &parent.ID,
 			Method:         spec.method,
 			Enabled:        true,
 			RequiredScopes: "",

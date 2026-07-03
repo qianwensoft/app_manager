@@ -51,6 +51,37 @@ import type { PrinterTemplate } from '@/runtime/printerTypes'
 GlobalRegistry.registerDesignerLocales(AllLocales)
 GlobalRegistry.setDesignerLanguage('zh-CN')
 
+// 全局补丁：递归清理所有组件 Behavior 的 propsSchema 中的 enum null 值
+const patchBehaviorSchemas = () => {
+  const components = [
+    Form, FormLayout, FormGrid, FormTab, FormCollapse, Field, Input, Select,
+    TreeSelect, Cascader, Radio, Checkbox, Slider, Rate, NumberPicker,
+    Transfer, Password, DatePicker, TimePicker, Upload, Switch, Text, Card,
+    ArrayCards, ArrayTable, Space, ObjectContainer
+  ]
+
+  components.forEach((comp: any) => {
+    if (comp.Behavior && Array.isArray(comp.Behavior)) {
+      comp.Behavior.forEach((behavior: any) => {
+        if (behavior.designerProps?.propsSchema) {
+          const cleanEnum = (obj: any) => {
+            if (!obj || typeof obj !== 'object') return
+            if (Array.isArray(obj.enum)) {
+              obj.enum = obj.enum.filter((v: any) => v != null)
+            }
+            if (obj.properties) {
+              Object.values(obj.properties).forEach((prop: any) => cleanEnum(prop))
+            }
+          }
+          cleanEnum(behavior.designerProps.propsSchema)
+        }
+      })
+    }
+  })
+}
+
+patchBehaviorSchemas()
+
 // transform 命名约定：必须与 createDesigner({ rootComponentName: 'Form' }) 及
 // 自定义组件 Resource 的 componentName: 'Field' 对齐，否则 transformToSchema
 // 找不到根（默认找 'DesignableForm'）会返回空 schema，导致字段无法识别/保存。
@@ -129,8 +160,10 @@ export default function PageDesignerPage() {
     const tryLoad = () => {
       if ((engine as any).workbench?.currentWorkspace) {
         try {
+          // 深度清理 schema 中的 null 值（包括 enum 数组、options 等）
           const sanitized = JSON.parse(JSON.stringify(schema), (k: string, v: any) => {
             if (k === 'enum' && Array.isArray(v)) return v.filter((x: any) => x != null)
+            if (k === 'options' && Array.isArray(v)) return v.filter((x: any) => x != null && x.value != null)
             return v
           })
           const tree = (transformToTreeNode as any)(sanitized, DESIGNABLE_OPTS)
@@ -334,8 +367,10 @@ export default function PageDesignerPage() {
     const schema = parsed?.schema ? parsed : { schema: parsed }
     setApplyingJson(true)
     try {
+      // 深度清理 schema 中的 null 值（包括 enum 数组、options 等）
       const sanitized = JSON.parse(JSON.stringify(schema), (k: string, v: any) => {
         if (k === 'enum' && Array.isArray(v)) return v.filter((x: any) => x != null)
+        if (k === 'options' && Array.isArray(v)) return v.filter((x: any) => x != null && x.value != null)
         return v
       })
       const tree = (transformToTreeNode as any)(sanitized, DESIGNABLE_OPTS)
