@@ -2,11 +2,13 @@ import React from 'react'
 import { Button } from '@/components/ui/button'
 import { createBehavior, createResource } from '@designable/core'
 import type { DnFC } from '@designable/react'
+import { useNodeIdProps } from '@designable/react'
 
 export const ScanTrigger: DnFC<any> = (props) => {
+  const nodeIdProps = useNodeIdProps()
   const p = props?.['x-component-props'] || props || {}
   return (
-    <Button variant="outline">
+    <Button variant="outline" {...nodeIdProps}>
       <span className="mr-2">📷</span>
       {p.text || '扫码'}
     </Button>
@@ -18,6 +20,11 @@ ScanTrigger.Behavior = createBehavior({
   extends: ['Field'],
   selector: node => node.props?.['x-component'] === 'ScanTrigger',
   designerProps: {
+    draggable: true,
+    droppable: false,
+    selectable: true,
+    selfRenderChildren: false,
+    inlineChildrenLayout: true,
     propsSchema: {
       type: 'object',
       properties: {

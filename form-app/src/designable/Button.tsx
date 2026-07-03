@@ -6,6 +6,7 @@ import React from 'react'
 import { Button } from '@/components/ui/button'
 import { createBehavior, createResource } from '@designable/core'
 import type { DnFC } from '@designable/react'
+import { useNodeIdProps } from '@designable/react'
 
 /** 生成唯一按钮 ID */
 const generateButtonId = () => {
@@ -15,12 +16,14 @@ const generateButtonId = () => {
 }
 
 export const CustomButton: DnFC<any> = (props) => {
+  const nodeIdProps = useNodeIdProps()
   const p = props?.['x-component-props'] || props || {}
   return (
     <Button
       variant={p.variant || 'default'}
       className={p.block ? 'w-full' : ''}
       type="button"
+      {...nodeIdProps}
     >
       {p.text || '按钮'}
     </Button>
@@ -72,7 +75,11 @@ CustomButton.Behavior = createBehavior({
   extends: ['Field'],
   selector: (node) => node.props?.['x-component'] === 'CustomButton',
   designerProps: {
+    draggable: true,
     droppable: false,
+    selectable: true,
+    selfRenderChildren: false,
+    inlineChildrenLayout: true,
     propsSchema: {
       type: 'object',
       properties: {

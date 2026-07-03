@@ -2,6 +2,7 @@ import React from 'react'
 import { Button } from '@/components/ui/button'
 import { createBehavior, createResource } from '@designable/core'
 import type { DnFC } from '@designable/react'
+import { useNodeIdProps } from '@designable/react'
 
 /** 生成唯一按钮 ID */
 const generateButtonId = (prefix: string) => {
@@ -68,12 +69,14 @@ const commonButtonProps = {
 // ── 通用动作按钮 ──────────────────────────────────────────────────────
 
 export const ActionButton: DnFC<any> = (props) => {
+  const nodeIdProps = useNodeIdProps()
   const p = props?.['x-component-props'] || props || {}
   return (
     <Button
       variant={p.variant || 'default'}
       className={p.block ? 'w-full' : ''}
       type="button"
+      {...nodeIdProps}
     >
       {p.text || '按钮'}
     </Button>
@@ -85,7 +88,11 @@ ActionButton.Behavior = createBehavior({
   extends: ['Field'],
   selector: node => node.props?.['x-component'] === 'ActionButton',
   designerProps: {
+    draggable: true,
     droppable: false,
+    selectable: true,
+    selfRenderChildren: false,
+    inlineChildrenLayout: true,
     propsSchema: createButtonPropsSchema({
       ...commonButtonProps,
       action: {
@@ -202,12 +209,14 @@ ActionButton.Resource = createResource({
 // ── 事件触发按钮 ──────────────────────────────────────────────────────
 
 export const EventButton: DnFC<any> = (props) => {
+  const nodeIdProps = useNodeIdProps()
   const p = props?.['x-component-props'] || props || {}
   return (
     <Button
       variant={p.variant || 'default'}
       className={p.block ? 'w-full' : ''}
       type="button"
+      {...nodeIdProps}
     >
       {p.text || '触发事件'}
     </Button>
@@ -219,15 +228,22 @@ EventButton.Behavior = createBehavior({
   extends: ['Field'],
   selector: node => node.props?.['x-component'] === 'EventButton',
   designerProps: {
+    draggable: true,
     droppable: false,
+    selectable: true,
+    selfRenderChildren: false,
+    inlineChildrenLayout: true,
     propsSchema: createButtonPropsSchema({
       ...commonButtonProps,
       buttonId: {
         type: 'string',
         title: '按钮ID',
-        description: '用于事件编排中匹配按钮触发源',
+        description: '用于事件编排中匹配按钮触发源（留空自动生成）',
         'x-decorator': 'FormItem',
         'x-component': 'Input',
+        'x-component-props': {
+          placeholder: '自动生成或手动输入',
+        },
       },
     }),
   },
@@ -239,7 +255,7 @@ EventButton.Behavior = createBehavior({
         'x-component-props.text': '按钮文本',
         'x-component-props.variant': '按钮样式',
         'x-component-props.block': '撑满整行',
-        'x-component-props.buttonId': '事件按钮ID',
+        'x-component-props.buttonId': '按钮ID',
       },
     },
     'en-US': { title: 'EventButton' },
@@ -268,12 +284,14 @@ EventButton.Resource = createResource({
 // ── 跳转按钮 ──────────────────────────────────────────────────────────
 
 export const NavigateButton: DnFC<any> = (props) => {
+  const nodeIdProps = useNodeIdProps()
   const p = props?.['x-component-props'] || props || {}
   return (
     <Button
       variant={p.variant || 'default'}
       className={p.block ? 'w-full' : ''}
       type="button"
+      {...nodeIdProps}
     >
       {p.text || '跳转'}
     </Button>
@@ -285,14 +303,53 @@ NavigateButton.Behavior = createBehavior({
   extends: ['Field'],
   selector: node => node.props?.['x-component'] === 'NavigateButton',
   designerProps: {
+    draggable: true,
     droppable: false,
+    selectable: true,
+    selfRenderChildren: false,
+    inlineChildrenLayout: true,
     propsSchema: createButtonPropsSchema({
       ...commonButtonProps,
+      navigateType: {
+        type: 'string',
+        title: '跳转类型',
+        'x-decorator': 'FormItem',
+        'x-component': 'Select',
+        enum: [
+          { label: 'App内页面', value: 'internal' },
+          { label: '外部URL', value: 'url' },
+        ],
+        'x-component-props': {
+          defaultValue: 'internal',
+        },
+      },
       targetPage: {
         type: 'string',
         title: '目标页面',
+        description: '输入页面key（如: form, detail）',
         'x-decorator': 'FormItem',
         'x-component': 'Input',
+        'x-component-props': {
+          placeholder: '页面key',
+        },
+        'x-reactions': {
+          dependencies: ['.navigateType'],
+          fulfill: { state: { visible: '{{$deps[0] === "internal" || !$deps[0]}}' } },
+        },
+      },
+      targetUrl: {
+        type: 'string',
+        title: '目标URL',
+        description: '完整的URL地址',
+        'x-decorator': 'FormItem',
+        'x-component': 'Input',
+        'x-component-props': {
+          placeholder: 'https://example.com',
+        },
+        'x-reactions': {
+          dependencies: ['.navigateType'],
+          fulfill: { state: { visible: '{{$deps[0] === "url"}}' } },
+        },
       },
     }),
   },
@@ -333,12 +390,14 @@ NavigateButton.Resource = createResource({
 // ── 一键反馈按钮 ──────────────────────────────────────────────────────
 
 export const FeedbackButton: DnFC<any> = (props) => {
+  const nodeIdProps = useNodeIdProps()
   const p = props?.['x-component-props'] || props || {}
   return (
     <Button
       variant={p.variant || 'default'}
       className={p.block ? 'w-full' : ''}
       type="button"
+      {...nodeIdProps}
     >
       {p.text || '一键反馈'}
     </Button>
@@ -350,7 +409,11 @@ FeedbackButton.Behavior = createBehavior({
   extends: ['Field'],
   selector: node => node.props?.['x-component'] === 'FeedbackButton',
   designerProps: {
+    draggable: true,
     droppable: false,
+    selectable: true,
+    selfRenderChildren: false,
+    inlineChildrenLayout: true,
     propsSchema: createButtonPropsSchema({
       ...commonButtonProps,
       feedbackType: {
