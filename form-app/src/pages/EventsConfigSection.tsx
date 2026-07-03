@@ -572,7 +572,10 @@ function ActionsEditor({
         const isExpanded = expandedActions.has(i)
         const actionLabel = {
           set_field: '设字段',
+          set_fields_batch: '批量设字段',
+          clear_fields: '清空字段',
           set_field_prop: '设属性',
+          set_field_props_batch: '批量设属性',
           call_interface: '调接口',
           print: '打印',
           navigate: '跳页',
@@ -611,11 +614,14 @@ function ActionsEditor({
                     onChange={(t) => {
                       const def: Record<string, EventAction> = {
                         set_field: { type: 'set_field', field: '', value_src: '$scan' },
+                        set_fields_batch: { type: 'set_fields_batch', mappings: [] },
+                        clear_fields: { type: 'clear_fields', fields: [] },
+                        set_field_prop: { type: 'set_field_prop', field: '', prop: 'visible', value_src: '' },
+                        set_field_props_batch: { type: 'set_field_props_batch', mappings: [] },
                         call_interface: { type: 'call_interface', interface_type: 'internal', param_map: [], result_map: [] },
                         print: { type: 'print', printer_template_id: '' },
                         navigate: { type: 'navigate', to_page_key: '' },
                   toast: { type: 'toast', message_src: '' },
-                  set_field_prop: { type: 'set_field_prop', field: '', prop: 'visible', value_src: '' },
                   speak: { type: 'speak', text_src: '' },
                   emit_event: { type: 'emit_event', event_name: '', data_src: '' },
                   run_script: { type: 'run_script', script: '' },
@@ -624,7 +630,10 @@ function ActionsEditor({
               }}
               options={[
                 { value: 'set_field', label: '设字段' },
+                { value: 'set_fields_batch', label: '批量设字段' },
+                { value: 'clear_fields', label: '清空字段' },
                 { value: 'set_field_prop', label: '设属性' },
+                { value: 'set_field_props_batch', label: '批量设属性' },
                 { value: 'call_interface', label: '调接口' },
                 { value: 'print', label: '打印' },
                 { value: 'navigate', label: '跳页' },
@@ -687,6 +696,134 @@ function ActionsEditor({
                   : a.prop === 'background' || a.prop === 'color'
                   ? '填颜色值，如 #ff4d4f / red / rgb(255,0,0)'
                   : '填字符串，支持 $scan/$form.字段 占位'}
+              </div>
+            </div>
+          )}
+
+          {a.type === 'set_field_props_batch' && (
+            <div>
+              <div style={{ marginBottom: 8, display: 'flex', gap: 6, alignItems: 'center' }}>
+                <Select size="small" style={{ width: 76 }} value={a.scope || 'page'}
+                  onChange={(v: any) => upd(i, { scope: v })}
+                  options={[{ value: 'page', label: '页面' }, { value: 'app', label: '应用' }]} />
+                <span style={{ fontSize: 11, color: '#94a3b8' }}>批量设置多个字段属性</span>
+                <Button size="small" type="dashed" onClick={() => {
+                  const mappings = [...(a.mappings || [])]
+                  mappings.push({ field: '', prop: 'visible', value_src: '' })
+                  upd(i, { mappings })
+                }}>+ 添加字段</Button>
+              </div>
+              {(!a.mappings || a.mappings.length === 0) && (
+                <div style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center', padding: '8px 0' }}>
+                  点击「添加字段」配置批量属性设置
+                </div>
+              )}
+              {a.mappings?.map((mapping, mi) => (
+                <div key={mi} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <Select size="small" style={{ width: 120 }} placeholder="字段" value={mapping.field || undefined}
+                    onChange={v => {
+                      const mappings = [...a.mappings]
+                      mappings[mi] = { ...mappings[mi], field: v }
+                      upd(i, { mappings })
+                    }} options={fieldOptions} />
+                  <Select size="small" style={{ width: 90 }} value={mapping.prop || 'visible'}
+                    onChange={(v: any) => {
+                      const mappings = [...a.mappings]
+                      mappings[mi] = { ...mappings[mi], prop: v }
+                      upd(i, { mappings })
+                    }}
+                    options={[
+                      { value: 'visible', label: '显示隐藏' },
+                      { value: 'disabled', label: '禁用' },
+                      { value: 'readOnly', label: '只读' },
+                      { value: 'background', label: '背景色' },
+                      { value: 'color', label: '文字色' },
+                      { value: 'title', label: '标题' },
+                    ]} />
+                  <span style={{ color: '#94a3b8' }}>←</span>
+                  <SrcInput style={{ flex: 1, minWidth: 100 }} value={mapping.value_src} fields={fields} onChange={v => {
+                    const mappings = [...a.mappings]
+                    mappings[mi] = { ...mappings[mi], value_src: v }
+                    upd(i, { mappings })
+                  }} />
+                  <Button size="small" danger onClick={() => {
+                    const mappings = a.mappings.filter((_, idx) => idx !== mi)
+                    upd(i, { mappings })
+                  }}>删</Button>
+                </div>
+              ))}
+              <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>
+                visible/disabled/readOnly 值为真：true/1/是/yes；background/color 填颜色值；title 填字符串
+              </div>
+            </div>
+          )}
+
+          {a.type === 'set_fields_batch' && (
+            <div>
+              <div style={{ marginBottom: 8, display: 'flex', gap: 6, alignItems: 'center' }}>
+                <Select size="small" style={{ width: 76 }} value={a.scope || 'page'}
+                  onChange={(v: any) => upd(i, { scope: v })}
+                  options={[{ value: 'page', label: '页面' }, { value: 'app', label: '应用' }]} />
+                <span style={{ fontSize: 11, color: '#94a3b8' }}>批量设置多个字段</span>
+                <Button size="small" type="dashed" onClick={() => {
+                  const mappings = [...(a.mappings || [])]
+                  mappings.push({ field: '', value_src: '' })
+                  upd(i, { mappings })
+                }}>+ 添加字段</Button>
+              </div>
+              {(!a.mappings || a.mappings.length === 0) && (
+                <div style={{ fontSize: 11, color: '#94a3b8', textAlign: 'center', padding: '8px 0' }}>
+                  点击「添加字段」配置批量设置
+                </div>
+              )}
+              {a.mappings?.map((mapping, mi) => (
+                <div key={mi} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center' }}>
+                  <Select size="small" style={{ flex: 1 }} placeholder="字段" value={mapping.field || undefined}
+                    onChange={v => {
+                      const mappings = [...a.mappings]
+                      mappings[mi] = { ...mappings[mi], field: v }
+                      upd(i, { mappings })
+                    }} options={fieldOptions} />
+                  <span style={{ color: '#94a3b8' }}>←</span>
+                  <SrcInput style={{ flex: 1 }} value={mapping.value_src} fields={fields} onChange={v => {
+                    const mappings = [...a.mappings]
+                    mappings[mi] = { ...mappings[mi], value_src: v }
+                    upd(i, { mappings })
+                  }} />
+                  <Button size="small" danger onClick={() => {
+                    const mappings = a.mappings.filter((_, idx) => idx !== mi)
+                    upd(i, { mappings })
+                  }}>删</Button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {a.type === 'clear_fields' && (
+            <div>
+              <div style={{ marginBottom: 8, display: 'flex', gap: 6, alignItems: 'center' }}>
+                <Select size="small" style={{ width: 76 }} value={a.scope || 'page'}
+                  onChange={(v: any) => upd(i, { scope: v })}
+                  options={[{ value: 'page', label: '页面' }, { value: 'app', label: '应用' }]} />
+                <span style={{ fontSize: 11, color: '#94a3b8' }}>清空字段（默认值：空字符串）</span>
+              </div>
+              <Select
+                size="small"
+                mode="multiple"
+                style={{ width: '100%' }}
+                placeholder="选择要清空的字段"
+                value={a.fields || []}
+                onChange={v => upd(i, { fields: v })}
+                options={fieldOptions}
+              />
+              <div style={{ marginTop: 6, fontSize: 11, color: '#94a3b8' }}>
+                可多选。字段将被重置为空字符串 ''（可在下方自定义清空值）
+              </div>
+              <div style={{ marginTop: 6, display: 'flex', gap: 6, alignItems: 'center' }}>
+                <span style={{ fontSize: 11, color: '#64748b' }}>清空值（可选）：</span>
+                <Input size="small" style={{ flex: 1 }} placeholder="默认为空字符串 ''"
+                  value={a.clear_value !== undefined ? String(a.clear_value) : ''}
+                  onChange={e => upd(i, { clear_value: e.target.value })} />
               </div>
             </div>
           )}
@@ -757,7 +894,10 @@ function ActionsEditor({
       })}
       <Space wrap size={4}>
         <Button size="small" onClick={() => add({ type: 'set_field', field: '', value_src: '$scan' })}>+设字段</Button>
+        <Button size="small" onClick={() => add({ type: 'set_fields_batch', mappings: [] })}>+批量设字段</Button>
+        <Button size="small" onClick={() => add({ type: 'clear_fields', fields: [] })}>+清空字段</Button>
         <Button size="small" onClick={() => add({ type: 'set_field_prop', field: '', prop: 'visible', value_src: '' })}>+设属性</Button>
+        <Button size="small" onClick={() => add({ type: 'set_field_props_batch', mappings: [] })}>+批量设属性</Button>
         <Button size="small" onClick={() => add({ type: 'call_interface', interface_type: 'internal', param_map: [], result_map: [] })}>+调接口</Button>
         <Button size="small" onClick={() => add({ type: 'print', printer_template_id: '' })}>+打印</Button>
         <Button size="small" onClick={() => add({ type: 'navigate', to_page_key: '' })}>+跳页</Button>

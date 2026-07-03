@@ -61,6 +61,166 @@ async function authed(path: string, method: string, body?: any) {
   return data
 }
 
+/**
+ * 字段配置与 design_schema 增量合并：
+ * 只更新字段定义相关属性（label、component、required 等），
+ * 保留编辑器设定的布局、样式、容器结构。
+ */
+function mergeFieldDefsIntoDesignSchema(fieldDefs: FieldDef[], existingSchema: any): any {
+  const properties = existingSchema?.schema?.properties || {}
+  const fieldMap = new Map<string, FieldDef>()
+  fieldDefs.forEach(f => fieldMap.set(f.field, f))
+
+  // 组件映射（与 schemaConverter 保持一致）
+  const COMP_MAP: Record<string, string> = {
+    Input: 'Input',
+    InputNumber: 'NumberPicker',
+    Select: 'Select',
+    DatePicker: 'DatePicker',
+    Switch: 'Switch',
+    Rate: 'Rate',
+    Slider: 'Slider',
+    Checkbox: 'Checkbox',
+    Radio: 'Radio',
+    PrintButton: 'PrintButton',
+  }
+
+  // 递归更新字段属性，保留布局容器和非字段节点
+  const updateProperties = (props: Record<string, any>): Record<string, any> => {
+    const updated: Record<string, any> = {}
+
+    for (const [key, node] of Object.entries(props)) {
+      if (!node || typeof node !== 'object') {
+        updated[key] = node
+        continue
+      }
+
+      const component = node['x-component']
+
+      // 容器节点：保留自身，递归更新子节点
+      const CONTAINER = ['Form', 'FormLayout', 'FormGrid', 'FormTab', 'FormTab.TabPane',
+        'Card', 'Space', 'FormCollapse', 'FormCollapse.CollapsePanel',
+        'Section', 'ArrayCards', 'ArrayTable']
+
+      if (CONTAINER.includes(component)) {
+        updated[key] = { ...node }
+        if (node.properties) {
+          updated[key].properties = updateProperties(node.properties)
+        }
+        if (node.items?.properties) {
+          updated[key].items = {
+            ...node.items,
+            properties: updateProperties(node.items.properties),
+          }
+        }
+        continue
+      }
+
+      // 非字段展示组件：原样保留
+      const NON_FIELD = ['Text', 'SubmitButton', 'ConfirmDialogButton', 'ScanTrigger',
+        'CardList', 'ActionButton', 'EventButton', 'NavigateButton', 'FeedbackButton',
+        'PageHeader', 'Divider', 'StaticImage', 'StaticText']
+
+      if (NON_FIELD.includes(component)) {
+        updated[key] = node
+        continue
+      }
+
+      // 打印按钮
+      if (component === 'PrintButton') {
+        const fieldName = node.name || key
+        const fieldDef = fieldMap.get(fieldName)
+        if (fieldDef) {
+          updated[key] = {
+            ...node,
+            title: fieldDef.label || node.title,
+            'x-component-props': {
+              ...node['x-component-props'],
+              templateId: fieldDef.print_template_id,
+              buttonId: fieldDef.button_id,
+              text: fieldDef.button_text || fieldDef.label || '打印',
+              type: (fieldDef as any).button_type || node['x-component-props']?.type,
+              block: (fieldDef as any).button_block ?? node['x-component-props']?.block ?? true,
+            },
+          }
+        } else {
+          updated[key] = node // 字段已删除，保留原节点
+        }
+        continue
+      }
+
+      // 输入字段：更新定义，保留布局/样式
+      const fieldName = node.name || key
+      const fieldDef = fieldMap.get(fieldName)
+
+      if (fieldDef) {
+        updated[key] = {
+          ...node, // 保留所有编辑器属性（x-index、位置、样式等）
+          title: fieldDef.label || fieldName,
+          'x-component': COMP_MAP[fieldDef.component] || 'Input',
+          'x-component-props': {
+            ...node['x-component-props'],
+            ...(fieldDef.placeholder ? { placeholder: fieldDef.placeholder } : {}),
+          },
+          'x-validator': fieldDef.required
+            ? [{ required: true, message: '此项为必填' }]
+            : (node['x-validator'] || []).filter((v: any) => !v.required),
+        }
+      } else {
+        // 字段已从 field_definitions 中删除，保留原节点（用户可在编辑器中手动删除）
+        updated[key] = node
+      }
+    }
+
+    // 添加新字段（存在于 fieldDefs 但不在 schema 中）
+    for (const fieldDef of fieldDefs) {
+      if (!Object.values(updated).some((n: any) => n?.name === fieldDef.field || n === fieldDef.field)) {
+        // 新增字段：生成默认节点
+        if (fieldDef.component === 'PrintButton') {
+          updated[fieldDef.field] = {
+            type: 'void',
+            name: fieldDef.field,
+            title: fieldDef.label || '',
+            'x-component': 'PrintButton',
+            'x-component-props': {
+              templateId: fieldDef.print_template_id,
+              buttonId: fieldDef.button_id,
+              text: fieldDef.button_text || fieldDef.label || '打印',
+              type: (fieldDef as any).button_type || 'default',
+              block: (fieldDef as any).button_block ?? true,
+            },
+            'x-index': Object.keys(updated).length,
+          }
+        } else {
+          updated[fieldDef.field] = {
+            name: fieldDef.field,
+            type: 'string',
+            title: fieldDef.label || fieldDef.field,
+            'x-decorator': 'FormItem',
+            'x-decorator-props': {},
+            'x-component': COMP_MAP[fieldDef.component] || 'Input',
+            'x-component-props': {
+              ...(fieldDef.placeholder ? { placeholder: fieldDef.placeholder } : {}),
+            },
+            ...(fieldDef.required ? { 'x-validator': [{ required: true, message: '此项为必填' }] } : {}),
+            'x-index': Object.keys(updated).length,
+          }
+        }
+      }
+    }
+
+    return updated
+  }
+
+  return {
+    ...existingSchema,
+    schema: {
+      ...existingSchema.schema,
+      properties: updateProperties(properties),
+    },
+  }
+}
+
 export default function PageEditorPage() {
   const { pageId } = useParams()
   const navigate = useNavigate()
@@ -132,15 +292,27 @@ export default function PageEditorPage() {
     try {
       const config = { field_definitions: fields, scanner: scannerConfig, events: pageEvents, printers, show_default_submit: showDefaultSubmit, enable_draft: enableDraft, param_schema: paramSchema }
 
-      // 同时生成并保存 design_schema
-      const designSchema = fieldDefsToSchema(fields)
+      // 读取当前页面的完整数据，包括现有的 design_schema
+      const pageRes = await authed(`/api/form-app/pages/${pageId}`, 'GET')
+      const currentPage = pageRes.data
+
+      // 增量更新 design_schema：保留编辑器设定的布局/样式，只更新字段定义
+      let finalDesignSchema = currentPage?.design_schema ? JSON.parse(currentPage.design_schema) : null
+
+      if (finalDesignSchema?.schema?.properties) {
+        // 已有 design_schema，执行交叉比对合并
+        finalDesignSchema = mergeFieldDefsIntoDesignSchema(fields, finalDesignSchema)
+      } else {
+        // 无有效 design_schema，全量生成（首次创建页面场景）
+        finalDesignSchema = fieldDefsToSchema(fields)
+      }
 
       await authed(`/api/form-app/pages/${pageId}`, 'PUT', {
         title,
         interface_code: interfaceCode,
         page_type: pageType,
         config_json: JSON.stringify(config),
-        design_schema: JSON.stringify(designSchema),
+        design_schema: JSON.stringify(finalDesignSchema),
       })
       message.success('保存成功，设计器布局已同步')
     } catch (e: any) {

@@ -24,6 +24,7 @@ import { FeedbackButton } from '../FeedbackButton'
 import { CustomButton } from '../Button'
 import ConfirmDialogButton from '../ConfirmDialogButton'
 import { PageHeader, Section, Divider, StaticImage, StaticText } from '../layout'
+import { ShadcnArrayCards, ShadcnArrayTable } from './shadcnArrayComponents'
 
 /**
  * design_schema 根节点 x-component 为 'Form'；外层已由库的 Form
@@ -188,9 +189,11 @@ export const shadcnComponents = {
   Select: FormilySelect,
   Checkbox: FormilyCheckbox,
   Switch: FormilySwitch,
+  ArrayCards: ShadcnArrayCards,
+  ArrayTable: ShadcnArrayTable,
   // 暂不支持的高级组件（后续按需添加）：
   // DatePicker, TimePicker, Upload, TreeSelect, Cascader, Transfer
-  // Radio, Rate, Slider, ArrayCards, ArrayTable
+  // Radio, Rate, Slider
   ...sharedComponents,
 }
 

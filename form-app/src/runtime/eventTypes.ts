@@ -123,6 +123,15 @@ export interface SetFieldPropAction extends ActionBase {
   scope?: StateScopeKind
 }
 
+/** 批量设置多个字段的展示属性 */
+export interface SetFieldPropsBatchAction extends ActionBase {
+  type: 'set_field_props_batch'
+  /** 字段属性映射列表：每项指定目标字段、属性名和值来源 */
+  mappings: Array<{ field: string; prop: FieldPropName; value_src: ValueSrc }>
+  /** 目标作用域，默认 'page' */
+  scope?: StateScopeKind
+}
+
 /** 语音播报：把文本（支持 $scan/$form.x/$event.x/字面量）念出来 */
 export interface SpeakAction extends ActionBase {
   type: 'speak'
@@ -149,13 +158,36 @@ export interface RunScriptAction extends ActionBase {
   script: string
 }
 
+/** 批量设置多个字段：一次性设置多个字段值 */
+export interface SetFieldsBatchAction extends ActionBase {
+  type: 'set_fields_batch'
+  /** 字段映射列表：每项指定目标字段和值来源 */
+  mappings: Array<{ field: string; value_src: ValueSrc }>
+  /** 写入的作用域，默认 'page' */
+  scope?: StateScopeKind
+}
+
+/** 清空字段：将多个字段重置为默认值（空字符串/null/undefined） */
+export interface ClearFieldsAction extends ActionBase {
+  type: 'clear_fields'
+  /** 要清空的字段列表 */
+  fields: string[]
+  /** 目标作用域，默认 'page' */
+  scope?: StateScopeKind
+  /** 清空值，默认为空字符串 '' */
+  clear_value?: any
+}
+
 export type EventAction =
   | SetFieldAction
+  | SetFieldsBatchAction
+  | ClearFieldsAction
   | CallInterfaceAction
   | PrintAction
   | NavigateAction
   | ToastAction
   | SetFieldPropAction
+  | SetFieldPropsBatchAction
   | SpeakAction
   | EmitEventAction
   | RunScriptAction

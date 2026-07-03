@@ -3,11 +3,14 @@
  * eventEngine 顶部 import 一次即完成全部注册。
  */
 import './setField'
+import './setFieldsBatch'
+import './clearFields'
 import './callInterface'
 import './print'
 import './navigate'
 import './toast'
 import './setFieldProp'
+import './setFieldPropsBatch'
 import './speak'
 import './emitEvent'
 import './runScript'
