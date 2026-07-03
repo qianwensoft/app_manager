@@ -25,7 +25,8 @@ object ScanBroadcastHelper {
         "android.intent.ACTION_DECODE_DATA",
         "com.sunmi.scanner.ACTION_DATA",
         "unitech.scanservice.data",
-        "com.zebra.dw.action.ACTION_DECODE_DATA"
+        "com.zebra.dw.action.ACTION_DECODE_DATA",
+        "com.speedata.showdecodedata"
     )
 
     /**
@@ -33,7 +34,8 @@ object ScanBroadcastHelper {
      */
     val SCAN_EXTRA_KEYS = listOf(
         "data", "barcode_string", "decode_data", "SCAN_DATA", "scannerdata",
-        "barcode", "BARCODE", "SCAN_BARCODE1", "barcodeData", "decodeData"
+        "barcode", "BARCODE", "SCAN_BARCODE1", "barcodeData", "decodeData",
+        "message"
     )
 
     /**
