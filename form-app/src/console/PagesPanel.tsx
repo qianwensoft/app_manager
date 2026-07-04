@@ -28,7 +28,8 @@ export default function PagesPanel({ app, pages, links, reload }: Props) {
   const [primaryKey, setPrimaryKey] = useState('id')
   const [tableColumns, setTableColumns] = useState<any[]>([])
   const [generating, setGenerating] = useState(false)
-  const [regenerateTarget, setRegenerateTarget] = useState<'form' | 'list' | 'detail' | null>(null)
+  const [regenerateTargets, setRegenerateTargets] = useState<Array<'form' | 'list' | 'detail'>>([])
+  const [platformType, setPlatformType] = useState<'web' | 'mobile'>('web')
 
   useEffect(() => {
     if (pages.length > 0) {
@@ -121,18 +122,19 @@ export default function PagesPanel({ app, pages, links, reload }: Props) {
 
   const doRegenerate = async () => {
     if (!selectedDataSourceID || !selectedTable) { message.warning('请选择数据源和数据表'); return }
-    if (!regenerateTarget) { message.warning('请选择要生成的页面类型'); return }
+    if (regenerateTargets.length === 0) { message.warning('请至少选择一个页面类型'); return }
     setGenerating(true)
     try {
       await authed(`/api/form-app/infos/${app.id}/pages/regenerate`, 'POST', {
-        page_type: regenerateTarget,
+        page_types: regenerateTargets,
+        platform_type: platformType,
         data_source_id: Number(selectedDataSourceID),
         table: selectedTable,
         primary_key: primaryKey,
       })
       setShowGenerator(false)
       reload()
-      message.success('页面生成成功')
+      message.success(`已生成 ${regenerateTargets.length} 个页面`)
     } catch (e: any) { message.error(e.message) } finally { setGenerating(false) }
   }
 
@@ -160,17 +162,37 @@ export default function PagesPanel({ app, pages, links, reload }: Props) {
           </Select>
         </div>
         <div style={{ marginBottom: 12 }}>
+          <label style={{ display: 'block', marginBottom: 4 }}>平台类型</label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <Button type={platformType === 'web' ? 'primary' : 'default'} onClick={() => setPlatformType('web')}>Web 端</Button>
+            <Button type={platformType === 'mobile' ? 'primary' : 'default'} onClick={() => setPlatformType('mobile')}>移动端</Button>
+          </div>
+          {platformType === 'mobile' && (
+            <div style={{ marginTop: 4, fontSize: 12, color: '#8c8c8c' }}>
+              移动端列表页使用 ArrayCards + 下拉刷新/上拉加载
+            </div>
+          )}
+        </div>
+        <div style={{ marginBottom: 12 }}>
           <label style={{ display: 'block', marginBottom: 4 }}>页面类型</label>
           <div style={{ display: 'flex', gap: 8 }}>
             {(['form', 'list', 'detail'] as const).map(t => (
-              <Button key={t} type={regenerateTarget === t ? 'primary' : 'default'} onClick={() => setRegenerateTarget(t)}>
+              <Button
+                key={t}
+                type={regenerateTargets.includes(t) ? 'primary' : 'default'}
+                onClick={() => {
+                  setRegenerateTargets(prev =>
+                    prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]
+                  )
+                }}
+              >
                 {t === 'form' ? '表单页' : t === 'list' ? '列表页' : '详情页'}
               </Button>
             ))}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <Button type="primary" loading={generating} onClick={doRegenerate} disabled={!selectedDataSourceID || !selectedTable || !regenerateTarget}>确认生成</Button>
+          <Button type="primary" loading={generating} onClick={doRegenerate} disabled={!selectedDataSourceID || !selectedTable || regenerateTargets.length === 0}>确认生成</Button>
           <Button onClick={() => setShowGenerator(false)}>取消</Button>
         </div>
       </div>

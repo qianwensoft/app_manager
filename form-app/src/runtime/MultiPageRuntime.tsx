@@ -426,6 +426,7 @@ export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }:
           fields={fields}
           bindings={bindings}
           queryConditions={config.query_conditions || []}
+          mode={designSchema?.schema?.properties?.table?.['x-component'] === 'ArrayCards' ? 'mobile' : 'web'}
           onFetchOptions={fetchOptions}
           onQuery={async queryParams => {
             const res = await authed(queryPath, 'POST', {

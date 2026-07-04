@@ -15,8 +15,8 @@ android {
         applicationId "com.appmanager.agent"
         minSdk 21
         targetSdk 34
-        versionCode 260
-        versionName "2.3.13"
+        versionCode 261
+        versionName "2.3.14"
     }
 
     signingConfigs {

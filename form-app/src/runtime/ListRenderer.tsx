@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { Table, TableHeader, TableBody, TableHead, TableRow, TableCell } from '@/components/ui/table'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -18,6 +18,7 @@ type ListRendererProps = {
   newButtonLabel?: string
   onFetchOptions?: (interfaceCode: string, paramValues: Record<string, any>) => Promise<FieldOption[]>
   pageSize?: number
+  mode?: 'web' | 'mobile'
 }
 
 export default function ListRenderer({
@@ -30,6 +31,7 @@ export default function ListRenderer({
   newButtonLabel = '新增',
   onFetchOptions,
   pageSize = 10,
+  mode = 'web',
 }: ListRendererProps) {
   const [data, setData] = useState<any[]>([])
   const [total, setTotal] = useState(0)
@@ -37,14 +39,27 @@ export default function ListRenderer({
   const [page, setPage] = useState(1)
   const [queryParams, setQueryParams] = useState<Record<string, any>>({})
   const [condOptions, setCondOptions] = useState<Record<string, FieldOption[]>>({})
+  const [refreshing, setRefreshing] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const listRef = useRef<HTMLDivElement>(null)
 
-  const loadData = async (p: number = page) => {
-    setLoading(true)
+  const loadData = async (p: number = page, append = false) => {
+    if (append) {
+      setLoadingMore(true)
+    } else {
+      setLoading(true)
+    }
     try {
       const res = await onQuery({ ...queryParams, page: p, page_size: pageSize })
       const resultData = res.data || []
-      setData(resultData)
+
+      if (append) {
+        setData(prev => [...prev, ...resultData])
+      } else {
+        setData(resultData)
+      }
       setTotal(res.total || 0)
+      setPage(p)
 
       // 调试信息：如果有数据但没有列，提示用户
       if (resultData.length > 0 && fields.length === 0) {
@@ -59,12 +74,45 @@ export default function ListRenderer({
       message.error(e.message || '加载失败')
     } finally {
       setLoading(false)
+      setLoadingMore(false)
+      setRefreshing(false)
     }
   }
 
   useEffect(() => {
     loadData(1)
   }, [])
+
+  // 下拉刷新
+  const handlePullRefresh = useCallback(async () => {
+    setRefreshing(true)
+    await loadData(1, false)
+  }, [queryParams, pageSize])
+
+  // 上拉加载更多
+  const handleLoadMore = useCallback(async () => {
+    if (loadingMore || data.length >= total) return
+    await loadData(page + 1, true)
+  }, [page, loadingMore, data.length, total, queryParams, pageSize])
+
+  // 监听滚动事件，触发上拉加载
+  useEffect(() => {
+    if (mode !== 'mobile' || !listRef.current) return
+
+    const handleScroll = () => {
+      const el = listRef.current
+      if (!el) return
+      const { scrollTop, scrollHeight, clientHeight } = el
+      // 距离底部 100px 时触发加载
+      if (scrollHeight - scrollTop - clientHeight < 100) {
+        handleLoadMore()
+      }
+    }
+
+    const el = listRef.current
+    el.addEventListener('scroll', handleScroll)
+    return () => el.removeEventListener('scroll', handleScroll)
+  }, [mode, handleLoadMore])
 
   const reloadCondOptions = async (cond: QueryCondition) => {
     if (!onFetchOptions || !cond.options_interface_code) return
@@ -138,8 +186,8 @@ export default function ListRenderer({
   }
 
   return (
-    <div style={{ padding: 24 }}>
-      <div style={{ marginBottom: 16, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+    <div style={{ padding: mode === 'mobile' ? 0 : 24 }}>
+      <div style={{ marginBottom: 16, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', padding: mode === 'mobile' ? '12px 16px' : 0 }}>
         {queryConditions.map(cond => (
           <div key={cond.field}>{renderCondInput(cond)}</div>
         ))}
@@ -160,6 +208,7 @@ export default function ListRenderer({
           background: '#fafafa',
           border: '1px dashed #d9d9d9',
           borderRadius: 8,
+          margin: mode === 'mobile' ? '0 16px' : 0,
         }}>
           <div style={{ fontSize: 48, marginBottom: 16 }}>📋</div>
           <div style={{ fontSize: 16, color: '#595959', marginBottom: 8 }}>未配置列表字段</div>
@@ -170,6 +219,66 @@ export default function ListRenderer({
             <div style={{ fontSize: 12, color: '#1890ff', marginTop: 12 }}>
               已加载 {data.length} 条数据，但缺少字段配置
             </div>
+          )}
+        </div>
+      ) : mode === 'mobile' ? (
+        <div
+          ref={listRef}
+          style={{
+            height: 'calc(100vh - 120px)',
+            overflow: 'auto',
+            WebkitOverflowScrolling: 'touch',
+          }}
+        >
+          {refreshing && (
+            <div style={{ padding: 16, textAlign: 'center' }}>
+              <Loader2 className="h-5 w-5 animate-spin inline-block text-muted-foreground" />
+              <span style={{ marginLeft: 8, fontSize: 14, color: '#666' }}>刷新中...</span>
+            </div>
+          )}
+          {loading && data.length === 0 ? (
+            <div className="flex justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : data.length === 0 ? (
+            <div style={{ padding: 60, textAlign: 'center', color: '#999' }}>暂无数据</div>
+          ) : (
+            <>
+              <div style={{ padding: '0 16px' }}>
+                {data.map((row, idx) => (
+                  <div
+                    key={row.id || idx}
+                    onClick={() => onRowClick?.(row)}
+                    style={{
+                      background: '#fff',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: 8,
+                      padding: 16,
+                      marginBottom: 12,
+                      cursor: onRowClick ? 'pointer' : 'default',
+                    }}
+                  >
+                    {fields.map(f => (
+                      <div key={f.field} style={{ marginBottom: 8, display: 'flex' }}>
+                        <span style={{ fontWeight: 500, color: '#666', minWidth: 80 }}>{f.label}:</span>
+                        <span style={{ flex: 1, color: '#333' }}>{row[f.field] ?? '-'}</span>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+              {loadingMore && (
+                <div style={{ padding: 16, textAlign: 'center' }}>
+                  <Loader2 className="h-5 w-5 animate-spin inline-block text-muted-foreground" />
+                  <span style={{ marginLeft: 8, fontSize: 14, color: '#666' }}>加载更多...</span>
+                </div>
+              )}
+              {data.length >= total && total > 0 && (
+                <div style={{ padding: 16, textAlign: 'center', fontSize: 14, color: '#999' }}>
+                  已加载全部 {total} 条
+                </div>
+              )}
+            </>
           )}
         </div>
       ) : (

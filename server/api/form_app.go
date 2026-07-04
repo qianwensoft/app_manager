@@ -1019,32 +1019,73 @@ func buildGeneratedDesignSchema(cols []dbdriver.ColumnInfo, pk string) map[strin
 	}
 }
 
-func buildGeneratedListDesignSchema(cols []dbdriver.ColumnInfo, pk string) map[string]interface{} {
-	columns := []map[string]interface{}{}
-	for _, c := range cols {
-		name := strings.TrimSpace(c.Name)
-		if name == "" {
-			continue
+func buildGeneratedListDesignSchema(cols []dbdriver.ColumnInfo, pk string, platformType string) map[string]interface{} {
+	var schema map[string]interface{}
+
+	if platformType == "mobile" {
+		// 移动端使用 ArrayCards，需要在 properties 中定义每个字段
+		cardProperties := map[string]interface{}{}
+		for i, c := range cols {
+			name := strings.TrimSpace(c.Name)
+			if name == "" {
+				continue
+			}
+			cardProperties[name] = map[string]interface{}{
+				"type":              "string",
+				"title":             strings.ToUpper(name),
+				"x-decorator":       "FormItem",
+				"x-component":       "Input",
+				"x-component-props": map[string]interface{}{"readOnly": true},
+				"x-index":           i,
+			}
 		}
-		columns = append(columns, map[string]interface{}{
-			"title":     strings.ToUpper(name),
-			"dataIndex": name,
-			"key":       name,
-		})
-	}
-	schema := map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"table": map[string]interface{}{
-				"type":        "void",
-				"x-component": "Table",
-				"x-component-props": map[string]interface{}{
-					"columns": columns,
-					"rowKey":  pk,
+
+		schema = map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"list": map[string]interface{}{
+					"type":        "array",
+					"x-component": "ArrayCards",
+					"x-component-props": map[string]interface{}{
+						"title": "列表数据",
+					},
+					"items": map[string]interface{}{
+						"type":       "object",
+						"properties": cardProperties,
+					},
 				},
 			},
-		},
+		}
+	} else {
+		// Web 端使用 ArrayTable
+		columns := []map[string]interface{}{}
+		for _, c := range cols {
+			name := strings.TrimSpace(c.Name)
+			if name == "" {
+				continue
+			}
+			columns = append(columns, map[string]interface{}{
+				"title":     strings.ToUpper(name),
+				"dataIndex": name,
+				"key":       name,
+			})
+		}
+
+		schema = map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"table": map[string]interface{}{
+					"type":              "void",
+					"x-component":       "ArrayTable",
+					"x-component-props": map[string]interface{}{
+						"columns": columns,
+						"rowKey":  pk,
+					},
+				},
+			},
+		}
 	}
+
 	return map[string]interface{}{
 		"schema": schema,
 	}
@@ -1266,7 +1307,7 @@ func GenerateFormAppPagesFromTable(c *gin.Context) {
 	designSchema := buildGeneratedDesignSchema(cols, pk)
 	designBytes, _ := json.Marshal(designSchema)
 
-	listDesignSchema := buildGeneratedListDesignSchema(cols, pk)
+	listDesignSchema := buildGeneratedListDesignSchema(cols, pk, "web")
 	listDesignBytes, _ := json.Marshal(listDesignSchema)
 
 	listConfig := map[string]interface{}{
@@ -1449,17 +1490,43 @@ func RegenerateSinglePage(c *gin.Context) {
 		return
 	}
 	var body struct {
-		PageType     string `json:"page_type" binding:"required"`
-		DataSourceID uint   `json:"data_source_id"`
-		Table        string `json:"table"`
-		PrimaryKey   string `json:"primary_key"`
+		PageType     string   `json:"page_type"`
+		PageTypes    []string `json:"page_types"`
+		PlatformType string   `json:"platform_type"` // web | mobile
+		DataSourceID uint     `json:"data_source_id"`
+		Table        string   `json:"table"`
+		PrimaryKey   string   `json:"primary_key"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if body.PageType != "form" && body.PageType != "list" && body.PageType != "detail" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "page_type must be form, list or detail"})
+
+	// Support both single page_type and multiple page_types
+	var pageTypes []string
+	if len(body.PageTypes) > 0 {
+		pageTypes = body.PageTypes
+	} else if body.PageType != "" {
+		pageTypes = []string{body.PageType}
+	} else {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "page_type or page_types is required"})
+		return
+	}
+
+	// Validate all page types
+	for _, pt := range pageTypes {
+		if pt != "form" && pt != "list" && pt != "detail" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "page_type must be form, list or detail"})
+			return
+		}
+	}
+
+	platformType := body.PlatformType
+	if platformType == "" {
+		platformType = "web"
+	}
+	if platformType != "web" && platformType != "mobile" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "platform_type must be web or mobile"})
 		return
 	}
 
@@ -1497,10 +1564,6 @@ func RegenerateSinglePage(c *gin.Context) {
 	}
 	suffix := fmt.Sprintf("%d", time.Now().Unix())
 
-	var designBytes []byte
-	var configBytes []byte
-	var interfaceCode string
-
 	quotedTable := ""
 	pkCol := ""
 	if body.Table != "" {
@@ -1508,227 +1571,256 @@ func RegenerateSinglePage(c *gin.Context) {
 		pkCol = quoteSQLTableIdent(src.Type, pk)
 	}
 
-	// Build dataset, interface and schema by page type
+	// Begin transaction
 	tx := database.DB.Begin()
 	if tx.Error != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": tx.Error.Error()})
 		return
 	}
 
-	switch body.PageType {
-	case "form":
-		var insertCols []string
-		var insertParams []string
-		if len(cols) > 0 {
+	createdPages := []gin.H{}
+
+	// Generate each page type
+	for _, pageType := range pageTypes {
+		var designBytes []byte
+		var configBytes []byte
+		var interfaceCode string
+
+		switch pageType {
+		case "form":
+			var insertCols []string
+			var insertParams []string
+			if len(cols) > 0 {
+				for _, c := range cols {
+					name := strings.TrimSpace(c.Name)
+					if name == "" || name == pk {
+						continue
+					}
+					insertCols = append(insertCols, quoteSQLTableIdent(src.Type, c.Name))
+					insertParams = append(insertParams, fmt.Sprintf("{{%s}}", c.Name))
+				}
+			}
+			insertSQL := ""
+			if len(insertCols) > 0 {
+				insertSQL = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedTable, strings.Join(insertCols, ", "), strings.Join(insertParams, ", "))
+			} else {
+				insertSQL = fmt.Sprintf("INSERT INTO %s (%s) VALUES ({{%s}})", quotedTable, pkCol, pk)
+			}
+			if !allowWrite {
+				insertSQL = ""
+			}
+			ifaceCode := fmt.Sprintf("%s_submit_%s", base, suffix)
+			dsCode := fmt.Sprintf("%s_ds_submit_%s", base, suffix)
+			ds := models.Dataset{
+				Code:         dsCode,
+				DataSourceID: &src.ID,
+				Category:     "form_app",
+				Name:         fmt.Sprintf("%s_%s_submit_auto", app.Name, body.Table),
+				Kind:         "transaction",
+				Definition:   "",
+				StepsJSON:    fmt.Sprintf(`["%s"]`, strings.ReplaceAll(insertSQL, `"`, `\"`)),
+			}
+			if err := tx.Create(&ds).Error; err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusBadRequest, gin.H{"error": "failed to create dataset: " + err.Error()})
+				return
+			}
+			iface := models.DataInterface{
+				Category:   "form_app",
+				Name:       app.Name + " 提交",
+				Code:       ifaceCode,
+				Slug:       ifaceCode,
+				Kind:       "transaction",
+				DatasetID:  &ds.ID,
+				Method:     "POST",
+				Enabled:    true,
+				SchemaJSON: `{"schema_version":"1.0.0"}`,
+			}
+			if err := tx.Create(&iface).Error; err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusBadRequest, gin.H{"error": "failed to create interface: " + err.Error()})
+				return
+			}
+			interfaceCode = ifaceCode
+
+			fieldDefs := []map[string]interface{}{}
 			for _, c := range cols {
 				name := strings.TrimSpace(c.Name)
 				if name == "" || name == pk {
 					continue
 				}
-				insertCols = append(insertCols, quoteSQLTableIdent(src.Type, c.Name))
-				insertParams = append(insertParams, fmt.Sprintf("{{%s}}", c.Name))
-			}
-		}
-		insertSQL := ""
-		if len(insertCols) > 0 {
-			insertSQL = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedTable, strings.Join(insertCols, ", "), strings.Join(insertParams, ", "))
-		} else {
-			insertSQL = fmt.Sprintf("INSERT INTO %s (%s) VALUES ({{%s}})", quotedTable, pkCol, pk)
-		}
-		if !allowWrite {
-			insertSQL = ""
-		}
-		ifaceCode := fmt.Sprintf("%s_submit_%s", base, suffix)
-		dsCode := fmt.Sprintf("%s_ds_submit_%s", base, suffix)
-		ds := models.Dataset{
-			Code:         dsCode,
-			DataSourceID: &src.ID,
-			Category:     "form_app",
-			Name:         fmt.Sprintf("%s_%s_submit_auto", app.Name, body.Table),
-			Kind:         "transaction",
-			Definition:   "",
-			StepsJSON:    fmt.Sprintf(`["%s"]`, strings.ReplaceAll(insertSQL, `"`, `\"`)),
-		}
-		if err := tx.Create(&ds).Error; err != nil {
-			tx.Rollback()
-			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to create dataset: " + err.Error()})
-			return
-		}
-		iface := models.DataInterface{
-			Category:   "form_app",
-			Name:       app.Name + " 提交",
-			Code:       ifaceCode,
-			Slug:       ifaceCode,
-			Kind:       "transaction",
-			DatasetID:  &ds.ID,
-			Method:     "POST",
-			Enabled:    true,
-			SchemaJSON: `{"schema_version":"1.0.0"}`,
-		}
-		if err := tx.Create(&iface).Error; err != nil {
-			tx.Rollback()
-			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to create interface: " + err.Error()})
-			return
-		}
-		interfaceCode = ifaceCode
-
-		fieldDefs := []map[string]interface{}{}
-		for _, c := range cols {
-			name := strings.TrimSpace(c.Name)
-			if name == "" || name == pk {
-				continue
-			}
-			fieldDefs = append(fieldDefs, map[string]interface{}{
-				"field":     name,
-				"label":     strings.ToUpper(name),
-				"component": inferFormComponentByColumn(c),
-				"required":  false,
-			})
-		}
-		cfg := map[string]interface{}{"field_definitions": fieldDefs}
-		configBytes, _ = json.Marshal(cfg)
-		designBytes, _ = json.Marshal(buildGeneratedDesignSchema(cols, pk))
-
-	case "list":
-		ifaceCode := fmt.Sprintf("%s_list_%s", base, suffix)
-		dsCode := fmt.Sprintf("%s_ds_%s", base, suffix)
-		listSQL := fmt.Sprintf("SELECT * FROM %s LIMIT {{limit}} OFFSET {{offset}}", quotedTable)
-		ds := models.Dataset{
-			Code:         dsCode,
-			DataSourceID: &src.ID,
-			Category:     "form_app",
-			Name:         fmt.Sprintf("%s_%s_list_auto", app.Name, body.Table),
-			Kind:         "query",
-			Definition:   listSQL,
-			StepsJSON:    "[]",
-		}
-		if err := tx.Create(&ds).Error; err != nil {
-			tx.Rollback()
-			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to create dataset: " + err.Error()})
-			return
-		}
-		iface := models.DataInterface{
-			Category:   "form_app",
-			Name:       app.Name + " 列表",
-			Code:       ifaceCode,
-			Slug:       ifaceCode,
-			Kind:       "query",
-			DatasetID:  &ds.ID,
-			Method:     "POST",
-			Enabled:    true,
-			SchemaJSON: `{"schema_version":"1.0.0"}`,
-		}
-		if err := tx.Create(&iface).Error; err != nil {
-			tx.Rollback()
-			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to create interface: " + err.Error()})
-			return
-		}
-		interfaceCode = ifaceCode
-
-		conditions := []map[string]interface{}{}
-		for i, c := range cols {
-			name := strings.TrimSpace(c.Name)
-			if name == "" || name == pk {
-				continue
-			}
-			if i < 6 {
-				conditions = append(conditions, map[string]interface{}{
-					"field":    name,
-					"operator": "contains",
-					"label":    strings.ToUpper(name),
-					"value":    "",
+				fieldDefs = append(fieldDefs, map[string]interface{}{
+					"field":     name,
+					"label":     strings.ToUpper(name),
+					"component": inferFormComponentByColumn(c),
+					"required":  false,
 				})
 			}
-		}
-		cfg := map[string]interface{}{
-			"pagination": map[string]interface{}{
-				"enabled":           true,
-				"page_param":        "page",
-				"page_size_param":   "page_size",
-				"limit_param":       "limit",
-				"offset_param":      "offset",
-				"default_page_size": 10,
-			},
-			"query_conditions": conditions,
-		}
-		configBytes, _ = json.Marshal(cfg)
-		designBytes, _ = json.Marshal(buildGeneratedListDesignSchema(cols, pk))
+			cfg := map[string]interface{}{"field_definitions": fieldDefs}
+			configBytes, _ = json.Marshal(cfg)
+			designBytes, _ = json.Marshal(buildGeneratedDesignSchema(cols, pk))
 
-	case "detail":
-		ifaceCode := fmt.Sprintf("%s_detail_%s", base, suffix)
-		dsCode := fmt.Sprintf("%s_ds_detail_%s", base, suffix)
-		detailSQL := fmt.Sprintf("SELECT * FROM %s WHERE %s = {{id}} LIMIT 1", quotedTable, pkCol)
-		ds := models.Dataset{
-			Code:         dsCode,
-			DataSourceID: &src.ID,
-			Category:     "form_app",
-			Name:         fmt.Sprintf("%s_%s_detail_auto", app.Name, body.Table),
-			Kind:         "query",
-			Definition:   detailSQL,
-			StepsJSON:    "[]",
+		case "list":
+			ifaceCode := fmt.Sprintf("%s_list_%s", base, suffix)
+			dsCode := fmt.Sprintf("%s_ds_%s", base, suffix)
+			listSQL := fmt.Sprintf("SELECT * FROM %s LIMIT {{limit}} OFFSET {{offset}}", quotedTable)
+			ds := models.Dataset{
+				Code:         dsCode,
+				DataSourceID: &src.ID,
+				Category:     "form_app",
+				Name:         fmt.Sprintf("%s_%s_list_auto", app.Name, body.Table),
+				Kind:         "query",
+				Definition:   listSQL,
+				StepsJSON:    "[]",
+			}
+			if err := tx.Create(&ds).Error; err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusBadRequest, gin.H{"error": "failed to create dataset: " + err.Error()})
+				return
+			}
+			iface := models.DataInterface{
+				Category:   "form_app",
+				Name:       app.Name + " 列表",
+				Code:       ifaceCode,
+				Slug:       ifaceCode,
+				Kind:       "query",
+				DatasetID:  &ds.ID,
+				Method:     "POST",
+				Enabled:    true,
+				SchemaJSON: `{"schema_version":"1.0.0"}`,
+			}
+			if err := tx.Create(&iface).Error; err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusBadRequest, gin.H{"error": "failed to create interface: " + err.Error()})
+				return
+			}
+			interfaceCode = ifaceCode
+
+			// 生成字段定义（用于列表显示）
+			fieldDefs := []map[string]interface{}{}
+			for _, c := range cols {
+				name := strings.TrimSpace(c.Name)
+				if name == "" {
+					continue
+				}
+				fieldDefs = append(fieldDefs, map[string]interface{}{
+					"field": name,
+					"label": strings.ToUpper(name),
+				})
+			}
+
+			conditions := []map[string]interface{}{}
+			for i, c := range cols {
+				name := strings.TrimSpace(c.Name)
+				if name == "" || name == pk {
+					continue
+				}
+				if i < 6 {
+					conditions = append(conditions, map[string]interface{}{
+						"field":    name,
+						"operator": "contains",
+						"label":    strings.ToUpper(name),
+						"value":    "",
+					})
+				}
+			}
+			cfg := map[string]interface{}{
+				"field_definitions": fieldDefs,
+				"pagination": map[string]interface{}{
+					"enabled":           true,
+					"page_param":        "page",
+					"page_size_param":   "page_size",
+					"limit_param":       "limit",
+					"offset_param":      "offset",
+					"default_page_size": 10,
+				},
+				"query_conditions": conditions,
+			}
+			configBytes, _ = json.Marshal(cfg)
+			designBytes, _ = json.Marshal(buildGeneratedListDesignSchema(cols, pk, platformType))
+
+		case "detail":
+			ifaceCode := fmt.Sprintf("%s_detail_%s", base, suffix)
+			dsCode := fmt.Sprintf("%s_ds_detail_%s", base, suffix)
+			detailSQL := fmt.Sprintf("SELECT * FROM %s WHERE %s = {{id}} LIMIT 1", quotedTable, pkCol)
+			ds := models.Dataset{
+				Code:         dsCode,
+				DataSourceID: &src.ID,
+				Category:     "form_app",
+				Name:         fmt.Sprintf("%s_%s_detail_auto", app.Name, body.Table),
+				Kind:         "query",
+				Definition:   detailSQL,
+				StepsJSON:    "[]",
+			}
+			if err := tx.Create(&ds).Error; err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusBadRequest, gin.H{"error": "failed to create dataset: " + err.Error()})
+				return
+			}
+			iface := models.DataInterface{
+				Category:   "form_app",
+				Name:       app.Name + " 详情",
+				Code:       ifaceCode,
+				Slug:       ifaceCode,
+				Kind:       "queryOne",
+				DatasetID:  &ds.ID,
+				Method:     "POST",
+				Enabled:    true,
+				SchemaJSON: `{"schema_version":"1.0.0"}`,
+			}
+			if err := tx.Create(&iface).Error; err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusBadRequest, gin.H{"error": "failed to create interface: " + err.Error()})
+				return
+			}
+			interfaceCode = ifaceCode
+
+			cfg := map[string]interface{}{}
+			configBytes, _ = json.Marshal(cfg)
+			designBytes, _ = json.Marshal(buildGeneratedDetailDesignSchema(cols, pk))
 		}
-		if err := tx.Create(&ds).Error; err != nil {
+
+		// Delete existing page with same page_key
+		database.DB.Where("form_app_id = ? AND page_key = ?", app.ID, pageType).Delete(&models.FormAppPage{})
+
+		existingCount := int64(0)
+		database.DB.Model(&models.FormAppPage{}).Where("form_app_id = ?", app.ID).Count(&existingCount)
+
+		page := models.FormAppPage{
+			FormAppID:     app.ID,
+			PageKey:       pageType,
+			PageType:      pageType,
+			Title:         map[string]string{"form": "表单页", "list": "列表页", "detail": "详情页"}[pageType],
+			DesignSchema:  string(designBytes),
+			InterfaceCode: interfaceCode,
+			ConfigJSON:    string(configBytes),
+			SortOrder:     int(existingCount),
+		}
+		if err := tx.Create(&page).Error; err != nil {
 			tx.Rollback()
-			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to create dataset: " + err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to create page: " + err.Error()})
 			return
 		}
-		iface := models.DataInterface{
-			Category:   "form_app",
-			Name:       app.Name + " 详情",
-			Code:       ifaceCode,
-			Slug:       ifaceCode,
-			Kind:       "queryOne",
-			DatasetID:  &ds.ID,
-			Method:     "POST",
-			Enabled:    true,
-			SchemaJSON: `{"schema_version":"1.0.0"}`,
+
+		createdPages = append(createdPages, gin.H{
+			"page_key":       page.PageKey,
+			"page_id":        page.ID,
+			"interface_code": page.InterfaceCode,
+		})
+
+		// Ensure link from list->detail if detail page is created
+		if pageType == "detail" {
+			tx.Where("form_app_id = ? AND from_page_key = 'list' AND to_page_key = 'detail'", app.ID).
+				Delete(&models.FormAppPageLink{})
+			link := models.FormAppPageLink{
+				FormAppID:    app.ID,
+				FromPageKey:  "list",
+				ToPageKey:    "detail",
+				TriggerType:  "row_click",
+				ParamMapping: `{"id":"$row.id"}`,
+			}
+			tx.Create(&link)
 		}
-		if err := tx.Create(&iface).Error; err != nil {
-			tx.Rollback()
-			c.JSON(http.StatusBadRequest, gin.H{"error": "failed to create interface: " + err.Error()})
-			return
-		}
-		interfaceCode = ifaceCode
-
-		cfg := map[string]interface{}{}
-		configBytes, _ = json.Marshal(cfg)
-		designBytes, _ = json.Marshal(buildGeneratedDetailDesignSchema(cols, pk))
-	}
-
-	// Delete existing page with same page_key
-	database.DB.Where("form_app_id = ? AND page_key = ?", app.ID, body.PageType).Delete(&models.FormAppPage{})
-
-	existingCount := int64(0)
-	database.DB.Model(&models.FormAppPage{}).Where("form_app_id = ?", app.ID).Count(&existingCount)
-
-	page := models.FormAppPage{
-		FormAppID:     app.ID,
-		PageKey:       body.PageType,
-		PageType:      body.PageType,
-		Title:         map[string]string{"form": "表单页", "list": "列表页", "detail": "详情页"}[body.PageType],
-		DesignSchema:  string(designBytes),
-		InterfaceCode: interfaceCode,
-		ConfigJSON:    string(configBytes),
-		SortOrder:     int(existingCount),
-	}
-	if err := tx.Create(&page).Error; err != nil {
-		tx.Rollback()
-		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to create page: " + err.Error()})
-		return
-	}
-
-	// Ensure link from list->detail if list page
-	if body.PageType == "detail" {
-		tx.Where("form_app_id = ? AND from_page_key = 'list' AND to_page_key = 'detail'", app.ID).
-			Delete(&models.FormAppPageLink{})
-		link := models.FormAppPageLink{
-			FormAppID:    app.ID,
-			FromPageKey:  "list",
-			ToPageKey:    "detail",
-			TriggerType:  "row_click",
-			ParamMapping: `{"id":"$row.id"}`,
-		}
-		tx.Create(&link)
 	}
 
 	if err := tx.Commit().Error; err != nil {
@@ -1737,11 +1829,7 @@ func RegenerateSinglePage(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"data": gin.H{
-			"page_key":       page.PageKey,
-			"page_id":        page.ID,
-			"interface_code": page.InterfaceCode,
-		},
+		"data": createdPages,
 	})
 }
 
