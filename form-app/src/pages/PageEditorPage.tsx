@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   Button, Input, Select, AutoComplete, message, Modal,
   Form, Checkbox, Tag, Drawer, Divider, Tooltip,
-  Switch, InputNumber, Space, Collapse,
+  Switch, InputNumber, Space, Collapse, Table,
 } from 'antd'
 import FieldRenderer from '@/runtime/FieldRenderer'
 import type { FieldDef } from '@/runtime/types'
@@ -237,6 +237,11 @@ export default function PageEditorPage() {
   const [pageEvents, setPageEvents] = useState<PageEvent[]>([])
   const [printers, setPrinters] = useState<PrinterTemplate[]>([])
   const [paramSchema, setParamSchema] = useState('')
+  const [pageParams, setPageParams] = useState<Array<{ name: string; type: string; description: string; required: boolean }>>([])
+
+  // 页面跳转
+  const [pageLinks, setPageLinks] = useState<any[]>([])
+  const [allPages, setAllPages] = useState<any[]>([])
 
   // 字段编辑 modal
   const [modalVisible, setModalVisible] = useState(false)
@@ -281,7 +286,38 @@ export default function PageEditorPage() {
       setEnableDraft(!!config.enable_draft)
       setPageEvents(Array.isArray(config.events) ? config.events : [])
       setPrinters(Array.isArray(config.printers) ? config.printers : [])
-      setParamSchema(config.param_schema || '')
+
+      const schema = config.param_schema || ''
+      setParamSchema(schema)
+
+      // Convert JSON schema to table data
+      if (schema) {
+        try {
+          const parsed = JSON.parse(schema)
+          const params = Object.entries(parsed).map(([name, def]: [string, any]) => ({
+            name,
+            type: def?.type || 'string',
+            description: def?.description || '',
+            required: !!def?.required,
+          }))
+          setPageParams(params)
+        } catch {
+          setPageParams([])
+        }
+      } else {
+        setPageParams([])
+      }
+
+      // 加载页面跳转和应用所有页面列表
+      if (d.app_id) {
+        const [linksRes, pagesRes] = await Promise.all([
+          authed(`/api/form-app/infos/${d.app_id}/links`, 'GET'),
+          authed(`/api/form-app/infos/${d.app_id}/pages`, 'GET'),
+        ])
+        const allLinks = linksRes.data || []
+        setPageLinks(allLinks.filter((l: any) => l.from_page_key === d.page_key))
+        setAllPages(pagesRes.data || [])
+      }
     } catch (e: any) {
       message.error(e.message)
     }
@@ -290,7 +326,26 @@ export default function PageEditorPage() {
   const save = async () => {
     setSaving(true)
     try {
-      const config = { field_definitions: fields, scanner: scannerConfig, events: pageEvents, printers, show_default_submit: showDefaultSubmit, enable_draft: enableDraft, param_schema: paramSchema }
+      // Convert table data back to JSON schema
+      const schemaObj: Record<string, any> = {}
+      pageParams.forEach(param => {
+        schemaObj[param.name] = {
+          type: param.type,
+          ...(param.description ? { description: param.description } : {}),
+          ...(param.required ? { required: true } : {}),
+        }
+      })
+      const finalParamSchema = Object.keys(schemaObj).length > 0 ? JSON.stringify(schemaObj) : ''
+
+      const config = {
+        field_definitions: fields,
+        scanner: scannerConfig,
+        events: pageEvents,
+        printers,
+        show_default_submit: showDefaultSubmit,
+        enable_draft: enableDraft,
+        param_schema: finalParamSchema,
+      }
 
       // 读取当前页面的完整数据，包括现有的 design_schema
       const pageRes = await authed(`/api/form-app/pages/${pageId}`, 'GET')
@@ -368,6 +423,24 @@ export default function PageEditorPage() {
       n.splice(to, 0, item)
       return n
     })
+  }
+
+  // ── 页面参数操作 ────────────────────────────────────────────────────────
+
+  const addPageParam = () => {
+    setPageParams(prev => [...prev, { name: '', type: 'string', description: '', required: false }])
+  }
+
+  const updatePageParam = (index: number, field: string, value: any) => {
+    setPageParams(prev => {
+      const updated = [...prev]
+      updated[index] = { ...updated[index], [field]: value }
+      return updated
+    })
+  }
+
+  const deletePageParam = (index: number) => {
+    setPageParams(prev => prev.filter((_, i) => i !== index))
   }
 
   // ── 渲染 ────────────────────────────────────────────────────────────
@@ -459,20 +532,91 @@ export default function PageEditorPage() {
 
           <div style={{ marginBottom: 20 }}>
             <label style={{ display: 'block', marginBottom: 8, fontSize: 13, fontWeight: 500, color: '#374151' }}>
-              页面入参 Schema (JSON)
-              <Tooltip title="定义此页面接收的 URL 参数，用于跳转时的参数映射和页面内部引用">
+              页面入参
+              <Tooltip title="定义此页面接收的 URL 参数，用于跳转时的参数映射和页面内部引用（如 $url.id）">
                 <span style={{ marginLeft: 4, color: '#94a3b8', cursor: 'help' }}>ⓘ</span>
               </Tooltip>
             </label>
-            <Input.TextArea
-              value={paramSchema}
-              onChange={e => setParamSchema(e.target.value)}
-              rows={3}
-              placeholder='{"id": {"type": "string", "description": "设备ID"}, "status": {"type": "string"}}'
-              style={{ fontFamily: 'monospace', fontSize: 12 }}
+
+            <Table
+              size="small"
+              dataSource={pageParams}
+              pagination={false}
+              rowKey={(_, idx) => String(idx)}
+              columns={[
+                {
+                  title: '参数名',
+                  dataIndex: 'name',
+                  width: 150,
+                  render: (val, _, idx) => (
+                    <Input
+                      size="small"
+                      value={val}
+                      onChange={e => updatePageParam(idx, 'name', e.target.value)}
+                      placeholder="如: id"
+                    />
+                  ),
+                },
+                {
+                  title: '类型',
+                  dataIndex: 'type',
+                  width: 120,
+                  render: (val, _, idx) => (
+                    <Select
+                      size="small"
+                      value={val}
+                      onChange={v => updatePageParam(idx, 'type', v)}
+                      style={{ width: '100%' }}
+                    >
+                      <Select.Option value="string">string</Select.Option>
+                      <Select.Option value="number">number</Select.Option>
+                      <Select.Option value="boolean">boolean</Select.Option>
+                    </Select>
+                  ),
+                },
+                {
+                  title: '说明',
+                  dataIndex: 'description',
+                  render: (val, _, idx) => (
+                    <Input
+                      size="small"
+                      value={val}
+                      onChange={e => updatePageParam(idx, 'description', e.target.value)}
+                      placeholder="参数说明"
+                    />
+                  ),
+                },
+                {
+                  title: '必填',
+                  dataIndex: 'required',
+                  width: 70,
+                  render: (val, _, idx) => (
+                    <Checkbox
+                      checked={val}
+                      onChange={e => updatePageParam(idx, 'required', e.target.checked)}
+                    />
+                  ),
+                },
+                {
+                  title: '操作',
+                  width: 60,
+                  render: (_, __, idx) => (
+                    <Button size="small" danger onClick={() => deletePageParam(idx)}>删</Button>
+                  ),
+                },
+              ]}
+              locale={{ emptyText: '暂无参数' }}
             />
+            <Button
+              size="small"
+              type="dashed"
+              onClick={addPageParam}
+              style={{ marginTop: 8, width: '100%' }}
+            >
+              + 添加参数
+            </Button>
             <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>
-              定义页面接收的参数，可在参数映射中使用 $url.xxx 引用
+              定义页面接收的 URL 参数，可在参数映射中使用 $url.xxx 引用
             </div>
           </div>
 
@@ -530,6 +674,15 @@ export default function PageEditorPage() {
             fields={fields}
             pageId={pageId}
             onOpenAI={() => setAiOpen(true)}
+          />
+
+          <Divider orientation="left" style={{ fontSize: 13, color: '#64748b', marginTop: 24 }}>页面跳转</Divider>
+          <PageNavigationSection
+            pageLinks={pageLinks}
+            allPages={allPages}
+            currentPageKey={page?.page_key || ''}
+            appId={page?.app_id}
+            onReload={loadPage}
           />
 
           <Divider orientation="left" style={{ fontSize: 13, color: '#64748b', marginTop: 24 }}>事件系统（高级）</Divider>
@@ -823,5 +976,210 @@ function FieldConfigModal({
         )}
       </Form>
     </Modal>
+  )
+}
+
+// ── 页面跳转配置 ──────────────────────────────────────────────────────
+
+function PageNavigationSection({
+  pageLinks,
+  allPages,
+  currentPageKey,
+  appId,
+  onReload,
+}: {
+  pageLinks: any[]
+  allPages: any[]
+  currentPageKey: string
+  appId?: number
+  onReload: () => void
+}) {
+  const [showModal, setShowModal] = useState(false)
+  const [editingLink, setEditingLink] = useState<any>(null)
+  const [form] = Form.useForm()
+
+  const addLink = () => {
+    setEditingLink(null)
+    form.resetFields()
+    form.setFieldsValue({ trigger_type: 'button_click' })
+    setShowModal(true)
+  }
+
+  const editLink = (link: any) => {
+    setEditingLink(link)
+    form.setFieldsValue({
+      to_page_key: link.to_page_key,
+      trigger_type: link.trigger_type,
+      trigger_config: link.trigger_config || '',
+      param_mapping: link.param_mapping || '{}',
+    })
+    setShowModal(true)
+  }
+
+  const saveLink = async () => {
+    if (!appId) return
+    try {
+      const values = await form.validateFields()
+      if (editingLink) {
+        await authed(`/api/form-app/links/${editingLink.id}`, 'PUT', values)
+        message.success('跳转已更新')
+      } else {
+        await authed(`/api/form-app/infos/${appId}/links`, 'POST', {
+          from_page_key: currentPageKey,
+          ...values,
+        })
+        message.success('跳转已添加')
+      }
+      setShowModal(false)
+      onReload()
+    } catch (e: any) {
+      message.error(e.message)
+    }
+  }
+
+  const deleteLink = async (id: number) => {
+    Modal.confirm({
+      title: '确认删除',
+      content: '删除后将无法恢复',
+      onOk: async () => {
+        try {
+          await authed(`/api/form-app/links/${id}`, 'DELETE')
+          message.success('跳转已删除')
+          onReload()
+        } catch (e: any) {
+          message.error(e.message)
+        }
+      },
+    })
+  }
+
+  return (
+    <div style={{ background: '#f8fafc', borderRadius: 8, padding: 14, border: '1px solid #e2e8f0' }}>
+      <div style={{ marginBottom: 12, fontSize: 12, color: '#64748b' }}>
+        配置页面跳转（列表行点击跳详情、按钮点击跳表单等）
+      </div>
+
+      <Table
+        size="small"
+        dataSource={pageLinks}
+        rowKey="id"
+        pagination={false}
+        columns={[
+          {
+            title: '目标页面',
+            dataIndex: 'to_page_key',
+            width: 120,
+            render: (val: string) => {
+              const target = allPages.find(p => p.page_key === val)
+              return target ? `${target.title || val}` : val
+            },
+          },
+          {
+            title: '触发类型',
+            dataIndex: 'trigger_type',
+            width: 100,
+            render: (val: string) => (
+              <span style={{ fontSize: 12 }}>
+                {val === 'button_click' ? '按钮点击' : val === 'row_click' ? '行点击' : val}
+              </span>
+            ),
+          },
+          {
+            title: '按钮文字',
+            dataIndex: 'trigger_config',
+            width: 80,
+          },
+          {
+            title: '操作',
+            width: 100,
+            render: (_, record: any) => (
+              <div style={{ display: 'flex', gap: 4 }}>
+                <Button size="small" onClick={() => editLink(record)}>编辑</Button>
+                <Button size="small" danger onClick={() => deleteLink(record.id)}>删除</Button>
+              </div>
+            ),
+          },
+        ]}
+        locale={{ emptyText: '暂无跳转配置' }}
+      />
+
+      <Button
+        size="small"
+        type="dashed"
+        onClick={addLink}
+        style={{ marginTop: 8, width: '100%' }}
+      >
+        + 添加跳转
+      </Button>
+
+      <Modal
+        title={editingLink ? '编辑跳转' : '添加跳转'}
+        visible={showModal}
+        onOk={saveLink}
+        onCancel={() => setShowModal(false)}
+        width={520}
+      >
+        <Form form={form} layout="vertical" style={{ marginTop: 8 }}>
+          <Form.Item
+            label="目标页面"
+            name="to_page_key"
+            rules={[{ required: true, message: '请选择目标页面' }]}
+          >
+            <Select placeholder="选择跳转到的页面">
+              {allPages
+                .filter(p => p.page_key !== currentPageKey)
+                .map(p => (
+                  <Select.Option key={p.page_key} value={p.page_key}>
+                    {p.title || p.page_key} ({p.page_type})
+                  </Select.Option>
+                ))}
+            </Select>
+          </Form.Item>
+
+          <Form.Item
+            label="触发类型"
+            name="trigger_type"
+            rules={[{ required: true, message: '请选择触发类型' }]}
+          >
+            <Select>
+              <Select.Option value="button_click">按钮点击</Select.Option>
+              <Select.Option value="row_click">行点击</Select.Option>
+            </Select>
+          </Form.Item>
+
+          <Form.Item
+            label="按钮文字"
+            name="trigger_config"
+            tooltip="触发类型为「按钮点击」时显示的按钮文字"
+          >
+            <Input placeholder="如: 新增、编辑" />
+          </Form.Item>
+
+          <Form.Item
+            label="参数映射（JSON）"
+            name="param_mapping"
+            tooltip="跳转时传递的参数，支持 $row.xxx 引用当前行数据、$url.xxx 引用当前页面 URL 参数"
+            rules={[
+              { required: true, message: '请输入参数映射' },
+              {
+                validator: (_, value) => {
+                  try {
+                    JSON.parse(value || '{}')
+                    return Promise.resolve()
+                  } catch {
+                    return Promise.reject('请输入有效的 JSON 格式')
+                  }
+                },
+              },
+            ]}
+          >
+            <Input.TextArea
+              rows={4}
+              placeholder='如: {"id": "$row.id"} 或 {"category": "$url.category"}'
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+    </div>
   )
 }

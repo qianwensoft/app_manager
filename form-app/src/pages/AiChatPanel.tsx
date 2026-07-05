@@ -17,6 +17,7 @@ type ChatBubble = {
   fields?: FieldDef[] // 解析出的字段（仅 assistant）
   events?: PageEvent[] // 解析出的事件（仅 assistant）
   printers?: PrinterTemplate[] // 解析出的打印模板（仅 assistant）
+  designSchema?: any // 解析出的布局配置（仅 assistant）
   source?: string // 生成该字段的用户指令（仅 assistant，用于快照来源说明）
 }
 
@@ -33,15 +34,19 @@ type Props = {
   currentEvents?: PageEvent[]
   // 可选：当前页面已有打印模板，作为 AI 上下文 + 供「保存」时一并落库。
   currentPrinters?: PrinterTemplate[]
+  // 可选：当前页面设计器布局配置（design_schema），作为 AI 上下文。
+  currentDesignSchema?: any
   // 应用到本地（编辑器 state）。预览后由用户决定是否再保存。
   onApplyFields: (fields: FieldDef[]) => void
   // 可选：应用 AI 生成的事件到本地（编辑器 state）。
   onApplyEvents?: (events: PageEvent[]) => void
   // 可选：应用 AI 生成的打印模板到本地（编辑器 state）。
   onApplyPrinters?: (printers: PrinterTemplate[]) => void
+  // 可选：应用 AI 生成的布局配置到本地（编辑器 state）。
+  onApplyDesignSchema?: (schema: any) => void
   // 可选：直接保存到页面（写库 + 刷新）。提供时显示「保存到页面」按钮。
   // events/printers 为 AI 本次生成的内容（未生成则为 undefined，调用方应保留原值）。
-  onSaveToPage?: (fields: FieldDef[], source?: string, events?: PageEvent[], printers?: PrinterTemplate[]) => Promise<void>
+  onSaveToPage?: (fields: FieldDef[], source?: string, events?: PageEvent[], printers?: PrinterTemplate[], designSchema?: any) => Promise<void>
   // 可选：页面 id，提供时显示「历史版本」并支持回滚。
   pageId?: number
   // 可选：回滚成功后的回调（刷新页面/预览）。
@@ -66,7 +71,7 @@ function validatePrinters(arr: any): arr is PrinterTemplate[] {
   return arr.every(p => p && typeof p === 'object' && typeof p.id === 'string' && typeof p.name === 'string' && typeof p.protocol === 'string')
 }
 
-export default function AiChatPanel({ currentFields, currentEvents, currentPrinters, onApplyFields, onApplyEvents, onApplyPrinters, onSaveToPage, pageId, onAfterRollback }: Props) {
+export default function AiChatPanel({ currentFields, currentEvents, currentPrinters, currentDesignSchema, onApplyFields, onApplyEvents, onApplyPrinters, onApplyDesignSchema, onSaveToPage, pageId, onAfterRollback }: Props) {
   const [bubbles, setBubbles] = useState<ChatBubble[]>([])
   const [input, setInput] = useState('')
   const [imageBase64, setImageBase64] = useState('')   // 含 data: 前缀，用于预览与发送
@@ -146,6 +151,14 @@ export default function AiChatPanel({ currentFields, currentEvents, currentPrint
     setStreaming(true)
     setStreamText('')
 
+    // 诊断日志：显示发送给 AI 的上下文
+    console.log('[AI Chat] Sending context:')
+    console.log('  - current_fields:', currentFields.length, 'fields')
+    console.log('  - current_events:', currentEvents?.length || 0, 'events')
+    console.log('  - current_printers:', currentPrinters?.length || 0, 'printers')
+    console.log('  - current_design_schema:', currentDesignSchema ? 'Yes' : 'No')
+    console.log('  - messages:', history.length, 'messages')
+
     // 组装发给后端的消息历史（仅文本 + 本次图片）
     const messages: AiChatMessage[] = history.map((b, i) => {
       const m: AiChatMessage = { role: b.role, content: b.content }
@@ -167,6 +180,7 @@ export default function AiChatPanel({ currentFields, currentEvents, currentPrint
         current_fields: currentFields.length ? currentFields : undefined,
         current_events: currentEvents && currentEvents.length ? currentEvents : undefined,
         current_printers: currentPrinters && currentPrinters.length ? currentPrinters : undefined,
+        current_design_schema: currentDesignSchema || undefined,
       },
       {
         onDelta: (t) => { acc += t; setStreamText(acc) },
@@ -174,10 +188,12 @@ export default function AiChatPanel({ currentFields, currentEvents, currentPrint
           let fields: FieldDef[] | undefined
           let events: PageEvent[] | undefined
           let printers: PrinterTemplate[] | undefined
-          // 优先用后端解析结果；缺失时前端从累积文本兜底解析对象 { fields, events, printers }
+          let designSchema: any | undefined
+          // 优先用后端解析结果；缺失时前端从累积文本兜底解析对象 { fields, events, printers, design_schema }
           const fieldsRaw = payload.fields_parsed ? payload.fields : ''
           const eventsRaw = payload.events_parsed ? payload.events : ''
           const printersRaw = payload.printers_parsed ? payload.printers : ''
+          const designSchemaRaw = payload.design_schema_parsed ? payload.design_schema : ''
           try {
             if (fieldsRaw) {
               const parsed = JSON.parse(fieldsRaw)
@@ -196,8 +212,14 @@ export default function AiChatPanel({ currentFields, currentEvents, currentPrint
               if (validatePrinters(parsed)) printers = parsed
             }
           } catch { /* ignore */ }
+          try {
+            if (designSchemaRaw) {
+              const parsed = JSON.parse(designSchemaRaw)
+              if (parsed && typeof parsed === 'object') designSchema = parsed
+            }
+          } catch { /* ignore */ }
           // 兜底：后端都没解析出来时，尝试从文本里解析对象或裸数组
-          if (!fields && !events && !printers) {
+          if (!fields && !events && !printers && !designSchema) {
             const objStr = extractJSONObject(acc)
             if (objStr) {
               try {
@@ -205,16 +227,31 @@ export default function AiChatPanel({ currentFields, currentEvents, currentPrint
                 if (validateFields(obj.fields)) fields = obj.fields
                 if (validateEvents(obj.events)) events = obj.events
                 if (validatePrinters(obj.printers)) printers = obj.printers
+                if (obj.design_schema && typeof obj.design_schema === 'object') designSchema = obj.design_schema
               } catch { /* ignore */ }
             }
-            if (!fields && !events && !printers) {
+            if (!fields && !events && !printers && !designSchema) {
               try {
                 const arr = JSON.parse(extractJSONArray(acc))
                 if (validateFields(arr)) fields = arr
               } catch { /* ignore */ }
             }
           }
-          setBubbles(prev => [...prev, { role: 'assistant', content: acc, fields, events, printers, source: text }])
+
+          // 诊断日志：显示 AI 返回的结果
+          console.log('[AI Chat] Received result:')
+          console.log('  - fields:', fields?.length || 0, 'fields')
+          console.log('  - events:', events?.length || 0, 'events')
+          console.log('  - printers:', printers?.length || 0, 'printers')
+          console.log('  - design_schema:', designSchema ? 'Yes' : 'No')
+          if (fields && fields.length < currentFields.length) {
+            console.warn('⚠️ Warning: AI returned fewer fields than current!')
+            console.warn('   Current:', currentFields.length, 'fields')
+            console.warn('   Returned:', fields.length, 'fields')
+            console.warn('   Difference:', currentFields.length - fields.length, 'fields lost')
+          }
+
+          setBubbles(prev => [...prev, { role: 'assistant', content: acc, fields, events, printers, designSchema, source: text }])
           setStreamText('')
           setStreaming(false)
           abortRef.current = null
@@ -322,7 +359,7 @@ export default function AiChatPanel({ currentFields, currentEvents, currentPrint
                 <img src={b.image} alt="上传图片" style={{ maxWidth: 200, display: 'block', marginBottom: 6, borderRadius: 4 }} />
               )}
               {b.content}
-              {(b.fields || b.events || b.printers) && (
+              {(b.fields || b.events || b.printers || b.designSchema) && (
                 <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   {b.fields && (
                     <Button type="primary" size="small" onClick={() => {
@@ -348,6 +385,14 @@ export default function AiChatPanel({ currentFields, currentEvents, currentPrint
                       应用打印模板（{b.printers.length} 项）
                     </Button>
                   )}
+                  {b.designSchema && onApplyDesignSchema && (
+                    <Button size="small" onClick={() => {
+                      onApplyDesignSchema(b.designSchema!)
+                      message.success('已应用布局配置到画布')
+                    }}>
+                      应用布局配置
+                    </Button>
+                  )}
                   {onSaveToPage && (
                     <Button
                       size="small"
@@ -357,6 +402,7 @@ export default function AiChatPanel({ currentFields, currentEvents, currentPrint
                         if (b.fields) parts.push(`${b.fields.length} 个字段`)
                         if (b.events) parts.push(`${b.events.length} 个事件`)
                         if (b.printers) parts.push(`${b.printers.length} 个打印模板`)
+                        if (b.designSchema) parts.push('布局配置')
                         Modal.confirm({
                           title: '保存到页面',
                           content: `将用这 ${parts.join(' 和 ')} 覆盖当前页面对应配置，确认保存？`,
@@ -368,8 +414,9 @@ export default function AiChatPanel({ currentFields, currentEvents, currentPrint
                               if (b.fields) onApplyFields(b.fields)
                               if (b.events && onApplyEvents) onApplyEvents(b.events)
                               if (b.printers && onApplyPrinters) onApplyPrinters(b.printers)
+                              if (b.designSchema && onApplyDesignSchema) onApplyDesignSchema(b.designSchema)
                               // fields 缺省时传当前字段，保证 onSaveToPage 始终拿到完整字段集
-                              await onSaveToPage(b.fields || currentFields, b.source, b.events, b.printers)
+                              await onSaveToPage(b.fields || currentFields, b.source, b.events, b.printers, b.designSchema)
                               message.success('已保存到页面')
                               loadSnapshots()
                             } catch (e: any) {

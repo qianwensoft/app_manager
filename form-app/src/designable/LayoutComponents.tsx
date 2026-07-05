@@ -7,6 +7,7 @@
  */
 import { createBehavior, createResource } from '@designable/core'
 import type { DnFC } from '@designable/react'
+import { useNodeIdProps } from '@designable/react'
 import {
   PageHeader as RtPageHeader,
   Section as RtSection,
@@ -19,7 +20,15 @@ const cp = (props: any) => props?.['x-component-props'] || {}
 
 // ── 页头 ──────────────────────────────────────────────────────────────
 
-export const PageHeader: DnFC<any> = (props) => <RtPageHeader {...cp(props)} />
+export const PageHeader: DnFC<any> = (props) => {
+  const nodeIdProps = useNodeIdProps()
+  const componentProps = cp(props)
+  return (
+    <div {...nodeIdProps}>
+      <RtPageHeader {...componentProps} />
+    </div>
+  )
+}
 
 PageHeader.Behavior = createBehavior({
   name: 'PageHeader',
@@ -38,8 +47,8 @@ PageHeader.Behavior = createBehavior({
               type: 'string', title: '对齐', 'x-decorator': 'FormItem', 'x-component': 'Select',
               enum: [{ label: '左对齐', value: 'left' }, { label: '居中', value: 'center' }],
             },
-            background: { type: 'string', title: '背景色', 'x-decorator': 'FormItem', 'x-component': 'Input', 'x-component-props': { placeholder: '如 #1677ff' } },
-            color: { type: 'string', title: '文字色', 'x-decorator': 'FormItem', 'x-component': 'Input' },
+            background: { type: 'string', title: '背景色', 'x-decorator': 'FormItem', 'x-component': 'ColorInput' },
+            color: { type: 'string', title: '文字色', 'x-decorator': 'FormItem', 'x-component': 'ColorInput' },
           },
         },
       },
@@ -95,7 +104,10 @@ Section.Resource = createResource({
 
 // ── 分割线 ────────────────────────────────────────────────────────────
 
-export const Divider: DnFC<any> = (props) => <RtDivider {...cp(props)} />
+export const Divider: DnFC<any> = (props) => {
+  const nodeIdProps = useNodeIdProps()
+  return <div {...nodeIdProps}><RtDivider {...cp(props)} /></div>
+}
 
 Divider.Behavior = createBehavior({
   name: 'Divider',
@@ -128,7 +140,10 @@ Divider.Resource = createResource({
 
 // ── 静态图片 ──────────────────────────────────────────────────────────
 
-export const StaticImage: DnFC<any> = (props) => <RtStaticImage {...cp(props)} />
+export const StaticImage: DnFC<any> = (props) => {
+  const nodeIdProps = useNodeIdProps()
+  return <div {...nodeIdProps}><RtStaticImage {...cp(props)} /></div>
+}
 
 StaticImage.Behavior = createBehavior({
   name: 'StaticImage',
@@ -163,7 +178,10 @@ StaticImage.Resource = createResource({
 
 // ── 静态文本 ──────────────────────────────────────────────────────────
 
-export const StaticText: DnFC<any> = (props) => <RtStaticText {...cp(props)} />
+export const StaticText: DnFC<any> = (props) => {
+  const nodeIdProps = useNodeIdProps()
+  return <div {...nodeIdProps}><RtStaticText {...cp(props)} /></div>
+}
 
 StaticText.Behavior = createBehavior({
   name: 'StaticText',

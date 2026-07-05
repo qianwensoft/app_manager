@@ -21,12 +21,13 @@ type aiChatMessage struct {
 }
 
 type aiChatReq struct {
-	Messages        []aiChatMessage   `json:"messages"`
-	SkillIDs        []uint            `json:"skill_ids"`
-	CurrentFields   []json.RawMessage `json:"current_fields"`
-	CurrentEvents   []json.RawMessage `json:"current_events"`   // 当前页面已有事件（PageEvent[]，可选）
-	CurrentPrinters []json.RawMessage `json:"current_printers"` // 当前页面已有打印模板（PrinterTemplate[]，可选）
-	PageContext     json.RawMessage   `json:"page_context"`     // 应用/页面当前状态上下文（可选）
+	Messages          []aiChatMessage   `json:"messages"`
+	SkillIDs          []uint            `json:"skill_ids"`
+	CurrentFields     []json.RawMessage `json:"current_fields"`
+	CurrentEvents     []json.RawMessage `json:"current_events"`      // 当前页面已有事件（PageEvent[]，可选）
+	CurrentPrinters   []json.RawMessage `json:"current_printers"`    // 当前页面已有打印模板（PrinterTemplate[]，可选）
+	CurrentDesignSchema json.RawMessage `json:"current_design_schema"` // 当前页面布局配置（design_schema，可选）
+	PageContext       json.RawMessage   `json:"page_context"`        // 应用/页面当前状态上下文（可选）
 }
 
 // FormAppAIChat 通过 SSE 流式调用 Claude，辅助生成/修改 FieldDef[] 表单字段。
@@ -55,18 +56,45 @@ func FormAppAIChat(c *gin.Context) {
 	}
 	if len(req.CurrentFields) > 0 {
 		cur, _ := json.Marshal(req.CurrentFields)
-		system += "\n\n## 当前页面已有字段（FieldDef[]）\n" + string(cur) +
-			"\n用户可能要求在此基础上增删改，请输出完整的新 FieldDef[]，而非仅增量。"
+		system += "\n\n## 当前页面已有字段（FieldDef[] - 共 " + fmt.Sprintf("%d", len(req.CurrentFields)) + " 个）\n" + string(cur) +
+			"\n\n【强制要求】用户可能要求在此基础上增删改字段。你必须遵守以下规则：" +
+			"\n1. ✅ 先复制上面的所有字段到你的输出数组中" +
+			"\n2. ✅ 然后根据用户要求修改、添加或删除特定字段" +
+			"\n3. ✅ 最后输出完整的字段数组（包含所有保留的 + 修改的 + 新增的）" +
+			"\n4. ❌ 绝不能只输出被修改/新增的字段，那会导致其他字段丢失" +
+			"\n5. ❌ 如果用户未明确说「删除XX字段」或「只保留XX字段」，所有现有字段都必须出现在输出中" +
+			"\n\n示例：当前有 [A, B, C]，用户说「将B改为必填」→ 输出 [A(不变), B(必填), C(不变)]，而不是只输出 [B(必填)]"
 	}
 	if len(req.CurrentEvents) > 0 {
 		cur, _ := json.Marshal(req.CurrentEvents)
-		system += "\n\n## 当前页面已有事件（PageEvent[]）\n" + string(cur) +
-			"\n用户可能要求在此基础上增删改事件，请在 events 中输出完整的新 PageEvent[]，而非仅增量。"
+		system += "\n\n## 当前页面已有事件（PageEvent[] - 共 " + fmt.Sprintf("%d", len(req.CurrentEvents)) + " 个）\n" + string(cur) +
+			"\n\n【强制要求】用户可能要求在此基础上增删改事件。你必须遵守以下规则：" +
+			"\n1. ✅ 先复制上面的所有事件到你的输出数组中" +
+			"\n2. ✅ 然后根据用户要求修改、添加或删除特定事件" +
+			"\n3. ✅ 最后在 events 中输出完整的事件数组（包含所有保留的 + 修改的 + 新增的）" +
+			"\n4. ❌ 绝不能只输出被修改/新增的事件，那会导致其他事件丢失" +
+			"\n5. ❌ 如果用户未明确说「删除XX事件」，所有现有事件都必须出现在输出中"
 	}
 	if len(req.CurrentPrinters) > 0 {
 		cur, _ := json.Marshal(req.CurrentPrinters)
-		system += "\n\n## 当前页面已有打印模板（PrinterTemplate[]）\n" + string(cur) +
-			"\n用户可能要求在此基础上增删改打印模板，请在 printers 中输出完整的新 PrinterTemplate[]，而非仅增量。"
+		system += "\n\n## 当前页面已有打印模板（PrinterTemplate[] - 共 " + fmt.Sprintf("%d", len(req.CurrentPrinters)) + " 个）\n" + string(cur) +
+			"\n\n【强制要求】用户可能要求在此基础上增删改打印模板。你必须遵守以下规则：" +
+			"\n1. ✅ 先复制上面的所有打印模板到你的输出数组中" +
+			"\n2. ✅ 然后根据用户要求修改、添加或删除特定模板" +
+			"\n3. ✅ 最后在 printers 中输出完整的模板数组（包含所有保留的 + 修改的 + 新增的）" +
+			"\n4. ❌ 绝不能只输出被修改/新增的模板，那会导致其他模板丢失" +
+			"\n5. ❌ 如果用户未明确说「删除XX模板」，所有现有模板都必须出现在输出中"
+	}
+	if len(req.CurrentDesignSchema) > 0 && string(req.CurrentDesignSchema) != "null" {
+		// 紧凑输出布局配置
+		var buf bytes.Buffer
+		if json.Compact(&buf, req.CurrentDesignSchema) == nil {
+			system += "\n\n## 当前页面布局配置（design_schema - 仅供参考）\n" + buf.String() +
+				"\n\n【说明】这是页面的可视化设计器布局结构（Formily Schema），包含字段的排列、分组、栅格、标签页等。" +
+				"\n目前你只需关注字段定义（field_definitions）、事件（events）和打印模板（printers）的内容逻辑。" +
+				"\n布局结构（如分组、多栏、分割线）由用户在可视化设计器中手动调整，你无需生成或修改 design_schema。" +
+				"\n如果用户明确要求调整布局（如\"字段分两栏显示\"、\"添加分组\"），请在回复中说明这需要在可视化设计器中操作，而非通过 AI 生成。"
+		}
 	}
 	// 注入可用接口目录（内部数据接口 / 外部 outbound 接口 / 连接器接口），供 call_interface 动作引用
 	if cat := buildInterfaceCatalog(); cat != "" {
@@ -144,45 +172,51 @@ func FormAppAIChat(c *gin.Context) {
 		return
 	}
 
-	// 5) 结束：解析输出。新契约输出对象 { fields, events, printers }；兼容旧的裸 FieldDef[] 数组。
+	// 5) 结束：解析输出。新契约输出对象 { fields, events, printers, design_schema }；兼容旧的裸 FieldDef[] 数组。
 	out := extractAIOutput(full)
 	writeSSE("done", gin.H{
-		"fields_parsed":   out.FieldsOK,
-		"fields":          out.Fields,
-		"events_parsed":   out.EventsOK,
-		"events":          out.Events,
-		"printers_parsed": out.PrintersOK,
-		"printers":        out.Printers,
+		"fields_parsed":        out.FieldsOK,
+		"fields":               out.Fields,
+		"events_parsed":        out.EventsOK,
+		"events":               out.Events,
+		"printers_parsed":      out.PrintersOK,
+		"printers":             out.Printers,
+		"design_schema_parsed": out.DesignSchemaOK,
+		"design_schema":        out.DesignSchema,
 	})
 }
 
 // aiOutput AI 输出解析结果。
 type aiOutput struct {
-	Fields     string
-	FieldsOK   bool
-	Events     string
-	EventsOK   bool
-	Printers   string
-	PrintersOK bool
+	Fields         string
+	FieldsOK       bool
+	Events         string
+	EventsOK       bool
+	Printers       string
+	PrintersOK     bool
+	DesignSchema   string
+	DesignSchemaOK bool
 }
 
 // extractAIOutput 解析 AI 输出。
-// 优先解析对象 {"fields":[...],"events":[...],"printers":[...]}；失败则回退到裸数组（仅 fields）。
+// 优先解析对象 {"fields":[...],"events":[...],"printers":[...],"design_schema":{...}}；失败则回退到裸数组（仅 fields）。
 func extractAIOutput(full string) aiOutput {
 	var res aiOutput
 	// 先尝试对象形式
 	if objStr := extractJSONObject(full); objStr != "" {
 		var obj struct {
-			Fields   json.RawMessage `json:"fields"`
-			Events   json.RawMessage `json:"events"`
-			Printers json.RawMessage `json:"printers"`
+			Fields       json.RawMessage `json:"fields"`
+			Events       json.RawMessage `json:"events"`
+			Printers     json.RawMessage `json:"printers"`
+			DesignSchema json.RawMessage `json:"design_schema"`
 		}
 		if json.Unmarshal([]byte(objStr), &obj) == nil {
 			res.Fields, res.FieldsOK = validJSONArray(obj.Fields)
 			res.Events, res.EventsOK = validJSONArray(obj.Events)
 			res.Printers, res.PrintersOK = validJSONArray(obj.Printers)
-			// 对象里至少解析出三者之一，才认定为对象形式
-			if res.FieldsOK || res.EventsOK || res.PrintersOK {
+			res.DesignSchema, res.DesignSchemaOK = validJSONObject(obj.DesignSchema)
+			// 对象里至少解析出四者之一，才认定为对象形式
+			if res.FieldsOK || res.EventsOK || res.PrintersOK || res.DesignSchemaOK {
 				return res
 			}
 		}
@@ -203,6 +237,18 @@ func validJSONArray(raw json.RawMessage) (string, bool) {
 	}
 	var arr []json.RawMessage
 	if json.Unmarshal(raw, &arr) == nil {
+		return string(raw), true
+	}
+	return "", false
+}
+
+// validJSONObject 校验 raw 是否为合法 JSON 对象，是则返回其字符串与 true。
+func validJSONObject(raw json.RawMessage) (string, bool) {
+	if len(raw) == 0 {
+		return "", false
+	}
+	var obj map[string]interface{}
+	if json.Unmarshal(raw, &obj) == nil {
 		return string(raw), true
 	}
 	return "", false
@@ -324,8 +370,52 @@ func buildFieldDefSystemPrompt() string {
 你必须只输出一个 JSON 对象，不要输出 markdown 代码块、不要任何解释文字。对象结构为：
 { "fields": FieldDef[], "events": PageEvent[], "printers": PrinterTemplate[] }
 
-- 只改其中一类时：其余项省略或原样回填当前值。
-- 同时改多类时：相应数组都给出完整内容（全量，而非增量）。
+## 【关键规则】完整数组输出（必须遵守）
+
+**这是最重要的规则**：当你输出 fields 数组时，你必须：
+1. 先复制系统提供的「当前页面已有字段」中的所有字段
+2. 然后根据用户要求进行增删改
+3. 最后输出完整的结果数组
+
+**举例说明**：
+- 当前有字段：A, B, C, D, E（5个字段）
+- 用户要求："将字段 B 改为中文标签"
+- 你必须输出：[A（不变）, B（修改后）, C（不变）, D（不变）, E（不变）]
+- ❌ 错误输出：[B（修改后）] ← 这会导致其他字段丢失！
+- ❌ 错误输出：[B（修改后）, 新字段F] ← 用户没要求添加F，且丢失了A/C/D/E！
+
+**再举例**：
+- 当前有字段：field1, field2, field3（3个字段）
+- 用户要求："添加一个字段 field4"
+- 你必须输出：[field1（保留）, field2（保留）, field3（保留）, field4（新增）]
+- ❌ 错误输出：[field4] ← 这会导致field1/field2/field3全部丢失！
+
+**特别强调**：
+- 如果用户说"修改XX"、"添加XX"、"调整XX布局"，都意味着其他字段必须保留
+- 只有用户明确说"删除XX"或"只保留XX"时，才能移除字段
+- 怀疑时，宁可多保留也不要删除
+
+## 输出规则
+1. **完整输出**：必须输出完整的数组，包含所有现有项 + 新增/修改项，而非仅增量
+2. **保留原则**：如果用户未明确要求删除，现有配置必须原样保留
+3. **修改原则**：只修改用户明确指定的部分，其他部分保持不变
+4. **删除原则**：只删除用户明确要求删除的项，其余全部保留
+5. **三类独立**：
+   - 只改字段时：fields 给完整数组，events/printers 省略（保持原值）
+   - 只改事件时：events 给完整数组，fields/printers 省略（保持原值）
+   - 只改打印时：printers 给完整数组，fields/events 省略（保持原值）
+   - 同时改多类时：相应数组都给出完整内容
+
+## 布局管理场景
+用户可能要求：
+- **form 页面**：调整字段顺序、添加/删除字段、修改必填项、调整表单布局
+- **list 页面**：调整列表字段、添加筛选项、配置列表操作按钮
+- **detail 页面**：调整详情字段、添加只读展示项、配置详情页操作
+
+无论哪种场景，你都要：
+1. 理解用户意图（是添加、删除还是调整布局）
+2. 保留所有未提及的现有配置
+3. 输出完整的新配置（不是增量）
 
 ## 多端渲染（重要）
 生成的页面会在「桌面 Web / 手机 App / H5」多端渲染：桌面用 antd、移动端用 antd-mobile 组件库，运行时按终端自动切换，无需你处理样式。但请遵循以下原则，保证移动端体验：
@@ -412,6 +502,9 @@ func buildFieldDefSystemPrompt() string {
     }
   ]
 }
+
+【最后提醒】如果系统提供了「当前页面已有字段/事件/打印模板」，你输出的数组必须包含所有这些现有项（除非用户明确要求删除）。
+只输出修改/新增的部分是错误的，会导致其他配置丢失！请务必输出完整数组。
 
 请严格只返回这个 JSON 对象本身。`
 }

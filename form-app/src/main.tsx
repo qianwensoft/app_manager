@@ -11,10 +11,12 @@ if (typeof window !== 'undefined' && !('ResizeObserver' in window)) {
   (window as any).ResizeObserver = ResizeObserverPolyfill
 }
 
-// 过滤 Ant Design 4.x 的 defaultProps 警告（React 18 兼容性问题）
+// 过滤 Ant Design 4.x 的 defaultProps 和 Menu children 警告（React 18 兼容性问题）
 // 这些警告不影响功能，Ant Design 5.x 已修复
 if (import.meta.env.DEV) {
   const originalError = console.error
+  const originalWarn = console.warn
+
   console.error = (...args: any[]) => {
     if (
       typeof args[0] === 'string' &&
@@ -23,6 +25,19 @@ if (import.meta.env.DEV) {
       return
     }
     originalError.call(console, ...args)
+  }
+
+  console.warn = (...args: any[]) => {
+    const message = typeof args[0] === 'string' ? args[0] : ''
+    if (
+      message.includes('[antd: Menu] `children` will be removed') ||
+      message.includes('[antd: Table] `index` parameter of `rowKey`') ||
+      message.includes('Warning: <%s /> is using incorrect casing') ||
+      message.includes('React Router Future Flag Warning')
+    ) {
+      return
+    }
+    originalWarn.call(console, ...args)
   }
 }
 

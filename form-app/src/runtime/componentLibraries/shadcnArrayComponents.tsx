@@ -28,6 +28,9 @@ export const ShadcnArrayCards = observer((props: any) => {
   const schema = useFieldSchema()
   const value = Array.isArray(field.value) ? field.value : []
 
+  // 从 props 或 x-component-props 中读取 readOnly 配置
+  const readOnly = props.readOnly || field.readOnly || field.readPretty || schema['x-component-props']?.readOnly
+
   const handleAdd = () => {
     if (!field.value) {
       field.setValue([])
@@ -50,15 +53,17 @@ export const ShadcnArrayCards = observer((props: any) => {
             <CardTitle className="text-sm font-medium">
               #{index + 1}
             </CardTitle>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => handleRemove(index)}
-              className="h-8 w-8 p-0 text-destructive hover:text-destructive"
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
+            {!readOnly && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => handleRemove(index)}
+                className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            )}
           </CardHeader>
           <CardContent>
             <RecursionField
@@ -69,15 +74,17 @@ export const ShadcnArrayCards = observer((props: any) => {
         </Card>
       ))}
 
-      <Button
-        type="button"
-        variant="outline"
-        onClick={handleAdd}
-        className="w-full"
-      >
-        <Plus className="mr-2 h-4 w-4" />
-        添加
-      </Button>
+      {!readOnly && (
+        <Button
+          type="button"
+          variant="outline"
+          onClick={handleAdd}
+          className="w-full"
+        >
+          <Plus className="mr-2 h-4 w-4" />
+          添加
+        </Button>
+      )}
     </div>
   )
 })
@@ -99,6 +106,9 @@ export const ShadcnArrayTable = observer((props: any) => {
   const field = useField<ArrayField>()
   const schema = useFieldSchema()
   const value = Array.isArray(field.value) ? field.value : []
+
+  // 从 props 或 x-component-props 中读取 readOnly 配置
+  const readOnly = props.readOnly || field.readOnly || field.readPretty || schema['x-component-props']?.readOnly
 
   const handleAdd = () => {
     if (!field.value) {
@@ -136,16 +146,18 @@ export const ShadcnArrayTable = observer((props: any) => {
                   {columns[key].title || key}
                 </th>
               ))}
-              <th className="h-10 px-4 text-center align-middle font-medium text-muted-foreground text-xs w-20">
-                操作
-              </th>
+              {!readOnly && (
+                <th className="h-10 px-4 text-center align-middle font-medium text-muted-foreground text-xs w-20">
+                  操作
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
             {value.length === 0 ? (
               <tr>
                 <td
-                  colSpan={columnKeys.length + 2}
+                  colSpan={columnKeys.length + (readOnly ? 1 : 2)}
                   className="h-24 text-center text-muted-foreground text-sm"
                 >
                   暂无数据
@@ -165,17 +177,19 @@ export const ShadcnArrayTable = observer((props: any) => {
                       />
                     </td>
                   ))}
-                  <td className="p-2 px-4 align-middle text-center">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleRemove(index)}
-                      className="h-8 w-8 p-0 text-destructive hover:text-destructive"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </td>
+                  {!readOnly && (
+                    <td className="p-2 px-4 align-middle text-center">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleRemove(index)}
+                        className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </td>
+                  )}
                 </tr>
               ))
             )}
@@ -183,15 +197,17 @@ export const ShadcnArrayTable = observer((props: any) => {
         </table>
       </div>
 
-      <Button
-        type="button"
-        variant="outline"
-        onClick={handleAdd}
-        className="w-full"
-      >
-        <Plus className="mr-2 h-4 w-4" />
-        添加
-      </Button>
+      {!readOnly && (
+        <Button
+          type="button"
+          variant="outline"
+          onClick={handleAdd}
+          className="w-full"
+        >
+          <Plus className="mr-2 h-4 w-4" />
+          添加
+        </Button>
+      )}
     </div>
   )
 })

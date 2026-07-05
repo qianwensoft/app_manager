@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Input, Select, Switch, Table, Modal, Drawer, message } from 'antd'
+import { Button, Input, Select, Switch, Table, Modal, Drawer, message, Checkbox } from 'antd'
 import { authed, type FormAppInfo, type FormAppPage } from './api'
 import AiChatPanel from '@/pages/AiChatPanel'
 import { fieldDefsToSchema } from '@/pages/schemaConverter'
@@ -18,6 +18,8 @@ export default function PagesPanel({ app, pages, links, reload }: Props) {
   const [selectedPage, setSelectedPage] = useState<FormAppPage | null>(null)
   const [showAddPage, setShowAddPage] = useState(false)
   const [newPage, setNewPage] = useState({ page_key: '', page_type: 'custom', title: '' })
+  const [pageParams, setPageParams] = useState<Array<{ name: string; type: string; description: string; required: boolean }>>([])
+  const [savingParams, setSavingParams] = useState(false)
 
   const [showGenerator, setShowGenerator] = useState(false)
   const [aiOpen, setAiOpen] = useState(false)
@@ -38,6 +40,31 @@ export default function PagesPanel({ app, pages, links, reload }: Props) {
       setSelectedPage(null)
     }
   }, [pages])
+
+  useEffect(() => {
+    if (selectedPage?.config_json) {
+      try {
+        const config = JSON.parse(selectedPage.config_json)
+        const schema = config.param_schema || ''
+        if (schema) {
+          const parsed = JSON.parse(schema)
+          const params = Object.entries(parsed).map(([name, def]: [string, any]) => ({
+            name,
+            type: def?.type || 'string',
+            description: def?.description || '',
+            required: !!def?.required,
+          }))
+          setPageParams(params)
+        } else {
+          setPageParams([])
+        }
+      } catch {
+        setPageParams([])
+      }
+    } else {
+      setPageParams([])
+    }
+  }, [selectedPage])
 
   useEffect(() => {
     authed('/api/data/sources', 'GET').then(res => setDataSources(res?.data || [])).catch(() => {})
@@ -118,6 +145,55 @@ export default function PagesPanel({ app, pages, links, reload }: Props) {
       source: source || '',
     })
     reload()
+  }
+
+  // 页面参数操作
+  const addPageParam = () => {
+    setPageParams(prev => [...prev, { name: '', type: 'string', description: '', required: false }])
+  }
+
+  const updatePageParam = (index: number, field: string, value: any) => {
+    setPageParams(prev => {
+      const updated = [...prev]
+      updated[index] = { ...updated[index], [field]: value }
+      return updated
+    })
+  }
+
+  const deletePageParam = (index: number) => {
+    setPageParams(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const savePageParams = async () => {
+    if (!selectedPage) return
+    setSavingParams(true)
+    try {
+      // Convert table data back to JSON schema
+      const schemaObj: Record<string, any> = {}
+      pageParams.forEach(param => {
+        if (param.name.trim()) {
+          schemaObj[param.name] = {
+            type: param.type,
+            ...(param.description ? { description: param.description } : {}),
+            ...(param.required ? { required: true } : {}),
+          }
+        }
+      })
+      const finalParamSchema = Object.keys(schemaObj).length > 0 ? JSON.stringify(schemaObj) : ''
+
+      const config = JSON.parse(selectedPage.config_json || '{}')
+      config.param_schema = finalParamSchema
+
+      await authed(`/api/form-app/pages/${selectedPage.id}`, 'PUT', {
+        config_json: JSON.stringify(config),
+      })
+      message.success('参数已保存')
+      reload()
+    } catch (e: any) {
+      message.error(e.message)
+    } finally {
+      setSavingParams(false)
+    }
   }
 
   const doRegenerate = async () => {
@@ -230,7 +306,13 @@ export default function PagesPanel({ app, pages, links, reload }: Props) {
         {selectedPage ? (
           <>
             <h2>{selectedPage.title}</h2>
-            <p>页面类型: {selectedPage.page_type}　接口编码: {selectedPage.interface_code || '未绑定'}</p>
+            <p>
+              页面类型: {selectedPage.page_type}
+              接口编码: {selectedPage.interface_code || '未绑定'}
+            </p>
+            <p style={{ marginTop: 8 }}>
+              页面 URL: <code style={{ padding: '2px 6px', background: '#f0f0f0', borderRadius: 3, fontSize: 13 }}>/form-app/page/{app.code}/{selectedPage.page_key}</code>
+            </p>
             <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
               <Button type="primary" onClick={() => navigate(`/page-editor/${selectedPage.id}`)}>字段配置</Button>
               <Button onClick={() => navigate(`/page-designer/${selectedPage.id}`)}>布局编辑</Button>
@@ -249,6 +331,88 @@ export default function PagesPanel({ app, pages, links, reload }: Props) {
                 reload={reload}
               />
             )}
+
+            <h3 style={{ marginTop: 24 }}>页面入参</h3>
+            <Table
+              size="small"
+              dataSource={pageParams.map((p, idx) => ({ ...p, _idx: idx }))}
+              pagination={false}
+              rowKey="_idx"
+              columns={[
+                {
+                  title: '参数名',
+                  dataIndex: 'name',
+                  width: 150,
+                  render: (val, _, idx) => (
+                    <Input
+                      size="small"
+                      value={val}
+                      onChange={e => updatePageParam(idx, 'name', e.target.value)}
+                      placeholder="如: id"
+                    />
+                  ),
+                },
+                {
+                  title: '类型',
+                  dataIndex: 'type',
+                  width: 120,
+                  render: (val, _, idx) => (
+                    <Select
+                      size="small"
+                      value={val}
+                      onChange={v => updatePageParam(idx, 'type', v)}
+                      style={{ width: '100%' }}
+                    >
+                      <Select.Option value="string">string</Select.Option>
+                      <Select.Option value="number">number</Select.Option>
+                      <Select.Option value="boolean">boolean</Select.Option>
+                    </Select>
+                  ),
+                },
+                {
+                  title: '说明',
+                  dataIndex: 'description',
+                  render: (val, _, idx) => (
+                    <Input
+                      size="small"
+                      value={val}
+                      onChange={e => updatePageParam(idx, 'description', e.target.value)}
+                      placeholder="参数说明"
+                    />
+                  ),
+                },
+                {
+                  title: '必填',
+                  dataIndex: 'required',
+                  width: 70,
+                  render: (val, _, idx) => (
+                    <Checkbox
+                      checked={val}
+                      onChange={e => updatePageParam(idx, 'required', e.target.checked)}
+                    />
+                  ),
+                },
+                {
+                  title: '操作',
+                  width: 60,
+                  render: (_, __, idx) => (
+                    <Button size="small" danger onClick={() => deletePageParam(idx)}>删</Button>
+                  ),
+                },
+              ]}
+              locale={{ emptyText: '暂无参数' }}
+            />
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <Button size="small" type="dashed" onClick={addPageParam} style={{ flex: 1 }}>
+                + 添加参数
+              </Button>
+              <Button size="small" type="primary" onClick={savePageParams} loading={savingParams}>
+                保存参数
+              </Button>
+            </div>
+            <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>
+              定义页面接收的 URL 参数，可在参数映射中使用 $url.xxx 引用
+            </div>
 
             <h3 style={{ marginTop: 24 }}>该页面的跳转</h3>
             <Table

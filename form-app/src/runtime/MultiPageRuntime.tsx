@@ -43,11 +43,70 @@ export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }:
   const [params, setParams] = useState<Record<string, any>>({})
   const [navOpen, setNavOpen] = useState(true)
   const didInit = useRef(false)
+  // ArrayCards 列表数据加载状态（提升到组件顶层避免 Hook 规则违反）
+  const [listData, setListData] = useState<any[]>([])
+  const [listLoading, setListLoading] = useState(false)
 
   const bindings = useMemo(
     () => parseBindingsFromRuntimeSchema(app?.runtime_schema),
     [app?.runtime_schema],
   )
+
+  // 当前页面计算（提前计算，用于 ArrayCards 数据加载）
+  const currentPage = pages.find(p => p.page_key === currentPageKey)
+  const config = currentPage?.config_json ? JSON.parse(currentPage.config_json) : {}
+  let designSchema: any = null
+  if (currentPage?.design_schema) {
+    try { designSchema = JSON.parse(currentPage.design_schema) } catch { designSchema = null }
+  }
+  const hasLayoutSchema = !!(designSchema?.schema?.properties)
+
+  // 查找 ArrayCards/ArrayTable 组件的字段名（可能是 table、list 或其他）
+  let arrayFieldName: string | null = null
+  if (currentPage?.page_type === 'list' && hasLayoutSchema) {
+    for (const [fieldName, fieldSchema] of Object.entries(designSchema.schema.properties)) {
+      const comp = (fieldSchema as any)?.['x-component']
+      if (comp === 'ArrayCards' || comp === 'ArrayTable') {
+        arrayFieldName = fieldName
+        break
+      }
+    }
+  }
+  const hasArrayComponent = !!arrayFieldName
+
+  // ArrayCards 列表数据加载（仅在 list 页面且有 ArrayCards/ArrayTable 时触发）
+  useEffect(() => {
+    if (!hasArrayComponent || !currentPage?.interface_code) {
+      setListData([])
+      return
+    }
+
+    const loadListData = async () => {
+      setListLoading(true)
+      try {
+        const queryPath = isAgentRuntime()
+          ? '/api/form-app/agent-runtime/query'
+          : '/api/form-app/runtime/query'
+        const res = await authed(queryPath, 'POST', {
+          interface_code: currentPage.interface_code,
+          form_code: formAppCode,
+          page_key: currentPageKey,
+          page_type: 'list',
+          param_values: { page: 1, page_size: 100 },
+        })
+        const data = res?.data ?? res?.rows ?? []
+        console.log('[ArrayCards] 加载数据:', { interface_code: currentPage.interface_code, arrayFieldName, count: data.length, data })
+        setListData(data)
+      } catch (e: any) {
+        console.error('[ArrayCards] 加载失败:', e)
+        message.error(`加载数据失败：${e?.message || '未知错误'}`)
+        setListData([])
+      } finally {
+        setListLoading(false)
+      }
+    }
+    loadListData()
+  }, [hasArrayComponent, currentPage?.interface_code, currentPageKey, formAppCode])
 
   const fetchOptions = useCallback(async (interfaceCode: string, paramValues: Record<string, any>): Promise<FieldOption[]> => {
     const queryPath = isAgentRuntime()
@@ -212,7 +271,7 @@ export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }:
     navigationManager.pop()
   }
 
-  const currentPage = pages.find(p => p.page_key === currentPageKey)
+  // currentPage 已在组件顶部计算
 
   // 左侧页面导航 + 顶部 URL 展示（无论当前页是否存在都渲染）
   const fullUrl = typeof window !== 'undefined'
@@ -288,14 +347,8 @@ export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }:
     )
   }
 
-  const config = currentPage.config_json ? JSON.parse(currentPage.config_json) : {}
+  // config 和 designSchema 已在组件顶部计算，这里直接使用
   const fields: FieldDef[] = config.field_definitions || config.fields || []
-  // 有 design_schema（Formily 布局）时运行时按布局渲染；否则回退扁平 field_definitions
-  let designSchema: any = null
-  if (currentPage.design_schema) {
-    try { designSchema = JSON.parse(currentPage.design_schema) } catch { designSchema = null }
-  }
-  const hasLayoutSchema = !!(designSchema?.schema?.properties)
   // 统一走 Formily 核心：无 design_schema 时用 field_definitions 即时生成 schema，
   // 保证非表单布局组件（页头/分区/图片等）与字段在同一套渲染器下显示。
   const effectiveSchema = hasLayoutSchema ? designSchema : fieldDefsToSchema(fields)
@@ -421,31 +474,73 @@ export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }:
           <div style={{ padding: 24, color: '#999' }}>该页面暂无可渲染内容，请在设计器中添加字段或布局组件。</div>
         )
       })()}
-      {currentPage.page_type === 'list' && (
-        <ListRenderer
-          fields={fields}
-          bindings={bindings}
-          queryConditions={config.query_conditions || []}
-          mode={designSchema?.schema?.properties?.table?.['x-component'] === 'ArrayCards' ? 'mobile' : 'web'}
-          onFetchOptions={fetchOptions}
-          onQuery={async queryParams => {
-            const res = await authed(queryPath, 'POST', {
-              interface_code: currentPage.interface_code,
-              form_code: formAppCode,
-              page_key: currentPageKey,
-              page_type: 'list',
-              param_values: queryParams,
-            })
-            return { data: res.rows || res.data || [], total: res.total || 0 }
-          }}
-          onRowClick={rowClickLink ? handleRowClick : undefined}
-          onNew={buttonLinks.length > 0
-            ? () => navigate(buttonLinks[0].to_page_key, resolveLinkParams(buttonLinks[0].param_mapping))
-            : undefined
+      {currentPage.page_type === 'list' && (() => {
+        // hasArrayComponent 已在组件顶部计算
+
+        // 如果有 ArrayCards/ArrayTable 布局，使用 SchemaFormRenderer + 顶层状态数据
+        if (hasArrayComponent && hasRenderableForm) {
+          if (listLoading) {
+            return <div style={{ padding: 24, textAlign: 'center' }}>加载中...</div>
           }
-          newButtonLabel={buttonLinks[0]?.trigger_config || '新增'}
-        />
-      )}
+
+          // 使用检测到的字段名
+          const initialValues = arrayFieldName ? { [arrayFieldName]: listData } : {}
+          console.log('[ArrayCards] 渲染组件:', { arrayFieldName, listDataCount: listData.length, initialValues })
+
+          // list 页面：设置 ArrayCards/ArrayTable 为只读模式（隐藏添加/删除按钮）
+          const readOnlySchema = JSON.parse(JSON.stringify(effectiveSchema))
+          if (arrayFieldName && readOnlySchema?.schema?.properties?.[arrayFieldName]) {
+            const field = readOnlySchema.schema.properties[arrayFieldName]
+            if (!field['x-component-props']) {
+              field['x-component-props'] = {}
+            }
+            field['x-component-props'].readOnly = true
+          }
+
+          return (
+            <SchemaFormRenderer
+              designSchema={readOnlySchema}
+              bindings={bindings}
+              initialValues={initialValues}
+              formCode={formAppCode}
+              pageKey={currentPageKey}
+              libraryKey={libraryKey}
+              onActivePageState={registerActivePage}
+              onQueryOptions={fetchOptions}
+              events={pageEvents}
+              onNavigate={navigate}
+              onSubmit={async () => { /* list 页面不提交 */ }}
+            />
+          )
+        }
+
+        // 否则使用传统 ListRenderer
+        return (
+          <ListRenderer
+            fields={fields}
+            bindings={bindings}
+            queryConditions={config.query_conditions || []}
+            mode={designSchema?.schema?.properties?.table?.['x-component'] === 'ArrayCards' ? 'mobile' : 'web'}
+            onFetchOptions={fetchOptions}
+            onQuery={async queryParams => {
+              const res = await authed(queryPath, 'POST', {
+                interface_code: currentPage.interface_code,
+                form_code: formAppCode,
+                page_key: currentPageKey,
+                page_type: 'list',
+                param_values: queryParams,
+              })
+              return { data: res.rows || res.data || [], total: res.total || 0 }
+            }}
+            onRowClick={rowClickLink ? handleRowClick : undefined}
+            onNew={buttonLinks.length > 0
+              ? () => navigate(buttonLinks[0].to_page_key, resolveLinkParams(buttonLinks[0].param_mapping))
+              : undefined
+            }
+            newButtonLabel={buttonLinks[0]?.trigger_config || '新增'}
+          />
+        )
+      })()}
       {currentPage.page_type === 'detail' && (
         <DetailRenderer
           fields={fields}

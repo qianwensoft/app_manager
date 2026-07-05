@@ -50,6 +50,8 @@ type SchemaFormRendererProps = {
   enableDraft?: boolean
   /** 把本页 pageState 注册为「当前活动页」，供 app 级常驻事件的 page 作用域动作转发。 */
   onActivePageState?: (state: StateScope | null) => void
+  /** URL 参数（预览时传入，可在表达式中通过 $url.xxx 访问） */
+  urlParams?: Record<string, any>
 }
 
 export default function SchemaFormRenderer({
@@ -70,6 +72,7 @@ export default function SchemaFormRenderer({
   pageKey,
   enableDraft = false,
   onActivePageState,
+  urlParams = {},
 }: SchemaFormRendererProps) {
   const [loading, setLoading] = useState(false)
   const valuesRef = useRef<Record<string, any>>(initialValues)
@@ -105,10 +108,17 @@ export default function SchemaFormRenderer({
   }, [schema])
   const formProps = useMemo(() => {
     const f = designSchema?.form || {}
+    // 从 schema 根节点提取样式（如果 Form 组件有 x-component-props）
+    const rootSchema = designSchema?.schema || {}
+    const rootProps = rootSchema['x-component-props'] || {}
+
     return {
       labelCol: f.labelCol ?? 6,
       wrapperCol: f.wrapperCol ?? 14,
       ...f,
+      // 合并根节点的 style 和 className
+      style: { ...f.style, ...rootProps.style },
+      className: rootProps.className || f.className,
     }
   }, [designSchema])
 
@@ -151,8 +161,8 @@ export default function SchemaFormRenderer({
   const triggerButtonRef = useRef<ButtonTrigger>(() => {})
   // 把 Formily form 适配成事件引擎认的 PageState（事件引擎已脱 Formily）
   const pageState = useMemo(
-    () => createFormilyPageState(form, () => valuesRef.current),
-    [form],
+    () => createFormilyPageState(form, () => valuesRef.current, urlParams),
+    [form, urlParams],
   )
   // 应用级状态（来自 MultiPageRuntime 的 Provider；旧入口无 Provider 时为 null）
   const appState = useAppState()

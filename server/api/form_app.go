@@ -820,12 +820,17 @@ func executeFormRuntimeInterface(interfaceCode string, paramValues map[string]in
 		if rows == nil {
 			rows = []map[string]interface{}{}
 		}
-		return map[string]interface{}{"ok": true, "data": rows, "rows": rows}, nil
+		result := map[string]interface{}{"ok": true, "data": rows, "rows": rows}
+		// 如果有 total count，添加到返回结果
+		if res.TotalCount != nil {
+			result["total"] = *res.TotalCount
+		}
+		return result, nil
 	case InvokeKindQueryOne:
 		if res.HasRow {
 			return map[string]interface{}{"ok": true, "data": res.Row}, nil
 		}
-		return map[string]interface{}{"ok": true, "data": nil}, nil
+		return map[string]interface{"ok": true, "data": nil}, nil
 	case InvokeKindTransaction:
 		return map[string]interface{}{
 			"ok":             true,
@@ -1145,6 +1150,7 @@ func GenerateFormAppPagesFromTable(c *gin.Context) {
 
 	quotedTable := quoteSQLTableIdent(src.Type, tbl)
 	pkCol := quoteSQLTableIdent(src.Type, pk)
+	fmt.Printf("[DEBUG] GenerateFormAppPagesFromTable: src.Type=%s, tbl=%s, quotedTable=%s\n", src.Type, tbl, quotedTable)
 	allowWrite := !src.IsReadOnly()
 	base := app.Code
 	if strings.TrimSpace(base) == "" {
@@ -1157,6 +1163,8 @@ func GenerateFormAppPagesFromTable(c *gin.Context) {
 
 	listSQL := fmt.Sprintf("SELECT * FROM %s LIMIT {{limit}} OFFSET {{offset}}", quotedTable)
 	detailSQL := fmt.Sprintf("SELECT * FROM %s WHERE %s = {{id}} LIMIT 1", quotedTable, pkCol)
+	fmt.Printf("[DEBUG] Generated SQL - listSQL: %s\n", listSQL)
+	fmt.Printf("[DEBUG] Generated SQL - detailSQL: %s\n", detailSQL)
 
 	var insertCols []string
 	var insertParams []string
@@ -1172,11 +1180,25 @@ func GenerateFormAppPagesFromTable(c *gin.Context) {
 		insertSQL = fmt.Sprintf("INSERT INTO %s (%s) VALUES ({{%s}})", quotedTable, pkCol, pk)
 	}
 
-	ifaceMeta := map[string]interface{}{
+	listIfaceMeta := map[string]interface{}{
+		"schema_version": "1.0.0",
+		"generated_at":   time.Now().Format(time.RFC3339),
+		"pagination": map[string]interface{}{
+			"pageParam":        "page",
+			"pageSizeParam":    "page_size",
+			"limitParam":       "limit",
+			"offsetParam":      "offset",
+			"defaultPageSize":  10,
+			"emit_total_count": true,
+		},
+	}
+	listMetaJSONBytes, _ := json.Marshal(listIfaceMeta)
+
+	detailIfaceMeta := map[string]interface{}{
 		"schema_version": "1.0.0",
 		"generated_at":   time.Now().Format(time.RFC3339),
 	}
-	metaJSONBytes, _ := json.Marshal(ifaceMeta)
+	detailMetaJSONBytes, _ := json.Marshal(detailIfaceMeta)
 
 	dsList := models.Dataset{
 		Code:         fmt.Sprintf("%s_ds_%s", base, suffix),
@@ -1237,7 +1259,7 @@ func GenerateFormAppPagesFromTable(c *gin.Context) {
 		DatasetID:  &dsList.ID,
 		Method:     "POST",
 		Enabled:    true,
-		SchemaJSON: string(metaJSONBytes),
+		SchemaJSON: string(listMetaJSONBytes),
 	}
 	detailIF := models.DataInterface{
 		Category:   "form_app",
@@ -1248,7 +1270,7 @@ func GenerateFormAppPagesFromTable(c *gin.Context) {
 		DatasetID:  &dsDetail.ID,
 		Method:     "POST",
 		Enabled:    true,
-		SchemaJSON: string(metaJSONBytes),
+		SchemaJSON: string(detailMetaJSONBytes),
 	}
 	submitIF := models.DataInterface{
 		Category:   "form_app",
@@ -1260,7 +1282,7 @@ func GenerateFormAppPagesFromTable(c *gin.Context) {
 		Method:     "POST",
 		Enabled:    true,
 		StepsJSON:  dsSubmit.StepsJSON,
-		SchemaJSON: string(metaJSONBytes),
+		SchemaJSON: string(detailMetaJSONBytes),
 	}
 	if err := tx.Create(&listIF).Error; err != nil {
 		tx.Rollback()
@@ -1687,7 +1709,7 @@ func RegenerateSinglePage(c *gin.Context) {
 				DatasetID:  &ds.ID,
 				Method:     "POST",
 				Enabled:    true,
-				SchemaJSON: `{"schema_version":"1.0.0"}`,
+				SchemaJSON: `{"schema_version":"1.0.0","pagination":{"pageParam":"page","pageSizeParam":"page_size","limitParam":"limit","offsetParam":"offset","defaultPageSize":10,"emit_total_count":true}}`,
 			}
 			if err := tx.Create(&iface).Error; err != nil {
 				tx.Rollback()
@@ -1808,18 +1830,45 @@ func RegenerateSinglePage(c *gin.Context) {
 			"interface_code": page.InterfaceCode,
 		})
 
-		// Ensure link from list->detail if detail page is created
-		if pageType == "detail" {
+		// Create page links based on page type
+		switch pageType {
+		case "form":
+			// form -> list: auto_redirect after submit
+			tx.Where("form_app_id = ? AND from_page_key = 'form' AND to_page_key = 'list'", app.ID).
+				Delete(&models.FormAppPageLink{})
+			linkFormToList := models.FormAppPageLink{
+				FormAppID:    app.ID,
+				FromPageKey:  "form",
+				ToPageKey:    "list",
+				TriggerType:  "auto_redirect",
+				ParamMapping: `{}`,
+			}
+			tx.Create(&linkFormToList)
+
+			// form -> detail: auto_redirect after submit (alternative, pass record_id)
+			tx.Where("form_app_id = ? AND from_page_key = 'form' AND to_page_key = 'detail'", app.ID).
+				Delete(&models.FormAppPageLink{})
+			linkFormToDetail := models.FormAppPageLink{
+				FormAppID:    app.ID,
+				FromPageKey:  "form",
+				ToPageKey:    "detail",
+				TriggerType:  "auto_redirect",
+				ParamMapping: `{"id":"$result.record_id"}`,
+			}
+			tx.Create(&linkFormToDetail)
+
+		case "detail":
+			// list -> detail: row_click
 			tx.Where("form_app_id = ? AND from_page_key = 'list' AND to_page_key = 'detail'", app.ID).
 				Delete(&models.FormAppPageLink{})
-			link := models.FormAppPageLink{
+			linkListToDetail := models.FormAppPageLink{
 				FormAppID:    app.ID,
 				FromPageKey:  "list",
 				ToPageKey:    "detail",
 				TriggerType:  "row_click",
 				ParamMapping: `{"id":"$row.id"}`,
 			}
-			tx.Create(&link)
+			tx.Create(&linkListToDetail)
 		}
 	}
 
@@ -1835,15 +1884,23 @@ func RegenerateSinglePage(c *gin.Context) {
 
 func buildGeneratedDetailDesignSchema(cols []dbdriver.ColumnInfo, pk string) map[string]interface{} {
 	props := map[string]interface{}{}
+	order := 0
 	for _, c := range cols {
 		name := strings.TrimSpace(c.Name)
 		if name == "" {
 			continue
 		}
 		props[name] = map[string]interface{}{
-			"type":  "string",
-			"title": strings.ToUpper(name),
+			"type":        "string",
+			"title":       strings.ToUpper(name),
+			"x-decorator": "FormItem",
+			"x-component": "Input",
+			"x-component-props": map[string]interface{}{
+				"readOnly": true,
+			},
+			"x-index": order,
 		}
+		order++
 	}
 	schema := map[string]interface{}{
 		"type": "object",

@@ -34,6 +34,8 @@ export interface StateScope {
    * 与新值，与现有 field_change 匹配逻辑一致。返回取消订阅函数。
    */
   subscribe(cb: (shortName: string, value: any) => void): () => void
+  /** URL 参数（用于表达式中的 $url.xxx） */
+  url?: Record<string, any>
 }
 
 /** PageState 即页面作用域的 StateScope（语义别名，便于阅读）。 */

@@ -596,7 +596,10 @@ func DebugDataset(c *gin.Context) {
 				return
 			}
 			defer db.Close()
+			fmt.Printf("[DEBUG] DebugDataset query - ds.Definition: %s\n", ds.Definition)
+			fmt.Printf("[DEBUG] DebugDataset query - dsSrc.Type: %s, params: %+v\n", dsSrc.Type, params)
 			out, usedSQL, args, err := QueryDatasetSQL(db, dsSrc.Type, ds.Definition, params, body.Limit)
+			fmt.Printf("[DEBUG] DebugDataset query - usedSQL: %s, args: %+v\n", usedSQL, args)
 			if err != nil {
 				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "sql": usedSQL, "elapsed_ms": ElapsedMS(start)})
 				return

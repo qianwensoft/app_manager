@@ -14,6 +14,7 @@ export type AiChatBody = {
   current_fields?: any[]
   current_events?: any[]
   current_printers?: any[]
+  current_design_schema?: any
 }
 
 export type AiChatCallbacks = {
@@ -22,6 +23,7 @@ export type AiChatCallbacks = {
     fields_parsed: boolean; fields: string
     events_parsed?: boolean; events?: string
     printers_parsed?: boolean; printers?: string
+    design_schema_parsed?: boolean; design_schema?: string
   }) => void
   onError: (msg: string) => void
 }

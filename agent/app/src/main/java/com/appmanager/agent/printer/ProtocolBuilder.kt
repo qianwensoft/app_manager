@@ -257,7 +257,8 @@ object ProtocolBuilder {
         sb.append(body)
         sb.append("FORM\r\n")
         sb.append("PRINT\r\n")
-        return sb.toString().toByteArray(Charsets.UTF_8)
+        // CPCL 打印机通常需要 GB2312/GBK 编码才能正确打印中文
+        return sb.toString().toByteArray(charset("GBK"))
     }
 
     private fun cpclBarcodeType(fmt: String): String = when (fmt) {
@@ -314,7 +315,8 @@ object ProtocolBuilder {
             }
         }
         sb.append("PRINT 1,1\r\n")
-        return sb.toString().toByteArray(Charsets.UTF_8)
+        // TSPL 打印机通常需要 GB2312/GBK 编码才能正确打印中文
+        return sb.toString().toByteArray(charset("GBK"))
     }
 
     // ── TSPL 坐标布局 ──────────────────────────────────────────────
@@ -375,7 +377,8 @@ object ProtocolBuilder {
             }
         }
         sb.append("PRINT 1,1\r\n")
-        return sb.toString().toByteArray(Charsets.UTF_8)
+        // TSPL 打印机通常需要 GB2312/GBK 编码才能正确打印中文
+        return sb.toString().toByteArray(charset("GBK"))
     }
 
     private fun tsplBarcodeType(fmt: String): String = when (fmt) {
@@ -440,7 +443,8 @@ object ProtocolBuilder {
         }
         sb.append("FORM\r\n")
         sb.append("PRINT\r\n")
-        return sb.toString().toByteArray(Charsets.UTF_8)
+        // CPCL 打印机通常需要 GB2312/GBK 编码才能正确打印中文
+        return sb.toString().toByteArray(charset("GBK"))
     }
 
     // 数值格式化：整数去掉 .0（40.0→"40"），否则保留（49.5→"49.5"）

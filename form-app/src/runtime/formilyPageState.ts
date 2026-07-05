@@ -25,10 +25,12 @@ function resolveNestedField(obj: any, path: string): any {
 /**
  * @param form               createForm() 实例
  * @param getValuesSnapshot   实时值快照来源（= 渲染器的 valuesRef.current）
+ * @param urlParams          URL 参数（用于表达式中的 $url.xxx）
  */
 export function createFormilyPageState(
   form: FormilyForm,
   getValuesSnapshot: () => Record<string, any>,
+  urlParams: Record<string, any> = {},
 ): StateScope {
   return {
     getValues: () => getValuesSnapshot(),
@@ -76,5 +78,6 @@ export function createFormilyPageState(
       })
       return () => form.removeEffects(effectId)
     },
+    url: urlParams,
   }
 }

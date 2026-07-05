@@ -1,4 +1,5 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { Toaster } from '@/components/ui/toaster'
 import FormAppListPage from '@/pages/FormAppListPage'
 import FormAppDesignerV2 from '@/pages/FormAppDesignerV2'
 import FormAppCreateWizard from '@/pages/FormAppCreateWizard'
@@ -33,6 +34,7 @@ export default function App() {
         <Route path="/schema" element={<SchemaPage />} />
         <Route path="/test" element={<TestPage />} />
       </Routes>
+      <Toaster />
     </BrowserRouter>
   )
 }

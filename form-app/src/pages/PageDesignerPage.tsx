@@ -19,15 +19,24 @@ import {
 } from '@designable/react'
 import { createDesigner, GlobalRegistry } from '@designable/core'
 import { transformToSchema, transformToTreeNode } from '@designable/formily'
-import { SettingsForm } from '@designable/react-settings-form'
+import { SettingsForm, ColorInput } from '@designable/react-settings-form'
 import {
-  ArrayCards, ArrayTable, Card, Cascader, Checkbox, DatePicker,
-  Field, Form, FormCollapse, FormGrid, FormLayout, FormTab,
-  Input, NumberPicker, ObjectContainer, Password, Radio, Rate,
-  Select, Slider, Space, Switch, Text, TimePicker, Transfer,
-  TreeSelect, Upload,
+  Field, Form, FormCollapse, FormGrid, FormLayout, FormTab, Space as FormilySpace,
   AllLocales,
 } from '@designable/formily-antd'
+import {
+  ShadcnInput as Input,
+  ShadcnTextArea as TextArea,
+  ShadcnSelect as Select,
+  ShadcnCheckbox as Checkbox,
+  ShadcnSwitch as Switch,
+  ShadcnDatePicker as DatePicker,
+  ShadcnNumberPicker as NumberPicker,
+  ShadcnSpace as Space,
+  ShadcnArrayCards as ArrayCards,
+  ShadcnArrayTable as ArrayTable,
+  SpaceLocales,
+} from '@/designable/shadcnDesignable'
 import { SubmitButton } from '@/designable/SubmitButton'
 import { ConfirmDialogButton } from '@/designable/ConfirmDialogButton'
 import { ScanTrigger } from '@/designable/ScanTrigger'
@@ -36,28 +45,29 @@ import { TableList } from '@/designable/TableList'
 import { ActionButton, EventButton, NavigateButton, FeedbackButton } from '@/designable/ActionButtons'
 import { CustomButton } from '@/designable/Button'
 import { PageHeader, Section, Divider as LayoutDivider, StaticImage, StaticText } from '@/designable/LayoutComponents'
-import { Button, message, Modal, Tag, Drawer, Tabs, Select as AntSelect, Radio as AntRadio, Alert } from 'antd'
+import { Button, Modal, Tag, Drawer, Tabs, Select as AntSelect, Radio as AntRadio, Alert } from 'antd'
+import { toast } from '@/components/ui/use-toast'
 import JsonEditor from './JsonEditor'
 import PreviewPane from './PreviewPane'
 import { fieldDefsToSchema, schemaToFieldDefs, normalizeDesignSchema } from './schemaConverter'
 import EventsConfigSection from './EventsConfigSection'
 import { useInterfaceOptions } from './useInterfaceOptions'
 import NodeEventBinder from '@/console/NodeEventBinder'
+import AiChatPanel from './AiChatPanel'
 import type { PageEvent } from '@/runtime/eventTypes'
 import type { FieldDef } from '@/runtime/types'
 import type { PrinterTemplate } from '@/runtime/printerTypes'
 
 // 注册中文 locale，让属性配置面板显示中文标签
 GlobalRegistry.registerDesignerLocales(AllLocales)
+GlobalRegistry.registerDesignerLocales({ Space: SpaceLocales })
 GlobalRegistry.setDesignerLanguage('zh-CN')
 
 // 全局补丁：递归清理所有组件 Behavior 的 propsSchema 中的 enum null 值
 const patchBehaviorSchemas = () => {
   const components = [
     Form, FormLayout, FormGrid, FormTab, FormCollapse, Field, Input, Select,
-    TreeSelect, Cascader, Radio, Checkbox, Slider, Rate, NumberPicker,
-    Transfer, Password, DatePicker, TimePicker, Upload, Switch, Text, Card,
-    ArrayCards, ArrayTable, Space, ObjectContainer
+    Checkbox, NumberPicker, DatePicker, Switch, Space, FormilySpace, TextArea, ArrayCards, ArrayTable
   ]
 
   components.forEach((comp: any) => {
@@ -90,14 +100,18 @@ const DESIGNABLE_OPTS = { designableFormName: 'Form', designableFieldName: 'Fiel
 const CompositeItem = CompositePanel.Item as any
 
 const componentMap = {
-  Form, Field, Input, Select, TreeSelect, Cascader, Radio, Checkbox,
-  Slider, Rate, NumberPicker, Transfer, Password, DatePicker, TimePicker,
-  Upload, Switch, Text, Card, ArrayCards, ArrayTable, Space, FormTab,
-  FormCollapse, FormGrid, FormLayout, ObjectContainer, SubmitButton,
+  Form, Field, Input, Select, Checkbox,
+  NumberPicker, DatePicker, Switch, Space, FormTab,
+  FormCollapse, FormGrid, FormLayout, SubmitButton,
   ConfirmDialogButton, ScanTrigger, CardList, Table: TableList,
   ActionButton, EventButton, NavigateButton, FeedbackButton, CustomButton,
   PageHeader, Section, Divider: LayoutDivider, StaticImage, StaticText,
   DesignableForm: Form, DesignableField: Field,
+  'Input.TextArea': TextArea,
+  TextArea,
+  ArrayCards,
+  ArrayTable,
+  ColorInput,
 }
 
 async function authed(path: string, method: string, body?: any) {
@@ -146,6 +160,28 @@ export default function PageDesignerPage() {
   const [eventPrinters, setEventPrinters] = useState<PrinterTemplate[]>([])
   const [eventButtons, setEventButtons] = useState<Array<{ buttonId: string; text: string; component: string }>>([])
   const [savingEvents, setSavingEvents] = useState(false)
+  const [paramSchema, setParamSchema] = useState<string>('')
+
+  // AI 助手
+  const [aiOpen, setAiOpen] = useState(false)
+
+  // 打开 AI 助手时，从画布同步最新字段
+  const openAiAssistant = () => {
+    try {
+      const currentSchema = (transformToSchema as any)(engine.getCurrentTree(), DESIGNABLE_OPTS)
+      if (currentSchema?.schema?.properties) {
+        // 从 design_schema 提取字段定义
+        const fields = schemaToFieldDefs(currentSchema)
+        setEventFields(fields)
+      }
+      // 提取按钮信息
+      const buttons = extractButtons(currentSchema)
+      setEventButtons(buttons)
+    } catch (e) {
+      console.warn('Failed to extract fields from canvas:', e)
+    }
+    setAiOpen(true)
+  }
   const ifaceOpts = useInterfaceOptions()
 
   const engine = useMemo(() => {
@@ -170,13 +206,13 @@ export default function PageDesignerPage() {
           engine.setCurrentTree(tree)
         } catch (e) {
           console.error('Failed to load schema into designer:', e)
-          message.warning('布局加载失败，请尝试手动导入')
+          toast({ variant: "destructive", description: '布局加载失败，请尝试手动导入' })
         }
       } else if (attempts < maxAttempts) {
         attempts++
         setTimeout(tryLoad, 100)
       } else {
-        message.warning('设计器未就绪，请点击「导入字段」手动加载')
+        toast({ variant: "destructive", description: '设计器未就绪，请点击「导入字段」手动加载' })
       }
     }
     setTimeout(tryLoad, 100)
@@ -185,7 +221,7 @@ export default function PageDesignerPage() {
   /** 从 field_definitions 手动导入字段到设计器 */
   const importFromFieldDefs = async () => {
     const pd = pageDataRef.current
-    if (!pd) { message.warning('页面数据未加载'); return }
+    if (!pd) { toast({ variant: "destructive", description: '页面数据未加载' }); return }
     setImporting(true)
     try {
       // 重新拉取最新 page 数据，确保 field_definitions 是最新的
@@ -193,13 +229,13 @@ export default function PageDesignerPage() {
       const latest = res?.data
       const config = latest?.config_json ? JSON.parse(latest.config_json) : {}
       const defs: any[] = config.field_definitions || []
-      if (defs.length === 0) { message.warning('字段配置为空，请先在「字段配置」中添加字段'); return }
+      if (defs.length === 0) { toast({ variant: "destructive", description: '字段配置为空，请先在「字段配置」中添加字段' }); return }
       const schema = fieldDefsToSchema(defs)
       autoGenerated.current = true
       loadSchemaWhenReady(schema, 5)
-      message.success(`已导入 ${defs.length} 个字段`)
+      toast({ description: `已导入 ${defs.length} 个字段` })
     } catch (e: any) {
-      message.error(e.message || '导入失败')
+      toast({ variant: "destructive", description: e.message || '导入失败' })
     } finally {
       setImporting(false)
     }
@@ -218,6 +254,10 @@ export default function PageDesignerPage() {
         try {
           const cfg = pageData.config_json ? JSON.parse(pageData.config_json) : {}
           if (Array.isArray(cfg.events)) setEvents(cfg.events)
+          if (cfg.param_schema) setParamSchema(cfg.param_schema)
+          // 加载字段定义和打印模板供 AI 助手使用
+          if (Array.isArray(cfg.field_definitions)) setEventFields(cfg.field_definitions)
+          if (Array.isArray(cfg.printers)) setEventPrinters(cfg.printers)
         } catch { /* 忽略 */ }
         if (pageData.form_app_id) {
           authed(`/api/form-app/infos/${pageData.form_app_id}`, 'GET')
@@ -263,7 +303,7 @@ export default function PageDesignerPage() {
           loadSchemaWhenReady(schema)
         }
       } catch (e: any) {
-        message.error(e.message || '加载页面失败')
+        toast({ variant: "destructive", description: e.message || '加载页面失败' })
       }
     })()
   }, [pageId, engine])
@@ -294,9 +334,9 @@ export default function PageDesignerPage() {
       })
 
       autoGenerated.current = false
-      message.success('布局已保存，字段配置已同步')
+      toast({ description: '布局已保存，字段配置已同步' })
     } catch (e: any) {
-      message.error(e.message || '保存失败')
+      toast({ variant: "destructive", description: e.message || '保存失败' })
     } finally {
       setSaving(false)
     }
@@ -375,7 +415,7 @@ export default function PageDesignerPage() {
       })
       const tree = (transformToTreeNode as any)(sanitized, DESIGNABLE_OPTS)
       engine.setCurrentTree(tree)
-      message.success('已应用到画布，可继续编辑或保存')
+      toast({ description: '已应用到画布，可继续编辑或保存' })
       setShowJson(false)
     } catch (e: any) {
       setJsonErr(`回灌画布失败：${e.message || '结构不被设计器识别'}`)
@@ -400,7 +440,7 @@ export default function PageDesignerPage() {
 
       setEventsOpen(true)
     } catch (e: any) {
-      message.error(e.message || '加载事件失败')
+      toast({ variant: "destructive", description: e.message || '加载事件失败' })
     }
   }
 
@@ -411,10 +451,10 @@ export default function PageDesignerPage() {
       const cfg = res.data?.config_json ? JSON.parse(res.data.config_json) : {}
       const merged = { ...cfg, events }
       await authed(`/api/form-app/pages/${pageId}`, 'PUT', { config_json: JSON.stringify(merged) })
-      message.success('事件已保存')
+      toast({ description: '事件已保存' })
       setEventsOpen(false)
     } catch (e: any) {
-      message.error(e.message || '保存事件失败')
+      toast({ variant: "destructive", description: e.message || '保存事件失败' })
     } finally {
       setSavingEvents(false)
     }
@@ -462,12 +502,11 @@ export default function PageDesignerPage() {
               <ResourceWidget title="页面布局" sources={[PageHeader, Section, LayoutDivider, StaticImage, StaticText]} />
               <ResourceWidget
                 title="输入控件"
-                sources={[Input, Password, NumberPicker, Rate, Slider, Select, TreeSelect, Cascader, Transfer, Checkbox, Radio, DatePicker, TimePicker, Upload, Switch, ObjectContainer]}
+                sources={[Input, TextArea, NumberPicker, Select, Checkbox, DatePicker, Switch]}
               />
-              <ResourceWidget title="布局" sources={[Card, FormGrid, FormTab, FormLayout, FormCollapse, Space]} />
+              <ResourceWidget title="布局" sources={[FormGrid, FormTab, FormLayout, FormCollapse, FormilySpace, Space]} />
               <ResourceWidget title="数组" sources={[ArrayCards, ArrayTable]} />
               <ResourceWidget title="按钮" sources={[CustomButton, SubmitButton, ActionButton, EventButton, NavigateButton, ConfirmDialogButton]} />
-              <ResourceWidget title="展示" sources={[Text]} />
               <ResourceWidget title="业务组件" sources={[ScanTrigger, CardList]} />
             </CompositeItem>
             <CompositeItem title="大纲" icon="Outline">
@@ -535,6 +574,7 @@ export default function PageDesignerPage() {
                   </Button>
                   <Button size="small" onClick={openJson}>JSON</Button>
                   <Button size="small" onClick={openEvents}>事件编排</Button>
+                  <Button size="small" onClick={openAiAssistant}>AI 助手</Button>
                   <Button size="small" type="primary" loading={saving} onClick={saveSchema}>
                     保存布局
                   </Button>
@@ -616,6 +656,11 @@ export default function PageDesignerPage() {
       <PreviewPane
         end={previewEnd}
         events={events}
+        paramSchema={paramSchema}
+        interfaceCode={page?.interface_code}
+        formCode={formCode}
+        pageKey={page?.page_key}
+        pageType={page?.page_type}
         onScanInterface={async (interfaceCode, paramValues, type = 'internal', endpointId) => {
           try {
             if (type === 'connector') {
@@ -640,7 +685,7 @@ export default function PageDesignerPage() {
             })
             return res?.data ?? res?.rows ?? res ?? {}
           } catch (e: any) {
-            message.warning(`预览调用接口失败：${e?.message || '未知错误'}`)
+            toast({ variant: "destructive", description: `预览调用接口失败：${e?.message || '未知错误'}` })
             return {}
           }
         }}
@@ -648,6 +693,90 @@ export default function PageDesignerPage() {
           try { return (transformToSchema as any)(engine.getCurrentTree(), DESIGNABLE_OPTS) } catch { return null }
         }}
       />
+
+      {/* AI 助手抽屉 */}
+      <Drawer
+        title="AI 助手 — 对话调整布局与事件"
+        visible={aiOpen}
+        onClose={() => setAiOpen(false)}
+        width={480}
+        bodyStyle={{ padding: 16, height: '100%' }}
+        destroyOnClose={false}
+      >
+        <AiChatPanel
+          currentFields={eventFields}
+          currentEvents={events}
+          currentPrinters={eventPrinters}
+          currentDesignSchema={(() => {
+            try {
+              return (transformToSchema as any)(engine.getCurrentTree(), DESIGNABLE_OPTS)
+            } catch {
+              return null
+            }
+          })()}
+          pageId={pageId ? Number(pageId) : undefined}
+          onApplyFields={(f) => {
+            setEventFields(f)
+            // 将字段应用到设计器：重新生成 schema 并加载
+            const schema = fieldDefsToSchema(f)
+            autoGenerated.current = true
+            loadSchemaWhenReady(schema, 5)
+            toast({ description: '已应用 AI 生成的字段到画布' })
+          }}
+          onApplyEvents={(e) => {
+            setEvents(e)
+            toast({ description: '已应用 AI 生成的事件' })
+          }}
+          onApplyPrinters={(p) => {
+            setEventPrinters(p)
+            toast({ description: '已应用 AI 生成的打印模板' })
+          }}
+          onApplyDesignSchema={(schema) => {
+            // 将 AI 生成的布局配置应用到设计器
+            try {
+              loadSchemaWhenReady(schema, 5)
+              toast({ description: '已应用 AI 生成的布局配置到画布' })
+            } catch (e: any) {
+              toast({ variant: "destructive", description: '应用布局配置失败：' + (e.message || '未知错误') })
+            }
+          }}
+          onSaveToPage={async (f, source, evts, prn, designSchema) => {
+            // 保存到数据库
+            // 使用 AI 提供的 design_schema，如果没有则使用当前画布的 schema
+            const schemaToSave = designSchema || (transformToSchema as any)(engine.getCurrentTree(), DESIGNABLE_OPTS)
+            const config = JSON.parse(page?.config_json || '{}')
+            config.field_definitions = f
+            if (evts !== undefined) config.events = evts
+            if (prn !== undefined) config.printers = prn
+
+            await authed(`/api/form-app/pages/${pageId}/ai-save`, 'POST', {
+              config_json: JSON.stringify(config),
+              design_schema: JSON.stringify(schemaToSave),
+              source: source || '',
+            })
+          }}
+          onAfterRollback={async () => {
+            // 回滚后重新加载页面
+            const res = await authed(`/api/form-app/pages/${pageId}`, 'GET')
+            const pageData = res?.data
+            if (pageData) {
+              setPage(pageData)
+              const cfg = pageData.config_json ? JSON.parse(pageData.config_json) : {}
+              if (Array.isArray(cfg.events)) setEvents(cfg.events)
+              setEventFields(cfg.field_definitions || [])
+              setEventPrinters(cfg.printers || [])
+
+              // 重新加载 design_schema 到画布
+              if (pageData.design_schema) {
+                try {
+                  const parsed = normalizeDesignSchema(JSON.parse(pageData.design_schema))
+                  loadSchemaWhenReady(parsed, 5)
+                } catch { /* ignore */ }
+              }
+            }
+          }}
+        />
+      </Drawer>
     </div>
   )
 }
