@@ -248,3 +248,33 @@ func screenShareAuthenticate(c *gin.Context, share string) bool {
 	c.Set("user_id", uint(0))
 	return true
 }
+
+// OptionalAuthMiddleware 可选认证：如果提供 JWT token 则解析用户信息，否则放行但不设置用户信息。
+// 用于既支持免登录访问又支持需登录访问的接口。
+func OptionalAuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		token := c.GetHeader("Authorization")
+		if token != "" {
+			token = strings.TrimPrefix(token, "Bearer ")
+		} else {
+			token = c.Query("token")
+		}
+
+		// 如果没有提供 token，直接放行
+		if token == "" {
+			c.Next()
+			return
+		}
+
+		// 如果提供了 token，尝试解析
+		claims, err := ParseToken(token)
+		if err == nil {
+			c.Set("user_id", claims.UserID)
+			c.Set("username", claims.Username)
+			c.Set("role", claims.Role)
+			c.Set("wo_scopes", claims.WoScopes)
+		}
+		// 解析失败也继续，按免登录处理
+		c.Next()
+	}
+}

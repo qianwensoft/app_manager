@@ -88,3 +88,9 @@ export const getWorkOrderReportShare = (token) => http.get(`/share/work-order-re
 export const getSharedWorkOrders = (token, params = {}) => http.get(`/share/work-order-reports/${token}/work-orders`, { params })
 export const getSharedWorkOrderStatistics = (token, params = {}) => http.get(`/share/work-order-reports/${token}/statistics`, { params })
 export const getSharedWorkOrderProgress = (token, workOrderId) => http.get(`/share/work-order-reports/${token}/work-orders/${workOrderId}/progress`)
+
+// 分享链接需登录模式下的工单操作
+export const getSharedWorkOrderDetail = (token, workOrderId) => http.get(`/share/work-order-reports/${token}/work-orders/${workOrderId}/detail`)
+export const addSharedWorkOrderComment = (token, workOrderId, comment) => http.post(`/share/work-order-reports/${token}/work-orders/${workOrderId}/comment`, { comment })
+export const updateSharedWorkOrderStatus = (token, workOrderId, status, comment) => http.post(`/share/work-order-reports/${token}/work-orders/${workOrderId}/status`, { status, comment })
+export const updateSharedWorkOrderFields = (token, workOrderId, fields) => http.put(`/share/work-order-reports/${token}/work-orders/${workOrderId}/fields`, fields)

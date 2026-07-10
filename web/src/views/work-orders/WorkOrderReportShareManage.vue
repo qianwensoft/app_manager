@@ -8,6 +8,24 @@
 
     <el-table v-loading="loading" :data="shareList" border>
       <el-table-column prop="title" label="分享标题" min-width="200" show-overflow-tooltip />
+      <el-table-column label="认证模式" width="120">
+        <template #default="{ row }">
+          <el-tag :type="row.auth_mode === 'public' ? 'success' : 'warning'">
+            {{ row.auth_mode === 'public' ? '免登录' : '需登录' }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="权限配置" width="180" v-if="shareList.some(s => s.auth_mode === 'login')">
+        <template #default="{ row }">
+          <div v-if="row.auth_mode === 'login' && row.permissions">
+            <el-tag v-if="parsePermissions(row).can_view" size="small" style="margin:2px">查看</el-tag>
+            <el-tag v-if="parsePermissions(row).can_comment" size="small" style="margin:2px">评论</el-tag>
+            <el-tag v-if="parsePermissions(row).can_update_status" size="small" style="margin:2px">改状态</el-tag>
+            <el-tag v-if="parsePermissions(row).can_update_fields" size="small" style="margin:2px">改字段</el-tag>
+          </div>
+          <span v-else style="color:#909399">-</span>
+        </template>
+      </el-table-column>
       <el-table-column label="浏览次数" width="120">
         <template #default="{ row }">
           <el-button link type="primary" @click="showViews(row)">
@@ -150,6 +168,15 @@ const deleteShare = async (id) => {
     fetchShares()
   } catch (e) {
     ElMessage.error(e.message || '删除失败')
+  }
+}
+
+const parsePermissions = (row) => {
+  if (!row.permissions) return {}
+  try {
+    return typeof row.permissions === 'string' ? JSON.parse(row.permissions) : row.permissions
+  } catch (e) {
+    return {}
   }
 }
 

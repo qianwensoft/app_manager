@@ -89,11 +89,16 @@ func SetupRouter() *gin.Engine {
 	r.GET("/api/scada/info/share/:token", GetScadaInfoByShareToken)
 	// 免登录：表单分享
 	r.GET("/api/form-app/info/share/:token", GetFormAppByShareToken)
-	// 免登录：工单报告分享
-	r.GET("/api/share/work-order-reports/:token", GetWorkOrderReportShare)
-	r.GET("/api/share/work-order-reports/:token/work-orders", GetSharedWorkOrders)
-	r.GET("/api/share/work-order-reports/:token/statistics", GetSharedWorkOrderStatistics)
-	r.GET("/api/share/work-order-reports/:token/work-orders/:id/progress", GetSharedWorkOrderProgress)
+	// 工单报告分享（免登录访问基础信息，需登录模式下需要 JWT）
+	r.GET("/api/share/work-order-reports/:token", auth.OptionalAuthMiddleware(), GetWorkOrderReportShare)
+	r.GET("/api/share/work-order-reports/:token/work-orders", auth.OptionalAuthMiddleware(), GetSharedWorkOrders)
+	r.GET("/api/share/work-order-reports/:token/statistics", auth.OptionalAuthMiddleware(), GetSharedWorkOrderStatistics)
+	r.GET("/api/share/work-order-reports/:token/work-orders/:id/progress", auth.OptionalAuthMiddleware(), GetSharedWorkOrderProgress)
+	// 需登录模式下的工单操作（需要 JWT）
+	r.GET("/api/share/work-order-reports/:token/work-orders/:id/detail", auth.OptionalAuthMiddleware(), GetSharedWorkOrderDetail)
+	r.POST("/api/share/work-order-reports/:token/work-orders/:id/comment", auth.OptionalAuthMiddleware(), AddSharedWorkOrderComment)
+	r.POST("/api/share/work-order-reports/:token/work-orders/:id/status", auth.OptionalAuthMiddleware(), UpdateSharedWorkOrderStatus)
+	r.PUT("/api/share/work-order-reports/:token/work-orders/:id/fields", auth.OptionalAuthMiddleware(), UpdateSharedWorkOrderFields)
 	// 组态静态资源（上传目录映射）
 	r.Static("/api/scada/resource", config.C.Storage.Path)
 

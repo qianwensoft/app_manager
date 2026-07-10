@@ -20,6 +20,8 @@ server/data/
 # 前端依赖与构建
 web/node_modules/
 web/dist/
+form-app/dist/
+scada-editor/dist/
 
 # Android / Gradle
 agent/.gradle/

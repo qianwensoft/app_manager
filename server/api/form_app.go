@@ -830,7 +830,7 @@ func executeFormRuntimeInterface(interfaceCode string, paramValues map[string]in
 		if res.HasRow {
 			return map[string]interface{}{"ok": true, "data": res.Row}, nil
 		}
-		return map[string]interface{"ok": true, "data": nil}, nil
+		return map[string]interface{}{"ok": true, "data": nil}, nil
 	case InvokeKindTransaction:
 		return map[string]interface{}{
 			"ok":             true,
@@ -1080,8 +1080,8 @@ func buildGeneratedListDesignSchema(cols []dbdriver.ColumnInfo, pk string, platf
 			"type": "object",
 			"properties": map[string]interface{}{
 				"table": map[string]interface{}{
-					"type":              "void",
-					"x-component":       "ArrayTable",
+					"type":        "void",
+					"x-component": "ArrayTable",
 					"x-component-props": map[string]interface{}{
 						"columns": columns,
 						"rowKey":  pk,

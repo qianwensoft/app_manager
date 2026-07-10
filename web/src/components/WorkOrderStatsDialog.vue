@@ -72,7 +72,7 @@
 
   <!-- 分享对话框 -->
   <el-dialog v-model="shareDialogVisible" title="生成分享链接" width="600px">
-    <el-form :model="shareForm" label-width="100px">
+    <el-form :model="shareForm" label-width="120px">
       <el-form-item label="分享标题">
         <el-input v-model="shareForm.title" placeholder="例如：Q1工单统计报告" />
       </el-form-item>
@@ -85,13 +85,34 @@
           <el-option label="30天" :value="30" />
         </el-select>
       </el-form-item>
+      <el-form-item label="认证模式">
+        <el-radio-group v-model="shareForm.authMode">
+          <el-radio value="public">免登录</el-radio>
+          <el-radio value="login">需登录</el-radio>
+        </el-radio-group>
+        <div style="font-size:12px; color:#909399; margin-top:5px">
+          <div v-if="shareForm.authMode === 'public'">任何人通过链接都可以查看，无需登录</div>
+          <div v-else>需要登录后才能查看和操作工单，支持权限控制</div>
+        </div>
+      </el-form-item>
+      <el-form-item v-if="shareForm.authMode === 'login'" label="访问权限">
+        <el-checkbox-group v-model="shareForm.permissions">
+          <el-checkbox label="can_view" disabled checked>查看工单详情</el-checkbox>
+          <el-checkbox label="can_comment">添加评论</el-checkbox>
+          <el-checkbox label="can_update_status">更新工单状态</el-checkbox>
+          <el-checkbox label="can_update_fields">更新工单字段</el-checkbox>
+        </el-checkbox-group>
+        <div style="font-size:12px; color:#909399; margin-top:5px">
+          登录用户可以执行哪些操作
+        </div>
+      </el-form-item>
     </el-form>
 
     <div v-if="shareLink" style="margin-top:20px">
       <el-alert title="分享链接已生成" type="success" :closable="false">
         <div style="margin-top:10px; display:flex; gap:10px; align-items:center;">
-          <el-input v-model="shareLink" readonly />
-          <el-button @click="copyShareLink">复制</el-button>
+          <el-input v-model="shareLink" readonly style="flex:1" />
+          <el-button @click="copyShareLink" style="flex-shrink:0">复制</el-button>
         </div>
       </el-alert>
     </div>
@@ -432,7 +453,9 @@ const showShareDialog = () => {
   shareLink.value = ''
   shareForm.value = {
     title: `工单统计报告_${new Date().toLocaleDateString()}`,
-    days: 7
+    days: 7,
+    authMode: 'public',
+    permissions: ['can_comment']
   }
 }
 
@@ -444,11 +467,25 @@ const generateShare = async () => {
 
   shareLoading.value = true
   try {
-    const res = await createWorkOrderReportShare({
+    const payload = {
       title: shareForm.value.title,
       filters: props.filters,
-      expires_in: shareForm.value.days * 24  // 转换天数为小时
-    })
+      expires_in: shareForm.value.days * 24,  // 转换天数为小时
+      auth_mode: shareForm.value.authMode
+    }
+
+    // 需登录模式下添加权限配置
+    if (shareForm.value.authMode === 'login') {
+      const permissions = {
+        can_view: true,  // 查看权限默认开启
+        can_comment: shareForm.value.permissions.includes('can_comment'),
+        can_update_status: shareForm.value.permissions.includes('can_update_status'),
+        can_update_fields: shareForm.value.permissions.includes('can_update_fields')
+      }
+      payload.permissions = permissions
+    }
+
+    const res = await createWorkOrderReportShare(payload)
 
     const token = res.data.token
     shareLink.value = `${window.location.origin}/work-order-report-share/${token}`
@@ -460,12 +497,49 @@ const generateShare = async () => {
   }
 }
 
-const copyShareLink = () => {
-  navigator.clipboard.writeText(shareLink.value).then(() => {
-    ElMessage.success('链接已复制到剪贴板')
-  }).catch(() => {
-    ElMessage.error('复制失败，请手动复制')
-  })
+const copyShareLink = async () => {
+  const link = shareLink.value
+
+  try {
+    // 优先使用现代 Clipboard API
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(link)
+      ElMessage.success('链接已复制到剪贴板')
+      return
+    }
+  } catch (e) {
+    console.warn('Clipboard API failed, fallback to execCommand', e)
+  }
+
+  // 回退方案：使用传统的 execCommand
+  try {
+    const textarea = document.createElement('textarea')
+    textarea.value = link
+    textarea.style.position = 'fixed'
+    textarea.style.top = '0'
+    textarea.style.left = '0'
+    textarea.style.width = '1px'
+    textarea.style.height = '1px'
+    textarea.style.padding = '0'
+    textarea.style.border = 'none'
+    textarea.style.outline = 'none'
+    textarea.style.boxShadow = 'none'
+    textarea.style.background = 'transparent'
+    document.body.appendChild(textarea)
+    textarea.focus()
+    textarea.select()
+    const successful = document.execCommand('copy')
+    document.body.removeChild(textarea)
+
+    if (successful) {
+      ElMessage.success('链接已复制到剪贴板')
+    } else {
+      throw new Error('execCommand failed')
+    }
+  } catch (e) {
+    console.error('All copy methods failed', e)
+    ElMessage.error('复制失败，请手动复制：' + link)
+  }
 }
 
 const manageShares = async () => {
@@ -483,13 +557,49 @@ const manageShares = async () => {
   }
 }
 
-const copyShareLinkById = (row) => {
+const copyShareLinkById = async (row) => {
   const link = `${window.location.origin}/work-order-report-share/${row.token}`
-  navigator.clipboard.writeText(link).then(() => {
-    ElMessage.success('链接已复制到剪贴板')
-  }).catch(() => {
-    ElMessage.error('复制失败，请手动复制')
-  })
+
+  try {
+    // 优先使用现代 Clipboard API
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(link)
+      ElMessage.success('链接已复制到剪贴板')
+      return
+    }
+  } catch (e) {
+    console.warn('Clipboard API failed, fallback to execCommand', e)
+  }
+
+  // 回退方案：使用传统的 execCommand
+  try {
+    const textarea = document.createElement('textarea')
+    textarea.value = link
+    textarea.style.position = 'fixed'
+    textarea.style.top = '0'
+    textarea.style.left = '0'
+    textarea.style.width = '1px'
+    textarea.style.height = '1px'
+    textarea.style.padding = '0'
+    textarea.style.border = 'none'
+    textarea.style.outline = 'none'
+    textarea.style.boxShadow = 'none'
+    textarea.style.background = 'transparent'
+    document.body.appendChild(textarea)
+    textarea.focus()
+    textarea.select()
+    const successful = document.execCommand('copy')
+    document.body.removeChild(textarea)
+
+    if (successful) {
+      ElMessage.success('链接已复制到剪贴板')
+    } else {
+      throw new Error('execCommand failed')
+    }
+  } catch (e) {
+    console.error('All copy methods failed', e)
+    ElMessage.error('复制失败，请手动复制：' + link)
+  }
 }
 
 const deleteShare = async (id) => {

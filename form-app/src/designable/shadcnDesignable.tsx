@@ -1126,7 +1126,8 @@ export const ShadcnSpace: DnFC<any> = (props) => {
         // 处理嵌套对象（如 background, border 等）
         // 这些通常来自 Formily 的样式 setter
         if (key === 'background' && 'backgroundColor' in value) {
-          processed.background = value.backgroundColor || value.background
+          const bgValue = value as any
+          processed.background = bgValue.backgroundColor || bgValue.background
         } else if (key === 'border') {
           const borderObj = value as any
           if (borderObj.style && borderObj.width && borderObj.color) {
@@ -1183,7 +1184,7 @@ export const ShadcnSpace: DnFC<any> = (props) => {
   }
 
   return (
-    <DroppableWidget>
+    <DroppableWidget {...props}>
       <div style={mergedStyle} className={componentProps.containerClassName} {...nodeIdProps}>
         {props.children}
       </div>
@@ -1222,7 +1223,7 @@ ShadcnSpace.Behavior = createBehavior(
               },
               'x-display': {
                 type: 'string',
-                enum: ['visible', 'hidden', 'none', null],
+                enum: ['visible', 'hidden', 'none', ''],
                 'x-decorator': 'FormItem',
                 'x-component': 'Select',
                 'x-component-props': {
@@ -1231,7 +1232,7 @@ ShadcnSpace.Behavior = createBehavior(
               },
               'x-pattern': {
                 type: 'string',
-                enum: ['editable', 'disabled', 'readOnly', 'readPretty', null],
+                enum: ['editable', 'disabled', 'readOnly', 'readPretty', ''],
                 'x-decorator': 'FormItem',
                 'x-component': 'Select',
                 'x-component-props': {
@@ -1270,7 +1271,7 @@ ShadcnSpace.Behavior = createBehavior(
                   },
                   align: {
                     type: 'string',
-                    enum: ['start', 'end', 'center', 'baseline', 'stretch', null],
+                    enum: ['start', 'end', 'center', 'baseline', 'stretch', ''],
                     'x-decorator': 'FormItem',
                     'x-component': 'Select',
                   },
@@ -1423,7 +1424,7 @@ ShadcnSpace.Resource = createResource({
 export const ShadcnArrayCards: DnFC<any> = (props) => {
   const nodeIdProps = useNodeIdProps()
   return (
-    <DroppableWidget>
+    <DroppableWidget {...props}>
       <div className="space-y-4" style={{ minHeight: '80px', border: '1px dashed #d9d9d9', padding: '16px' }} {...nodeIdProps}>
         <Card>
           <CardHeader>
@@ -1530,7 +1531,7 @@ ShadcnArrayCards.Resource = createResource({
 export const ShadcnArrayTable: DnFC<any> = (props) => {
   const nodeIdProps = useNodeIdProps()
   return (
-    <DroppableWidget>
+    <DroppableWidget {...props}>
       <div style={{ minHeight: '80px', border: '1px dashed #d9d9d9', padding: '16px' }} {...nodeIdProps}>
         <div className="rounded-md border">
           <table className="w-full">

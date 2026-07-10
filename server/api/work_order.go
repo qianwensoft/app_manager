@@ -1675,6 +1675,7 @@ func GetWorkOrderStatistics(c *gin.Context) {
 			"by_type":              []gin.H{},
 			"by_tag":               []gin.H{},
 			"by_priority":          []gin.H{},
+			"by_item_kind":         []gin.H{},
 			"avg_processing_hours": 0,
 		})
 		return
@@ -1733,6 +1734,19 @@ func GetWorkOrderStatistics(c *gin.Context) {
 		Order("count DESC").
 		Find(&byTag)
 
+	// 附件统计
+	type itemKindStat struct {
+		Kind  string `json:"kind"`
+		Count int    `json:"count"`
+	}
+	var byItemKind []itemKindStat
+	database.DB.Model(&models.WorkOrderItem{}).
+		Select("kind, COUNT(*) as count").
+		Where("work_order_id IN ?", woIDs).
+		Group("kind").
+		Order("count DESC").
+		Find(&byItemKind)
+
 	// 计算平均处理耗时（仅已关闭的工单）- 兼容 SQLite 和 MySQL
 	var avgHours float64
 	var closedWOs []models.WorkOrder
@@ -1762,6 +1776,7 @@ func GetWorkOrderStatistics(c *gin.Context) {
 		"by_type":              byType,
 		"by_tag":               byTag,
 		"by_priority":          byPriority,
+		"by_item_kind":         byItemKind,
 		"avg_processing_hours": avgHours,
 	})
 }
@@ -1778,9 +1793,11 @@ func generateShareToken() string {
 // CreateWorkOrderReportShare 创建报告分享链接
 func CreateWorkOrderReportShare(c *gin.Context) {
 	var req struct {
-		Title     string                 `json:"title"`
-		Filters   map[string]interface{} `json:"filters"`
-		ExpiresIn int                    `json:"expires_in"` // 过期时长（小时），默认168小时（7天）
+		Title       string                 `json:"title"`
+		Filters     map[string]interface{} `json:"filters"`
+		ExpiresIn   int                    `json:"expires_in"`  // 过期时长（小时），默认168小时（7天）
+		AuthMode    string                 `json:"auth_mode"`   // 认证模式：public（免登录）| login（需登录）
+		Permissions map[string]interface{} `json:"permissions"` // 需登录模式的权限配置
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -1794,11 +1811,38 @@ func CreateWorkOrderReportShare(c *gin.Context) {
 		req.ExpiresIn = 720
 	}
 
+	// 默认免登录模式
+	authMode := req.AuthMode
+	if authMode == "" {
+		authMode = "public"
+	}
+	if authMode != "public" && authMode != "login" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid auth_mode"})
+		return
+	}
+
+	// 需登录模式下，默认权限配置
+	var permissionsJSON string
+	if authMode == "login" {
+		if req.Permissions == nil {
+			req.Permissions = map[string]interface{}{
+				"can_view":          true,
+				"can_comment":       true,
+				"can_update_status": false,
+				"can_update_fields": false,
+			}
+		}
+		b, _ := json.Marshal(req.Permissions)
+		permissionsJSON = string(b)
+	}
+
 	filtersJSON, _ := json.Marshal(req.Filters)
 	share := models.WorkOrderReportShare{
 		Token:       generateShareToken(),
 		Title:       req.Title,
 		FiltersJSON: string(filtersJSON),
+		AuthMode:    authMode,
+		Permissions: permissionsJSON,
 		CreatedBy:   c.GetUint("user_id"),
 		ExpiresAt:   time.Now().Add(time.Duration(req.ExpiresIn) * time.Hour),
 	}
@@ -1811,7 +1855,7 @@ func CreateWorkOrderReportShare(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": share})
 }
 
-// GetWorkOrderReportShare 获取分享信息（免登录）
+// GetWorkOrderReportShare 获取分享信息（免登录或已登录）
 func GetWorkOrderReportShare(c *gin.Context) {
 	token := c.Param("token")
 	var share models.WorkOrderReportShare
@@ -1845,19 +1889,32 @@ func GetWorkOrderReportShare(c *gin.Context) {
 		json.Unmarshal([]byte(share.FiltersJSON), &filters)
 	}
 
+	// 解析permissions
+	var permissions map[string]interface{}
+	if share.Permissions != "" {
+		json.Unmarshal([]byte(share.Permissions), &permissions)
+	}
+
+	// 检查登录状态（仅用于前端判断是否已登录）
+	userID := c.GetUint("user_id")
+	isAuthenticated := userID > 0
+
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
-			"id":         share.ID,
-			"token":      share.Token,
-			"title":      share.Title,
-			"filters":    filters,
-			"expires_at": share.ExpiresAt,
-			"created_at": share.CreatedAt,
+			"id":               share.ID,
+			"token":            share.Token,
+			"title":            share.Title,
+			"filters":          filters,
+			"auth_mode":        share.AuthMode,
+			"permissions":      permissions,
+			"expires_at":       share.ExpiresAt,
+			"created_at":       share.CreatedAt,
+			"is_authenticated": isAuthenticated,
 		},
 	})
 }
 
-// GetSharedWorkOrders 获取分享的工单列表（免登录）
+// GetSharedWorkOrders 获取分享的工单列表（免登录或需登录）
 func GetSharedWorkOrders(c *gin.Context) {
 	token := c.Param("token")
 	var share models.WorkOrderReportShare
@@ -1869,6 +1926,15 @@ func GetSharedWorkOrders(c *gin.Context) {
 	if time.Now().After(share.ExpiresAt) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "分享链接已过期"})
 		return
+	}
+
+	// 需登录模式下，检查是否已登录
+	if share.AuthMode == "login" {
+		userID := c.GetUint("user_id")
+		if userID == 0 {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "此分享链接需要登录才能访问"})
+			return
+		}
 	}
 
 	// 解析保存的查询条件
@@ -1978,7 +2044,7 @@ func GetSharedWorkOrders(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": out, "total": total, "page": page, "limit": limit})
 }
 
-// GetSharedWorkOrderStatistics 获取分享的统计报告（免登录）
+// GetSharedWorkOrderStatistics 获取分享的统计报告（免登录或需登录）
 func GetSharedWorkOrderStatistics(c *gin.Context) {
 	token := c.Param("token")
 	var share models.WorkOrderReportShare
@@ -1990,6 +2056,15 @@ func GetSharedWorkOrderStatistics(c *gin.Context) {
 	if time.Now().After(share.ExpiresAt) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "分享链接已过期"})
 		return
+	}
+
+	// 需登录模式下，检查是否已登录
+	if share.AuthMode == "login" {
+		userID := c.GetUint("user_id")
+		if userID == 0 {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "此分享链接需要登录才能访问"})
+			return
+		}
 	}
 
 	// 解析保存的查询条件
@@ -2046,6 +2121,7 @@ func GetSharedWorkOrderStatistics(c *gin.Context) {
 			"by_type":              []gin.H{},
 			"by_tag":               []gin.H{},
 			"by_priority":          []gin.H{},
+			"by_item_kind":         []gin.H{},
 			"avg_processing_hours": 0,
 		})
 		return
@@ -2101,6 +2177,19 @@ func GetSharedWorkOrderStatistics(c *gin.Context) {
 		Order("count DESC").
 		Find(&byTag)
 
+	// 附件统计
+	type itemKindStat struct {
+		Kind  string `json:"kind"`
+		Count int    `json:"count"`
+	}
+	var byItemKind []itemKindStat
+	database.DB.Model(&models.WorkOrderItem{}).
+		Select("kind, COUNT(*) as count").
+		Where("work_order_id IN ?", woIDs).
+		Group("kind").
+		Order("count DESC").
+		Find(&byItemKind)
+
 	var avgHours float64
 	var closedWOs []models.WorkOrder
 	database.DB.Select("created_at, closed_at, archived_at").
@@ -2129,6 +2218,7 @@ func GetSharedWorkOrderStatistics(c *gin.Context) {
 		"by_type":              byType,
 		"by_tag":               byTag,
 		"by_priority":          byPriority,
+		"by_item_kind":         byItemKind,
 		"avg_processing_hours": avgHours,
 	})
 }

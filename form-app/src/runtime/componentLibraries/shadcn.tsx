@@ -61,7 +61,8 @@ const FormilyInput = connect(
 )
 
 // 为 Input 添加 TextArea 子组件，支持 Input.TextArea 语法
-FormilyInput.TextArea = FormilyTextarea
+// 使用类型断言绕过 TypeScript 检查
+;(FormilyInput as any).TextArea = FormilyTextarea
 
 /**
  * shadcn Select 适配 Formily

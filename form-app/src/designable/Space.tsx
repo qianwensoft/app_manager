@@ -37,7 +37,7 @@ export const Space: DnFC<any> = observer((props) => {
 
   // 设计态：使用 DroppableWidget 确保空容器也可见可拖拽
   return (
-    <DroppableWidget>
+    <DroppableWidget {...props}>
       <div style={mergedStyle} className={componentProps.containerClassName}>
         {props.children}
       </div>

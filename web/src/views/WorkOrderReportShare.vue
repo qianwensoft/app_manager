@@ -21,11 +21,18 @@
                 过期时间：{{ new Date(shareInfo.expires_at).toLocaleString() }}
               </div>
             </div>
-            <el-radio-group v-model="viewMode" size="default" class="view-mode-group">
-              <el-radio-button value="statistics">统计</el-radio-button>
-              <el-radio-button value="list">列表</el-radio-button>
-              <el-radio-button value="board">看板</el-radio-button>
-            </el-radio-group>
+            <div class="card-header-actions">
+              <div v-if="currentUser" class="current-user">
+                <el-icon><User /></el-icon>
+                <span>{{ currentUser.username }}</span>
+                <el-tag v-if="currentUser.role" size="small" type="info">{{ roleLabel(currentUser.role) }}</el-tag>
+              </div>
+              <el-radio-group v-model="viewMode" size="default" class="view-mode-group">
+                <el-radio-button value="statistics">统计</el-radio-button>
+                <el-radio-button value="list">列表</el-radio-button>
+                <el-radio-button value="board">看板</el-radio-button>
+              </el-radio-group>
+            </div>
           </div>
         </template>
 
@@ -51,6 +58,7 @@
                           <el-tag v-if="section.key === 'status'" :type="statusType(row[section.labelProp])">
                             {{ statusLabel(row[section.labelProp]) }}
                           </el-tag>
+                          <span v-else-if="section.key === 'item_kind'">{{ itemKindLabel(row[section.labelProp]) }}</span>
                           <span v-else>{{ row[section.labelProp] }}</span>
                         </template>
                       </el-table-column>
@@ -216,6 +224,28 @@
           </el-tag>
         </div>
 
+        <!-- 工单附件 -->
+        <div v-if="currentWorkOrder.items && currentWorkOrder.items.length > 0" style="margin-top:24px">
+          <el-divider content-position="left"><b>附件 / 采集产物（{{ currentWorkOrder.items.length }}）</b></el-divider>
+          <div class="items-list">
+            <div v-for="item in currentWorkOrder.items" :key="item.id" class="item-card">
+              <div class="item-header">
+                <el-tag size="small">{{ itemKindLabel(item.kind) }}</el-tag>
+                <span class="item-name">{{ item.file_name }}</span>
+                <el-link :href="workOrderItemDownloadUrl(currentWorkOrder.id, item.id)" target="_blank" type="primary" size="small">下载</el-link>
+              </div>
+              <img
+                v-if="item.kind === 'photo'"
+                :src="workOrderItemDownloadUrl(currentWorkOrder.id, item.id)"
+                class="item-img"
+                @click="openItemImage(currentWorkOrder.id, item.id)"
+              />
+              <video v-else-if="item.kind === 'video' || item.kind === 'screen_record'" :src="workOrderItemDownloadUrl(currentWorkOrder.id, item.id)" controls class="item-video" />
+              <audio v-else-if="item.kind === 'voice'" :src="workOrderItemDownloadUrl(currentWorkOrder.id, item.id)" controls class="item-audio" />
+            </div>
+          </div>
+        </div>
+
         <!-- 工单进展 -->
         <div v-if="progressList.length > 0" style="margin-top:24px">
           <el-divider content-position="left"><b>工单进展（{{ progressList.length }}）</b></el-divider>
@@ -245,17 +275,98 @@
           </div>
         </div>
 
-        <el-alert type="info" :closable="false" style="margin-top:16px">
+        <el-alert
+          v-if="!shareInfo.is_authenticated || !hasAnyEditPermission"
+          type="info"
+          :closable="false"
+          style="margin-top:16px"
+        >
           <template #title>
             <div style="display:flex; align-items:center; gap:8px">
               <el-icon><Lock /></el-icon>
-              <span>此为只读分享页面，不支持编辑操作</span>
+              <span v-if="!shareInfo.is_authenticated">{{ shareInfo.auth_mode === 'login' ? '请登录后查看更多操作权限' : '此为只读分享页面，不支持编辑操作' }}</span>
+              <span v-else>此分享链接为只读权限</span>
             </div>
           </template>
         </el-alert>
       </div>
       <template #footer>
-        <el-button @click="detailDialogVisible = false">关闭</el-button>
+        <div style="display:flex; justify-content:space-between; width:100%">
+          <div>
+            <el-button v-if="canComment" type="primary" @click="showCommentDialog">添加评论</el-button>
+            <el-button v-if="canUpdateStatus" @click="showStatusDialog">更新状态</el-button>
+            <el-button v-if="canEdit" @click="showEditDialog">编辑工单</el-button>
+          </div>
+          <el-button @click="detailDialogVisible = false">关闭</el-button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <!-- 添加评论对话框 -->
+    <el-dialog v-model="commentDialogVisible" title="添加评论" width="600px">
+      <el-input
+        v-model="commentContent"
+        type="textarea"
+        :rows="5"
+        placeholder="请输入评论内容"
+        maxlength="1000"
+        show-word-limit
+      />
+      <template #footer>
+        <el-button @click="commentDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="submitComment" :loading="commentSubmitting">提交</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 更新状态对话框 -->
+    <el-dialog v-model="statusDialogVisible" title="更新工单状态" width="600px">
+      <el-form label-width="100px">
+        <el-form-item label="当前状态">
+          <el-tag :type="statusType(currentWorkOrder?.status)">{{ statusLabel(currentWorkOrder?.status) }}</el-tag>
+        </el-form-item>
+        <el-form-item label="新状态">
+          <el-select v-model="newStatus" placeholder="请选择新状态">
+            <el-option label="待处理" value="open" />
+            <el-option label="处理中" value="in_progress" />
+            <el-option label="已解决" value="resolved" />
+            <el-option label="已关闭" value="closed" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input
+            v-model="statusComment"
+            type="textarea"
+            :rows="3"
+            placeholder="可选：状态变更说明"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="statusDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="submitStatusUpdate" :loading="statusSubmitting">提交</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 编辑工单对话框 -->
+    <el-dialog v-model="editDialogVisible" title="编辑工单" width="600px">
+      <el-form :model="editForm" label-width="100px">
+        <el-form-item label="标题">
+          <el-input v-model="editForm.title" placeholder="请输入标题" />
+        </el-form-item>
+        <el-form-item label="描述">
+          <el-input v-model="editForm.description" type="textarea" :rows="5" placeholder="请输入描述" />
+        </el-form-item>
+        <el-form-item label="优先级">
+          <el-select v-model="editForm.priority">
+            <el-option label="低" value="normal" />
+            <el-option label="中" value="medium" />
+            <el-option label="高" value="high" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="submitEdit" :loading="editSubmitting">提交</el-button>
       </template>
     </el-dialog>
   </div>
@@ -263,17 +374,21 @@
 
 <script setup>
 import { ref, onMounted, onBeforeUnmount, nextTick, computed, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Lock, Grid } from '@element-plus/icons-vue'
-import { getWorkOrderReportShare, getSharedWorkOrders, getSharedWorkOrderStatistics, getSharedWorkOrderProgress } from '@/api/workOrder'
+import { Lock, Grid, User } from '@element-plus/icons-vue'
+import { getWorkOrderReportShare, getSharedWorkOrders, getSharedWorkOrderStatistics, getSharedWorkOrderProgress, addSharedWorkOrderComment, updateSharedWorkOrderStatus, updateSharedWorkOrderFields } from '@/api/workOrder'
 import { statusLabel, statusType, priorityLabel, priorityType } from '@/views/work-orders/workOrderConst'
 import { createWorkOrdersStomp } from '@/utils/workOrdersStomp'
+import { useAuthStore } from '@/stores/auth'
 import QRCode from 'qrcode'
 import * as echarts from 'echarts'
 
 const route = useRoute()
+const router = useRouter()
 const token = route.params.token
+const authStore = useAuthStore()
+const currentUser = computed(() => authStore.user)
 
 const isMobile = ref(window.innerWidth < 768)
 const onResize = () => { isMobile.value = window.innerWidth < 768 }
@@ -281,7 +396,8 @@ const onResize = () => { isMobile.value = window.innerWidth < 768 }
 const loading = ref(true)
 const error = ref('')
 const shareInfo = ref(null)
-const viewMode = ref('statistics')
+// 从 URL 参数初始化视图模式，默认为 statistics
+const viewMode = ref(route.query.view || 'statistics')
 
 const statsLoading = ref(false)
 const stats = ref(null)
@@ -302,11 +418,32 @@ const currentWorkOrder = ref(null)
 const progressList = ref([])
 const qrCache = ref({})
 
+// 评论对话框
+const commentDialogVisible = ref(false)
+const commentContent = ref('')
+const commentSubmitting = ref(false)
+
+// 状态更新对话框
+const statusDialogVisible = ref(false)
+const newStatus = ref('')
+const statusComment = ref('')
+const statusSubmitting = ref(false)
+
+// 编辑对话框
+const editDialogVisible = ref(false)
+const editForm = ref({
+  title: '',
+  description: '',
+  priority: 'normal'
+})
+const editSubmitting = ref(false)
+
 const sections = ref([
   { key: 'status', title: '按状态统计', data: [], labelProp: 'status', labelName: '状态' },
   { key: 'type', title: '按类型统计', data: [], labelProp: 'type_code', labelName: '类型' },
   { key: 'priority', title: '按优先级统计', data: [], labelProp: 'priority', labelName: '优先级' },
-  { key: 'tag', title: '按标签统计', data: [], labelProp: 'tag_name', labelName: '标签' }
+  { key: 'tag', title: '按标签统计', data: [], labelProp: 'tag_name', labelName: '标签' },
+  { key: 'item_kind', title: '按附件类型统计', data: [], labelProp: 'kind', labelName: '附件类型' }
 ])
 
 const boardColumns = computed(() => {
@@ -317,6 +454,29 @@ const boardColumns = computed(() => {
     items: workOrders.value.filter(wo => wo.status === status)
   }))
 })
+
+// 权限计算
+const hasAnyEditPermission = computed(() => {
+  if (!shareInfo.value || !shareInfo.value.is_authenticated) return false
+  const perms = shareInfo.value.permissions || {}
+  return perms.can_comment || perms.can_update_status || perms.can_edit
+})
+
+const canComment = computed(() => {
+  if (!shareInfo.value || !shareInfo.value.is_authenticated) return false
+  return shareInfo.value.permissions?.can_comment === true
+})
+
+const canUpdateStatus = computed(() => {
+  if (!shareInfo.value || !shareInfo.value.is_authenticated) return false
+  return shareInfo.value.permissions?.can_update_status === true
+})
+
+const canEdit = computed(() => {
+  if (!shareInfo.value || !shareInfo.value.is_authenticated) return false
+  return shareInfo.value.permissions?.can_edit === true
+})
+
 
 const formatDuration = (row) => {
   if (!row.created_at) return '-'
@@ -336,7 +496,7 @@ const formatDuration = (row) => {
 const fetchShareInfo = async () => {
   try {
     const res = await getWorkOrderReportShare(token)
-    shareInfo.value = res
+    shareInfo.value = res.data || res  // 提取 data 字段，如果没有则使用整个响应
   } catch (e) {
     error.value = e.message || '分享链接无效或已过期'
     throw e
@@ -352,6 +512,7 @@ const fetchStatistics = async () => {
     sections.value[1].data = res.by_type || []
     sections.value[2].data = res.by_priority || []
     sections.value[3].data = res.by_tag || []
+    sections.value[4].data = res.by_item_kind || []
     nextTick(() => renderCharts())
   } catch (e) {
     ElMessage.error(e.message || '获取统计数据失败')
@@ -394,6 +555,109 @@ const showDetail = async (workOrder) => {
   }
 }
 
+// 显示评论对话框
+const showCommentDialog = () => {
+  commentContent.value = ''
+  commentDialogVisible.value = true
+}
+
+// 提交评论
+const submitComment = async () => {
+  if (!commentContent.value.trim()) {
+    ElMessage.warning('请输入评论内容')
+    return
+  }
+
+  commentSubmitting.value = true
+  try {
+    await addSharedWorkOrderComment(token, currentWorkOrder.value.id, commentContent.value)
+    ElMessage.success('评论添加成功')
+    commentDialogVisible.value = false
+    // 重新加载进展列表
+    const res = await getSharedWorkOrderProgress(token, currentWorkOrder.value.id)
+    progressList.value = res.data || []
+  } catch (e) {
+    ElMessage.error('添加评论失败：' + (e.message || '未知错误'))
+  } finally {
+    commentSubmitting.value = false
+  }
+}
+
+// 显示状态更新对话框
+const showStatusDialog = () => {
+  newStatus.value = currentWorkOrder.value.status
+  statusComment.value = ''
+  statusDialogVisible.value = true
+}
+
+// 提交状态更新
+const submitStatusUpdate = async () => {
+  if (!newStatus.value) {
+    ElMessage.warning('请选择新状态')
+    return
+  }
+
+  if (newStatus.value === currentWorkOrder.value.status) {
+    ElMessage.warning('新状态与当前状态相同')
+    return
+  }
+
+  statusSubmitting.value = true
+  try {
+    await updateSharedWorkOrderStatus(token, currentWorkOrder.value.id, newStatus.value, statusComment.value)
+    ElMessage.success('状态更新成功')
+    statusDialogVisible.value = false
+    // 更新当前工单状态
+    currentWorkOrder.value.status = newStatus.value
+    // 重新加载进展列表
+    const res = await getSharedWorkOrderProgress(token, currentWorkOrder.value.id)
+    progressList.value = res.data || []
+    // 刷新工单列表
+    if (viewMode.value === 'list' || viewMode.value === 'board') {
+      fetchWorkOrders()
+    }
+  } catch (e) {
+    ElMessage.error('更新状态失败：' + (e.message || '未知错误'))
+  } finally {
+    statusSubmitting.value = false
+  }
+}
+
+// 显示编辑对话框
+const showEditDialog = () => {
+  editForm.value = {
+    title: currentWorkOrder.value.title,
+    description: currentWorkOrder.value.description || '',
+    priority: currentWorkOrder.value.priority
+  }
+  editDialogVisible.value = true
+}
+
+// 提交编辑
+const submitEdit = async () => {
+  if (!editForm.value.title.trim()) {
+    ElMessage.warning('请输入标题')
+    return
+  }
+
+  editSubmitting.value = true
+  try {
+    await updateSharedWorkOrderFields(token, currentWorkOrder.value.id, editForm.value)
+    ElMessage.success('工单更新成功')
+    editDialogVisible.value = false
+    // 更新当前工单
+    Object.assign(currentWorkOrder.value, editForm.value)
+    // 刷新工单列表
+    if (viewMode.value === 'list' || viewMode.value === 'board') {
+      fetchWorkOrders()
+    }
+  } catch (e) {
+    ElMessage.error('更新工单失败：' + (e.message || '未知错误'))
+  } finally {
+    editSubmitting.value = false
+  }
+}
+
 const renderCharts = () => {
   nextTick(() => {
     sections.value.forEach(section => {
@@ -411,6 +675,8 @@ const renderCharts = () => {
         let name = item[section.labelProp]
         if (section.key === 'status') {
           name = statusLabel(name)
+        } else if (section.key === 'item_kind') {
+          name = itemKindLabel(name)
         }
         return { value: item.count, name }
       })
@@ -459,8 +725,16 @@ const renderCharts = () => {
   })
 }
 
-// 监听视图模式切换，重新渲染图表和刷新数据
+// 监听视图模式切换，重新渲染图表和刷新数据，并同步 URL 参数
 watch(viewMode, (newMode, oldMode) => {
+  // 同步 URL 参数
+  router.replace({
+    query: {
+      ...route.query,
+      view: newMode
+    }
+  })
+
   if (newMode === 'statistics') {
     // 切换到统计视图时，刷新统计数据
     fetchStatistics()
@@ -513,6 +787,29 @@ const progressAttDownloadUrl = (attId) => {
 const progressAttKindLabel = (kind) => {
   const labels = { photo: '图片', video: '视频', audio: '音频', screen_record: '录屏', voice: '录音', logcat: '日志' }
   return labels[kind] || kind
+}
+
+// 角色标签
+const roleLabel = (role) => {
+  const labels = { admin: '管理员', operator: '操作员', viewer: '查看者' }
+  return labels[role] || role
+}
+
+// 工单附件类型标签
+const itemKindLabel = (kind) => {
+  const labels = { text: '文字', photo: '照片', video: '视频', voice: '语音', screen_record: '录屏', logcat: '日志', resource: '资源' }
+  return labels[kind] || kind
+}
+
+// 工单附件下载链接
+const workOrderItemDownloadUrl = (workOrderId, itemId) => {
+  const token = localStorage.getItem('token') || ''
+  return `/api/work-orders/${workOrderId}/items/${itemId}/download?token=${encodeURIComponent(token)}`
+}
+
+// 打开工单附件图片
+const openItemImage = (workOrderId, itemId) => {
+  window.open(workOrderItemDownloadUrl(workOrderId, itemId), '_blank')
 }
 
 // 打开进展附件（图片）
@@ -734,6 +1031,51 @@ onBeforeUnmount(() => {
   gap: 16px;
 }
 
+/* 工单附件样式 */
+.items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.item-card {
+  padding: 12px;
+  background: #fff;
+  border-radius: 6px;
+  border: 1px solid #e4e7ed;
+}
+
+.item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.item-name {
+  font-size: 13px;
+  color: #606266;
+  flex: 1;
+}
+
+.item-img {
+  width: 100%;
+  max-width: 480px;
+  border-radius: 4px;
+  cursor: zoom-in;
+}
+
+.item-video {
+  width: 100%;
+  max-width: 480px;
+  border-radius: 4px;
+}
+
+.item-audio {
+  width: 100%;
+  max-width: 300px;
+}
+
 .progress-item {
   padding: 12px;
   background: #f9fafb;
@@ -855,6 +1197,34 @@ onBeforeUnmount(() => {
   word-break: break-word;
 }
 
+.card-header-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.current-user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #606266;
+  padding: 6px 12px;
+  background: #f5f7fa;
+  border-radius: 6px;
+  border: 1px solid #e4e7ed;
+}
+
+.current-user .el-icon {
+  font-size: 16px;
+  color: #909399;
+}
+
+.current-user span {
+  font-weight: 500;
+}
+
 /* 手机端适配 */
 @media (max-width: 767px) {
   .share-page {
@@ -872,6 +1242,14 @@ onBeforeUnmount(() => {
 
   .card-header-title div {
     font-size: 11px !important;
+  }
+
+  .card-header-actions {
+    align-items: stretch;
+  }
+
+  .current-user {
+    justify-content: center;
   }
 
   .view-mode-group {
@@ -914,6 +1292,18 @@ onBeforeUnmount(() => {
   }
 
   .progress-att-audio {
+    max-width: 100%;
+  }
+
+  .item-img {
+    max-width: 100%;
+  }
+
+  .item-video {
+    max-width: 100%;
+  }
+
+  .item-audio {
     max-width: 100%;
   }
 }

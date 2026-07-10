@@ -228,10 +228,14 @@ func (WorkOrderWorkflowLog) TableName() string { return "work_order_workflow_log
 
 // WorkOrderReportShare 工单报告分享链接
 type WorkOrderReportShare struct {
-	ID          uint      `gorm:"primaryKey" json:"id"`
-	Token       string    `gorm:"uniqueIndex;size:64;not null" json:"token"`
-	Title       string    `gorm:"size:200" json:"title"`
-	FiltersJSON string    `gorm:"type:text" json:"filters_json"` // 查询条件（JSON）
+	ID          uint   `gorm:"primaryKey" json:"id"`
+	Token       string `gorm:"uniqueIndex;size:64;not null" json:"token"`
+	Title       string `gorm:"size:200" json:"title"`
+	FiltersJSON string `gorm:"type:text" json:"filters_json"` // 查询条件（JSON）
+	// AuthMode 认证模式：public（免登录）| login（需登录）
+	AuthMode string `gorm:"size:16;default:'public'" json:"auth_mode"`
+	// Permissions 需登录模式的权限配置（JSON 对象），如 {"can_view":true,"can_comment":true,"can_update_status":true}
+	Permissions string    `gorm:"type:text" json:"permissions"`
 	CreatedBy   uint      `gorm:"index" json:"created_by"`
 	ViewCount   int       `gorm:"default:0" json:"view_count"` // 浏览次数
 	ExpiresAt   time.Time `gorm:"index" json:"expires_at"`

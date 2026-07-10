@@ -787,11 +787,11 @@ onUnmounted(() => {
 .spacer { flex: 1; }
 .pager { margin-top: 12px; justify-content: flex-end; }
 .board { display: flex; flex-direction: column; gap: 12px; }
-.board-cols { display: flex; gap: 12px; align-items: flex-start; flex: 1; min-height: 0; }
-.board-col { flex: 1; min-width: 0; background: #f5f7fa; border-radius: 6px; padding: 8px; }
-.board-col-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; padding: 0 4px; }
+.board-cols { display: flex; gap: 12px; align-items: stretch; flex: 1; min-height: 0; }
+.board-col { flex: 1; min-width: 0; background: #f5f7fa; border-radius: 6px; padding: 8px; display: flex; flex-direction: column; }
+.board-col-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; padding: 0 4px; flex-shrink: 0; }
 .board-count { font-size: 12px; color: #909399; }
-.board-list { min-height: 200px; display: flex; flex-direction: column; gap: 8px; }
+.board-list { min-height: 400px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
 .board-card { background: #fff; border: 1px solid #ebeef5; border-radius: 4px; padding: 10px; cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.04); transition: box-shadow .2s ease, border-color .2s ease; }
 .board-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.1); border-color: #c6e2ff; }
 .board-card:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: 2px; }
