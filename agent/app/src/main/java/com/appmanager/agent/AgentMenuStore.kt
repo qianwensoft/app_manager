@@ -51,9 +51,14 @@ object AgentMenuStore {
     fun resolveMenuUrl(context: Context, m: Map<String, Any?>): String? = resolvePreviewUrl(context, m)
 
     private fun resolvePreviewUrl(context: Context, m: Map<String, Any?>): String? {
-        // 优先读新字段 preview_path（相对路径），用 serverUrl 拼绝对地址
+        // 优先读新字段 preview_path（相对路径或完整 URL）
         val path = m["preview_path"] as? String
         if (!path.isNullOrBlank()) {
+            // 如果是完整 URL（http:// 或 https://），直接返回
+            if (path.startsWith("http://") || path.startsWith("https://")) {
+                return path
+            }
+            // 否则作为相对路径，用 serverUrl 拼绝对地址
             val cfg = AgentConfig.get(context)
             // 菜单下发的 form_app_base_url 优先于本地 formAppBaseUrl 配置
             val menuFormBase = (m["form_app_base_url"] as? String)?.trim()?.trimEnd('/').orEmpty()

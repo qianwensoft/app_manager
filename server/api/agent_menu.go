@@ -462,6 +462,10 @@ func buildMenuPayloadForDevice(deviceID uint) []map[string]interface{} {
 				}
 			}
 		}
+		// webview_url 类型：target_ref 直接是完整 URL，下发给 Agent
+		if m.TargetType == "webview_url" && strings.TrimSpace(m.TargetRef) != "" {
+			previewPath = strings.TrimSpace(m.TargetRef)
+		}
 		formCode := strings.TrimSpace(m.FormAppCode)
 		if formCode == "" {
 			formCode = strings.TrimSpace(m.TargetRef)

@@ -196,7 +196,8 @@ class WorkOrderListActivity : AppCompatActivity() {
                     append("/api/agent/work-orders?limit=50")
                     searchKey?.let { append("&search_key=$it") }
                 }
-                val json = AgentCatalogApi.getJson(base, path, cfg.deviceToken.trim())
+                // 优先使用用户 JWT token，否则使用设备 token
+                val json = AgentCatalogApi.getJsonWithAuth(base, path, cfg.userToken.trim(), cfg.deviceToken.trim())
                 val obj = JSONObject(json)
                 val data = obj.optJSONArray("data") ?: throw Exception("返回数据格式错误")
 

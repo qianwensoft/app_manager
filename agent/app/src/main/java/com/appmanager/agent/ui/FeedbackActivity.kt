@@ -669,8 +669,12 @@ class FeedbackActivity : AppCompatActivity() {
         val otherCodes = etOtherCodes.text?.toString()?.trim().orEmpty()
         val cfg = AgentConfig.get(this)
         val base = ServerUrlUtil.httpBaseFromWs(cfg.serverUrl)
-        val token = cfg.deviceToken.trim()
-        if (base.isEmpty() || token.isEmpty()) { Toast.makeText(this, "未配置服务器/设备令牌", Toast.LENGTH_SHORT).show(); return }
+        val jwtToken = cfg.userToken.trim()
+        val deviceToken = cfg.deviceToken.trim()
+        if (base.isEmpty() || (jwtToken.isEmpty() && deviceToken.isEmpty())) {
+            Toast.makeText(this, "未配置服务器/认证令牌", Toast.LENGTH_SHORT).show()
+            return
+        }
 
         val dialog = AlertDialog.Builder(this).setMessage("提交中…").setCancelable(false).create()
         dialog.show()
@@ -682,11 +686,12 @@ class FeedbackActivity : AppCompatActivity() {
                     .put("description", desc)
                     .put("business_no", businessNo)
                     .put("other_codes", otherCodes)
-                val resp = AgentCatalogApi.postJson(base, "/api/work-orders", token, body.toString())
+                // 优先使用用户 JWT token，否则使用设备 token
+                val resp = AgentCatalogApi.postJsonWithAuth(base, "/api/work-orders", jwtToken, deviceToken, body.toString())
                 val wo = JSONObject(resp).optJSONObject("data") ?: JSONObject()
                 val id = wo.optInt("id")
                 for (a in attachments) {
-                    AgentCatalogApi.uploadFile(base, "/api/work-orders/$id/items", token, a.file, a.contentType,
+                    AgentCatalogApi.uploadFileWithAuth(base, "/api/work-orders/$id/items", jwtToken, deviceToken, a.file, a.contentType,
                         mapOf("kind" to a.kind, "target_pkg" to a.targetPkg))
                 }
                 runOnUiThread {
@@ -718,8 +723,12 @@ class FeedbackActivity : AppCompatActivity() {
         val otherCodes = etOtherCodes.text?.toString()?.trim().orEmpty()
         val cfg = AgentConfig.get(this)
         val base = ServerUrlUtil.httpBaseFromWs(cfg.serverUrl)
-        val token = cfg.deviceToken.trim()
-        if (base.isEmpty() || token.isEmpty()) { Toast.makeText(this, "未配置服务器/设备令牌", Toast.LENGTH_SHORT).show(); return }
+        val jwtToken = cfg.userToken.trim()
+        val deviceToken = cfg.deviceToken.trim()
+        if (base.isEmpty() || (jwtToken.isEmpty() && deviceToken.isEmpty())) {
+            Toast.makeText(this, "未配置服务器/认证令牌", Toast.LENGTH_SHORT).show()
+            return
+        }
 
         val dialog = AlertDialog.Builder(this).setMessage("提交中…").setCancelable(false).create()
         dialog.show()
@@ -731,11 +740,12 @@ class FeedbackActivity : AppCompatActivity() {
                     .put("description", desc)
                     .put("business_no", businessNo)
                     .put("other_codes", otherCodes)
-                val resp = AgentCatalogApi.postJson(base, "/api/work-orders", token, body.toString())
+                // 优先使用用户 JWT token，否则使用设备 token
+                val resp = AgentCatalogApi.postJsonWithAuth(base, "/api/work-orders", jwtToken, deviceToken, body.toString())
                 val wo = JSONObject(resp).optJSONObject("data") ?: JSONObject()
                 val id = wo.optInt("id")
                 for (a in attachments) {
-                    AgentCatalogApi.uploadFile(base, "/api/work-orders/$id/items", token, a.file, a.contentType,
+                    AgentCatalogApi.uploadFileWithAuth(base, "/api/work-orders/$id/items", jwtToken, deviceToken, a.file, a.contentType,
                         mapOf("kind" to a.kind, "target_pkg" to a.targetPkg))
                 }
                 runOnUiThread {
@@ -798,7 +808,8 @@ class FeedbackActivity : AppCompatActivity() {
                 }
                 val queryString = if (params.isNotEmpty()) "?${params.joinToString("&")}" else ""
 
-                val json = AgentCatalogApi.getJson(base, "/api/work-orders/mine$queryString", cfg.deviceToken.trim())
+                // 优先使用用户 JWT token，否则使用设备 token
+                val json = AgentCatalogApi.getJsonWithAuth(base, "/api/work-orders/mine$queryString", cfg.userToken.trim(), cfg.deviceToken.trim())
                 val arr = JSONObject(json).optJSONArray("data") ?: JSONArray()
                 val rows = mutableListOf<WoRow>()
                 for (i in 0 until arr.length()) {
