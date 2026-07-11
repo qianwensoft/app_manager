@@ -54,6 +54,7 @@
         />
         <el-button @click="reload">查询</el-button>
         <el-button type="success" @click="showStatistics">统计报告</el-button>
+        <el-button type="primary" :loading="exporting" @click="doExport">导出</el-button>
         <el-radio-group v-model="view" style="margin-left:8px">
           <el-radio-button value="list">列表</el-radio-button>
           <el-radio-button value="board">看板</el-radio-button>
@@ -138,11 +139,13 @@
 
         <el-pagination
           class="pager"
-          layout="total, prev, pager, next"
+          layout="total, sizes, prev, pager, next"
           :total="total"
           :page-size="limit"
+          :page-sizes="[10, 20, 50, 100, 200]"
           :current-page="page"
           @current-change="onPage"
+          @size-change="onSizeChange"
         />
       </template>
 
@@ -319,6 +322,7 @@ const total = ref(0)
 const page = ref(1)
 const limit = ref(20)
 const loading = ref(false)
+const exporting = ref(false)
 const view = ref('list')
 const filters = ref({ status: '', type_code: '', device_id: '', business_no: '', tags: [], search_key: '', createdRange: null })
 const statsDialog = ref(null)
@@ -525,6 +529,59 @@ const restoreFromQuery = () => {
 }
 
 const onPage = (p) => { page.value = p; syncQuery(); load() }
+
+const onSizeChange = (size) => {
+  limit.value = size
+  page.value = 1
+  syncQuery()
+  load()
+}
+
+const doExport = async () => {
+  exporting.value = true
+  try {
+    const params = { status: filters.value.status, device_id: filters.value.device_id, business_no: filters.value.business_no }
+    if (filters.value.type_code) params.type_code = filters.value.type_code
+    if (filters.value.tags.length) params.tags = filters.value.tags.join(',')
+    if (filters.value.search_key) params.search_key = filters.value.search_key
+    if (filters.value.createdRange && filters.value.createdRange.length === 2) {
+      params.created_start = filters.value.createdRange[0].toISOString()
+      params.created_end = filters.value.createdRange[1].toISOString()
+    }
+
+    const token = localStorage.getItem('token')
+    const queryString = new URLSearchParams(params).toString()
+    const url = `/api/work-orders/export?${queryString}`
+
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      throw new Error(errorData.error || '导出失败')
+    }
+
+    const blob = await response.blob()
+    const downloadUrl = window.URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = downloadUrl
+    a.download = `工单列表_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.xlsx`
+    document.body.appendChild(a)
+    a.click()
+    window.URL.revokeObjectURL(downloadUrl)
+    document.body.removeChild(a)
+
+    ElMessage.success('导出成功')
+  } catch (e) {
+    ElMessage.error(e.message || '导出失败')
+  } finally {
+    exporting.value = false
+  }
+}
 
 const load = async () => {
   loading.value = true

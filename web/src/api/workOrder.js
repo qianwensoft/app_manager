@@ -83,6 +83,7 @@ export const getWorkOrderStatistics = (params = {}) => http.get('/work-orders/st
 export const createWorkOrderReportShare = (data) => http.post('/work-orders/report-shares', data)
 export const listWorkOrderReportShares = () => http.get('/work-orders/report-shares')
 export const getWorkOrderReportShareViews = (id) => http.get(`/work-orders/report-shares/${id}/views`)
+export const updateWorkOrderReportShare = (id, data) => http.put(`/work-orders/report-shares/${id}`, data)
 export const deleteWorkOrderReportShare = (id) => http.delete(`/work-orders/report-shares/${id}`)
 export const getWorkOrderReportShare = (token) => http.get(`/share/work-order-reports/${token}`)
 export const getSharedWorkOrders = (token, params = {}) => http.get(`/share/work-order-reports/${token}/work-orders`, { params })

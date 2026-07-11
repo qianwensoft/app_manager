@@ -77,13 +77,16 @@
         <el-input v-model="shareForm.title" placeholder="例如：Q1工单统计报告" />
       </el-form-item>
       <el-form-item label="有效期">
-        <el-select v-model="shareForm.days" placeholder="选择有效期">
-          <el-option label="1天" :value="1" />
-          <el-option label="3天" :value="3" />
-          <el-option label="7天" :value="7" />
-          <el-option label="14天" :value="14" />
-          <el-option label="30天" :value="30" />
-        </el-select>
+        <el-input-number
+          v-model="shareForm.days"
+          :min="1"
+          :max="365"
+          placeholder="天数"
+          style="width:100%"
+        />
+        <div style="font-size:12px; color:#909399; margin-top:4px">
+          自定义有效期（1-365天）
+        </div>
       </el-form-item>
       <el-form-item label="认证模式">
         <el-radio-group v-model="shareForm.authMode">
@@ -470,7 +473,7 @@ const generateShare = async () => {
     const payload = {
       title: shareForm.value.title,
       filters: props.filters,
-      expires_in: shareForm.value.days * 24,  // 转换天数为小时
+      expires_in_days: shareForm.value.days,  // 直接使用天数
       auth_mode: shareForm.value.authMode
     }
 

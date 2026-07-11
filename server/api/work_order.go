@@ -19,6 +19,7 @@ import (
 	"app-manager/workflow"
 
 	"github.com/gin-gonic/gin"
+	"github.com/xuri/excelize/v2"
 	"gorm.io/gorm"
 )
 
@@ -1793,22 +1794,29 @@ func generateShareToken() string {
 // CreateWorkOrderReportShare 创建报告分享链接
 func CreateWorkOrderReportShare(c *gin.Context) {
 	var req struct {
-		Title       string                 `json:"title"`
-		Filters     map[string]interface{} `json:"filters"`
-		ExpiresIn   int                    `json:"expires_in"`  // 过期时长（小时），默认168小时（7天）
-		AuthMode    string                 `json:"auth_mode"`   // 认证模式：public（免登录）| login（需登录）
-		Permissions map[string]interface{} `json:"permissions"` // 需登录模式的权限配置
+		Title         string                 `json:"title"`
+		Filters       map[string]interface{} `json:"filters"`
+		ExpiresIn     int                    `json:"expires_in"`      // 过期时长（小时），兼容旧版
+		ExpiresInDays int                    `json:"expires_in_days"` // 过期时长（天数），优先使用
+		AuthMode      string                 `json:"auth_mode"`       // 认证模式：public（免登录）| login（需登录）
+		Permissions   map[string]interface{} `json:"permissions"`     // 需登录模式的权限配置
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	if req.ExpiresIn <= 0 {
-		req.ExpiresIn = 168 // 默认7天
+	// 优先使用天数，如果没有则使用小时数（兼容旧版）
+	expiresInHours := req.ExpiresIn
+	if req.ExpiresInDays > 0 {
+		expiresInHours = req.ExpiresInDays * 24
 	}
-	if req.ExpiresIn > 720 { // 最多30天
-		req.ExpiresIn = 720
+
+	if expiresInHours <= 0 {
+		expiresInHours = 168 // 默认7天
+	}
+	if expiresInHours > 8760 { // 最多365天
+		expiresInHours = 8760
 	}
 
 	// 默认免登录模式
@@ -1844,7 +1852,7 @@ func CreateWorkOrderReportShare(c *gin.Context) {
 		AuthMode:    authMode,
 		Permissions: permissionsJSON,
 		CreatedBy:   c.GetUint("user_id"),
-		ExpiresAt:   time.Now().Add(time.Duration(req.ExpiresIn) * time.Hour),
+		ExpiresAt:   time.Now().Add(time.Duration(expiresInHours) * time.Hour),
 	}
 
 	if err := database.DB.Create(&share).Error; err != nil {
@@ -2264,6 +2272,58 @@ func DeleteWorkOrderReportShare(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "ok"})
 }
 
+// UpdateWorkOrderReportShare 更新分享链接（标题、有效期）
+func UpdateWorkOrderReportShare(c *gin.Context) {
+	id := c.Param("id")
+
+	// 验证权限
+	var share models.WorkOrderReportShare
+	if err := database.DB.Where("id = ? AND created_by = ?", id, c.GetUint("user_id")).First(&share).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "分享链接不存在或无权限修改"})
+		return
+	}
+
+	var req struct {
+		Title         *string `json:"title"`
+		ExpiresInDays *int    `json:"expires_in_days"` // 从现在开始计算的天数
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	updates := make(map[string]interface{})
+
+	if req.Title != nil {
+		updates["title"] = *req.Title
+	}
+
+	if req.ExpiresInDays != nil {
+		days := *req.ExpiresInDays
+		if days <= 0 {
+			days = 7 // 默认7天
+		}
+		if days > 365 { // 最多365天
+			days = 365
+		}
+		updates["expires_at"] = time.Now().Add(time.Duration(days*24) * time.Hour)
+	}
+
+	if len(updates) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "没有需要更新的字段"})
+		return
+	}
+
+	if err := database.DB.Model(&share).Updates(updates).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 重新查询返回最新数据
+	database.DB.First(&share, id)
+	c.JSON(http.StatusOK, gin.H{"data": share})
+}
+
 // GetSharedWorkOrderProgress 获取分享工单的进展列表（免登录，通过 token 验证）
 func GetSharedWorkOrderProgress(c *gin.Context) {
 	token := c.Param("token")
@@ -2363,4 +2423,218 @@ func GetSharedWorkOrderProgress(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": out})
+}
+
+// ExportWorkOrders 导出工单列表为 Excel 文件（根据查询条件导出所有符合条件的记录）
+func ExportWorkOrders(c *gin.Context) {
+	q := database.DB.Model(&models.WorkOrder{})
+
+	// 归档过滤：默认仅未归档
+	if c.Query("archived") == "1" {
+		q = q.Where("archived = ?", true)
+	} else {
+		q = q.Where("archived = ? OR archived IS NULL", false)
+	}
+
+	// 应用所有查询条件
+	if s := c.Query("status"); s != "" {
+		q = q.Where("status = ?", s)
+	}
+	if t := c.Query("type_code"); t != "" {
+		q = q.Where("type_code = ?", t)
+	}
+	if d := c.Query("device_id"); d != "" {
+		q = q.Where("device_id = ?", d)
+	}
+	if a := c.Query("assigned_to"); a != "" {
+		q = q.Where("assigned_to = ?", a)
+	}
+	if v := c.Query("visibility"); v != "" {
+		q = q.Where("visibility = ?", v)
+	}
+	if bn := strings.TrimSpace(c.Query("business_no")); bn != "" {
+		q = q.Where("business_no LIKE ?", "%"+bn+"%")
+	}
+
+	// 标签筛选
+	if t := strings.TrimSpace(c.Query("tags")); t != "" {
+		codes := make([]string, 0)
+		for _, p := range strings.Split(t, ",") {
+			if s := strings.TrimSpace(p); s != "" {
+				codes = append(codes, s)
+			}
+		}
+		if len(codes) > 0 {
+			sub := database.DB.Model(&models.WorkOrderTagLink{}).
+				Select("work_order_id").Where("tag_code IN ?", codes)
+			q = q.Where("id IN (?)", sub)
+		}
+	}
+
+	// 关键词搜索
+	if searchKey := strings.TrimSpace(c.Query("search_key")); searchKey != "" {
+		pattern := "%" + searchKey + "%"
+		q = q.Where("code LIKE ? OR business_no LIKE ? OR other_codes LIKE ? OR title LIKE ? OR description LIKE ?",
+			pattern, pattern, pattern, pattern, pattern)
+	}
+
+	// 创建时间范围筛选
+	if createdStart := strings.TrimSpace(c.Query("created_start")); createdStart != "" {
+		q = q.Where("created_at >= ?", createdStart)
+	}
+	if createdEnd := strings.TrimSpace(c.Query("created_end")); createdEnd != "" {
+		q = q.Where("created_at <= ?", createdEnd)
+	}
+
+	// 非管理员权限过滤
+	if c.GetString("role") != "admin" {
+		uid := c.GetUint("user_id")
+		q = q.Where("visibility = ? OR created_by = ? OR assigned_to = ?", "public", uid, uid)
+	}
+
+	// 查询所有符合条件的工单（限制最大 10000 条避免内存溢出）
+	var rows []models.WorkOrder
+	if err := q.Order("id DESC").Limit(10000).Find(&rows).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 批量查询标签
+	ids := make([]uint, 0, len(rows))
+	for i := range rows {
+		ids = append(ids, rows[i].ID)
+	}
+	tagsByWO := map[uint][]string{}
+	if len(ids) > 0 {
+		var links []models.WorkOrderTagLink
+		database.DB.Where("work_order_id IN ?", ids).Find(&links)
+		for _, l := range links {
+			tagsByWO[l.WorkOrderID] = append(tagsByWO[l.WorkOrderID], l.TagCode)
+		}
+	}
+
+	// 创建 Excel 文件
+	f := excelize.NewFile()
+	defer func() {
+		if err := f.Close(); err != nil {
+			// 忽略关闭错误
+		}
+	}()
+
+	sheetName := "工单列表"
+	index, err := f.NewSheet(sheetName)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	f.SetActiveSheet(index)
+	f.DeleteSheet("Sheet1") // 删除默认工作表
+
+	// 设置表头
+	headers := []string{
+		"工单号", "标题", "类型", "状态", "优先级", "公开性",
+		"设备ID", "设备名称", "业务单号", "其他编码", "标签",
+		"描述", "创建时间", "关闭时间", "归档时间",
+	}
+
+	for i, h := range headers {
+		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
+		f.SetCellValue(sheetName, cell, h)
+	}
+
+	// 设置表头样式
+	headerStyle, _ := f.NewStyle(&excelize.Style{
+		Font: &excelize.Font{Bold: true},
+		Fill: excelize.Fill{Type: "pattern", Color: []string{"#E0E0E0"}, Pattern: 1},
+	})
+	for i := range headers {
+		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
+		f.SetCellStyle(sheetName, cell, cell, headerStyle)
+	}
+
+	// 状态、优先级、公开性映射
+	statusMap := map[string]string{
+		"open":        "待处理",
+		"in_progress": "进行中",
+		"resolved":    "已解决",
+		"closed":      "已关闭",
+		"reopened":    "重新打开",
+	}
+	priorityMap := map[string]string{
+		"normal": "普通",
+		"high":   "较高",
+		"urgent": "紧急",
+	}
+	visibilityMap := map[string]string{
+		"public":  "公开",
+		"private": "私有",
+	}
+
+	// 填充数据
+	for i, wo := range rows {
+		rowNum := i + 2
+
+		tags := tagsByWO[wo.ID]
+		tagsStr := ""
+		if len(tags) > 0 {
+			tagsStr = strings.Join(tags, ", ")
+		}
+
+		statusLabel := statusMap[wo.Status]
+		if statusLabel == "" {
+			statusLabel = wo.Status
+		}
+
+		priorityLabel := priorityMap[wo.Priority]
+		if priorityLabel == "" {
+			priorityLabel = wo.Priority
+		}
+
+		visibilityLabel := visibilityMap[wo.Visibility]
+		if visibilityLabel == "" {
+			visibilityLabel = wo.Visibility
+		}
+
+		deviceName := wo.DeviceName
+
+		values := []interface{}{
+			wo.Code,
+			wo.Title,
+			wo.TypeCode,
+			statusLabel,
+			priorityLabel,
+			visibilityLabel,
+			wo.DeviceID,
+			deviceName,
+			wo.BusinessNo,
+			wo.OtherCodes,
+			tagsStr,
+			wo.Description,
+			wo.CreatedAt,
+			wo.ClosedAt,
+			wo.ArchivedAt,
+		}
+
+		for j, v := range values {
+			cell, _ := excelize.CoordinatesToCellName(j+1, rowNum)
+			f.SetCellValue(sheetName, cell, v)
+		}
+	}
+
+	// 自动调整列宽
+	for i := range headers {
+		col, _ := excelize.ColumnNumberToName(i + 1)
+		f.SetColWidth(sheetName, col, col, 15)
+	}
+
+	// 输出文件
+	filename := fmt.Sprintf("工单列表_%s.xlsx", time.Now().Format("20060102_150405"))
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
+	c.Header("Content-Transfer-Encoding", "binary")
+
+	if err := f.Write(c.Writer); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
 }

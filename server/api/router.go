@@ -558,6 +558,7 @@ func SetupRouter() *gin.Engine {
 	wo := r.Group("/api/work-orders", auth.AuthMiddleware())
 	{
 		wo.GET("", ListWorkOrders)
+		wo.GET("/export", ExportWorkOrders)
 		wo.POST("/types", auth.RequireRole("admin", "operator"), CreateWorkOrderType)
 		wo.PUT("/types/:id", auth.RequireRole("admin", "operator"), UpdateWorkOrderType)
 		wo.DELETE("/types/:id", auth.RequireRole("admin", "operator"), DeleteWorkOrderType)
@@ -589,6 +590,7 @@ func SetupRouter() *gin.Engine {
 		wo.POST("/report-shares", CreateWorkOrderReportShare)
 		wo.GET("/report-shares", ListWorkOrderReportShares)
 		wo.GET("/report-shares/:id/views", GetWorkOrderReportShareViews)
+		wo.PUT("/report-shares/:id", UpdateWorkOrderReportShare)
 		wo.DELETE("/report-shares/:id", DeleteWorkOrderReportShare)
 		wo.GET("/:id", GetWorkOrder)
 		wo.PUT("/:id", auth.RequireRoleOrWoWrite("admin", "operator"), UpdateWorkOrder)

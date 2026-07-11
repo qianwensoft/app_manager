@@ -46,9 +46,10 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="200" fixed="right">
+      <el-table-column label="操作" width="260" fixed="right">
         <template #default="{ row }">
           <el-button size="small" @click="copyLink(row)">复制链接</el-button>
+          <el-button size="small" @click="editShare(row)">编辑</el-button>
           <el-popconfirm title="确定删除此分享？" @confirm="deleteShare(row.id)">
             <template #reference>
               <el-button size="small" type="danger">删除</el-button>
@@ -74,13 +75,38 @@
         <el-button @click="viewsDialogVisible = false">关闭</el-button>
       </template>
     </el-dialog>
+
+    <!-- 编辑对话框 -->
+    <el-dialog v-model="editDialogVisible" title="编辑分享链接" width="500px">
+      <el-form :model="editForm" label-width="100px">
+        <el-form-item label="分享标题">
+          <el-input v-model="editForm.title" placeholder="请输入分享标题" />
+        </el-form-item>
+        <el-form-item label="有效期">
+          <el-input-number
+            v-model="editForm.expires_in_days"
+            :min="1"
+            :max="365"
+            placeholder="天数"
+            style="width:100%"
+          />
+          <div style="font-size:12px; color:#909399; margin-top:4px">
+            从现在开始计算，最多365天
+          </div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="editLoading" @click="submitEdit">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { listWorkOrderReportShares, getWorkOrderReportShareViews, deleteWorkOrderReportShare } from '@/api/workOrder'
+import { listWorkOrderReportShares, getWorkOrderReportShareViews, deleteWorkOrderReportShare, updateWorkOrderReportShare } from '@/api/workOrder'
 
 const loading = ref(false)
 const shareList = ref([])
@@ -89,6 +115,14 @@ const viewsDialogVisible = ref(false)
 const viewsLoading = ref(false)
 const viewsList = ref([])
 const currentShare = ref(null)
+
+const editDialogVisible = ref(false)
+const editLoading = ref(false)
+const editForm = ref({
+  id: null,
+  title: '',
+  expires_in_days: 7
+})
 
 const fetchShares = async () => {
   loading.value = true
@@ -168,6 +202,32 @@ const deleteShare = async (id) => {
     fetchShares()
   } catch (e) {
     ElMessage.error(e.message || '删除失败')
+  }
+}
+
+const editShare = (row) => {
+  editForm.value = {
+    id: row.id,
+    title: row.title,
+    expires_in_days: 7 // 默认7天
+  }
+  editDialogVisible.value = true
+}
+
+const submitEdit = async () => {
+  editLoading.value = true
+  try {
+    await updateWorkOrderReportShare(editForm.value.id, {
+      title: editForm.value.title,
+      expires_in_days: editForm.value.expires_in_days
+    })
+    ElMessage.success('修改成功')
+    editDialogVisible.value = false
+    fetchShares()
+  } catch (e) {
+    ElMessage.error(e.message || '修改失败')
+  } finally {
+    editLoading.value = false
   }
 }
 
