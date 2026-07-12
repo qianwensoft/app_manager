@@ -2638,3 +2638,165 @@ func ExportWorkOrders(c *gin.Context) {
 		return
 	}
 }
+
+// ExportSharedWorkOrders 导出分享工单列表为 Excel（与分享页列表数据一致）
+func ExportSharedWorkOrders(c *gin.Context) {
+	token := c.Param("token")
+	var share models.WorkOrderReportShare
+	if err := database.DB.Where("token = ?", token).First(&share).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "分享链接不存在或已失效"})
+		return
+	}
+	if time.Now().After(share.ExpiresAt) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "分享链接已过期"})
+		return
+	}
+	if share.AuthMode == "login" {
+		if c.GetUint("user_id") == 0 {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "此分享链接需要登录才能访问"})
+			return
+		}
+	}
+
+	var savedFilters map[string]interface{}
+	if share.FiltersJSON != "" {
+		json.Unmarshal([]byte(share.FiltersJSON), &savedFilters)
+	}
+
+	q := database.DB.Model(&models.WorkOrder{})
+	if archived, ok := savedFilters["archived"].(string); ok && archived == "1" {
+		q = q.Where("archived = ?", true)
+	} else {
+		q = q.Where("archived = ? OR archived IS NULL", false)
+	}
+	if status, ok := savedFilters["status"].(string); ok && status != "" {
+		q = q.Where("status = ?", status)
+	}
+	if typeCode, ok := savedFilters["type_code"].(string); ok && typeCode != "" {
+		q = q.Where("type_code = ?", typeCode)
+	}
+	if deviceID, ok := savedFilters["device_id"].(string); ok && deviceID != "" {
+		q = q.Where("device_id = ?", deviceID)
+	}
+	if tags, ok := savedFilters["tags"].(string); ok && tags != "" {
+		codes := strings.Split(tags, ",")
+		if len(codes) > 0 {
+			sub := database.DB.Model(&models.WorkOrderTagLink{}).
+				Select("work_order_id").Where("tag_code IN ?", codes)
+			q = q.Where("id IN (?)", sub)
+		}
+	}
+	if createdStart, ok := savedFilters["created_start"].(string); ok && createdStart != "" {
+		q = q.Where("created_at >= ?", createdStart)
+	}
+	if createdEnd, ok := savedFilters["created_end"].(string); ok && createdEnd != "" {
+		q = q.Where("created_at <= ?", createdEnd)
+	}
+	if archivedStart, ok := savedFilters["archived_start"].(string); ok && archivedStart != "" {
+		q = q.Where("archived_at >= ?", archivedStart)
+	}
+	if archivedEnd, ok := savedFilters["archived_end"].(string); ok && archivedEnd != "" {
+		q = q.Where("archived_at <= ?", archivedEnd)
+	}
+
+	var rows []models.WorkOrder
+	if err := q.Order("id DESC").Limit(10000).Find(&rows).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 批量查询标签名称
+	ids := make([]uint, 0, len(rows))
+	for i := range rows {
+		ids = append(ids, rows[i].ID)
+	}
+	var allTags []models.WorkOrderTag
+	database.DB.Find(&allTags)
+	tagNameMap := make(map[string]string)
+	for _, t := range allTags {
+		tagNameMap[t.Code] = t.Name
+	}
+	tagsByWO := map[uint][]string{}
+	if len(ids) > 0 {
+		var links []models.WorkOrderTagLink
+		database.DB.Where("work_order_id IN ?", ids).Find(&links)
+		for _, l := range links {
+			name := tagNameMap[l.TagCode]
+			if name == "" {
+				name = l.TagCode
+			}
+			tagsByWO[l.WorkOrderID] = append(tagsByWO[l.WorkOrderID], name)
+		}
+	}
+
+	f := excelize.NewFile()
+	defer f.Close()
+
+	sheetName := "工单列表"
+	index, err := f.NewSheet(sheetName)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	f.SetActiveSheet(index)
+	f.DeleteSheet("Sheet1")
+
+	headers := []string{
+		"工单号", "标题", "类型", "状态", "优先级",
+		"设备名称", "业务单号", "其他编码", "标签",
+		"描述", "创建时间", "关闭时间",
+	}
+	for i, h := range headers {
+		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
+		f.SetCellValue(sheetName, cell, h)
+	}
+	headerStyle, _ := f.NewStyle(&excelize.Style{
+		Font: &excelize.Font{Bold: true},
+		Fill: excelize.Fill{Type: "pattern", Color: []string{"#E0E0E0"}, Pattern: 1},
+	})
+	for i := range headers {
+		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
+		f.SetCellStyle(sheetName, cell, cell, headerStyle)
+	}
+
+	statusMap := map[string]string{
+		"open": "待处理", "in_progress": "进行中", "resolved": "已解决",
+		"closed": "已关闭", "reopened": "重新打开",
+	}
+	priorityMap := map[string]string{"normal": "普通", "high": "较高", "urgent": "紧急"}
+
+	for i, wo := range rows {
+		rowNum := i + 2
+		tags := strings.Join(tagsByWO[wo.ID], ", ")
+		sl := statusMap[wo.Status]
+		if sl == "" {
+			sl = wo.Status
+		}
+		pl := priorityMap[wo.Priority]
+		if pl == "" {
+			pl = wo.Priority
+		}
+		values := []interface{}{
+			wo.Code, wo.Title, wo.TypeCode, sl, pl,
+			wo.DeviceName, wo.BusinessNo, wo.OtherCodes, tags,
+			wo.Description, wo.CreatedAt, wo.ClosedAt,
+		}
+		for j, v := range values {
+			cell, _ := excelize.CoordinatesToCellName(j+1, rowNum)
+			f.SetCellValue(sheetName, cell, v)
+		}
+	}
+
+	for i := range headers {
+		col, _ := excelize.ColumnNumberToName(i + 1)
+		f.SetColWidth(sheetName, col, col, 15)
+	}
+
+	filename := fmt.Sprintf("工单列表_%s.xlsx", time.Now().Format("20060102_150405"))
+	c.Header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
+	c.Header("Content-Transfer-Encoding", "binary")
+	if err := f.Write(c.Writer); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	}
+}

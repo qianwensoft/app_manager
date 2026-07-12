@@ -87,6 +87,11 @@ export const updateWorkOrderReportShare = (id, data) => http.put(`/work-orders/r
 export const deleteWorkOrderReportShare = (id) => http.delete(`/work-orders/report-shares/${id}`)
 export const getWorkOrderReportShare = (token) => http.get(`/share/work-order-reports/${token}`)
 export const getSharedWorkOrders = (token, params = {}) => http.get(`/share/work-order-reports/${token}/work-orders`, { params })
+export const exportSharedWorkOrders = (token) => {
+  const userToken = localStorage.getItem('token') || ''
+  const url = `/api/share/work-order-reports/${token}/work-orders/export` + (userToken ? `?token=${encodeURIComponent(userToken)}` : '')
+  window.open(url, '_blank')
+}
 export const getSharedWorkOrderStatistics = (token, params = {}) => http.get(`/share/work-order-reports/${token}/statistics`, { params })
 export const getSharedWorkOrderProgress = (token, workOrderId) => http.get(`/share/work-order-reports/${token}/work-orders/${workOrderId}/progress`)
 

@@ -92,6 +92,7 @@ func SetupRouter() *gin.Engine {
 	// 工单报告分享（免登录访问基础信息，需登录模式下需要 JWT）
 	r.GET("/api/share/work-order-reports/:token", auth.OptionalAuthMiddleware(), GetWorkOrderReportShare)
 	r.GET("/api/share/work-order-reports/:token/work-orders", auth.OptionalAuthMiddleware(), GetSharedWorkOrders)
+	r.GET("/api/share/work-order-reports/:token/work-orders/export", auth.OptionalAuthMiddleware(), ExportSharedWorkOrders)
 	r.GET("/api/share/work-order-reports/:token/statistics", auth.OptionalAuthMiddleware(), GetSharedWorkOrderStatistics)
 	r.GET("/api/share/work-order-reports/:token/work-orders/:id/progress", auth.OptionalAuthMiddleware(), GetSharedWorkOrderProgress)
 	// 需登录模式下的工单操作（需要 JWT）

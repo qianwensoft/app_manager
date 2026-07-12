@@ -79,6 +79,9 @@
 
         <!-- 工单列表视图 -->
         <div v-if="viewMode === 'list'" v-loading="listLoading">
+          <div style="display:flex; justify-content:flex-end; margin-bottom:12px">
+            <el-button type="success" @click="exportSharedWorkOrders(token)">导出 Excel</el-button>
+          </div>
           <el-table :data="workOrders" border>
             <el-table-column prop="code" label="工单编号" width="150" />
             <el-table-column prop="title" label="标题" min-width="200" show-overflow-tooltip />
@@ -377,7 +380,7 @@ import { ref, onMounted, onBeforeUnmount, nextTick, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Lock, Grid, User } from '@element-plus/icons-vue'
-import { getWorkOrderReportShare, getSharedWorkOrders, getSharedWorkOrderStatistics, getSharedWorkOrderProgress, addSharedWorkOrderComment, updateSharedWorkOrderStatus, updateSharedWorkOrderFields } from '@/api/workOrder'
+import { getWorkOrderReportShare, getSharedWorkOrders, getSharedWorkOrderStatistics, getSharedWorkOrderProgress, addSharedWorkOrderComment, updateSharedWorkOrderStatus, updateSharedWorkOrderFields, exportSharedWorkOrders } from '@/api/workOrder'
 import { statusLabel, statusType, priorityLabel, priorityType } from '@/views/work-orders/workOrderConst'
 import { createWorkOrdersStomp } from '@/utils/workOrdersStomp'
 import { useAuthStore } from '@/stores/auth'
