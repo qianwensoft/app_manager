@@ -302,7 +302,7 @@ const onSelectionChange = (r) => { selection.value = r }
 
 const formatDuration = (row) => {
   if (!row.created_at) return '-'
-  const endTime = row.closed_at || row.archived_at
+  const endTime = row.settled_at || row.closed_at || row.archived_at
   if (!endTime) return '-'
 
   const start = new Date(row.created_at)

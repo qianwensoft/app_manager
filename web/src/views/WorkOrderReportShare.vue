@@ -335,6 +335,16 @@
             <el-option label="已关闭" value="closed" />
           </el-select>
         </el-form-item>
+        <el-form-item label="标签">
+          <el-select v-model="selectedTags" multiple placeholder="请选择标签" style="width:100%">
+            <el-option
+              v-for="tag in availableTags"
+              :key="tag.code"
+              :label="tag.name"
+              :value="tag.code"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="备注">
           <el-input
             v-model="statusComment"
@@ -380,7 +390,7 @@ import { ref, onMounted, onBeforeUnmount, nextTick, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Lock, Grid, User } from '@element-plus/icons-vue'
-import { getWorkOrderReportShare, getSharedWorkOrders, getSharedWorkOrderStatistics, getSharedWorkOrderProgress, addSharedWorkOrderComment, updateSharedWorkOrderStatus, updateSharedWorkOrderFields, exportSharedWorkOrders } from '@/api/workOrder'
+import { getWorkOrderReportShare, getSharedWorkOrders, getSharedWorkOrderStatistics, getSharedWorkOrderProgress, addSharedWorkOrderComment, updateSharedWorkOrderStatus, updateSharedWorkOrderFields, exportSharedWorkOrders, getWorkOrderTagDict } from '@/api/workOrder'
 import { statusLabel, statusType, priorityLabel, priorityType } from '@/views/work-orders/workOrderConst'
 import { createWorkOrdersStomp } from '@/utils/workOrdersStomp'
 import { useAuthStore } from '@/stores/auth'
@@ -431,6 +441,8 @@ const statusDialogVisible = ref(false)
 const newStatus = ref('')
 const statusComment = ref('')
 const statusSubmitting = ref(false)
+const selectedTags = ref([])
+const availableTags = ref([])
 
 // 编辑对话框
 const editDialogVisible = ref(false)
@@ -483,7 +495,8 @@ const canEdit = computed(() => {
 
 const formatDuration = (row) => {
   if (!row.created_at) return '-'
-  const endTime = row.status === 'closed' || row.status === 'resolved' ? new Date(row.closed_at || row.updated_at) : new Date()
+  const settled = row.settled_at || row.closed_at
+  const endTime = settled ? new Date(settled) : new Date()
   const startTime = new Date(row.created_at)
   const diffMs = endTime - startTime
   const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
@@ -590,6 +603,8 @@ const submitComment = async () => {
 const showStatusDialog = () => {
   newStatus.value = currentWorkOrder.value.status
   statusComment.value = ''
+  // 初始化标签为当前工单的标签
+  selectedTags.value = (currentWorkOrder.value.tags || []).map(t => t.code || t)
   statusDialogVisible.value = true
 }
 
@@ -607,11 +622,15 @@ const submitStatusUpdate = async () => {
 
   statusSubmitting.value = true
   try {
-    await updateSharedWorkOrderStatus(token, currentWorkOrder.value.id, newStatus.value, statusComment.value)
+    await updateSharedWorkOrderStatus(token, currentWorkOrder.value.id, newStatus.value, statusComment.value, selectedTags.value)
     ElMessage.success('状态更新成功')
     statusDialogVisible.value = false
-    // 更新当前工单状态
+    // 更新当前工单状态和标签
     currentWorkOrder.value.status = newStatus.value
+    currentWorkOrder.value.tags = selectedTags.value.map(code => {
+      const tag = availableTags.value.find(t => t.code === code)
+      return tag ? { code: tag.code, name: tag.name } : { code }
+    })
     // 重新加载进展列表
     const res = await getSharedWorkOrderProgress(token, currentWorkOrder.value.id)
     progressList.value = res.data || []
@@ -834,6 +853,13 @@ onMounted(async () => {
   loading.value = true
   try {
     await fetchShareInfo()
+    // 加载标签字典
+    try {
+      const tagsRes = await getWorkOrderTagDict()
+      availableTags.value = tagsRes.data || []
+    } catch (e) {
+      console.error('加载标签字典失败:', e)
+    }
     await fetchStatistics()
     await fetchWorkOrders()
 

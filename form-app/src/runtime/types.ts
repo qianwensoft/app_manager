@@ -20,7 +20,7 @@ export type FieldDef = {
   placeholder?: string
   validation?: { max_length?: number; pattern?: string; min?: number; max?: number }
   visible_when?: VisibleWhenRule
-  /** 列表查询条件：依赖字段变化后重新拉取本字段选项 */
+  /** 依赖字段变化后重新拉取本字段选项 */
   listen_targets?: string[]
   options_interface_code?: string
   /** component === 'PrintButton' 时：绑定的打印模板 id / 触发的按钮事件 id / 文案 */

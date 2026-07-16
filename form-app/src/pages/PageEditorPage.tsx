@@ -11,6 +11,41 @@ import type { PageEvent } from '@/runtime/eventTypes'
 import type { PrinterTemplate } from '@/runtime/printerTypes'
 import { PrintButtonContext } from '@/runtime/PrintButtonContext'
 import { fieldDefsToSchema } from './schemaConverter'
+
+const OPTION_COMPONENTS = new Set(['Select', 'Radio'])
+
+function normalizeFieldOptions(options: any): Array<{ label: string; value: string | number | boolean }> {
+  if (!Array.isArray(options)) return []
+  return options
+    .map((option) => {
+      if (!option || typeof option !== 'object') return null
+      const rawValue = option.value
+      if (rawValue === undefined || rawValue === null || rawValue === '') return null
+      const valueType = option.value_type || typeof rawValue
+      let value: string | number | boolean = String(rawValue)
+      if (valueType === 'number') {
+        const n = Number(rawValue)
+        if (Number.isNaN(n)) return null
+        value = n
+      } else if (valueType === 'boolean') {
+        value = rawValue === true || rawValue === 'true'
+      }
+      return {
+        label: option.label ? String(option.label) : String(value),
+        value,
+      }
+    })
+    .filter((option): option is { label: string; value: string | number | boolean } => Boolean(option))
+}
+
+function optionsForForm(options: any): Array<{ label: string; value: string; value_type: string }> {
+  if (!Array.isArray(options) || options.length === 0) return [{ label: '', value: '', value_type: 'string' }]
+  return options.map((option) => ({
+    label: option?.label !== undefined && option?.label !== null ? String(option.label) : '',
+    value: option?.value !== undefined && option?.value !== null ? String(option.value) : '',
+    value_type: typeof option?.value === 'number' ? 'number' : typeof option?.value === 'boolean' ? 'boolean' : 'string',
+  }))
+}
 import { useInterfaceOptions } from './useInterfaceOptions'
 import EventsConfigSection from './EventsConfigSection'
 import PrintersConfigSection from './PrintersConfigSection'
@@ -154,14 +189,19 @@ function mergeFieldDefsIntoDesignSchema(fieldDefs: FieldDef[], existingSchema: a
       const fieldDef = fieldMap.get(fieldName)
 
       if (fieldDef) {
+        const nextComponent = COMP_MAP[fieldDef.component] || 'Input'
+        const options = OPTION_COMPONENTS.has(fieldDef.component) ? normalizeFieldOptions(fieldDef.options) : []
         updated[key] = {
           ...node, // 保留所有编辑器属性（x-index、位置、样式等）
           title: fieldDef.label || fieldName,
-          'x-component': COMP_MAP[fieldDef.component] || 'Input',
+          'x-component': nextComponent,
           'x-component-props': {
             ...node['x-component-props'],
             ...(fieldDef.placeholder ? { placeholder: fieldDef.placeholder } : {}),
+            ...(fieldDef.options_interface_code ? { optionsInterfaceCode: fieldDef.options_interface_code } : {}),
+            ...(Array.isArray(fieldDef.listen_targets) && fieldDef.listen_targets.length ? { listenTargets: fieldDef.listen_targets } : {}),
           },
+          ...(options.length > 0 ? { enum: options } : { enum: undefined }),
           'x-validator': fieldDef.required
             ? [{ required: true, message: '此项为必填' }]
             : (node['x-validator'] || []).filter((v: any) => !v.required),
@@ -192,6 +232,7 @@ function mergeFieldDefsIntoDesignSchema(fieldDefs: FieldDef[], existingSchema: a
             'x-index': Object.keys(updated).length,
           }
         } else {
+          const options = OPTION_COMPONENTS.has(fieldDef.component) ? normalizeFieldOptions(fieldDef.options) : []
           updated[fieldDef.field] = {
             name: fieldDef.field,
             type: 'string',
@@ -201,7 +242,10 @@ function mergeFieldDefsIntoDesignSchema(fieldDefs: FieldDef[], existingSchema: a
             'x-component': COMP_MAP[fieldDef.component] || 'Input',
             'x-component-props': {
               ...(fieldDef.placeholder ? { placeholder: fieldDef.placeholder } : {}),
+              ...(fieldDef.options_interface_code ? { optionsInterfaceCode: fieldDef.options_interface_code } : {}),
+              ...(Array.isArray(fieldDef.listen_targets) && fieldDef.listen_targets.length ? { listenTargets: fieldDef.listen_targets } : {}),
             },
+            ...(options.length > 0 ? { enum: options } : {}),
             ...(fieldDef.required ? { 'x-validator': [{ required: true, message: '此项为必填' }] } : {}),
             'x-index': Object.keys(updated).length,
           }
@@ -382,6 +426,7 @@ export default function PageEditorPage() {
   const addField = () => {
     setEditingField(null)
     form.resetFields()
+    form.setFieldsValue({ options: [{ label: '', value: '', value_type: 'string' }], listen_targets: [] })
     setModalVisible(true)
   }
 
@@ -389,18 +434,25 @@ export default function PageEditorPage() {
     setEditingField({ ...field, _index: index })
     form.setFieldsValue({
       ...field,
-      listen_targets: Array.isArray(field.listen_targets)
-        ? field.listen_targets.join(', ')
-        : field.listen_targets,
+      listen_targets: Array.isArray(field.listen_targets) ? field.listen_targets : [],
+      options: optionsForForm(field.options),
     })
     setModalVisible(true)
   }
 
   const saveField = () => {
     form.validateFields().then(values => {
-      if (typeof values.listen_targets === 'string') {
-        values.listen_targets = values.listen_targets
-          .split(',').map((s: string) => s.trim()).filter(Boolean)
+      if (!Array.isArray(values.listen_targets)) {
+        values.listen_targets = typeof values.listen_targets === 'string'
+          ? values.listen_targets.split(',').map((s: string) => s.trim()).filter(Boolean)
+          : []
+      }
+      values.listen_targets = values.listen_targets.map((s: string) => String(s).trim()).filter(Boolean)
+      values.options = normalizeFieldOptions(values.options)
+      if (!OPTION_COMPONENTS.has(values.component)) {
+        delete values.options
+        delete values.listen_targets
+        delete values.options_interface_code
       }
       if (values.visible_when && !values.visible_when.field) delete values.visible_when
       if (editingField?._index !== undefined) {
@@ -894,13 +946,14 @@ function FieldConfigModal({
   onCancel: () => void
 }) {
   const component = Form.useWatch('component', form)
+  const canConfigureOptions = OPTION_COMPONENTS.has(component)
   return (
     <Modal
       title={editingField ? '编辑字段' : '新增字段'}
       visible={visible}
       onOk={onOk}
       onCancel={onCancel}
-      width={520}
+      width={720}
     >
       <Form form={form} layout="vertical" style={{ marginTop: 8 }}>
         <Form.Item label="字段名 (field key)" name="field" rules={[{ required: true, message: '请输入字段名' }]}>
@@ -958,20 +1011,68 @@ function FieldConfigModal({
               <Input placeholder="eq/in 时填写" />
             </Form.Item>
 
-            <Divider orientation="left" style={{ fontSize: 12, color: '#94a3b8' }}>动态选项（Select 类型用）</Divider>
-            <Form.Item label="级联监听字段" name="listen_targets">
-              <Input placeholder="逗号分隔，如 dept_id" />
-            </Form.Item>
-            <Form.Item label="选项查询接口" name="options_interface_code">
-              <AutoComplete
-                options={interfaceOptions}
-                placeholder="数据接口 code"
-                allowClear
-                filterOption={(input, opt) =>
-                  !!opt?.value?.includes(input) || !!opt?.label?.toString().includes(input)
-                }
-              />
-            </Form.Item>
+            {canConfigureOptions && (
+              <>
+                <Divider orientation="left" style={{ fontSize: 12, color: '#94a3b8' }}>可选项</Divider>
+                <Form.List name="options">
+                  {(optionFields, { add, remove }) => (
+                    <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: 10, background: '#f8fafc' }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 110px 56px', gap: 8, marginBottom: 8, color: '#64748b', fontSize: 12 }}>
+                        <span>显示文本</span>
+                        <span>提交值</span>
+                        <span>值类型</span>
+                        <span>操作</span>
+                      </div>
+                      {optionFields.map(field => (
+                        <div key={field.key} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 110px 56px', gap: 8, marginBottom: 8 }}>
+                          <Form.Item {...field} name={[field.name, 'label']} style={{ marginBottom: 0 }}>
+                            <Input placeholder="如：启用" />
+                          </Form.Item>
+                          <Form.Item {...field} name={[field.name, 'value']} style={{ marginBottom: 0 }}>
+                            <Input placeholder="如：enabled" />
+                          </Form.Item>
+                          <Form.Item {...field} name={[field.name, 'value_type']} style={{ marginBottom: 0 }} initialValue="string">
+                            <Select>
+                              <Select.Option value="string">文本</Select.Option>
+                              <Select.Option value="number">数字</Select.Option>
+                              <Select.Option value="boolean">布尔</Select.Option>
+                            </Select>
+                          </Form.Item>
+                          <Button size="small" danger onClick={() => remove(field.name)}>删除</Button>
+                        </div>
+                      ))}
+                      <Button size="small" type="dashed" onClick={() => add({ label: '', value: '', value_type: 'string' })} style={{ width: '100%' }}>
+                        + 添加静态选项
+                      </Button>
+                    </div>
+                  )}
+                </Form.List>
+                <div style={{ color: '#94a3b8', fontSize: 12, marginTop: 6, lineHeight: 1.6 }}>
+                  静态选项会直接写入页面 schema；接口选项会在运行时调用接口并覆盖下拉数据。
+                </div>
+
+                <Divider orientation="left" style={{ fontSize: 12, color: '#94a3b8' }}>接口选项</Divider>
+                <Form.Item label="选项查询接口" name="options_interface_code" tooltip="接口返回数组时会按 value/id/code/key 和 label/name/title/text 自动映射为选项">
+                  <AutoComplete
+                    options={interfaceOptions}
+                    placeholder="选择或输入数据接口 code"
+                    allowClear
+                    filterOption={(input, opt) =>
+                      !!opt?.value?.includes(input) || !!opt?.label?.toString().includes(input)
+                    }
+                  />
+                </Form.Item>
+                <Form.Item label="级联监听字段" name="listen_targets" tooltip="这些字段变化时会重新调用上面的选项接口，并把字段值作为参数传入">
+                  <Select
+                    mode="tags"
+                    tokenSeparators={[',']}
+                    allowClear
+                    placeholder="输入字段名后回车，如 dept_id"
+                    options={[]}
+                  />
+                </Form.Item>
+              </>
+            )}
           </>
         )}
       </Form>

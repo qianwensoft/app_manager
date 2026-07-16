@@ -89,8 +89,8 @@ object PrinterManager {
      * 即使已授予权限，定位总开关关闭时 startDiscovery 也扫描不到任何设备。
      */
     fun isLocationServiceOn(context: Context): Boolean {
-        // 12+ 用 BLUETOOTH_SCAN，与定位解耦，无需检查
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) return true
+        // Android 13+（TIRAMISU）才真正解耦；Android 12 未加 neverForLocation 时仍依赖定位总开关
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) return true
         return try {
             val lm = context.getSystemService(Context.LOCATION_SERVICE) as? android.location.LocationManager
             lm?.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER) == true ||

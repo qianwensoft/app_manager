@@ -194,8 +194,9 @@ func UpdateSharedWorkOrderStatus(c *gin.Context) {
 	}
 
 	var req struct {
-		Status  string `json:"status"`
-		Comment string `json:"comment"`
+		Status  string   `json:"status"`
+		Comment string   `json:"comment"`
+		Tags    []string `json:"tags"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -233,6 +234,15 @@ func UpdateSharedWorkOrderStatus(c *gin.Context) {
 	userID := c.GetUint("user_id")
 	actor := actorLabel(c)
 	applyWorkOrderStatus(c, &wo, req.Status, req.Comment, userID, actor)
+
+	// 更新标签（如果提供）
+	if req.Tags != nil {
+		if err := syncWorkOrderTags(&wo, req.Tags); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "标签更新失败"})
+			return
+		}
+		addWorkOrderActivity(wo.ID, "tag_change", wo.Status, wo.Status, userID, actor, fmt.Sprintf("更新标签：%v", req.Tags))
+	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "状态已更新", "data": wo})
 }

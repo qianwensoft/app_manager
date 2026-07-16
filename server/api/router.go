@@ -563,6 +563,7 @@ func SetupRouter() *gin.Engine {
 		wo.POST("/types", auth.RequireRole("admin", "operator"), CreateWorkOrderType)
 		wo.PUT("/types/:id", auth.RequireRole("admin", "operator"), UpdateWorkOrderType)
 		wo.DELETE("/types/:id", auth.RequireRole("admin", "operator"), DeleteWorkOrderType)
+		wo.POST("/types/:id/auto-archive/run", auth.RequireRole("admin", "operator"), RunWorkOrderTypeAutoArchive)
 		wo.GET("/webhooks", auth.RequireRole("admin", "operator"), ListWorkOrderWebhooks)
 		wo.POST("/webhooks", auth.RequireRole("admin", "operator"), CreateWorkOrderWebhook)
 		wo.PUT("/webhooks/:id", auth.RequireRole("admin", "operator"), UpdateWorkOrderWebhook)

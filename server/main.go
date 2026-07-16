@@ -71,6 +71,7 @@ func main() {
 		outbound.InitTriggerManager(database.DB)
 		api.StartMetricsAggregator()
 		api.StartStompStatsPublisher()
+		api.StartWorkOrderAutoArchiver()
 		scada.StartSimEngine()
 		scada.StartBatcher()
 		go scada.StartUDPIngress(9000)

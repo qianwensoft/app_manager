@@ -28,6 +28,8 @@ export const getWorkOrderTypes = () => http.get('/work-orders/types')
 export const createWorkOrderType = (data) => http.post('/work-orders/types', data)
 export const updateWorkOrderType = (id, data) => http.put(`/work-orders/types/${id}`, data)
 export const deleteWorkOrderType = (id) => http.delete(`/work-orders/types/${id}`)
+// 立即执行某类型的自动归档扫描
+export const runWorkOrderTypeAutoArchive = (id) => http.post(`/work-orders/types/${id}/auto-archive/run`)
 
 // 外发 webhook
 export const getWorkOrderWebhooks = (params = {}) => http.get('/work-orders/webhooks', { params })
@@ -98,5 +100,5 @@ export const getSharedWorkOrderProgress = (token, workOrderId) => http.get(`/sha
 // 分享链接需登录模式下的工单操作
 export const getSharedWorkOrderDetail = (token, workOrderId) => http.get(`/share/work-order-reports/${token}/work-orders/${workOrderId}/detail`)
 export const addSharedWorkOrderComment = (token, workOrderId, comment) => http.post(`/share/work-order-reports/${token}/work-orders/${workOrderId}/comment`, { comment })
-export const updateSharedWorkOrderStatus = (token, workOrderId, status, comment) => http.post(`/share/work-order-reports/${token}/work-orders/${workOrderId}/status`, { status, comment })
+export const updateSharedWorkOrderStatus = (token, workOrderId, status, comment, tags) => http.post(`/share/work-order-reports/${token}/work-orders/${workOrderId}/status`, { status, comment, tags })
 export const updateSharedWorkOrderFields = (token, workOrderId, fields) => http.put(`/share/work-order-reports/${token}/work-orders/${workOrderId}/fields`, fields)

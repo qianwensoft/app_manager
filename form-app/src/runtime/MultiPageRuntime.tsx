@@ -20,7 +20,7 @@ import type { PageEvent } from './eventTypes'
 import { parseBindingsFromRuntimeSchema, rowsToOptions } from './fieldLogic'
 import { doPrintViaBridge } from './printBridge'
 import { isAgentRuntime, runtimeFetch } from './runtimeAuth'
-import type { FieldDef, FieldOption } from './types'
+import type { FieldBinding, FieldDef, FieldOption } from './types'
 
 async function authed(path: string, method: string, body?: any) {
   return runtimeFetch(path, method, body)
@@ -47,7 +47,7 @@ export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }:
   const [listData, setListData] = useState<any[]>([])
   const [listLoading, setListLoading] = useState(false)
 
-  const bindings = useMemo(
+  const runtimeSchemaBindings = useMemo(
     () => parseBindingsFromRuntimeSchema(app?.runtime_schema),
     [app?.runtime_schema],
   )
@@ -349,6 +349,16 @@ export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }:
 
   // config 和 designSchema 已在组件顶部计算，这里直接使用
   const fields: FieldDef[] = config.field_definitions || config.fields || []
+  const fieldOptionBindings: FieldBinding[] = fields
+    .filter(f => f.options_interface_code)
+    .map(f => ({
+      field: f.field,
+      context_key: f.field,
+      listen_targets: Array.isArray(f.listen_targets) ? f.listen_targets : [],
+      query_source_type: 'data_interface' as const,
+      query_interface_code: f.options_interface_code,
+    }))
+  const bindings = [...runtimeSchemaBindings, ...fieldOptionBindings]
   // 统一走 Formily 核心：无 design_schema 时用 field_definitions 即时生成 schema，
   // 保证非表单布局组件（页头/分区/图片等）与字段在同一套渲染器下显示。
   const effectiveSchema = hasLayoutSchema ? designSchema : fieldDefsToSchema(fields)

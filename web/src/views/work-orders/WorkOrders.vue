@@ -327,10 +327,12 @@ const view = ref('list')
 const filters = ref({ status: '', type_code: '', device_id: '', business_no: '', tags: [], search_key: '', createdRange: null })
 const statsDialog = ref(null)
 
-// 格式化处理耗时
+// 格式化处理耗时。
+// 终点优先用 settled_at（结算时刻：首次已解决/已关闭时冻结），其次 closed_at，
+// 否则以当前时间实时增长。重新打开会清空 settled_at，耗时恢复从 created_at 起算。
 const formatDuration = (row) => {
   if (!row.created_at) return '-'
-  const endTime = row.closed_at || row.archived_at || new Date().toISOString()
+  const endTime = row.settled_at || row.closed_at || row.archived_at || new Date().toISOString()
   if (!endTime) return '-'
 
   const start = new Date(row.created_at)
@@ -357,7 +359,7 @@ const formatDuration = (row) => {
 const sortByDuration = (a, b) => {
   const getDuration = (row) => {
     if (!row.created_at) return 0
-    const endTime = row.closed_at || row.archived_at || new Date().toISOString()
+    const endTime = row.settled_at || row.closed_at || row.archived_at || new Date().toISOString()
     const start = new Date(row.created_at)
     const end = new Date(endTime)
     return end - start
@@ -691,6 +693,20 @@ const matchesFilter = (p) => {
 
 function onWorkOrderEvent(p) {
   if (!p || !p.id) return
+  // 归档事件（含系统自动归档）：默认视图移除该工单，轻提醒。
+  if (p.event === 'work_order.archived' || p.archived === true) {
+    removeWorkOrderFromViews(p.id)
+    if (!isOwnEcho(p.id, p.status)) {
+      ElNotification({
+        title: '工单已归档',
+        message: `${p.code || ''} ${p.title || ''}`.trim() || '工单已自动归档',
+        type: 'info',
+        duration: 4000
+      })
+    }
+    loadTypeCounts()
+    return
+  }
   const own = isOwnEcho(p.id, p.status)
   if (!own) notifyEvent(p)
   if (!matchesFilter(p)) return
@@ -719,8 +735,24 @@ const eventToRow = (p, existing) => ({
   status: p.status, priority: p.priority, device_id: p.device_id,
   device_name_snap: p.device_name || existing?.device_name_snap,
   other_codes: p.other_codes, created_at: p.created_at || existing?.created_at,
+  settled_at: p.settled_at !== undefined ? p.settled_at : existing?.settled_at,
+  closed_at: p.closed_at !== undefined ? p.closed_at : existing?.closed_at,
   tags: p.tags ? String(p.tags).split(',').filter(Boolean) : (existing?.tags || [])
 })
+
+// 从看板与列表中移除某工单（归档后默认视图不再展示）。
+const removeWorkOrderFromViews = (id) => {
+  if (view.value === 'board') {
+    for (const key of Object.keys(boardData.value)) {
+      const arr = boardData.value[key]
+      const idx = arr.findIndex(w => w.id === id)
+      if (idx >= 0) arr.splice(idx, 1)
+    }
+  } else {
+    const idx = rows.value.findIndex(w => w.id === id)
+    if (idx >= 0) { rows.value.splice(idx, 1); total.value = Math.max(0, total.value - 1) }
+  }
+}
 
 const applyEventToBoard = (p) => {
   // 先从所有列移除旧卡片

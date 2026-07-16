@@ -102,19 +102,28 @@
           <el-button text type="primary" size="small" @click="addAction">添加动作</el-button>
         </div>
         <div v-for="(action, idx) in actions" :key="idx" class="action-item">
-          <div class="action-head" @click="toggleActionCollapse(idx)">
+          <div class="action-head" @click="toggleActionCollapse(idx)" :style="action.enabled === false ? 'opacity:0.55' : ''">
             <div class="action-head-left">
               <el-icon class="collapse-icon" :class="{ collapsed: action.collapsed }">
                 <ArrowDown />
               </el-icon>
               <span>动作 {{ idx + 1 }}</span>
               <el-tag v-if="action.type" size="small" style="margin-left:8px">{{ actionTypeLabel(action.type) }}</el-tag>
+              <el-tag v-if="action.enabled === false" type="info" size="small" style="margin-left:6px">已停用</el-tag>
               <span v-if="action.collapsed && action.condition" class="condition-preview">
                 <el-icon style="margin-left:8px;margin-right:4px"><Filter /></el-icon>
                 <code>{{ action.condition }}</code>
               </span>
             </div>
             <div @click.stop class="action-head-buttons">
+              <el-switch
+                v-model="action.enabled"
+                size="small"
+                style="margin-right:8px"
+                :active-value="true"
+                :inactive-value="false"
+                title="启用 / 停用此动作"
+              />
               <el-button text type="primary" size="small" @click="insertAction(idx, 'before')">
                 <el-icon><Top /></el-icon> 向前添加
               </el-button>
@@ -886,6 +895,7 @@ const openEdit = (row) => {
       useBuilder: true,
       builder: {},
       condition: a.condition || '', // 加载执行条件
+      enabled: a.enabled !== false,
       collapsed: true, // 默认收起以提升性能
       activeTab: 'visual' // 初始化 activeTab
     }
@@ -985,6 +995,7 @@ const copyWorkflow = (row) => {
       useBuilder: true,
       builder: {},
       condition: a.condition || '',
+      enabled: a.enabled !== false,
       collapsed: true, // 默认收起以提升性能
       activeTab: 'visual' // 初始化 activeTab
     }
@@ -1047,11 +1058,11 @@ const copyWorkflow = (row) => {
 }
 
 const addAction = () => {
-  actions.value.push({ type: '', configJSON: '{}', useBuilder: false, builder: {}, condition: '', collapsed: false, activeTab: 'visual' })
+  actions.value.push({ type: '', configJSON: '{}', useBuilder: false, builder: {}, condition: '', enabled: true, collapsed: false, activeTab: 'visual' })
 }
 
 const insertAction = (idx, position) => {
-  const newAction = { type: '', configJSON: '{}', useBuilder: false, builder: {}, condition: '', collapsed: false, activeTab: 'visual' }
+  const newAction = { type: '', configJSON: '{}', useBuilder: false, builder: {}, condition: '', enabled: true, collapsed: false, activeTab: 'visual' }
   if (position === 'before') {
     actions.value.splice(idx, 0, newAction)
   } else {
@@ -1669,6 +1680,8 @@ const save = async () => {
     if (a.condition?.trim()) {
       actionData.condition = a.condition.trim()
     }
+    // 启用/停用标记：始终写入，确保切换状态能正确保存
+    actionData.enabled = a.enabled !== false
     actionsData.push(actionData)
   }
   const payload = {

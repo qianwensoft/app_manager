@@ -34,6 +34,25 @@ const REVERSE_COMP_MAP: Record<string, string> = {
   ArrayCards: 'ArrayCards',
 }
 
+function normalizeOptions(options: any): Array<{ label: string; value: any }> {
+  if (!Array.isArray(options)) return []
+  return options
+    .map((option) => {
+      if (option === null || option === undefined) return null
+      if (typeof option === 'object') {
+        const value = option.value
+        if (value === undefined || value === null || value === '') return null
+        return {
+          label: option.label !== undefined && option.label !== null && option.label !== '' ? String(option.label) : String(value),
+          value,
+        }
+      }
+      if (option === '') return null
+      return { label: String(option), value: option }
+    })
+    .filter((option): option is { label: string; value: any } => Boolean(option))
+}
+
 /**
  * 将 config_json.field_definitions 转换为 Formily JSON Schema
  *
@@ -69,16 +88,23 @@ export function fieldDefsToSchema(fieldDefs: any[]): object {
       }
       return
     }
+    const component = COMP_MAP[f.component] || 'Input'
+    const supportsOptions = component === 'Select' || component === 'Radio'
+    const options = supportsOptions ? normalizeOptions(f.options) : []
+
     properties[f.field] = {
       name: f.field,
       type: 'string',
       title: f.label || f.field,
       'x-decorator': 'FormItem',
       'x-decorator-props': {},
-      'x-component': COMP_MAP[f.component] || 'Input',
+      'x-component': component,
       'x-component-props': {
         ...(f.placeholder ? { placeholder: f.placeholder } : {}),
+        ...(f.options_interface_code ? { optionsInterfaceCode: f.options_interface_code } : {}),
+        ...(Array.isArray(f.listen_targets) && f.listen_targets.length ? { listenTargets: f.listen_targets } : {}),
       },
+      ...(options.length > 0 ? { enum: options } : {}),
       ...(f.required ? { 'x-validator': [{ required: true, message: '此项为必填' }] } : {}),
       'x-index': index,
     }
@@ -205,6 +231,22 @@ export function schemaToFieldDefs(schema: any): any[] {
       const componentProps = value['x-component-props'] || {}
       if (componentProps.placeholder) {
         fieldDef.placeholder = componentProps.placeholder
+      }
+
+      if (fieldDef.component === 'Select' || fieldDef.component === 'Radio') {
+        const enumOptions = normalizeOptions(value.enum)
+        const options = enumOptions.length > 0
+          ? enumOptions
+          : normalizeOptions(componentProps.options || componentProps.dataSource)
+        if (options.length > 0) {
+          fieldDef.options = options
+        }
+        if (componentProps.optionsInterfaceCode) {
+          fieldDef.options_interface_code = String(componentProps.optionsInterfaceCode)
+        }
+        if (Array.isArray(componentProps.listenTargets)) {
+          fieldDef.listen_targets = componentProps.listenTargets.map(String).filter(Boolean)
+        }
       }
 
       fieldDefs.push(fieldDef)

@@ -330,6 +330,9 @@ func workOrderEventPayload(event string, wo *models.WorkOrder, actor string, cha
 	if wo.ClosedAt != nil {
 		payload["closed_at"] = wo.ClosedAt
 	}
+	if wo.SettledAt != nil {
+		payload["settled_at"] = wo.SettledAt
+	}
 
 	// 补充归档人信息
 	if wo.ArchivedBy != nil && *wo.ArchivedBy > 0 {

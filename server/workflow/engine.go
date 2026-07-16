@@ -28,6 +28,7 @@ type WorkflowAction struct {
 	Type      string                 `json:"type"` // execute_js | update_work_order | create_work_order | query_work_orders
 	Config    map[string]interface{} `json:"config"`
 	Condition string                 `json:"condition,omitempty"` // 可选的执行条件表达式
+	Enabled   *bool                  `json:"enabled,omitempty"`   // nil/true=启用；false=停用
 }
 
 // ActionResult 动作执行结果。
@@ -174,6 +175,23 @@ func (e *Engine) executeWorkflow(wf *models.WorkOrderWorkflow, event string, wo 
 			ConfigBefore:  configBefore,
 			ContextBefore: contextBefore,
 			Condition:     action.Condition,
+		}
+
+		// 停用的动作直接跳过
+		if action.Enabled != nil && !*action.Enabled {
+			detail.Skipped = true
+			detail.SkipReason = "动作已停用"
+			detail.DurationMs = time.Since(actionStart).Milliseconds()
+			contextAfter := make(map[string]interface{})
+			for k, v := range ctx.Variables {
+				contextAfter[k] = v
+			}
+			detail.ContextAfter = contextAfter
+			result.Result = "skipped"
+			ctx.ActionResults = append(ctx.ActionResults, result)
+			ctx.ActionDetails = append(ctx.ActionDetails, detail)
+			executed++
+			continue
 		}
 
 		// 评估执行条件

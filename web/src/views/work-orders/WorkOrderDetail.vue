@@ -500,7 +500,7 @@ const openPreview = (it) => { previewItem.value = it; previewDialog.value = true
 
 const kindLabels = { text: '文字', photo: '照片', video: '视频', voice: '语音', screen_record: '录屏', logcat: '日志', resource: '资源' }
 const kindLabel = (k) => kindLabels[k] || k
-const actionLabels = { create: '创建', update: '更新', comment: '备注', assign: '转交', status_change: '状态变更', close: '关闭', reopen: '重新打开', external_update: '第三方更新', tag_change: '标签变更', archive: '归档', unarchive: '取消归档' }
+const actionLabels = { create: '创建', update: '更新', comment: '备注', assign: '转交', status_change: '状态变更', close: '关闭', reopen: '重新打开', external_update: '第三方更新', tag_change: '标签变更', archive: '归档', unarchive: '取消归档', auto_archive: '系统自动归档' }
 const actionLabel = (a) => actionLabels[a] || a
 
 const dlUrl = (itemId) => workOrderItemDownloadUrl(id, itemId)

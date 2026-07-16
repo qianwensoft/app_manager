@@ -487,7 +487,7 @@ export default function PageDesignerPage() {
     }
 
     if (schema?.schema?.properties) {
-      traverse(schema.schema.properties)
+      Object.values(schema.schema.properties).forEach((child: any) => traverse(child))
     }
 
     return buttons

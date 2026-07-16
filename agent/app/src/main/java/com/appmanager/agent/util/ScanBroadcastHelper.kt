@@ -26,7 +26,8 @@ object ScanBroadcastHelper {
         "com.sunmi.scanner.ACTION_DATA",
         "unitech.scanservice.data",
         "com.zebra.dw.action.ACTION_DECODE_DATA",
-        "com.speedata.showdecodedata"
+        "com.speedata.showdecodedata",
+        "com.se4500.onDecodeComplete"
     )
 
     /**

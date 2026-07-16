@@ -494,10 +494,10 @@ func ChangeWorkOrderStatus(c *gin.Context) {
 // applyWorkOrderStatus 共用：内部接口与开放 API 第三方调用都走它。
 func applyWorkOrderStatus(c *gin.Context, wo *models.WorkOrder, status, comment string, actorUserID uint, actor string) {
 	from := wo.Status
+	now := time.Now()
 	updates := map[string]interface{}{"status": status}
 	action := "status_change"
 	if status == "closed" {
-		now := time.Now()
 		updates["closed_at"] = &now
 		if actorUserID > 0 {
 			updates["closed_by"] = &actorUserID
@@ -507,6 +507,17 @@ func applyWorkOrderStatus(c *gin.Context, wo *models.WorkOrder, status, comment 
 		action = "reopen"
 		updates["closed_at"] = nil
 		updates["closed_by"] = nil
+	}
+	// 结算时刻：首次进入已解决/已关闭时冻结耗时终点（已有则保留）；
+	// 其它状态（重开/待处理/处理中）清空，耗时恢复从 CreatedAt 起算。
+	if isSettledStatus(status) {
+		if wo.SettledAt == nil {
+			updates["settled_at"] = &now
+			wo.SettledAt = &now
+		}
+	} else if wo.SettledAt != nil {
+		updates["settled_at"] = nil
+		wo.SettledAt = nil
 	}
 	database.DB.Model(wo).Updates(updates)
 	wo.Status = status
@@ -554,6 +565,11 @@ func pushWorkOrderStatusToDevice(wo *models.WorkOrder, from, to string) {
 			"duration_ms": 10000,
 		},
 	})
+}
+
+// isSettledStatus 判断状态是否为「结算态」（已解决/已关闭）：耗时在此冻结、可被自动归档。
+func isSettledStatus(s string) bool {
+	return s == "resolved" || s == "closed"
 }
 
 // workOrderStatusLabel 状态中文展示（与 web/agent 端一致）。
@@ -628,7 +644,11 @@ func BatchArchiveWorkOrders(c *gin.Context) {
 			"archived_at": &now,
 			"archived_by": &uid,
 		})
+		wo.Archived = true
+		wo.ArchivedAt = &now
 		addWorkOrderActivity(wo.ID, "archive", wo.Status, wo.Status, uid, actor, "")
+		// 实时推送：前端默认列表/看板移除该工单（与自动归档一致）。
+		dispatchWorkOrderEvent("work_order.archived", wo, actor, "")
 		archived++
 	}
 	c.JSON(http.StatusOK, gin.H{"archived": archived, "skipped": skipped})
@@ -1033,14 +1053,17 @@ func UpdateWorkOrderType(c *gin.Context) {
 		return
 	}
 	database.DB.Model(&t).Updates(map[string]interface{}{
-		"name":                req.Name,
-		"description":         req.Description,
-		"form_app_code":       req.FormAppCode,
-		"form_page_key":       req.FormPageKey,
-		"default_title":       req.DefaultTitle,
-		"board_card_template": req.BoardCardTemplate,
-		"enabled":             req.Enabled,
-		"sort_order":          req.SortOrder,
+		"name":                       req.Name,
+		"description":                req.Description,
+		"form_app_code":              req.FormAppCode,
+		"form_page_key":              req.FormPageKey,
+		"default_title":              req.DefaultTitle,
+		"board_card_template":        req.BoardCardTemplate,
+		"auto_archive_enabled":       req.AutoArchiveEnabled,
+		"auto_archive_statuses":      req.AutoArchiveStatuses,
+		"auto_archive_delay_minutes": req.AutoArchiveDelayMinutes,
+		"enabled":                    req.Enabled,
+		"sort_order":                 req.SortOrder,
 	})
 	c.JSON(http.StatusOK, gin.H{"data": t})
 }
@@ -1751,15 +1774,19 @@ func GetWorkOrderStatistics(c *gin.Context) {
 	// 计算平均处理耗时（仅已关闭的工单）- 兼容 SQLite 和 MySQL
 	var avgHours float64
 	var closedWOs []models.WorkOrder
-	database.DB.Select("created_at, closed_at, archived_at").
+	database.DB.Select("created_at, settled_at, closed_at, archived_at").
 		Where("id IN ?", woIDs).
-		Where("closed_at IS NOT NULL OR archived_at IS NOT NULL").
+		Where("settled_at IS NOT NULL OR closed_at IS NOT NULL OR archived_at IS NOT NULL").
 		Find(&closedWOs)
 
 	if len(closedWOs) > 0 {
 		var totalHours float64
 		for _, wo := range closedWOs {
-			endTime := wo.ClosedAt
+			// 终点优先用结算时刻（冻结耗时），其次关闭时刻，再次归档时刻。
+			endTime := wo.SettledAt
+			if endTime == nil {
+				endTime = wo.ClosedAt
+			}
 			if endTime == nil {
 				endTime = wo.ArchivedAt
 			}
@@ -2200,15 +2227,19 @@ func GetSharedWorkOrderStatistics(c *gin.Context) {
 
 	var avgHours float64
 	var closedWOs []models.WorkOrder
-	database.DB.Select("created_at, closed_at, archived_at").
+	database.DB.Select("created_at, settled_at, closed_at, archived_at").
 		Where("id IN ?", woIDs).
-		Where("closed_at IS NOT NULL OR archived_at IS NOT NULL").
+		Where("settled_at IS NOT NULL OR closed_at IS NOT NULL OR archived_at IS NOT NULL").
 		Find(&closedWOs)
 
 	if len(closedWOs) > 0 {
 		var totalHours float64
 		for _, wo := range closedWOs {
-			endTime := wo.ClosedAt
+			// 终点优先用结算时刻（冻结耗时），其次关闭时刻，再次归档时刻。
+			endTime := wo.SettledAt
+			if endTime == nil {
+				endTime = wo.ClosedAt
+			}
 			if endTime == nil {
 				endTime = wo.ArchivedAt
 			}

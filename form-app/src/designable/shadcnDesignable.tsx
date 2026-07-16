@@ -470,19 +470,45 @@ ShadcnTextArea.Resource = createResource({
 // Select - 下拉选择
 // ────────────────────────────────────────────────────────────────────────────
 
+const normalizeSelectOptions = (options: any[] | undefined) => {
+  if (!Array.isArray(options)) return []
+  return options
+    .filter((option) => option && typeof option === 'object' && option.value !== undefined && option.value !== null && option.value !== '')
+    .map((option) => ({
+      label: option.label ?? String(option.value),
+      value: String(option.value),
+    }))
+}
+
 export const ShadcnSelect: DnFC<any> = (props) => {
   const nodeIdProps = useNodeIdProps()
   const { title } = props
+  const componentProps = props['x-component-props'] || {}
+  const options = normalizeSelectOptions(props.enum)
+  const previewOptions = options.length > 0
+    ? options
+    : [
+        { label: '选项1', value: '1' },
+        { label: '选项2', value: '2' },
+      ]
+  const defaultValue = props.default !== undefined && props.default !== null && props.default !== ''
+    ? String(props.default)
+    : undefined
+  const previewValue = previewOptions.some((option) => option.value === defaultValue)
+    ? defaultValue
+    : previewOptions[0]?.value
+
   return (
     <div className="space-y-2" {...nodeIdProps}>
       {title && <Label>{title}</Label>}
-      <Select disabled>
+      <Select value={previewValue} disabled>
         <SelectTrigger>
-          <SelectValue placeholder="请选择" />
+          <SelectValue placeholder={componentProps.placeholder || '请选择'} />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="1">选项1</SelectItem>
-          <SelectItem value="2">选项2</SelectItem>
+          {previewOptions.map((option) => (
+            <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+          ))}
         </SelectContent>
       </Select>
     </div>

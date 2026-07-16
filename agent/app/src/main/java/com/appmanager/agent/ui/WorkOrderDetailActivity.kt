@@ -332,7 +332,8 @@ class WorkOrderDetailActivity : AppCompatActivity() {
                     deviceName = data.optString("device_name_snap", ""),
                     submitter = data.optString("submitter", ""),
                     createdAt = data.optString("created_at"),
-                    closedAt = data.optString("closed_at", "")
+                    closedAt = data.optString("closed_at", ""),
+                    settledAt = data.optString("settled_at", "")
                 )
 
                 val tagsArray = data.optJSONArray("tags")
@@ -386,7 +387,7 @@ class WorkOrderDetailActivity : AppCompatActivity() {
         tvPriority.text = "优先级: ${getPriorityLabel(wo.priority)}"
         tvDescription.text = wo.description.ifBlank { "无描述" }
         tvCreatedAt.text = "提交时间: ${wo.createdAt}"
-        tvElapsed.text = "耗时: ${calculateElapsed(wo.createdAt, wo.closedAt, wo.status)}"
+        tvElapsed.text = "耗时: ${calculateElapsed(wo.createdAt, wo.settledAt, wo.closedAt, wo.status)}"
 
         // Display submitter (fallback to device name)
         val submitterText = if (wo.submitter.isNotEmpty()) {
@@ -664,22 +665,31 @@ class WorkOrderDetailActivity : AppCompatActivity() {
         else -> priority
     }
 
-    private fun calculateElapsed(createdAt: String, closedAt: String, status: String): String {
+    // 处理耗时：终点优先用 settled_at（结算时刻，首次已解决/已关闭时冻结），
+    // 其次 closed_at，否则实时增长。重新打开会清空 settled_at，耗时恢复从提交时刻起算。
+    private fun calculateElapsed(createdAt: String, settledAt: String, closedAt: String, status: String): String {
         try {
             val fmt = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.getDefault())
             val startTime = fmt.parse(createdAt)?.time ?: return "-"
 
-            val endTime = if (closedAt.isNotBlank() && (status == "closed" || status == "resolved")) {
-                fmt.parse(closedAt)?.time ?: System.currentTimeMillis()
-            } else {
-                System.currentTimeMillis()
+            val settledMillis = when {
+                settledAt.isNotBlank() -> parseTsPrefix(fmt, settledAt)
+                closedAt.isNotBlank() && (status == "closed" || status == "resolved") -> parseTsPrefix(fmt, closedAt)
+                else -> null
             }
+            val endTime = settledMillis ?: System.currentTimeMillis()
 
             val elapsed = endTime - startTime
             return formatDuration(elapsed)
         } catch (e: Exception) {
             return "-"
         }
+    }
+
+    // 服务端时间戳可能带毫秒/时区后缀，截取到秒再解析。
+    private fun parseTsPrefix(fmt: SimpleDateFormat, ts: String): Long? {
+        val s = if (ts.length >= 19) ts.substring(0, 19) else ts
+        return fmt.parse(s)?.time
     }
 
     private fun formatDuration(millis: Long): String {
@@ -711,6 +721,7 @@ class WorkOrderDetailActivity : AppCompatActivity() {
         val submitter: String,
         val createdAt: String,
         val closedAt: String,
+        val settledAt: String = "",
         var tags: List<String> = emptyList()
     )
 

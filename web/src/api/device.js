@@ -1,7 +1,7 @@
 import axios from 'axios'
 import http from './http'
 
-export const getDevices = () => http.get('/devices')
+export const getDevices = (params) => http.get('/devices', { params })
 export const getDevice = (id) => http.get(`/devices/${id}`)
 export const createDevice = (data) => http.post('/devices', data)
 export const updateDevice = (id, data) => http.put(`/devices/${id}`, data)

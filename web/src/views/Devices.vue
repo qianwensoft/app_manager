@@ -21,6 +21,12 @@
         <AdbBridgeScan @registered="refresh" />
         <el-button :loading="refreshing" @click="refresh" :icon="RefreshIcon">刷新</el-button>
         <div style="flex:1"></div>
+        <el-input
+          v-model="searchKey"
+          placeholder="搜索名称/别名/型号/设备号"
+          clearable
+          style="width:220px"
+        />
         <el-radio-group v-model="viewMode" size="small">
           <el-radio-button value="table">列表</el-radio-button>
           <el-radio-button value="card">卡片</el-radio-button>
@@ -221,6 +227,7 @@ const addForm = ref({ ip: '', port: '5555' })
 const editForm = ref({ id: null, name: '', server_alias: '', group_name: '' })
 const selectedGroup = ref('')
 const viewMode = ref(readStoredViewMode())
+const searchKey = ref('')
 
 watch(viewMode, (v) => {
   try {
@@ -237,9 +244,24 @@ const groups = computed(() => {
 })
 
 const filteredDevices = computed(() => {
-  if (!selectedGroup.value) return devices.value
-  if (selectedGroup.value === '未分组') return devices.value.filter(d => !d.group_name)
-  return devices.value.filter(d => d.group_name === selectedGroup.value)
+  let list = devices.value
+  if (selectedGroup.value === '未分组') {
+    list = list.filter(d => !d.group_name)
+  } else if (selectedGroup.value) {
+    list = list.filter(d => d.group_name === selectedGroup.value)
+  }
+  const sk = searchKey.value.trim().toLowerCase()
+  if (sk) {
+    list = list.filter(d =>
+      (d.name || '').toLowerCase().includes(sk) ||
+      (d.serial || '').toLowerCase().includes(sk) ||
+      (d.server_alias || '').toLowerCase().includes(sk) ||
+      (d.agent_alias || '').toLowerCase().includes(sk) ||
+      (d.model || '').toLowerCase().includes(sk) ||
+      (d.android_serial || '').toLowerCase().includes(sk)
+    )
+  }
+  return list
 })
 
 const load = async () => {

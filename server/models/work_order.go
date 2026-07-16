@@ -16,11 +16,22 @@ type WorkOrderType struct {
 	// BoardCardTemplate 看板卡片正文模板：多行，每行一段，支持 {{field}} 占位符
 	// （field 取工单行字段，如 title/code/priority/status/device_name/tags/other_codes）。
 	// 空表示用默认卡片布局。
-	BoardCardTemplate string    `gorm:"type:text" json:"board_card_template"`
-	Enabled           bool      `gorm:"default:true" json:"enabled"`
-	SortOrder         int       `gorm:"default:0" json:"sort_order"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	BoardCardTemplate string `gorm:"type:text" json:"board_card_template"`
+	// AutoArchiveEnabled 是否对该类型启用「到达约定状态并超时后自动归档」。
+	AutoArchiveEnabled bool `gorm:"default:false" json:"auto_archive_enabled"`
+	// AutoArchiveStatuses 触发自动归档的结算状态（逗号分隔），如 "resolved,closed"；
+	// 空则默认 resolved,closed。工单进入这些状态并停留超过 AutoArchiveDelayMinutes 即归档。
+	AutoArchiveStatuses string `gorm:"size:64" json:"auto_archive_statuses"`
+	// AutoArchiveDelayMinutes 达到结算状态后到自动归档的等待分钟数（如 1440=24小时、43200=30天）。
+	AutoArchiveDelayMinutes int `gorm:"default:0" json:"auto_archive_delay_minutes"`
+	// LastAutoArchiveAt 最近一次自动归档扫描（定时或手动「立即执行」）运行时刻。
+	LastAutoArchiveAt *time.Time `json:"last_auto_archive_at"`
+	// LastAutoArchiveCount 最近一次扫描归档的工单数。
+	LastAutoArchiveCount int       `gorm:"default:0" json:"last_auto_archive_count"`
+	Enabled              bool      `gorm:"default:true" json:"enabled"`
+	SortOrder            int       `gorm:"default:0" json:"sort_order"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
 }
 
 func (WorkOrderType) TableName() string { return "work_order_types" }
@@ -69,6 +80,9 @@ type WorkOrder struct {
 	CreatedBy   uint       `gorm:"index" json:"created_by"`    // 提交人 user_id；device 提交时为 0
 	ClosedBy    *uint      `json:"closed_by"`
 	ClosedAt    *time.Time `json:"closed_at"`
+	// SettledAt 结算时刻：工单首次进入已解决/已关闭时冻结，处理耗时以此为终点、不再增长；
+	// 重新打开时清空，耗时继续从 CreatedAt 起算（重开不重置起点）。
+	SettledAt *time.Time `gorm:"index" json:"settled_at"`
 	// Archived 归档标记：归档后默认列表不展示，需单独归档页查询。
 	Archived   bool       `gorm:"index;default:false" json:"archived"`
 	ArchivedAt *time.Time `json:"archived_at"`

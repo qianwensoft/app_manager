@@ -74,6 +74,11 @@ func ListDevices(c *gin.Context) {
 		uid := c.GetUint("user_id")
 		q = q.Where("user_id = ?", uid)
 	}
+	if sk := strings.TrimSpace(c.Query("search_key")); sk != "" {
+		like := "%" + sk + "%"
+		q = q.Where("name LIKE ? OR serial LIKE ? OR server_alias LIKE ? OR agent_alias LIKE ? OR model LIKE ? OR android_serial LIKE ?",
+			like, like, like, like, like, like)
+	}
 	q.Find(&devices)
 	c.JSON(http.StatusOK, gin.H{"data": devices})
 }

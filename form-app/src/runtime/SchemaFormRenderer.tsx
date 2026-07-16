@@ -100,6 +100,10 @@ export default function SchemaFormRenderer({
   )
 
   const schema = useMemo(() => designSchema?.schema || {}, [designSchema])
+  const optionBindings = useMemo(
+    () => bindings.filter(b => b.query_interface_code),
+    [bindings],
+  )
   // schema 中是否已含提交类按钮节点（设计器拖入 SubmitButton / ActionButton）；
   // 有则由按钮组件驱动提交，配合 showDefaultSubmit 决定是否再渲染底部兜底按钮。
   const hasSubmitButton = useMemo(() => {
@@ -137,6 +141,15 @@ export default function SchemaFormRenderer({
     }
   }
 
+  useEffect(() => {
+    optionBindings.forEach((b) => {
+      if (!b.query_interface_code) return
+      const params = buildBindingParamValues(b, form.values)
+      applyOptions(b.field, b.query_interface_code, params)
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form, optionBindings, onQueryOptions])
+
   // 监听字段值变化 → 触发 binding 重新拉取选项；同步 valuesRef
   useEffect(() => {
     const effectId = 'schema-form-binding-effects'
@@ -145,7 +158,7 @@ export default function SchemaFormRenderer({
         valuesRef.current = form.values
         const addr: string = field?.address?.toString?.() || field?.path?.toString?.() || ''
         const shortName = addr.split('.').pop() || addr
-        const triggered = bindingsTriggeredBy(bindings, shortName)
+        const triggered = bindingsTriggeredBy(optionBindings, shortName)
         for (const b of triggered) {
           if (!b.query_interface_code) continue
           const params = buildBindingParamValues(b, form.values)
@@ -155,7 +168,7 @@ export default function SchemaFormRenderer({
     })
     return () => form.removeEffects(effectId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form, bindings, onQueryOptions])
+  }, [form, optionBindings, onQueryOptions])
 
   // 页面级统一事件系统：扫码 / 自定义事件 / 字段变更 / 按钮 → 条件 → 动作链
   const triggerButtonRef = useRef<ButtonTrigger>(() => {})

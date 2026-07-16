@@ -47,8 +47,8 @@ class PrinterSettingsActivity : AppCompatActivity() {
     private var selectedPrinterMac: String = ""
     private var selectedPrinterName: String = ""
 
-    /** 扫描到的未配对设备，按 MAC 去重 */
-    private val foundDevices = LinkedHashMap<String, BluetoothDevice>()
+    /** 扫描到的未配对设备，按 MAC 去重；值为 (device, rssi_dBm) */
+    private val foundDevices = LinkedHashMap<String, Pair<BluetoothDevice, Int>>()
 
     /** 是否已发起过扫描权限申请（用于区分「首次申请」与「永久拒绝」） */
     private var hasRequestedScanPerm = false
@@ -57,10 +57,10 @@ class PrinterSettingsActivity : AppCompatActivity() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
                 BluetoothDevice.ACTION_FOUND -> {
-                    val device: BluetoothDevice? =
-                        intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+                    val device: BluetoothDevice? = getBluetoothDevice(intent)
                     if (device != null && device.bondState != BluetoothDevice.BOND_BONDED) {
-                        foundDevices[device.address] = device
+                        val rssi = intent.getShortExtra(BluetoothDevice.EXTRA_RSSI, Short.MIN_VALUE).toInt()
+                        foundDevices[device.address] = Pair(device, rssi)
                         renderFoundDevices()
                     }
                 }
@@ -75,8 +75,7 @@ class PrinterSettingsActivity : AppCompatActivity() {
                     val state = intent.getIntExtra(
                         BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.BOND_NONE
                     )
-                    val device: BluetoothDevice? =
-                        intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+                    val device: BluetoothDevice? = getBluetoothDevice(intent)
                     if (state == BluetoothDevice.BOND_BONDED && device != null) {
                         // 配对成功：移出待配对列表，自动选为默认打印机
                         foundDevices.remove(device.address)
@@ -145,7 +144,7 @@ class PrinterSettingsActivity : AppCompatActivity() {
             addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
             addAction(android.bluetooth.BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
         }
-        ContextCompat.registerReceiver(this, discoveryReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        ContextCompat.registerReceiver(this, discoveryReceiver, filter, ContextCompat.RECEIVER_EXPORTED)
     }
 
     override fun onDestroy() {
@@ -273,7 +272,7 @@ class PrinterSettingsActivity : AppCompatActivity() {
             Toast.makeText(this, "请先开启蓝牙", Toast.LENGTH_SHORT).show()
             return
         }
-        // Android 11 及以下：经典蓝牙发现强依赖系统定位总开关，关闭时扫不到任何设备
+        // Android 12 及以下（未加 neverForLocation）：经典蓝牙发现强依赖系统定位总开关
         if (!PrinterManager.isLocationServiceOn(this)) {
             AlertDialog.Builder(this)
                 .setTitle(R.string.printer_discover_title)
@@ -299,17 +298,52 @@ class PrinterSettingsActivity : AppCompatActivity() {
 
     private fun renderFoundDevices() {
         containerFoundDevices.removeAllViews()
-        for ((_, device) in foundDevices) {
+        val sorted = foundDevices.values.sortedByDescending { (_, rssi) -> rssi }
+        for ((device, rssi) in sorted) {
             val name = safeDeviceName(device)
+            val rssiLabel = when {
+                rssi == Short.MIN_VALUE.toInt() -> ""
+                rssi >= -60 -> "信号强 ($rssi dBm)"
+                rssi >= -80 -> "信号中 ($rssi dBm)"
+                else -> "信号弱 ($rssi dBm)"
+            }
+            val typeLabel = when (device.type) {
+                BluetoothDevice.DEVICE_TYPE_LE -> "BLE"
+                BluetoothDevice.DEVICE_TYPE_DUAL -> "经典+BLE"
+                else -> "经典蓝牙"
+            }
+            val classLabel = btClassLabel(device)
+            val lines = buildString {
+                append(name)
+                append("\nMAC: ${device.address}")
+                append("   $typeLabel")
+                if (classLabel.isNotEmpty()) append(" · $classLabel")
+                if (rssiLabel.isNotEmpty()) append("\n$rssiLabel")
+            }
             val tv = TextView(this).apply {
-                text = "$name\n${device.address}"
-                textSize = 14f
+                text = lines
+                textSize = 13f
                 setPadding(dp(12), dp(12), dp(12), dp(12))
                 setBackgroundResource(android.R.drawable.list_selector_background)
                 setOnClickListener { confirmBond(device) }
             }
             containerFoundDevices.addView(tv)
         }
+    }
+
+    private fun btClassLabel(device: BluetoothDevice): String {
+        return try {
+            when (device.bluetoothClass?.majorDeviceClass) {
+                android.bluetooth.BluetoothClass.Device.Major.IMAGING -> "打印/图像"
+                android.bluetooth.BluetoothClass.Device.Major.COMPUTER -> "电脑"
+                android.bluetooth.BluetoothClass.Device.Major.PHONE -> "手机"
+                android.bluetooth.BluetoothClass.Device.Major.AUDIO_VIDEO -> "音频/视频"
+                android.bluetooth.BluetoothClass.Device.Major.PERIPHERAL -> "外设"
+                android.bluetooth.BluetoothClass.Device.Major.NETWORKING -> "网络设备"
+                android.bluetooth.BluetoothClass.Device.Major.HEALTH -> "医疗"
+                else -> ""
+            }
+        } catch (_: Throwable) { "" }
     }
 
     private fun confirmBond(device: BluetoothDevice) {
@@ -319,12 +353,17 @@ class PrinterSettingsActivity : AppCompatActivity() {
             .setMessage(getString(R.string.printer_bond_confirm, name))
             .setPositiveButton(R.string.printer_bond_action) { _, _ ->
                 PrinterManager.cancelDiscovery(this)
-                val ok = PrinterManager.bondDevice(device)
-                if (!ok) {
-                    Toast.makeText(this, R.string.printer_bond_failed, Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(this, R.string.printer_bond_pairing, Toast.LENGTH_SHORT).show()
-                }
+                // 等蓝牙栈停止发现后再发起配对，避免系统配对对话框被阻断
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    if (!isFinishing && !isDestroyed) {
+                        val ok = PrinterManager.bondDevice(device)
+                        if (!ok) {
+                            Toast.makeText(this, R.string.printer_bond_failed, Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(this, R.string.printer_bond_pairing, Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }, 300)
             }
             .setNegativeButton("取消", null)
             .show()
@@ -359,10 +398,20 @@ class PrinterSettingsActivity : AppCompatActivity() {
 
     /** 扫描设备所需权限：31+ 需 SCAN+CONNECT；<31 需定位。 */
     private fun ensureScanPermission(): Boolean {
-        val perms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
-        } else {
-            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        val perms = when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> {
+                // Android 13+：BT 发现与位置彻底解耦
+                arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+            }
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+                // Android 12：BLUETOOTH_SCAN 未加 neverForLocation，startDiscovery 仍需 ACCESS_FINE_LOCATION
+                arrayOf(
+                    Manifest.permission.BLUETOOTH_SCAN,
+                    Manifest.permission.BLUETOOTH_CONNECT,
+                    Manifest.permission.ACCESS_FINE_LOCATION
+                )
+            }
+            else -> arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
         }
         val missing = perms.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
@@ -414,6 +463,14 @@ class PrinterSettingsActivity : AppCompatActivity() {
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    @Suppress("DEPRECATION")
+    private fun getBluetoothDevice(intent: Intent): BluetoothDevice? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+        } else {
+            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+        }
 
     companion object {
         private const val REQ_BT_SELECT = 5201

@@ -96,6 +96,7 @@ export const workOrderEventParams = [
   { key: 'closed_by_id', label: '关闭人ID', category: '关闭人' },
   { key: 'closed_by_username', label: '关闭人用户名', category: '关闭人' },
   { key: 'closed_at', label: '关闭时间', category: '关闭人' },
+  { key: 'settled_at', label: '结算时间(耗时终点)', category: '关闭人' },
 
   // 归档人信息
   { key: 'archived_by_id', label: '归档人ID', category: '归档人' },
