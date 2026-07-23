@@ -607,6 +607,7 @@ func SetupRouter() *gin.Engine {
 		fapp.GET("/infos/code/:code", GetFormAppByCode)
 		fapp.POST("/infos", auth.RequireRole("admin", "operator"), CreateFormApp)
 		fapp.PUT("/infos/:id", auth.RequireRole("admin", "operator"), UpdateFormApp)
+		fapp.POST("/infos/:id/copy", auth.RequireRole("admin", "operator"), CopyFormApp)
 		fapp.DELETE("/infos/:id", auth.RequireRole("admin", "operator"), DeleteFormApp)
 		fapp.POST("/infos/:id/save-schema", auth.RequireRole("admin", "operator"), SaveFormAppSchema)
 		fapp.POST("/repair-generated-schemas", auth.RequireRole("admin", "operator"), RepairGeneratedFormSchemas)

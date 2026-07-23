@@ -951,6 +951,17 @@
   transform: translateY(-1px);
 }
 
+.formapp-action-btn-info {
+  color: #3B82F6;
+  border-color: #DBEAFE;
+}
+
+.formapp-action-btn-info:hover {
+  background: #EFF6FF;
+  border-color: #93C5FD;
+  transform: translateY(-1px);
+}
+
 .formapp-action-btn-danger {
   color: #DC2626;
   border-color: #FCA5A5;

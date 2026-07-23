@@ -104,6 +104,16 @@ export default function FormAppListPage() {
     setDeleteModalVisible(true)
   }
 
+  const handleCopy = async (app: FormAppRow) => {
+    try {
+      await authed(`/api/form-app/infos/${app.id}/copy`, 'POST')
+      message.success('应用复制成功')
+      await load()
+    } catch (e: any) {
+      message.error(e.message || '复制失败')
+    }
+  }
+
   const stats = {
     total: rows.length,
     published: rows.filter(r => r.publish_status).length,
@@ -344,6 +354,17 @@ export default function FormAppListPage() {
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                           </svg>
                           运行
+                        </button>
+                        <button
+                          type="button"
+                          className="formapp-action-btn formapp-action-btn-info"
+                          onClick={() => handleCopy(r)}
+                          title="复制应用"
+                        >
+                          <svg className="formapp-action-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                          </svg>
+                          复制
                         </button>
                         <button
                           type="button"

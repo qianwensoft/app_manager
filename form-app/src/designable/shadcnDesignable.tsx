@@ -267,6 +267,23 @@ ShadcnInput.Behavior = createBehavior({
               'x-decorator': 'FormItem',
               'x-component': 'Switch',
             },
+            inputMode: {
+              type: 'string',
+              title: '键盘类型',
+              'x-decorator': 'FormItem',
+              'x-component': 'Select',
+              enum: [
+                { label: '默认', value: undefined },
+                { label: 'text - 标准文本', value: 'text' },
+                { label: 'numeric - 纯数字', value: 'numeric' },
+                { label: 'decimal - 含小数点', value: 'decimal' },
+                { label: 'tel - 电话', value: 'tel' },
+                { label: 'email - 邮箱', value: 'email' },
+                { label: 'url - URL', value: 'url' },
+                { label: 'search - 搜索', value: 'search' },
+                { label: 'none - 不弹出', value: 'none' },
+              ],
+            },
           },
         },
         'x-validator': {

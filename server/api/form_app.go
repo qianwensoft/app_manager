@@ -136,6 +136,100 @@ func DeleteFormApp(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
+func CopyFormApp(c *gin.Context) {
+	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
+	var src models.FormAppInfo
+	if err := database.DB.First(&src, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+
+	// 生成新的应用编码（添加 _copy 后缀和时间戳）
+	newCode := fmt.Sprintf("%s_copy_%d", src.Code, time.Now().Unix())
+	newName := src.Name + " (副本)"
+
+	// 复制应用基本信息
+	newApp := models.FormAppInfo{
+		Code:            newCode,
+		Name:            newName,
+		Description:     src.Description,
+		Mode:            src.Mode,
+		DataSourceID:    src.DataSourceID,
+		EntryPageKey:    src.EntryPageKey,
+		GlobalConfig:    src.GlobalConfig,
+		DesignSchema:    src.DesignSchema,
+		RuntimeSchema:   src.RuntimeSchema,
+		UISchema:        src.UISchema,
+		PublishStatus:   0, // 副本默认为草稿状态
+		ShareToken:      "",
+		ShareExpireAt:   nil,
+		ContentVersion:  1,
+	}
+
+	tx := database.DB.Begin()
+	if tx.Error != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": tx.Error.Error()})
+		return
+	}
+
+	if err := tx.Create(&newApp).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 复制关联的页面
+	var pages []models.FormAppPage
+	if err := database.DB.Where("form_app_id = ?", src.ID).Find(&pages).Error; err == nil {
+		for _, page := range pages {
+			newPage := models.FormAppPage{
+				FormAppID:     newApp.ID,
+				PageKey:       page.PageKey,
+				PageType:      page.PageType,
+				Title:         page.Title,
+				DesignSchema:  page.DesignSchema,
+				InterfaceCode: page.InterfaceCode,
+				ConfigJSON:    page.ConfigJSON,
+				SortOrder:     page.SortOrder,
+			}
+			if err := tx.Create(&newPage).Error; err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+		}
+	}
+
+	// 复制页面链接
+	var links []models.FormAppPageLink
+	if err := database.DB.Where("form_app_id = ?", src.ID).Find(&links).Error; err == nil {
+		for _, link := range links {
+			newLink := models.FormAppPageLink{
+				FormAppID:    newApp.ID,
+				FromPageKey:  link.FromPageKey,
+				ToPageKey:    link.ToPageKey,
+				TriggerType:  link.TriggerType,
+				ParamMapping: link.ParamMapping,
+			}
+			if err := tx.Create(&newLink).Error; err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+		}
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 发布实时事件
+	publishFormAppEvent("form_app.created", newApp)
+
+	c.JSON(http.StatusOK, gin.H{"data": newApp})
+}
+
 func SaveFormAppSchema(c *gin.Context) {
 	id, _ := strconv.ParseUint(c.Param("id"), 10, 64)
 	var body struct {
