@@ -5,6 +5,8 @@ import { useCanvasBindingData } from '@/hooks/useCanvasBindingData'
 import CanvasViewer from '@/components/CanvasViewer'
 import type { CanvasProject, CanvasData } from '@/types'
 import { shouldAutoLandscape, isLandscape } from '@/utils/deviceDetect'
+import { useToastHost } from '@/components/ToastHost'
+import { resetGlobalContext } from '@/runtime/workflow/globalContext'
 
 type DataMode = 'stomp' | 'http' | 'none'
 
@@ -26,6 +28,13 @@ export default function PreviewPage() {
   const [headerHovered, setHeaderHovered] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const [needLandscape, setNeedLandscape] = useState(false)
+  const { toast, node: toastNode } = useToastHost()
+
+  // 进入/离开预览时重置全局工作流上下文（跨画布常驻，退出预览清空）
+  useEffect(() => {
+    resetGlobalContext()
+    return () => resetGlobalContext()
+  }, [id])
 
   useEffect(() => {
     if (!info?.canvas_data) return
@@ -260,6 +269,10 @@ export default function PreviewPage() {
                 tableLiveData={tableLiveData}
                 scadaCode={info?.scada_code}
                 onSwitchCanvas={setActiveId}
+                workflows={project?.workflows}
+                workflowLibs={project?.workflowLibs}
+                enableWorkflows
+                onToast={toast}
               />
             </div>
           ) : (
@@ -276,6 +289,10 @@ export default function PreviewPage() {
                 tableLiveData={tableLiveData}
                 scadaCode={info?.scada_code}
                 onSwitchCanvas={setActiveId}
+                workflows={project?.workflows}
+                workflowLibs={project?.workflowLibs}
+                enableWorkflows
+                onToast={toast}
               />
             </div>
           )
@@ -287,6 +304,7 @@ export default function PreviewPage() {
           </div>
         )}
       </div>
+      {toastNode}
     </div>
   )
 }

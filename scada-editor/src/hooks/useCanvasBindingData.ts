@@ -55,11 +55,15 @@ export function useCanvasBindingData({
   useInterfaceBindingData({
     elements: interfaceEnabled ? elements : [],
     onData: mergeData,
+    scadaCode,
+    pointData,
+    shareToken,
   })
 
   const tableLiveData = useTableBindingData({
     elements,
     enabled: interfaceEnabled,
+    shareToken,
   })
 
   return { pointData, tableLiveData }

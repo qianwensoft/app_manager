@@ -5,6 +5,7 @@ import type { PointDataMap } from '@/hooks/useStompPointData'
 import { mergeAnimStyle } from '@/runtime/animationExecutor'
 import { getStyleValue, type StyleFieldDef, chartSchema } from '@/schema/chartSchema'
 import { applyFormatter } from '@/hooks/useInterfaceBindingData'
+import { parseBindingValue, toNumber } from '@/runtime/bindingData'
 
 interface Props {
   el: CanvasElement
@@ -12,13 +13,14 @@ interface Props {
   pointData?: PointDataMap
 }
 
-function applyTransform(raw: number, transform?: string): number {
-  if (!transform) return raw
+function applyTransform(raw: unknown, transform?: string): number {
+  const value = toNumber(raw)
+  if (!transform) return value
   try {
     // eslint-disable-next-line no-new-func
-    return Number(new Function('v', `return (${transform})`)(raw))
+    return Number(new Function('v', `return (${transform})`)(value))
   } catch {
-    return raw
+    return value
   }
 }
 
@@ -47,7 +49,7 @@ function parseGaugeColors(s: string): [number, string][] {
  * - static mode: pull from pb.staticData and inject into pointData-compatible keys
  * - interface mode: read __iface_series_* keys from pointData
  */
-function resolveChartData(pb: PointBinding | undefined, rawPointData: PointDataMap): {
+function resolveChartData(pb: PointBinding | undefined, rawPointData: PointDataMap, elId?: string): {
   seriesKeys: string[][]
   categoryKey: string | undefined
   pointData: PointDataMap
@@ -60,44 +62,65 @@ function resolveChartData(pb: PointBinding | undefined, rawPointData: PointDataM
     const sd = pb.staticData ?? {}
     const syntheticData: PointDataMap = {}
     const seriesKeys: string[][] = []
+    let categoryKey: string | undefined
 
-    for (const [key, val] of Object.entries(sd)) {
-      if (Array.isArray(val)) {
+    for (const [key, raw] of Object.entries(sd)) {
+      const value = parseBindingValue(raw)
+      if (value === undefined) continue
+      if (key === 'category' && Array.isArray(value)) {
+        categoryKey = '__static_category'
+        syntheticData[categoryKey] = value.map(String)
+        continue
+      }
+      if (Array.isArray(value)) {
         const keys: string[] = []
-        ;(val as unknown[]).forEach((v, i) => {
-          const k = `__static_${key}_${i}`
-          syntheticData[k] = Number(v)
-          keys.push(k)
+        value.forEach((item, index) => {
+          const dataKey = `__static_${key}_${index}`
+          syntheticData[dataKey] = item
+          keys.push(dataKey)
         })
         seriesKeys.push(keys)
       } else {
-        const k = `__static_${key}`
-        syntheticData[k] = Number(val)
-        seriesKeys.push([k])
+        const dataKey = `__static_${key}`
+        syntheticData[dataKey] = value
+        seriesKeys.push([dataKey])
       }
     }
-    return { seriesKeys, categoryKey: undefined, pointData: { ...rawPointData, ...syntheticData } }
+    return { seriesKeys, categoryKey, pointData: { ...rawPointData, ...syntheticData } }
   }
 
   if (mode === 'interface') {
-    // __iface_series_0_0, __iface_series_0_1, ... already in rawPointData
+    // 优先取元件专属键（浏览器轮询），回退到全局键（STOMP 推送）
+    const scopedPrefix = elId ? `__ifx_${elId}__` : ''
+    const hasScopedSeries = !!scopedPrefix && (
+      rawPointData[`${scopedPrefix}series_0`] !== undefined ||
+      rawPointData[`${scopedPrefix}series_0_0`] !== undefined
+    )
+    const prefix = hasScopedSeries ? scopedPrefix : '__iface_'
+
     const seriesKeys: string[][] = []
     let idx = 0
     while (true) {
       const keys: string[] = []
       let i = 0
-      while (rawPointData[`__iface_series_${idx}_${i}`] !== undefined) {
-        keys.push(`__iface_series_${idx}_${i}`)
+      while (rawPointData[`${prefix}series_${idx}_${i}`] !== undefined) {
+        keys.push(`${prefix}series_${idx}_${i}`)
         i++
       }
-      if (rawPointData[`__iface_series_${idx}`] !== undefined) {
-        keys.push(`__iface_series_${idx}`)
+      if (rawPointData[`${prefix}series_${idx}`] !== undefined) {
+        keys.push(`${prefix}series_${idx}`)
       }
       if (keys.length === 0) break
       seriesKeys.push(keys)
       idx++
     }
-    return { seriesKeys, categoryKey: undefined, pointData: rawPointData }
+    const scopedCategory = scopedPrefix ? `${scopedPrefix}category` : ''
+    const categoryKey = scopedCategory && rawPointData[scopedCategory] !== undefined
+      ? scopedCategory
+      : rawPointData.__iface_category !== undefined
+        ? '__iface_category'
+        : undefined
+    return { seriesKeys, categoryKey, pointData: rawPointData }
   }
 
   if (mode === 'simulation') {
@@ -131,7 +154,7 @@ function resolveChartData(pb: PointBinding | undefined, rawPointData: PointDataM
 function buildOption(el: CanvasElement, rawPointData: PointDataMap): echarts.EChartsOption {
   const cfg = (el.properties?.chartConfig ?? {}) as Record<string, unknown>
   const pb = el.pointBinding
-  const { seriesKeys, categoryKey, pointData } = resolveChartData(pb, rawPointData)
+  const { seriesKeys, categoryKey, pointData } = resolveChartData(pb, rawPointData, el.id)
   const transform = pb?.transform
 
   // 共用 title / bg

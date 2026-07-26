@@ -73,6 +73,7 @@ func main() {
 		api.StartStompStatsPublisher()
 		api.StartWorkOrderAutoArchiver()
 		scada.StartSimEngine()
+		scada.ReloadInterfacePollers()
 		scada.StartBatcher()
 		go scada.StartUDPIngress(9000)
 		agent.StartStaleDeviceReaper()

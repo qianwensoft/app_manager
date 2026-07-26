@@ -1,12 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useEditorStore } from '@/store/editorStore'
 import { pushHistory } from '@/hooks/useHistory'
 import { scadaApi } from '@/api/scada'
 import { getChartSchema, type StyleFieldDef } from '@/schema/chartSchema'
 import type {
   CanvasElement, TableColumn, ElementEvent, FormFieldRule, FormFieldReaction,
-  ElementAnimation, PointBinding, DataBindingMode,
+  ElementAnimation, PointBinding, DataBindingMode, DateTimeConfig,
 } from '@/types'
+import type { ScadaWorkflow } from '@/types/workflow'
+import { generateId } from '@/utils/canvas'
+import {
+  DATETIME_PRESETS, DATETIME_TOKENS, formatDate, parseAnyToDate, defaultDateTimeConfig,
+} from '@/runtime/dateTimeFormat'
 
 /* ── Shared input ── */
 const Inp = ({ val, onChange, type = 'text', placeholder = '' }: {
@@ -141,6 +147,204 @@ const PairRow = ({ l1, v1, l2, v2, on1, on2 }: {
     </div>
   </div>
 )
+
+/* ── 日期时间引导式配置 ── */
+function DateTimeConfigSection({ el, onUpdate }: {
+  el: CanvasElement
+  onUpdate: (key: keyof CanvasElement, value: unknown) => void
+}) {
+  const dt = el.dateTime
+  const enabled = !!dt?.enabled
+  const cfg: DateTimeConfig = dt ?? defaultDateTimeConfig()
+  const formatRef = useRef<HTMLInputElement>(null)
+
+  const patch = (partial: Partial<DateTimeConfig>) => {
+    const base: DateTimeConfig = dt ?? defaultDateTimeConfig()
+    onUpdate('dateTime', { ...base, ...partial })
+  }
+
+  // 实时预览：current 用系统时间；data 用一个示例时间戳
+  const sampleDate = (cfg.source ?? 'current') === 'current'
+    ? new Date()
+    : (parseAnyToDate(Date.now(), cfg.inputType ?? 'auto') ?? new Date())
+  let preview = ''
+  try {
+    preview = formatDate(sampleDate, cfg.format || 'YYYY-MM-DD HH:mm:ss', cfg.locale ?? 'zh')
+  } catch {
+    preview = '(格式无效)'
+  }
+
+  const insertToken = (token: string) => {
+    const input = formatRef.current
+    const current = cfg.format ?? ''
+    if (input && typeof input.selectionStart === 'number') {
+      const s = input.selectionStart
+      const e = input.selectionEnd ?? s
+      patch({ format: current.slice(0, s) + token + current.slice(e) })
+      requestAnimationFrame(() => {
+        input.focus()
+        const pos = s + token.length
+        input.setSelectionRange(pos, pos)
+      })
+    } else {
+      patch({ format: current + token })
+    }
+  }
+
+  const chipStyle: React.CSSProperties = {
+    fontSize: 10, padding: '2px 7px', cursor: 'pointer',
+    background: 'var(--bg-base)', border: '1px solid var(--border)',
+    borderRadius: 10, color: 'var(--text-secondary)', whiteSpace: 'nowrap',
+  }
+  const dtSelectStyle: React.CSSProperties = {
+    width: '100%', height: 26, background: 'var(--bg-base)',
+    border: '1px solid var(--border)', color: 'var(--text-primary)',
+    borderRadius: 'var(--radius-sm)', fontSize: 11, padding: '0 4px', outline: 'none',
+  }
+
+  return (
+    <Section title="日期时间" defaultOpen={enabled}>
+      <Row label="启用">
+        <Toggle
+          checked={enabled}
+          onChange={(v) => {
+            if (v) patch({ enabled: true })
+            else onUpdate('dateTime', { ...cfg, enabled: false })
+          }}
+          label={enabled ? '按日期时间显示' : '普通文本'}
+        />
+      </Row>
+
+      {enabled && (
+        <>
+          {/* 实时预览 */}
+          <div style={{
+            margin: '2px 0 4px', padding: '8px 10px', borderRadius: 'var(--radius-sm)',
+            background: 'var(--bg-base)', border: '1px dashed var(--border-accent, var(--border))',
+            textAlign: 'center',
+          }}>
+            <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 3, letterSpacing: '0.06em' }}>预览</div>
+            <div style={{ fontSize: 15, fontFamily: 'var(--font-mono)', color: 'var(--accent)' }}>{preview || '--'}</div>
+          </div>
+
+          <Row label="数据来源">
+            <select
+              value={cfg.source ?? 'current'}
+              onChange={(e) => patch({ source: e.target.value as DateTimeConfig['source'] })}
+              style={dtSelectStyle}
+            >
+              <option value="current">当前系统时间（自动刷新）</option>
+              <option value="data">绑定数据（解析为时间）</option>
+            </select>
+          </Row>
+
+          {/* 快捷格式预设 */}
+          <div>
+            <div style={labelStyle}>常用格式</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {DATETIME_PRESETS.map((p) => {
+                const active = (cfg.format ?? '') === p.format
+                return (
+                  <button
+                    key={p.format}
+                    type="button"
+                    onClick={() => patch({ format: p.format })}
+                    title={p.format}
+                    style={{
+                      ...chipStyle,
+                      ...(active ? { borderColor: 'var(--accent)', color: 'var(--accent)', background: 'var(--accent-muted)' } : {}),
+                    }}
+                  >{p.label}</button>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* 格式串（可手动编辑 + 令牌插入） */}
+          <div>
+            <div style={labelStyle}>格式串</div>
+            <input
+              ref={formatRef}
+              value={cfg.format ?? ''}
+              placeholder="YYYY-MM-DD HH:mm:ss"
+              onChange={(e) => patch({ format: e.target.value })}
+              style={{
+                width: '100%', height: 26, background: 'var(--bg-base)',
+                border: '1px solid var(--border)', color: 'var(--text-primary)',
+                padding: '0 6px', borderRadius: 'var(--radius-sm)', fontSize: 11,
+                outline: 'none', fontFamily: 'var(--font-mono)',
+              }}
+            />
+          </div>
+
+          {/* 令牌插入 */}
+          <div>
+            <div style={labelStyle}>点击插入字段</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {DATETIME_TOKENS.map((t) => (
+                <button
+                  key={t.token}
+                  type="button"
+                  onClick={() => insertToken(t.token)}
+                  title={`${t.desc} 示例 ${t.sample}`}
+                  style={{ ...chipStyle, fontFamily: 'var(--font-mono)' }}
+                >{t.token}</button>
+              ))}
+            </div>
+          </div>
+
+          <Row label="语言">
+            <select
+              value={cfg.locale ?? 'zh'}
+              onChange={(e) => patch({ locale: e.target.value as DateTimeConfig['locale'] })}
+              style={dtSelectStyle}
+            >
+              <option value="zh">中文（星期/月名）</option>
+              <option value="en">英文（星期/月名）</option>
+            </select>
+          </Row>
+
+          {(cfg.source ?? 'current') === 'current' ? (
+            <Row label="刷新(ms)">
+              <Inp
+                val={cfg.refreshMs ?? 1000}
+                type="number"
+                onChange={(v) => patch({ refreshMs: Math.max(200, Number(v) || 1000) })}
+              />
+            </Row>
+          ) : (
+            <>
+              <Row label="输入类型">
+                <select
+                  value={cfg.inputType ?? 'auto'}
+                  onChange={(e) => patch({ inputType: e.target.value as DateTimeConfig['inputType'] })}
+                  style={dtSelectStyle}
+                >
+                  <option value="auto">自动识别（时间戳/字符串）</option>
+                  <option value="unix_s">Unix 秒级时间戳</option>
+                  <option value="unix_ms">Unix 毫秒时间戳</option>
+                  <option value="iso">ISO / 日期字符串</option>
+                  <option value="string">普通日期字符串</option>
+                </select>
+              </Row>
+              <div style={{ fontSize: 9, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                自动识别：10 位按秒、13 位按毫秒解析；非数字按日期字符串解析。数据来源取自本元件的数据绑定。
+              </div>
+            </>
+          )}
+
+          <Row label="无值占位">
+            <Inp
+              val={cfg.fallback ?? ''}
+              placeholder="--"
+              onChange={(v) => patch({ fallback: v })}
+            />
+          </Row>
+        </>
+      )}
+    </Section>
+  )
+}
 
 /* ── Image resource section with upload ── */
 function ImageResourceSection({ imageUrl, onUpdate }: { imageUrl?: string; onUpdate: (v: string) => void }) {
@@ -872,6 +1076,7 @@ const EVENT_ACTIONS: { value: ElementEvent['action']; label: string }[] = [
   { value: 'navigate',        label: '打开链接' },
   { value: 'popup',           label: '弹出窗口' },
   { value: 'script',          label: '执行脚本' },
+  { value: 'trigger-workflow', label: '触发工作流' },
 ]
 
 function EventEditorSection({ el, onUpdate }: {
@@ -879,10 +1084,35 @@ function EventEditorSection({ el, onUpdate }: {
   onUpdate: (key: string, value: unknown) => void
 }) {
   const project = useEditorStore((s) => s.project)
+  const scadaId = useEditorStore((s) => s.scadaId)
+  const addWorkflow = useEditorStore((s) => s.addWorkflow)
+  const navigate = useNavigate()
   const canvasList = Object.values(project.canvases)
   const modalElements = Object.values(project.canvases)
     .flatMap((c) => c.elements)
     .filter((e) => e.type === 'layout-modal')
+  const workflows = project.workflows ?? []
+
+  // 与该元素相关的工作流：以其为 component 触发源，或被 trigger-workflow 引用
+  const linkedWorkflows = workflows.filter((w) => {
+    if (w.source?.kind === 'component' && w.source.elementId === el.id) return true
+    return (el.events ?? []).some((ev) => ev.action === 'trigger-workflow' && ev.workflowId === w.id)
+  })
+
+  const createComponentWorkflow = () => {
+    const wf: ScadaWorkflow = {
+      id: generateId(),
+      name: `${el.name || el.type} 工作流`,
+      scope: 'canvas',
+      canvasId: project.activeCanvasId,
+      source: { kind: 'component', elementId: el.id, event: 'click' },
+      actions: [],
+      graph: { nodes: [], edges: [] },
+      enabled: true,
+    }
+    addWorkflow(wf)
+    if (scadaId) navigate(`/workflow/${scadaId}`)
+  }
 
   const events: ElementEvent[] = el.events ?? []
 
@@ -923,6 +1153,16 @@ function EventEditorSection({ el, onUpdate }: {
     if (ev.action === 'script') {
       return (
         <Inp val={ev.script ?? ''} onChange={(v) => setEvent(i, { script: v })} placeholder="alert('hello')" />
+      )
+    }
+    if (ev.action === 'trigger-workflow') {
+      return (
+        <select value={ev.workflowId ?? ''} onChange={(e) => setEvent(i, { workflowId: e.target.value })} style={selectStyle}>
+          <option value="">— 选择工作流 —</option>
+          {workflows.map((w) => (
+            <option key={w.id} value={w.id}>{w.name || w.id}</option>
+          ))}
+        </select>
       )
     }
     return (
@@ -986,6 +1226,40 @@ function EventEditorSection({ el, onUpdate }: {
       }}>
         + 添加事件
       </button>
+
+      {/* 工作流绑定 */}
+      <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', letterSpacing: '0.04em' }}>工作流</span>
+          <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{linkedWorkflows.length} 个关联</span>
+        </div>
+        {linkedWorkflows.map((w) => (
+          <div key={w.id} style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '4px 7px', marginBottom: 3, borderRadius: 'var(--radius-sm)',
+            background: 'var(--bg-base)', border: '1px solid var(--border)',
+          }}>
+            <span style={{ fontSize: 10, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {w.name || w.id}
+              <span style={{ marginLeft: 6, fontSize: 8, color: 'var(--text-muted)' }}>
+                {w.source?.kind === 'component' ? '组件源' : '引用'}
+              </span>
+            </span>
+            <button
+              onClick={() => { if (scadaId) navigate(`/workflow/${scadaId}`) }}
+              style={{ ...btnStyle, color: 'var(--accent)', fontSize: 9 }}
+            >编辑</button>
+          </div>
+        ))}
+        <button onClick={createComponentWorkflow} style={{
+          width: '100%', padding: '5px 0', cursor: 'pointer', marginTop: 3,
+          background: 'var(--bg-surface)', color: 'var(--text-secondary)',
+          border: '1px dashed var(--border-strong)',
+          borderRadius: 'var(--radius-sm)', fontSize: 11,
+        }}>
+          + 新建组件工作流
+        </button>
+      </div>
     </div>
   )
 }
@@ -1418,9 +1692,41 @@ function ElementBasicTabContent({ el, onUpdate, onUngroup }: {
     <div style={{ display: 'flex', flexDirection: 'column' }}>
       {el.type === 'group' && (
         <Section title="组合" accent>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
             包含 {el.children?.length ?? 0} 个子元素
           </div>
+          <Row label="对象模板">
+            <Toggle
+              checked={el.groupBinding?.enabled ?? false}
+              onChange={(enabled) => onUpdate('groupBinding', { ...(el.groupBinding ?? {}), enabled, source: el.groupBinding?.source ?? 'static', layout: el.groupBinding?.layout ?? 'grid' })}
+              label={el.groupBinding?.enabled ? '已启用' : '关闭'}
+            />
+          </Row>
+          {el.groupBinding?.enabled && (
+            <>
+              <Row label="对象来源">
+                <select value={el.groupBinding.source ?? 'static'} onChange={(e) => onUpdate('groupBinding', { ...el.groupBinding, source: e.target.value })}>
+                  <option value="static">静态 JSON</option>
+                  <option value="point">点位路径</option>
+                  <option value="interface">接口结果</option>
+                </select>
+              </Row>
+              {el.groupBinding.source === 'static' ? (
+                <Row label="对象/数组 JSON"><Inp val={typeof el.groupBinding.value === 'string' ? el.groupBinding.value : JSON.stringify(el.groupBinding.value ?? [])} onChange={(value) => onUpdate('groupBinding', { ...el.groupBinding, value })} placeholder='[{"name":"设备 A"}]' /></Row>
+              ) : (
+                <Row label="数组路径"><Inp val={el.groupBinding.path ?? ''} onChange={(path) => onUpdate('groupBinding', { ...el.groupBinding, path })} placeholder="items" /></Row>
+              )}
+              <Row label="实例别名"><Inp val={el.groupBinding.itemAlias ?? 'item'} onChange={(itemAlias) => onUpdate('groupBinding', { ...el.groupBinding, itemAlias })} /></Row>
+              <Row label="布局">
+                <select value={el.groupBinding.layout ?? 'grid'} onChange={(e) => onUpdate('groupBinding', { ...el.groupBinding, layout: e.target.value })}>
+                  <option value="grid">网格</option><option value="horizontal">横向</option><option value="vertical">纵向</option>
+                </select>
+              </Row>
+              <PairRow l1="列数" v1={el.groupBinding.columns ?? 1} l2="最大实例" v2={el.groupBinding.maxInstances ?? 100}
+                on1={(columns) => onUpdate('groupBinding', { ...el.groupBinding, columns: Math.max(1, Number(columns)) })}
+                on2={(maxInstances) => onUpdate('groupBinding', { ...el.groupBinding, maxInstances: Math.max(1, Number(maxInstances)) })} />
+            </>
+          )}
           <button
             onClick={onUngroup}
             style={{
@@ -1512,6 +1818,10 @@ function ElementBasicTabContent({ el, onUpdate, onUngroup }: {
               label={el.fontWeight === 'bold' ? '粗体' : '常规'} />
           </Row>
         </Section>
+      )}
+
+      {(el.type === 'text' || el.type === 'button') && (
+        <DateTimeConfigSection el={el} onUpdate={onUpdate} />
       )}
 
       {(el.type === 'image-bg' || el.type === 'image-widget' ||

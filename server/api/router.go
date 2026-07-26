@@ -87,6 +87,8 @@ func SetupRouter() *gin.Engine {
 
 	// 免登录：组态分享
 	r.GET("/api/scada/info/share/:token", GetScadaInfoByShareToken)
+	// 免登录：组态分享态调用其画布引用的平台数据接口（只读，token 在 body，白名单校验）
+	r.POST("/api/scada/share/interfaces/:id/invoke", InvokeScadaShareInterface)
 	// 免登录：表单分享
 	r.GET("/api/form-app/info/share/:token", GetFormAppByShareToken)
 	// 工单报告分享（免登录访问基础信息，需登录模式下需要 JWT）

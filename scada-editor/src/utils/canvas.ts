@@ -1,5 +1,15 @@
 import type { CanvasElement, CanvasData } from '@/types'
 import type { DrawAnimState } from '@/runtime/animationExecutor'
+import { formatDate } from '@/runtime/dateTimeFormat'
+
+/** 编辑器画布上文本/按钮的显示文本：current 源的日期时间实时渲染，其余用元件文本 */
+function editorDisplayText(el: CanvasElement): string {
+  const dt = el.dateTime
+  if (dt?.enabled && (dt.source ?? 'current') === 'current') {
+    return formatDate(new Date(), dt.format || 'YYYY-MM-DD HH:mm:ss', dt.locale ?? 'zh')
+  }
+  return el.text || ''
+}
 
 export function drawGrid(ctx: CanvasRenderingContext2D, canvas: CanvasData, zoom: number) {
   if (!canvas.showGrid) return
@@ -45,6 +55,8 @@ export function drawElement(
 
   switch (el.type) {
     case 'group': {
+      // 空组合不绘制，避免残留蓝色虚线小框（"蓝点"）无法消除
+      if (!el.children || el.children.length === 0) break
       ctx.strokeStyle = 'rgba(74,158,255,0.35)'
       ctx.lineWidth = 1
       ctx.setLineDash([5, 4])
@@ -96,9 +108,11 @@ export function drawElement(
       const weight = el.fontWeight === 'bold' ? 'bold ' : ''
       const fstyle = el.fontStyle === 'italic' ? 'italic ' : ''
       ctx.font = `${fstyle}${weight}${(el.fontSize ?? 14) * zoom}px ${el.fontFamily || 'sans-serif'}`
-      ctx.textAlign = el.textAlign || 'center'
+      const align = el.textAlign || 'center'
+      ctx.textAlign = align
       ctx.textBaseline = 'middle'
-      ctx.fillText(el.text || '', x + w / 2, y + h / 2, w)
+      const tx = align === 'left' ? x + 2 : align === 'right' ? x + w - 2 : x + w / 2
+      ctx.fillText(editorDisplayText(el), tx, y + h / 2, w)
       break
     }
     case 'image':

@@ -181,7 +181,7 @@ export default function TrendWidget({ el, zoom, pointData, scadaCode }: Props) {
       const v = pointData[key]
       if (v === undefined) return
       const buf = bufRef.current.get(key) ?? []
-      const next = trimBuffer([...buf, { t: now, v }], maxPoints, windowMs)
+      const next = trimBuffer([...buf, { t: now, v: Number(v) }], maxPoints, windowMs)
       bufRef.current.set(key, next)
       changed = true
     })

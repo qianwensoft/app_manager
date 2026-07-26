@@ -33,6 +33,7 @@ const Icons = {
   Back:    'M19 12H5M12 19l-7-7 7-7',
   Publish: 'M12 2v13M12 2 7 7M12 2l5 5M5 16v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3',
   Unpublish: 'M12 15V2M12 15l-5-5M12 15l5-5M5 16v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3',
+  Workflow: 'M6 3v12M6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM18 9v3a3 3 0 0 1-3 3H9',
 }
 
 /* ── Divider ── */
@@ -44,9 +45,10 @@ interface Props {
   publishStatus?: number
   onPreview?: () => void
   onBack?: () => void
+  onWorkflow?: () => void
 }
 
-export default function EditorHeader({ scadaName, scadaCode, publishStatus, onPreview, onBack }: Props) {
+export default function EditorHeader({ scadaName, scadaCode, publishStatus, onPreview, onBack, onWorkflow }: Props) {
   const store = useEditorStore()
   const { isDirty, zoom, setZoom, project, scadaId } = store
   const saveCanvas = useSaveCanvas()
@@ -238,6 +240,15 @@ export default function EditorHeader({ scadaName, scadaCode, publishStatus, onPr
           <Icon d={Icons.Eye} size={13} />
         </Button>
       </Tooltip>
+
+      {/* Workflow */}
+      {onWorkflow && (
+        <Tooltip content="工作流">
+          <Button size="icon" variant="ghost" onClick={onWorkflow} aria-label="工作流">
+            <Icon d={Icons.Workflow} size={13} />
+          </Button>
+        </Tooltip>
+      )}
 
       {/* Save */}
       <button

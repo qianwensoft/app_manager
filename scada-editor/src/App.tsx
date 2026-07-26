@@ -8,6 +8,7 @@ import SharePage from '@/pages/SharePage'
 import SchemaPage from '@/pages/SchemaPage'
 import SimPointsPage from '@/pages/SimPointsPage'
 import CustomizeComponentsPage from '@/pages/CustomizeComponentsPage'
+import WorkflowDesignerPage from '@/pages/WorkflowDesignerPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -25,6 +26,7 @@ export default function App() {
           <Route path="/" element={<Navigate to="/scada" replace />} />
           <Route path="/scada" element={<ScadaListPage />} />
           <Route path="/editor/:id" element={<EditorPage />} />
+          <Route path="/workflow/:id" element={<WorkflowDesignerPage />} />
           <Route path="/preview/:id" element={<PreviewPage />} />
           <Route path="/share/:token" element={<SharePage />} />
           <Route path="/schema" element={<SchemaPage />} />

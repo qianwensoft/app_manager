@@ -1,11 +1,18 @@
 import { useEffect, useRef, useCallback } from 'react'
 import type { CanvasElement, PointBinding, ValueFormatter } from '@/types'
+import { resolveInterfaceParams, type InterfaceParamContext } from '@/runtime/interfaceParams'
 import type { PointDataMap } from './useStompPointData'
 import { resolveElementDisplayValue } from '@/runtime/bindingResolver'
+import { flattenBindingValue, getPath, ifaceKeyPrefix, parseBindingValue } from '@/runtime/bindingData'
 
 interface Options {
   elements: CanvasElement[]
   onData: (data: PointDataMap) => void
+  scadaCode?: string
+  pointData?: PointDataMap
+  objectContexts?: Record<string, Record<string, unknown>>
+  /** 免登分享 token：走 /api/scada/share/interfaces/:id/invoke，不带 JWT */
+  shareToken?: string
 }
 
 function applyTransform(raw: number, transform?: string): number {
@@ -61,48 +68,36 @@ export function applyFormatter(value: number | string, fmt?: ValueFormatter): st
   return result
 }
 
-/** Extract flat PointDataMap from a nested JSON response + field mappings */
-function extractMappedData(payload: unknown, binding: PointBinding): PointDataMap {
+/**
+ * Extract flat PointDataMap from a nested JSON response + field mappings.
+ * 键使用元件专属前缀（elId），避免多个绑定同一接口的元件互相覆盖。
+ */
+function extractMappedData(payload: unknown, binding: PointBinding, elId?: string): PointDataMap {
   const result: PointDataMap = {}
   const mappings = binding.ifaceFieldMappings ?? []
   if (!mappings.length) return result
 
-  const schema = binding.chartSeriesKeys
+  const prefix = ifaceKeyPrefix(elId)
 
   for (const m of mappings) {
     if (!m.sourceField || !m.target) continue
 
-    // Resolve sourceField path (dot-separated) from payload
-    let val: unknown = payload
-    for (const seg of m.sourceField.split('.')) {
-      if (val && typeof val === 'object') {
-        val = (val as Record<string, unknown>)[seg]
-      } else {
-        val = undefined
-        break
-      }
-    }
-
+    const val = getPath(payload, m.sourceField)
     if (val === undefined) continue
-    const num = Number(val)
 
-    // Map to target key
     if (m.target === 'category') {
-      // store as-is for category (string array)
-      result[`__iface_category`] = num
+      result[`${prefix}category`] = Array.isArray(val) ? val.map(String) : [String(val)]
     } else if (m.target.startsWith('series:')) {
       const idx = parseInt(m.target.slice(7), 10)
-      // For arrays, expand to individual keys: series:0:0, series:0:1, ...
       if (Array.isArray(val)) {
-        val.forEach((v, i) => {
-          result[`__iface_series_${idx}_${i}`] = Number(v)
+        val.forEach((item, itemIndex) => {
+          result[`${prefix}series_${idx}_${itemIndex}`] = item
         })
       } else {
-        result[`__iface_series_${idx}`] = num
+        result[`${prefix}series_${idx}`] = val
       }
     } else {
-      // Element property target (text, fill, value...)
-      result[`__iface_${m.target}`] = num
+      flattenBindingValue(`${prefix}${m.target}`, val, result)
     }
   }
 
@@ -110,32 +105,49 @@ function extractMappedData(payload: unknown, binding: PointBinding): PointDataMa
 }
 
 /** Fetch interface data for a single binding and merge results */
-async function fetchIfaceData(binding: PointBinding): Promise<PointDataMap> {
-  if (binding.ifaceSourceType !== 'data_iface') return {}
+async function fetchIfaceData(binding: PointBinding, context: InterfaceParamContext, elId?: string, shareToken?: string): Promise<PointDataMap> {
   if (!binding.ifaceId) return {}
+  const sourceType = binding.ifaceSourceType ?? 'data_iface'
+
+  // 分享态：外部开放接口/Webhook 无免登代理路径，安全起见跳过（避免走 JWT 路径导致 401 噪声）。
+  if (shareToken && sourceType !== 'data_iface') return {}
 
   try {
     const token = localStorage.getItem('token') ?? ''
-    const url = `/api/data/interfaces/${binding.ifaceId}/invoke`
-    const params = binding.ifaceParamValues ?? {}
+    const params = resolveInterfaceParams(binding, [], context)
+
+    // 分享态：受限只读，token 走 body，服务端按画布引用白名单校验。
+    const url = shareToken
+      ? `/api/scada/share/interfaces/${binding.ifaceId}/invoke`
+      : sourceType === 'open_api'
+        // 外部应用开放接口：走出站代理 /api/outbound/endpoints/:id/call
+        ? `/api/outbound/endpoints/${binding.ifaceId}/call`
+        : `/api/data/interfaces/${binding.ifaceId}/invoke`
+
+    const body = shareToken
+      ? JSON.stringify({ share_token: shareToken, param_values: params, limit: 500 })
+      : sourceType === 'open_api'
+        ? JSON.stringify({ param_values: params })
+        : JSON.stringify({ param_values: params, limit: 500 })
 
     const res = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        // 分享态不携带 JWT（后端为免登路由）
+        ...(!shareToken && token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ param_values: params, limit: 500 }),
+      body,
     })
     if (!res.ok) return {}
     const json = await res.json()
-    // invoke endpoint returns { data: [...] } (objects) or { row: {...} }; tolerate legacy shapes too
+    // open_api 代理返回 { success, data, status_code }，失败时不合并数据
+    if (sourceType === 'open_api' && json.success === false) return {}
+    // Invoke responses are normalized but historic endpoints vary in nesting.
     const payload = json.data ?? json.rows ?? json.row ?? json.result ?? json
-
-    return extractMappedData(
-      typeof payload === 'string' ? JSON.parse(payload) : payload,
-      binding,
-    )
+    const parsed = typeof payload === 'string' ? parseBindingValue(payload) : payload
+    if (parsed === undefined) return {}
+    return extractMappedData(parsed, binding, elId)
   } catch {
     return {}
   }
@@ -145,21 +157,10 @@ async function fetchIfaceData(binding: PointBinding): Promise<PointDataMap> {
 function resolveStaticData(binding: PointBinding): PointDataMap {
   const result: PointDataMap = {}
   const sd = binding.staticData ?? {}
-  if (sd.value !== undefined) {
-    const n = typeof sd.value === 'number' ? sd.value : parseFloat(String(sd.value))
-    if (!isNaN(n)) result.__static_value = n
-  }
-  for (const [key, val] of Object.entries(sd)) {
-    if (typeof val === 'number') {
-      result[`__static_${key}`] = val
-    } else if (typeof val === 'string') {
-      const n = parseFloat(val)
-      if (!isNaN(n)) result[`__static_${key}`] = n
-    } else if (Array.isArray(val)) {
-      ;(val as unknown[]).forEach((v, i) => {
-        result[`__static_${key}_${i}`] = Number(v)
-      })
-    }
+  for (const [key, raw] of Object.entries(sd)) {
+    const value = parseBindingValue(raw)
+    if (value === undefined) continue
+    flattenBindingValue(`__static_${key}`, value, result)
   }
   return result
 }
@@ -168,9 +169,11 @@ function resolveStaticData(binding: PointBinding): PointDataMap {
  * Polls interface-mode bindings across all elements and calls onData with resolved PointDataMap.
  * Static-mode data is resolved synchronously on mount/update.
  */
-export function useInterfaceBindingData({ elements, onData }: Options) {
+export function useInterfaceBindingData({ elements, onData, scadaCode = '', pointData = {}, objectContexts = {}, shareToken }: Options) {
   const onDataRef = useRef(onData)
   onDataRef.current = onData
+  const contextRef = useRef({ elements, scadaCode, pointData, objectContexts, shareToken })
+  contextRef.current = { elements, scadaCode, pointData, objectContexts, shareToken }
   const timersRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map())
 
   const setupElement = useCallback((el: CanvasElement) => {
@@ -184,11 +187,18 @@ export function useInterfaceBindingData({ elements, onData }: Options) {
       return
     }
 
-    // Interface mode: poll
-    if (binding.mode === 'interface' && binding.ifaceSourceType === 'data_iface' && binding.ifaceId) {
+    // Interface mode: poll (平台数据接口 data_iface 或外部应用开放接口 open_api)
+    const ifaceSource = binding.ifaceSourceType ?? 'data_iface'
+    if (binding.mode === 'interface' && (ifaceSource === 'data_iface' || ifaceSource === 'open_api') && binding.ifaceId && binding.ifaceTransport !== 'stomp') {
       const intervalMs = binding.ifaceRefreshMs ?? 5000
       const poll = async () => {
-        const data = await fetchIfaceData(binding)
+        const current = contextRef.current
+        const data = await fetchIfaceData(binding, {
+          scadaCode: current.scadaCode,
+          elements: current.elements,
+          pointData: current.pointData,
+          objectContext: current.objectContexts[el.id],
+        }, el.id, current.shareToken)
         if (Object.keys(data).length) onDataRef.current(data)
       }
       poll()

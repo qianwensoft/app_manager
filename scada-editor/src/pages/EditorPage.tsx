@@ -106,6 +106,7 @@ export default function EditorPage() {
         publishStatus={info?.publish_status}
         onBack={() => navigate('/')}
         onPreview={() => navigate(`/preview/${scadaId}`)}
+        onWorkflow={() => navigate(`/workflow/${scadaId}`)}
       />
       <CanvasTabs />
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>

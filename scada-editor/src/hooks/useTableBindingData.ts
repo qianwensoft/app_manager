@@ -25,15 +25,23 @@ function rowsFromPayload(payload: unknown): Record<string, unknown>[] {
   return []
 }
 
-async function fetchTableRows(interfaceId: number, paramJson?: string): Promise<Record<string, unknown>[]> {
+async function fetchTableRows(interfaceId: number, paramJson?: string, shareToken?: string): Promise<Record<string, unknown>[]> {
   const token = localStorage.getItem('token') ?? ''
-  const res = await fetch(`/api/data/interfaces/${interfaceId}/debug`, {
+  // 分享态：走受限只读 share 调用（token 在 body，服务端按画布引用白名单校验）；
+  // 登录态：仍走 /invoke（viewer 可读），而非 /debug（需 operator）。
+  const url = shareToken
+    ? `/api/scada/share/interfaces/${interfaceId}/invoke`
+    : `/api/data/interfaces/${interfaceId}/invoke`
+  const body = shareToken
+    ? { share_token: shareToken, param_values: parseParamJson(paramJson), limit: 500 }
+    : { param_values: parseParamJson(paramJson), limit: 500 }
+  const res = await fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(!shareToken && token ? { Authorization: `Bearer ${token}` } : {}),
     },
-    body: JSON.stringify({ param_values: parseParamJson(paramJson), limit: 500 }),
+    body: JSON.stringify(body),
   })
   if (!res.ok) return []
   const json = await res.json()
@@ -44,10 +52,12 @@ async function fetchTableRows(interfaceId: number, paramJson?: string): Promise<
 interface Options {
   elements: CanvasElement[]
   enabled?: boolean
+  /** 免登分享 token：走 share 只读接口 */
+  shareToken?: string
 }
 
 /** 表格元件 interface 模式运行时数据 */
-export function useTableBindingData({ elements, enabled = true }: Options) {
+export function useTableBindingData({ elements, enabled = true, shareToken }: Options) {
   const [tableLiveData, setTableLiveData] = useState<Record<string, Record<string, unknown>[]>>({})
   const timersRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map())
 
@@ -66,7 +76,7 @@ export function useTableBindingData({ elements, enabled = true }: Options) {
       const paramJson = el.tableDataBinding!.paramJson
 
       const poll = async () => {
-        const rows = await fetchTableRows(ifaceId, paramJson)
+        const rows = await fetchTableRows(ifaceId, paramJson, shareToken)
         if (rows.length) {
           setTableLiveData((prev) => ({ ...prev, [el.id]: rows }))
         }
@@ -81,7 +91,7 @@ export function useTableBindingData({ elements, enabled = true }: Options) {
       timersRef.current.forEach((t) => clearInterval(t))
       timersRef.current.clear()
     }
-  }, [elements, enabled])
+  }, [elements, enabled, shareToken])
 
   return tableLiveData
 }

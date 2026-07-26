@@ -1,3 +1,7 @@
+import type { ScadaWorkflow, WorkflowLib } from './workflow'
+
+export * from './workflow'
+
 export interface TableColumn {
   key: string
   title: string
@@ -82,8 +86,11 @@ export interface CanvasElement {
   }
   // 组合：子元素 ID 列表（type === 'group' 时使用）
   children?: string[]
+  groupBinding?: GroupBinding
   // 数据绑定
   pointBinding?: PointBinding
+  // 日期时间显示（text / button 元件，开启后按 dateTime.format 渲染）
+  dateTime?: DateTimeConfig
   // 动画
   animation?: ElementAnimation
   // 事件
@@ -145,6 +152,21 @@ export interface CanvasElement {
   formBeforeScript?: string      // async (data) => data | false | void — runs before submit; throw to abort
 }
 
+export interface GroupBinding {
+  enabled?: boolean
+  source?: 'static' | 'point' | 'interface'
+  value?: unknown
+  path?: string
+  itemAlias?: string
+  keyPath?: string
+  maxInstances?: number
+  layout?: 'horizontal' | 'vertical' | 'grid'
+  columns?: number
+  gapX?: number
+  gapY?: number
+  emptyBehavior?: 'hide' | 'template'
+}
+
 export type ElementType =
   | 'rect' | 'circle' | 'ellipse' | 'line' | 'polyline' | 'polygon'
   | 'text' | 'image' | 'button' | 'radio' | 'checkbox' | 'table'
@@ -188,6 +210,18 @@ export interface InterfaceFieldMapping {
   sourceField: string
 }
 
+export type InterfaceParamSourceType = 'constant' | 'url' | 'context' | 'point' | 'element' | 'object'
+
+export interface InterfaceParamBinding {
+  source: InterfaceParamSourceType
+  value?: unknown
+  path?: string
+  elementId?: string
+  property?: string
+}
+
+export type InterfaceTransportMode = 'polling' | 'stomp'
+
 // 单点数据格式化配置（在 transform 之后执行）
 export interface ValueFormatter {
   // 数字：小数精度，-1=不限
@@ -202,6 +236,26 @@ export interface ValueFormatter {
   rangeMap?: { min: number; max: number; label: string; color?: string }[]
   // 自定义格式模板：含 ${v} 占位符，如 "${v} ℃ (正常)"
   template?: string
+}
+
+// 日期时间显示配置（挂在 text/button 元件的 dateTime 字段）
+// - source=current：显示系统当前时间，按 refreshMs 自动刷新
+// - source=data：把绑定数据值解析为时间后格式化显示（自动兼容时间戳/字符串）
+export interface DateTimeConfig {
+  // 是否启用日期时间渲染（关闭时按普通文本/绑定处理）
+  enabled?: boolean
+  // 数据来源：current=显示系统当前时间（自动刷新）；data=解析绑定数据（pointBinding）
+  source?: 'current' | 'data'
+  // 显示格式（token 模板，如 YYYY-MM-DD HH:mm:ss）
+  format: string
+  // 当 source=data 时，输入值的解析类型（auto 自动兼容时间戳/字符串）
+  inputType?: 'auto' | 'unix_s' | 'unix_ms' | 'iso' | 'string'
+  // source=current 时的刷新间隔（ms），默认 1000
+  refreshMs?: number
+  // 无有效值时的占位显示
+  fallback?: string
+  // 语言：用于星期/月份文字，zh=中文（默认），en=英文
+  locale?: 'zh' | 'en'
 }
 
 export interface PointBinding {
@@ -235,9 +289,11 @@ export interface PointBinding {
   ifaceCode?: string            // DataInterface.code（调用时用）
   ifaceAppId?: number           // OutboundWebhook 所属 app id
   ifaceName?: string            // 显示用名称
-  ifaceParamValues?: Record<string, string>  // 调用接口的参数
+  ifaceParamValues?: Record<string, string>  // 向后兼容的固定参数值
+  ifaceParamBindings?: Record<string, InterfaceParamBinding> // 参数来源与路径
   ifaceFieldMappings?: InterfaceFieldMapping[]  // 字段映射
-  ifaceRefreshMs?: number       // 轮询间隔（ms），0=不轮询
+  ifaceRefreshMs?: number       // 轮询间隔（ms）
+  ifaceTransport?: InterfaceTransportMode // polling=浏览器轮询；stomp=服务端推送
 
   // === 表格列定义（interface 模式 + table 组件专用）===
   tableColumns?: TableColumn[]  // 表格列定义
@@ -257,12 +313,14 @@ export interface ElementAnimation {
 
 export interface ElementEvent {
   trigger: 'click' | 'dblclick' | 'hover' | 'condition'
-  action: 'navigate' | 'popup' | 'script' | 'open-modal' | 'close-modal' | 'navigate-canvas'
+  action: 'navigate' | 'popup' | 'script' | 'open-modal' | 'close-modal' | 'navigate-canvas' | 'trigger-workflow'
   /** open-modal / close-modal: modal element ID; navigate-canvas: canvas ID (string); popup: url */
   target?: string
   script?: string
   /** JS 表达式，可用 v（绑定点位值）；空=始终执行 */
   condition?: string
+  /** action==='trigger-workflow': 指向 CanvasProject.workflows 中的工作流 id */
+  workflowId?: string
 }
 
 // 画布数据
@@ -330,6 +388,10 @@ export interface CanvasProject {
   canvases: Record<number, CanvasData>
   activeCanvasId: number
   canvasGroups: CanvasGroupNode[]
+  /** 工作流定义（全局 + 组件绑定），随项目持久化 */
+  workflows?: ScadaWorkflow[]
+  /** 脚本可用的外部库清单（URL / 上传） */
+  workflowLibs?: WorkflowLib[]
 }
 
 export interface CanvasGroupNode {

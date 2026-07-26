@@ -51,6 +51,56 @@ const Sel = ({ val, onChange, children }: {
   </select>
 )
 
+// 组合输入：既可从建议项下拉选择，也可自由录入
+let comboSeq = 0
+const Combo = ({ val, onChange, options, placeholder = '', type = 'text', onBlur }: {
+  val: string; onChange: (v: string) => void; options: string[]; placeholder?: string; type?: string; onBlur?: () => void
+}) => {
+  const listId = useRef(`combo-${++comboSeq}`).current
+  const uniq = Array.from(new Set(options.filter((o) => o !== '')))
+  return (
+    <>
+      <input
+        value={val}
+        type={type}
+        list={uniq.length > 0 ? listId : undefined}
+        placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value)}
+        style={{
+          width: '100%', height: 28, background: 'var(--bg-base)',
+          border: '1px solid var(--border)', color: 'var(--text-primary)',
+          padding: '0 8px', borderRadius: 'var(--radius-sm)', fontSize: 12,
+          outline: 'none', fontFamily: 'var(--font-mono)', boxSizing: 'border-box',
+        }}
+        onFocus={(e) => { e.target.style.borderColor = 'var(--accent)' }}
+        onBlur={(e) => { e.target.style.borderColor = 'var(--border)'; onBlur?.() }}
+      />
+      {uniq.length > 0 && (
+        <datalist id={listId}>
+          {uniq.map((o, i) => <option key={i} value={o} />)}
+        </datalist>
+      )}
+    </>
+  )
+}
+
+// 自由参数名输入：本地暂存，失焦时再提交重命名，避免每次按键都改动对象 key 造成整行重挂载而丢失焦点
+const FreeParamNameInput = ({ name, options, onCommit }: {
+  name: string; options: string[]; onCommit: (newName: string) => void
+}) => {
+  const [local, setLocal] = useState(name)
+  useEffect(() => { setLocal(name) }, [name])
+  return (
+    <Combo
+      val={local}
+      onChange={setLocal}
+      onBlur={() => { if (local !== name) onCommit(local) }}
+      options={options}
+      placeholder="选择或录入参数名"
+    />
+  )
+}
+
 const Label = ({ children }: { children: React.ReactNode }) => (
   <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>{children}</div>
 )
@@ -550,7 +600,7 @@ function SimModePanel({ draft, setDraft, scadaCode, pointData, onApply, onManage
       let changed = false
       for (const [k, v] of Object.entries(pointData)) {
         if (simPoints.some((p) => p.link_name === k)) {
-          next[k] = { value: v, time: new Date() }
+          next[k] = { value: Number(v), time: new Date() }
           changed = true
         }
       }
@@ -1034,9 +1084,48 @@ function IfaceModePanel({ draft, setDraft, isChart, schema, isText, isTable }: {
   const paramSpecs = getParamSpecs()
   const hasParams = paramSpecs.length > 0 || sourceType === 'webhook' || sourceType === 'open_api'
 
+  // 自由参数名的可选建议：来自接口契约/schema 中声明但尚未添加的参数
+  const getParamNameSuggestions = (): string[] => {
+    const used = new Set(Object.keys(draft.ifaceParamValues ?? {}))
+    const names = paramSpecs.map((p) => p.name)
+    try {
+      if (sourceType === 'open_api') {
+        const ep = endpoints.find((e) => e.id === draft.ifaceId)
+        if (ep?.param_schema) {
+          const s = JSON.parse(ep.param_schema)
+          if (s.properties) names.push(...Object.keys(s.properties))
+        }
+      } else if (sourceType === 'webhook') {
+        const wh = webhooks.find((w) => w.id === draft.ifaceId)
+        if (wh?.response_schema) {
+          const s = JSON.parse(wh.response_schema)
+          if (s.properties) names.push(...Object.keys(s.properties))
+        }
+      }
+    } catch {}
+    return Array.from(new Set(names)).filter((n) => !used.has(n))
+  }
+  const paramNameSuggestions = getParamNameSuggestions()
+
   const setParamValue = (name: string, value: string) => {
     const params = { ...(draft.ifaceParamValues ?? {}), [name]: value }
-    update({ ifaceParamValues: params })
+    const bindings = { ...(draft.ifaceParamBindings ?? {}), [name]: { source: 'constant' as const, value } }
+    update({ ifaceParamValues: params, ifaceParamBindings: bindings })
+  }
+
+  const setParamSource = (name: string, source: 'constant' | 'url' | 'context' | 'point' | 'element' | 'object') => {
+    const bindings = { ...(draft.ifaceParamBindings ?? {}) }
+    const existing = bindings[name]
+    bindings[name] = source === 'constant'
+      ? { source, value: draft.ifaceParamValues?.[name] ?? '' }
+      : { source, path: existing?.path ?? '' }
+    update({ ifaceParamBindings: bindings })
+  }
+
+  const setParamPath = (name: string, path: string) => {
+    const bindings = { ...(draft.ifaceParamBindings ?? {}) }
+    bindings[name] = { ...(bindings[name] ?? { source: 'constant' as const }), path }
+    update({ ifaceParamBindings: bindings })
   }
 
   const addFreeParam = () => {
@@ -1051,11 +1140,27 @@ function IfaceModePanel({ draft, setDraft, isChart, schema, isText, isTable }: {
   }
 
   const renameFreeParam = (oldKey: string, newKey: string) => {
-    const params = { ...(draft.ifaceParamValues ?? {}) }
-    const val = params[oldKey]
-    delete params[oldKey]
-    if (newKey) params[newKey] = val
-    update({ ifaceParamValues: params })
+    if (oldKey === newKey) return
+    const src = draft.ifaceParamValues ?? {}
+    // 保持原有顺序重建对象，避免重命名后该行跳到末尾
+    const params: Record<string, string> = {}
+    for (const [k, v] of Object.entries(src)) {
+      if (k === oldKey) {
+        if (newKey) params[newKey] = v
+      } else {
+        params[k] = v
+      }
+    }
+    const srcBindings = draft.ifaceParamBindings ?? {}
+    const bindings: Record<string, typeof srcBindings[string]> = {}
+    for (const [k, v] of Object.entries(srcBindings)) {
+      if (k === oldKey) {
+        if (newKey) bindings[newKey] = v
+      } else {
+        bindings[k] = v
+      }
+    }
+    update({ ifaceParamValues: params, ifaceParamBindings: bindings })
   }
 
   // Test interface call
@@ -1218,6 +1323,13 @@ function IfaceModePanel({ draft, setDraft, isChart, schema, isText, isTable }: {
         </>
       )}
 
+      <Field label="数据传输模式">
+        <Sel val={draft.ifaceTransport ?? 'polling'} onChange={(v) => update({ ifaceTransport: v as 'polling' | 'stomp' })}>
+          <option value="polling">浏览器轮询</option>
+          <option value="stomp">SCADA STOMP 推送</option>
+        </Sel>
+        <Hint>STOMP 模式由服务端按已发布组态注册接口任务；动态 URL、组件或组合参数应保留轮询。</Hint>
+      </Field>
       <Field label="轮询间隔 (ms)" optional>
         <Inp
           type="number"
@@ -1225,7 +1337,7 @@ function IfaceModePanel({ draft, setDraft, isChart, schema, isText, isTable }: {
           onChange={(v) => update({ ifaceRefreshMs: Number(v) || 5000 })}
           placeholder="5000"
         />
-        <Hint>仅对接口数据有效，0 表示不轮询（依赖 Webhook 推送）</Hint>
+        <Hint>{draft.ifaceTransport === 'stomp' ? '服务端推送任务的执行间隔，最低 1000ms。' : '浏览器请求接口的间隔。'}</Hint>
       </Field>
 
       {/* 接口参数 */}
@@ -1252,6 +1364,8 @@ function IfaceModePanel({ draft, setDraft, isChart, schema, isText, isTable }: {
           {/* Schema-based params (data_iface) */}
           {paramSpecs.map((param) => {
             const val = draft.ifaceParamValues?.[param.name] ?? String(param.default ?? '')
+            const paramBinding = draft.ifaceParamBindings?.[param.name]
+            const source = paramBinding?.source ?? 'constant'
             return (
               <div key={param.name} style={{ marginBottom: 10 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
@@ -1267,13 +1381,33 @@ function IfaceModePanel({ draft, setDraft, isChart, schema, isText, isTable }: {
                     }}>{param.type}</span>
                   )}
                 </div>
-                {param.enum && param.enum.length > 0 ? (
-                  <Sel val={val} onChange={(v) => setParamValue(param.name, v)}>
-                    <option value="">-- 选择 --</option>
-                    {param.enum.map((e, i) => (
-                      <option key={i} value={String(e)}>{String(e)}</option>
-                    ))}
+                <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: 6, marginBottom: 6 }}>
+                  <Sel val={source} onChange={(v) => setParamSource(param.name, v as 'constant' | 'url' | 'context' | 'point' | 'element' | 'object')}>
+                    <option value="constant">固定值</option>
+                    <option value="url">URL 参数</option>
+                    <option value="context">SCADA 上下文</option>
+                    <option value="point">点位数据</option>
+                    <option value="element">组件属性</option>
+                    <option value="object">组合对象</option>
                   </Sel>
+                  {source === 'constant' ? (
+                    <span style={{ alignSelf: 'center', fontSize: 10, color: 'var(--text-muted)' }}>按接口契约校验并转换类型</span>
+                  ) : (
+                    <Inp
+                      val={paramBinding?.path ?? ''}
+                      onChange={(v) => setParamPath(param.name, v)}
+                      placeholder={source === 'url' ? 'query 参数名' : source === 'element' ? '属性路径（需在组合内指定组件）' : '点分隔路径'}
+                    />
+                  )}
+                </div>
+                {source === 'constant' && (param.enum && param.enum.length > 0 ? (
+                  <Combo
+                    val={val}
+                    onChange={(v) => setParamValue(param.name, v)}
+                    options={param.enum.map((e) => String(e))}
+                    placeholder="选择或录入"
+                    type={param.type === 'number' || param.type === 'integer' ? 'number' : 'text'}
+                  />
                 ) : param.type === 'boolean' ? (
                   <Sel val={val} onChange={(v) => setParamValue(param.name, v)}>
                     <option value="">-- 选择 --</option>
@@ -1287,7 +1421,7 @@ function IfaceModePanel({ draft, setDraft, isChart, schema, isText, isTable }: {
                     placeholder={param.default ? String(param.default) : `输入 ${param.name}`}
                     type={param.type === 'number' || param.type === 'integer' ? 'number' : 'text'}
                   />
-                )}
+                ))}
                 {(param.min !== undefined || param.max !== undefined) && (
                   <Hint>
                     范围：{param.min !== undefined ? `最小 ${param.min}` : ''}
@@ -1302,14 +1436,14 @@ function IfaceModePanel({ draft, setDraft, isChart, schema, isText, isTable }: {
           {/* Free-form params (webhook / open_api without schema) */}
           {(sourceType === 'webhook' || sourceType === 'open_api') && (
             <>
-              {Object.entries(draft.ifaceParamValues ?? {}).map(([key, val]) => (
-                <div key={key} style={{
+              {Object.entries(draft.ifaceParamValues ?? {}).map(([key, val], idx) => (
+                <div key={idx} style={{
                   display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 6, marginBottom: 6, alignItems: 'center',
                 }}>
-                  <Inp
-                    val={key}
-                    onChange={(v) => renameFreeParam(key, v)}
-                    placeholder="参数名"
+                  <FreeParamNameInput
+                    name={key}
+                    onCommit={(v) => renameFreeParam(key, v)}
+                    options={paramNameSuggestions}
                   />
                   <Inp
                     val={String(val)}

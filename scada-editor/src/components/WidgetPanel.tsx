@@ -164,6 +164,50 @@ const groups: { name: string; icon: string; items: WidgetDef[] }[] = [
     ],
   },
   {
+    name: '显示组件', icon: 'M12 6v6l4 2M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z',
+    items: [
+      {
+        type: 'text',
+        label: '日期时间',
+        iconPath: 'M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z',
+        defaults: {
+          width: 220, height: 40, text: '2026-07-25 18:08:05',
+          fontSize: 18, fontColor: '#fff', fill: 'transparent', textAlign: 'center',
+          dateTime: {
+            enabled: true, source: 'current', format: 'YYYY-MM-DD HH:mm:ss',
+            inputType: 'auto', refreshMs: 1000, fallback: '--', locale: 'zh',
+          },
+        },
+      },
+      {
+        type: 'text',
+        label: '当前时间',
+        iconPath: 'M12 6v6l4 2M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z',
+        defaults: {
+          width: 130, height: 44, text: '18:08:05',
+          fontSize: 26, fontColor: '#4a9eff', fill: 'transparent', textAlign: 'center', fontWeight: 'bold',
+          dateTime: {
+            enabled: true, source: 'current', format: 'HH:mm:ss',
+            inputType: 'auto', refreshMs: 1000, fallback: '--:--:--', locale: 'zh',
+          },
+        },
+      },
+      {
+        type: 'text',
+        label: '中文日期',
+        iconPath: 'M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z',
+        defaults: {
+          width: 280, height: 40, text: '2026年07月25日 星期六',
+          fontSize: 18, fontColor: '#fff', fill: 'transparent', textAlign: 'center',
+          dateTime: {
+            enabled: true, source: 'current', format: 'YYYY年MM月DD日 dddd',
+            inputType: 'auto', refreshMs: 1000, fallback: '--', locale: 'zh',
+          },
+        },
+      },
+    ],
+  },
+  {
     name: '文本控件', icon: 'M4 7V5h16v2M9 5v14m6-14v14M9 19h6',
     items: [
       { type: 'text',   label: '文本', iconPath: 'M4 7V5h16v2M9 5v14m6-14v14M9 19h6', defaults: { width: 120, height: 40, text: '文本', fontSize: 16, fontColor: '#fff', fill: 'transparent' } },
@@ -329,7 +373,7 @@ export function buildWidgetElement(def: WidgetDef, canvas: { elements: { length:
 export default function WidgetPanel() {
   const store = useEditorStore()
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
-    '基础图形': true, '文本控件': true, '图表': false,
+    '基础图形': true, '显示组件': true, '文本控件': true, '图表': false,
   })
   const [customOpen, setCustomOpen] = useState(false)
 

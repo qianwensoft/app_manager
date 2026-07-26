@@ -9,6 +9,8 @@ export interface EventRuntimeContext {
   closeModal: (id: string) => void
   switchCanvas: (id: number) => void
   onSwitchCanvas?: (canvasId: number) => void
+  /** 触发指定 id 的工作流（trigger-workflow 动作用） */
+  triggerWorkflow?: (workflowId: string) => void
 }
 
 export function eventConditionMet(el: CanvasElement, ev: ElementEvent, pointData: PointDataMap): boolean {
@@ -49,6 +51,9 @@ export function executeEventAction(ev: ElementEvent, ctx: EventRuntimeContext): 
           /* ignore script errors in preview */
         }
       }
+      break
+    case 'trigger-workflow':
+      if (ev.workflowId) ctx.triggerWorkflow?.(ev.workflowId)
       break
     default:
       break

@@ -30,6 +30,9 @@ interface CtxMenu {
   id: string
 }
 
+// 每层嵌套的缩进步长（px）。组合内的子元素按深度向右缩进。
+const INDENT_STEP = 14
+
 const typeColor: Record<string, string> = {
   rect: '#4a9eff',
   circle: '#a78bfa',
@@ -174,14 +177,28 @@ export default function LayerPanel() {
   const toggleGroup = (id: string) =>
     setExpandedGroups((prev) => ({ ...prev, [id]: !prev[id] }))
 
-  const renderRow = (el: (typeof sorted)[0], indent = 0, drag?: DragHandleProps) => {
+  // 每个子元素只归属一个组合（按元素顺序取第一个引用它的组合），避免同属多组时重复渲染。
+  const childOwner = new Map<string, string>()
+  for (const el of canvas.elements) {
+    if (el.type === 'group' && el.children) {
+      for (const cid of el.children) {
+        if (!childOwner.has(cid)) childOwner.set(cid, el.id)
+      }
+    }
+  }
+
+  // ancestors 仅包含「从根到当前节点」这条路径，用于阻断循环引用；对兄弟节点无副作用，
+  // 因此每次渲染（含 dnd-kit 对单个可排序项的独立重渲）结果一致。
+  const renderRow = (el: (typeof sorted)[0], indent = 0, drag?: DragHandleProps, ancestors: Set<string> = new Set()) => {
+    if (ancestors.has(el.id)) return null
     const isSelected = selectedIds.includes(el.id)
     const dotColor = typeColor[el.type] ?? '#64748b'
     const isGroup = el.type === 'group'
     const isExpanded = expandedGroups[el.id] ?? true
     const children = isGroup && el.children
-      ? canvas.elements.filter((c) => el.children!.includes(c.id))
+      ? canvas.elements.filter((c) => el.children!.includes(c.id) && childOwner.get(c.id) === el.id && !ancestors.has(c.id))
       : []
+    const childAncestors = isGroup ? new Set(ancestors).add(el.id) : ancestors
 
     return (
       <div key={el.id}>
@@ -194,9 +211,10 @@ export default function LayerPanel() {
             setCtxMenu({ x: e.clientX, y: e.clientY, id: el.id })
           }}
           className={`layer-row${isSelected ? ' active' : ''}${el.locked ? ' locked' : ''}`}
-          style={{ paddingLeft: (drag ? 2 : 6) + indent * 12 }}
+          style={{ paddingLeft: 6 + indent * INDENT_STEP }}
         >
-          {drag && (
+          {/* 拖拽列：仅顶层可拖拽，其余保留同宽占位以对齐 */}
+          {drag ? (
             <button
               type="button"
               className="icon-btn layer-drag-handle"
@@ -208,12 +226,17 @@ export default function LayerPanel() {
             >
               <GripIcon />
             </button>
+          ) : (
+            <span style={{ width: 14, flexShrink: 0 }} />
           )}
-          {isGroup && (
+          {/* 折叠列：组合显示箭头，非组合保留同宽占位以对齐 */}
+          {isGroup ? (
             <button className="icon-btn" style={{ width: 14, height: 14, flexShrink: 0 }}
               onClick={(e) => { e.stopPropagation(); toggleGroup(el.id) }}>
               <ChevronIcon open={isExpanded} />
             </button>
+          ) : (
+            <span style={{ width: 14, flexShrink: 0 }} />
           )}
           <span style={{
             fontSize: 8, fontWeight: 700, fontFamily: 'var(--font-mono)',
@@ -289,18 +312,15 @@ export default function LayerPanel() {
             </>
           )}
         </div>
-        {isGroup && isExpanded && children.map((child) => renderRow(child, indent + 1))}
+        {isGroup && isExpanded && children.map((child) => renderRow(child, indent + 1, undefined, childAncestors))}
       </div>
     )
   }
 
-  const groupChildIds = new Set(
-    canvas.elements.filter((e) => e.type === 'group' && e.children).flatMap((e) => e.children!)
-  )
-
   // Separate modals from regular elements
   const modalElements = sorted.filter((e) => e.type === 'layout-modal')
-  const topLevel = sorted.filter((e) => !groupChildIds.has(e.id) && e.type !== 'layout-modal')
+  // 顶层 = 未被任何组合认领的元素（childOwner 保证每个子元素只归属一个组合）
+  const topLevel = sorted.filter((e) => !childOwner.has(e.id) && e.type !== 'layout-modal')
   const topLevelIds = topLevel.map((e) => e.id)
 
   const handleLayerDragEnd = (event: DragEndEvent) => {
@@ -334,7 +354,9 @@ export default function LayerPanel() {
         </span>
       </div>
 
-      <div className="scada-scroll" style={{ flex: 1, overflowY: 'auto' }}>
+      <div className="scada-scroll" style={{ flex: 1, overflow: 'auto' }}>
+        {/* minWidth: max-content 让所有行宽度对齐到最宽行，内容超出面板宽度时出现横向滚动条 */}
+        <div style={{ minWidth: 'max-content' }}>
         {/* ── Modal section ── */}
         {modalElements.length > 0 && (
           <div style={{ borderBottom: '1px solid var(--border)' }}>
@@ -443,6 +465,7 @@ export default function LayerPanel() {
             ))}
           </SortableContext>
         </DndContext>
+        </div>
       </div>
 
       {/* Right-click context menu */}

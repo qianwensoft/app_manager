@@ -4,6 +4,15 @@ server/config.yaml
 web/.env.local
 scripts/sync-agent-apk.env
 */node_modules
+node_modules/
+
+# Claude artifacts
+.agents/
+.codex/
+
+# Root level TS placeholders (should be in subdirs)
+/*.ts
+
 # Go 构建产物
 app-manager
 *.exe

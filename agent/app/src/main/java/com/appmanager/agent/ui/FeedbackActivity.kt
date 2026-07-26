@@ -808,8 +808,8 @@ class FeedbackActivity : AppCompatActivity() {
                 }
                 val queryString = if (params.isNotEmpty()) "?${params.joinToString("&")}" else ""
 
-                // 优先使用用户 JWT token，否则使用设备 token
-                val json = AgentCatalogApi.getJsonWithAuth(base, "/api/work-orders/mine$queryString", cfg.userToken.trim(), cfg.deviceToken.trim())
+                // 我的工单仅查询当前设备的工单：始终使用设备 token（不强制走用户登录）
+                val json = AgentCatalogApi.getJson(base, "/api/work-orders/mine$queryString", cfg.deviceToken.trim())
                 val arr = JSONObject(json).optJSONArray("data") ?: JSONArray()
                 val rows = mutableListOf<WoRow>()
                 for (i in 0 until arr.length()) {

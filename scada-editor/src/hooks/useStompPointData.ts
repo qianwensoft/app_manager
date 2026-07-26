@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { Client } from '@stomp/stompjs'
 
-export type PointDataMap = Record<string, number>
+export type PointDataMap = Record<string, unknown>
 
 interface Options {
   scadaCode: string
@@ -31,7 +31,17 @@ export function useStompPointData({ scadaCode, onData, enabled = true, shareToke
         client.subscribe(`/topic/scada/point-data/${scadaCode}`, (msg) => {
           try {
             const data: PointDataMap = JSON.parse(msg.body)
-            onDataRef.current(data)
+            const iface = data.__scada_interface as { binding_id?: string; rows?: unknown; error?: string } | undefined
+            if (iface?.binding_id) {
+              const rows = iface.rows
+              const first = Array.isArray(rows) ? rows[0] : rows
+              onDataRef.current({
+                ...data,
+                ...Object.fromEntries(Object.entries(first && typeof first === 'object' ? first as Record<string, unknown> : {}).map(([key, value]) => [`__iface_${key}`, value])),
+              })
+            } else {
+              onDataRef.current(data)
+            }
           } catch {
             // ignore malformed
           }

@@ -5,6 +5,8 @@ import { useCanvasBindingData } from '@/hooks/useCanvasBindingData'
 import CanvasViewer from '@/components/CanvasViewer'
 import type { CanvasProject, CanvasData } from '@/types'
 import { shouldAutoLandscape, isLandscape } from '@/utils/deviceDetect'
+import { useToastHost } from '@/components/ToastHost'
+import { resetGlobalContext } from '@/runtime/workflow/globalContext'
 
 /**
  * 免登分享页：app 端 WebView / 外部链接通过 share_token 访问已发布组态。
@@ -18,6 +20,12 @@ export default function SharePage() {
   const [activeId, setActiveId] = useState<number | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [needLandscape, setNeedLandscape] = useState(false)
+  const { toast, node: toastNode } = useToastHost()
+
+  useEffect(() => {
+    resetGlobalContext()
+    return () => resetGlobalContext()
+  }, [token])
 
   useEffect(() => {
     if (!info?.canvas_data) return
@@ -118,6 +126,11 @@ export default function SharePage() {
             tableLiveData={tableLiveData}
             scadaCode={info.scada_code}
             onSwitchCanvas={setActiveId}
+            workflows={project?.workflows}
+            workflowLibs={project?.workflowLibs}
+            enableWorkflows
+            onToast={toast}
+            shareToken={token}
           />
         ) : (
           // 固定尺寸或适应内容：保持原有行为
@@ -129,6 +142,11 @@ export default function SharePage() {
             tableLiveData={tableLiveData}
             scadaCode={info.scada_code}
             onSwitchCanvas={setActiveId}
+            workflows={project?.workflows}
+            workflowLibs={project?.workflowLibs}
+            enableWorkflows
+            onToast={toast}
+            shareToken={token}
           />
         )
       ) : (
@@ -136,6 +154,7 @@ export default function SharePage() {
           {project === null && info.canvas_data ? '画布数据解析失败' : '该组态暂无画布内容'}
         </div>
       )}
+      {toastNode}
     </div>
   )
 }

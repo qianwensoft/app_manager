@@ -1,9 +1,92 @@
 import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
 import type { CanvasData, CanvasElement, CanvasProject, DrawingTool, AlignType } from '@/types'
+import type { ScadaWorkflow, WorkflowLib } from '@/types/workflow'
 import { generateId } from '@/utils/canvas'
 
 const MAIN_CANVAS_ID = 100001
+
+// 将选中的根元素展开为「根 + 组合内所有后代」的完整集合（递归、去重），
+// 以便复制/粘贴/再制组合时连同其子元素一起处理。
+function expandWithChildren(all: CanvasElement[], roots: CanvasElement[]): CanvasElement[] {
+  const byId = new Map(all.map((e) => [e.id, e]))
+  const out = new Map<string, CanvasElement>()
+  const visit = (el: CanvasElement) => {
+    if (out.has(el.id)) return
+    out.set(el.id, el)
+    if (el.type === 'group' && el.children) {
+      for (const cid of el.children) {
+        const child = byId.get(cid)
+        if (child) visit(child)
+      }
+    }
+  }
+  roots.forEach(visit)
+  return [...out.values()]
+}
+
+// 克隆一组元素：分配新 id、按偏移平移、重排 zIndex，并把组合的 children 重映射到新 id。
+// 返回克隆结果与「根 id」（集合内未被任何组合引用的元素）供粘贴后选中。
+function cloneWithRemap(
+  sources: CanvasElement[],
+  offset: number,
+  baseZ: number,
+): { clones: CanvasElement[]; rootIds: string[] } {
+  const srcIds = new Set(sources.map((s) => s.id))
+  const idMap = new Map<string, string>()
+  sources.forEach((s) => idMap.set(s.id, generateId()))
+
+  // 按原 zIndex 升序克隆，保持层叠顺序
+  const ordered = [...sources].sort((a, b) => a.zIndex - b.zIndex)
+  const clones = ordered.map((src, i) => {
+    const clone: CanvasElement = JSON.parse(JSON.stringify(src))
+    clone.id = idMap.get(src.id)!
+    clone.x = src.x + offset
+    clone.y = src.y + offset
+    clone.zIndex = baseZ + i + 1
+    if (clone.children) {
+      clone.children = clone.children
+        .filter((cid) => srcIds.has(cid))
+        .map((cid) => idMap.get(cid)!)
+    }
+    return clone
+  })
+
+  const referenced = new Set<string>()
+  sources.forEach((s) => {
+    if (s.type === 'group' && s.children) {
+      s.children.forEach((cid) => { if (srcIds.has(cid)) referenced.add(cid) })
+    }
+  })
+  const rootIds = sources.filter((s) => !referenced.has(s.id)).map((s) => idMap.get(s.id)!)
+  return { clones, rootIds }
+}
+
+// 清理组合的悬空引用与空组合：从每个组合的 children 中移除已不存在的元素；
+// children 变空的组合本身删除，并级联（父组合可能因此再变空）。就地修改 c.elements。
+function pruneGroups(c: CanvasData): void {
+  let changed = true
+  while (changed) {
+    changed = false
+    const present = new Set(c.elements.map((e) => e.id))
+    for (const el of c.elements) {
+      if (el.type === 'group' && el.children) {
+        const filtered = el.children.filter((cid) => present.has(cid))
+        if (filtered.length !== el.children.length) {
+          el.children = filtered
+          changed = true
+        }
+      }
+    }
+    const emptyIds = new Set(
+      c.elements.filter((e) => e.type === 'group' && (!e.children || e.children.length === 0)).map((e) => e.id),
+    )
+    if (emptyIds.size) {
+      c.elements = c.elements.filter((e) => !emptyIds.has(e.id))
+      changed = true
+    }
+  }
+}
 
 function defaultCanvas(): CanvasData {
   return {
@@ -97,6 +180,13 @@ interface EditorStore {
   setZoom: (zoom: number) => void
   setPanOffset: (offset: { x: number; y: number }) => void
 
+  // actions - workflows（随 canvas_data 持久化）
+  addWorkflow: (wf: ScadaWorkflow) => void
+  updateWorkflow: (id: string, updates: Partial<ScadaWorkflow>) => void
+  deleteWorkflow: (id: string) => void
+  duplicateWorkflow: (id: string) => void
+  setWorkflowLibs: (libs: WorkflowLib[]) => void
+
   // ui prefs — persisted to localStorage
   liveDataOn: boolean
   toggleLiveData: () => void
@@ -147,7 +237,13 @@ export const useEditorStore = create<EditorStore>()(
     },
 
     loadProject: (scadaId, project) =>
-      set((s) => { s.scadaId = scadaId; s.project = project; s.isDirty = false }),
+      set((s) => {
+        s.scadaId = scadaId
+        s.project = project
+        // 清理历史数据中遗留的空组合 / 悬空引用（此前删除子元素未同步维护组合）
+        Object.values(s.project.canvases).forEach((c) => c && pruneGroups(c))
+        s.isDirty = false
+      }),
 
     resetProject: () =>
       set((s) => { s.project = initialProject; s.isDirty = false; s.scadaId = null }),
@@ -248,7 +344,10 @@ export const useEditorStore = create<EditorStore>()(
         const c = s.project.canvases[s.project.activeCanvasId]
         if (!c) return
         c.elements = c.elements.filter((e) => !ids.includes(e.id))
-        s.selectedIds = s.selectedIds.filter((id) => !ids.includes(id))
+        // 从组合 children 中移除被删元素，并清理由此变空的组合（级联），避免残留空组合渲染成蓝色小框
+        pruneGroups(c)
+        const present = new Set(c.elements.map((e) => e.id))
+        s.selectedIds = s.selectedIds.filter((id) => present.has(id))
         s.isDirty = true
       }),
 
@@ -312,7 +411,9 @@ export const useEditorStore = create<EditorStore>()(
       const { selectedIds, activeCanvas } = get()
       const c = activeCanvas()
       if (!c || selectedIds.length === 0) return
-      const els = c.elements.filter((e) => selectedIds.includes(e.id))
+      const roots = c.elements.filter((e) => selectedIds.includes(e.id))
+      // 组合需连同其后代一起复制，否则粘贴出的组合会丢失子元素
+      const els = expandWithChildren(c.elements, roots)
       set((s) => { s._clipboard = JSON.parse(JSON.stringify(els)) })
     },
 
@@ -320,20 +421,10 @@ export const useEditorStore = create<EditorStore>()(
       set((s) => {
         const c = s.project.canvases[s.project.activeCanvasId]
         if (!c || s._clipboard.length === 0) return
-        const newIds: string[] = []
         const maxZ = c.elements.reduce((m, e) => Math.max(m, e.zIndex), 0)
-        s._clipboard.forEach((src, i) => {
-          const el: CanvasElement = {
-            ...JSON.parse(JSON.stringify(src)),
-            id: generateId(),
-            x: src.x + 20,
-            y: src.y + 20,
-            zIndex: maxZ + i + 1,
-          }
-          c.elements.push(el)
-          newIds.push(el.id)
-        })
-        s.selectedIds = newIds
+        const { clones, rootIds } = cloneWithRemap(s._clipboard, 20, maxZ)
+        clones.forEach((el) => c.elements.push(el))
+        s.selectedIds = rootIds
         s.isDirty = true
       }),
 
@@ -341,24 +432,15 @@ export const useEditorStore = create<EditorStore>()(
       const { selectedIds, activeCanvas } = get()
       const c = activeCanvas()
       if (!c || selectedIds.length === 0) return
-      const els = c.elements.filter((e) => selectedIds.includes(e.id))
+      const roots = c.elements.filter((e) => selectedIds.includes(e.id))
+      const els = expandWithChildren(c.elements, roots)
       set((s) => {
         const canvas = s.project.canvases[s.project.activeCanvasId]
         if (!canvas) return
-        const newIds: string[] = []
         const maxZ = canvas.elements.reduce((m, e) => Math.max(m, e.zIndex), 0)
-        els.forEach((src, i) => {
-          const el: CanvasElement = {
-            ...JSON.parse(JSON.stringify(src)),
-            id: generateId(),
-            x: src.x + 20,
-            y: src.y + 20,
-            zIndex: maxZ + i + 1,
-          }
-          canvas.elements.push(el)
-          newIds.push(el.id)
-        })
-        s.selectedIds = newIds
+        const { clones, rootIds } = cloneWithRemap(els, 20, maxZ)
+        clones.forEach((el) => canvas.elements.push(el))
+        s.selectedIds = rootIds
         s.isDirty = true
       })
     },
@@ -529,6 +611,46 @@ export const useEditorStore = create<EditorStore>()(
         })
         s.isDirty = true
       }),
+
+    addWorkflow: (wf) =>
+      set((s) => {
+        if (!s.project.workflows) s.project.workflows = []
+        s.project.workflows.push(wf)
+        s.isDirty = true
+      }),
+
+    updateWorkflow: (id, updates) =>
+      set((s) => {
+        const list = s.project.workflows
+        if (!list) return
+        const idx = list.findIndex((w) => w.id === id)
+        if (idx < 0) return
+        Object.assign(list[idx], updates)
+        s.isDirty = true
+      }),
+
+    deleteWorkflow: (id) =>
+      set((s) => {
+        if (!s.project.workflows) return
+        s.project.workflows = s.project.workflows.filter((w) => w.id !== id)
+        s.isDirty = true
+      }),
+
+    duplicateWorkflow: (id) =>
+      set((s) => {
+        const list = s.project.workflows
+        if (!list) return
+        const src = list.find((w) => w.id === id)
+        if (!src) return
+        const copy: ScadaWorkflow = JSON.parse(JSON.stringify(src))
+        copy.id = generateId()
+        copy.name = `${src.name || '工作流'} 副本`
+        list.push(copy)
+        s.isDirty = true
+      }),
+
+    setWorkflowLibs: (libs) =>
+      set((s) => { s.project.workflowLibs = libs; s.isDirty = true }),
 
     setTool: (tool) => set((s) => { s.activeTool = tool }),
     setZoom: (zoom) => set((s) => { s.zoom = Math.max(0.1, Math.min(5, zoom)) }),

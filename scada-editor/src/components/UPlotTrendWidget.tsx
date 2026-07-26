@@ -281,7 +281,7 @@ export default function UPlotTrendWidget({ el, zoom, pointData, scadaCode }: Pro
       const v = pointData[key]
       if (v === undefined) return
       const ring = ringsRef.current.get(key)
-      if (ring) { ring.push(now, v); changed = true }
+      if (ring) { ring.push(now, Number(v)); changed = true }
     })
     if (changed) markDirty()
   // eslint-disable-next-line react-hooks/exhaustive-deps

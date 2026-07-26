@@ -4,6 +4,7 @@ import (
 	"app-manager/config"
 	"app-manager/database"
 	"app-manager/models"
+	"app-manager/scada"
 	"app-manager/stomp"
 	"app-manager/storage"
 	"encoding/json"
@@ -197,6 +198,7 @@ func SaveScadaCanvas(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	scada.ReloadInterfacePollers()
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
@@ -224,6 +226,7 @@ func SaveScadaCanvasByID(c *gin.Context) {
 		return
 	}
 	database.DB.First(&row, id)
+	scada.ReloadInterfacePollers()
 	c.JSON(http.StatusOK, gin.H{"data": row})
 }
 
@@ -249,6 +252,7 @@ func PublishScada(c *gin.Context) {
 		return
 	}
 	database.DB.First(&row, id)
+	scada.ReloadInterfacePollers()
 	c.JSON(http.StatusOK, gin.H{"data": row})
 }
 
@@ -272,6 +276,7 @@ func UnpublishScada(c *gin.Context) {
 	row.ShareExpireTime = nil
 	// 发布实时事件
 	publishScadaEvent("scada.unpublished", row)
+	scada.ReloadInterfacePollers()
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 

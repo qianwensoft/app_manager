@@ -10,6 +10,7 @@ import type { PointDataMap } from '@/hooks/useStompPointData'
 import { useStompPointData } from '@/hooks/useStompPointData'
 import { useInterfaceBindingData, resolveElementValue } from '@/hooks/useInterfaceBindingData'
 import { useHighFreqTextData } from '@/hooks/useHighFreqTextData'
+import { useDateTimeTick } from '@/hooks/useDateTimeTick'
 import { useScadaInfo } from '@/hooks/useScada'
 import ChartWidget from './ChartWidget'
 import TrendWidget from './TrendWidget'
@@ -94,6 +95,9 @@ export default function CanvasBoard() {
     onData: handlePointData,
   })
 
+  // 当前时间日期元件的每秒刷新（编辑器画布直接渲染系统时间）
+  const dateTimeTick = useDateTimeTick(allElements)
+
   // High-frequency text data via binary stream (interval_ms < 1000)
   const highFreqData = useHighFreqTextData(allElements, scadaCode, !!scadaCode)
 
@@ -157,7 +161,8 @@ export default function CanvasBoard() {
         }
       }
     }
-  }, [canvas, zoom, selectedIds])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvas, zoom, selectedIds, dateTimeTick])
 
   useEffect(() => { draw() }, [draw])
 
