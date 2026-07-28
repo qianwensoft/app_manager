@@ -1,10 +1,11 @@
-import { useState, useCallback } from 'react'
-import type { CanvasElement } from '@/types'
+import { useState, useCallback, useMemo } from 'react'
+import type { CanvasElement, CustomFunctionDef, GlobalParam } from '@/types'
 import type { PointDataMap } from './useStompPointData'
 import { useStompPointData } from './useStompPointData'
 import { useHttpPollingPointData } from './useHttpPollingPointData'
 import { useInterfaceBindingData } from './useInterfaceBindingData'
 import { useTableBindingData } from './useTableBindingData'
+import { resolveGlobalParams } from '@/runtime/expression'
 
 export interface CanvasBindingOptions {
   scadaCode: string
@@ -18,6 +19,10 @@ export interface CanvasBindingOptions {
   interfaceEnabled?: boolean
   /** 免登分享模式 token：STOMP 走 /ws/stomp-scada */
   shareToken?: string
+  /** 项目级全局参数（接口参数 global / expression 源使用） */
+  globalParams?: GlobalParam[]
+  /** 项目级自定义函数（接口参数 expression 源使用） */
+  customFunctions?: CustomFunctionDef[]
 }
 
 /**
@@ -31,8 +36,12 @@ export function useCanvasBindingData({
   httpPollIntervalMs = 2000,
   interfaceEnabled = true,
   shareToken,
+  globalParams,
+  customFunctions,
 }: CanvasBindingOptions) {
   const [pointData, setPointData] = useState<PointDataMap>({})
+
+  const resolvedGlobalParams = useMemo(() => resolveGlobalParams(globalParams), [globalParams])
 
   const mergeData = useCallback((data: PointDataMap) => {
     setPointData((prev) => ({ ...prev, ...data }))
@@ -58,6 +67,8 @@ export function useCanvasBindingData({
     scadaCode,
     pointData,
     shareToken,
+    globalParams: resolvedGlobalParams,
+    customFunctions,
   })
 
   const tableLiveData = useTableBindingData({

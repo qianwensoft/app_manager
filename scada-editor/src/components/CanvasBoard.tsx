@@ -1,5 +1,6 @@
-import { useRef, useEffect, useCallback, useState } from 'react'
+import { useRef, useEffect, useCallback, useState, useMemo } from 'react'
 import { useEditorStore } from '@/store/editorStore'
+import { resolveGlobalParams } from '@/runtime/expression'
 import {
   drawGrid, drawElement, drawSelectionHandles, drawMultiSelectBox, drawMarquee,
   hitTest, hitTestHandle, hitTestMarquee, snapToGrid, generateId,
@@ -90,9 +91,17 @@ export default function CanvasBoard() {
   })
 
   const allElements = canvas?.elements ?? []
+  const resolvedGlobalParams = useMemo(
+    () => resolveGlobalParams(store.project.globalParams),
+    [store.project.globalParams],
+  )
   useInterfaceBindingData({
     elements: liveDataOn ? allElements : [],
     onData: handlePointData,
+    scadaCode,
+    pointData,
+    globalParams: resolvedGlobalParams,
+    customFunctions: store.project.customFunctions,
   })
 
   // 当前时间日期元件的每秒刷新（编辑器画布直接渲染系统时间）

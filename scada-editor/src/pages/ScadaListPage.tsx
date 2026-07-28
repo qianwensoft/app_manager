@@ -45,6 +45,14 @@ const Icons = {
   search:   ['M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16ZM21 21l-4.35-4.35'],
   chevron:  ['M9 18l6-6-6-6'],
   scada:    ['M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z'],
+  link:     ['M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71', 'M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71'],
+  copy:     ['M20 9H11a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2z', 'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'],
+  check:    ['M20 6L9 17l-5-5'],
+}
+
+/** 构建已发布组态的免登录正式访问地址 */
+function buildShareUrl(token: string): string {
+  return `${window.location.origin}/scada-editor/share/${token}`
 }
 
 /* ── Group tree ─────────────────────────────────────── */
@@ -94,6 +102,7 @@ interface CardInfo {
   scada_code: string
   publish_status?: number
   preview_image?: string
+  share_token?: string
 }
 
 function ScadaCard({
@@ -112,6 +121,30 @@ function ScadaCard({
   publishBusy: boolean
 }) {
   const [hover, setHover] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  const shareUrl = info.publish_status === 1 && info.share_token
+    ? buildShareUrl(info.share_token)
+    : ''
+
+  const copyShareUrl = async () => {
+    if (!shareUrl) return
+    try {
+      await navigator.clipboard.writeText(shareUrl)
+    } catch {
+      // 剪贴板不可用时退回到手动选择
+      const ta = document.createElement('textarea')
+      ta.value = shareUrl
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      try { document.execCommand('copy') } catch { /* ignore */ }
+      document.body.removeChild(ta)
+    }
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1600)
+  }
 
   return (
     <div
@@ -213,6 +246,49 @@ function ScadaCard({
         }}>
           {info.scada_code}
         </div>
+
+        {/* 正式地址（已发布免登录访问链接） */}
+        {shareUrl && (
+          <div
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              marginBottom: 10, padding: '6px 8px',
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-sm)',
+            }}
+            title={shareUrl}
+          >
+            <span style={{ color: '#4ade80', display: 'flex', flexShrink: 0 }}>
+              <Svg d={Icons.link} size={12} />
+            </span>
+            <span style={{
+              flex: 1, minWidth: 0,
+              fontFamily: 'var(--font-mono)', fontSize: 10,
+              color: 'var(--text-secondary)',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>
+              {shareUrl}
+            </span>
+            <button
+              onClick={(e) => { e.stopPropagation(); copyShareUrl() }}
+              title="复制正式地址（免登录）"
+              className="focus-accent"
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                width: 22, height: 22, flexShrink: 0,
+                borderRadius: 'var(--radius-sm)',
+                background: 'transparent',
+                border: '1px solid var(--border)',
+                color: copied ? '#4ade80' : 'var(--text-muted)',
+                cursor: 'pointer',
+                transition: 'color var(--duration-fast), border-color var(--duration-fast)',
+              }}
+            >
+              <Svg d={copied ? Icons.check : Icons.copy} size={12} />
+            </button>
+          </div>
+        )}
 
         <div style={{ display: 'flex', gap: 6 }}>
           <button

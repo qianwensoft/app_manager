@@ -829,9 +829,23 @@ import { createEventAnalysisStomp } from '@/utils/eventAnalysisStomp'
 import QRCode from 'qrcode'
 import WirelessAdbPanel from '@/components/WirelessAdbPanel.vue'
 import { useWirelessAdb } from '@/composables/useWirelessAdb'
+import { usePortalContext } from '@/composables/usePortalContext'
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+// 资源中心前台模式：详情操作按选中节点的 detail_perms 逐项显隐。
+const { ctx: portalCtx, portalMode } = usePortalContext()
+const portalDetailPerms = computed(() => {
+  if (!portalMode.value || !portalCtx?.activeNode?.value) return null
+  const n = portalCtx.activeNode.value
+  return Array.isArray(n.detail_perms) ? n.detail_perms : []
+})
+// hasPortalPerm 在前台模式下判断某操作是否被授予；非前台模式恒 true。
+const hasPortalPerm = (perm) => {
+  if (!portalMode.value) return true
+  const list = portalDetailPerms.value || []
+  return list.includes(perm)
+}
 const wirelessAdb = useWirelessAdb(computed(() => route.params.id))
 // provide('wirelessAdb', wirelessAdb)  // 🔧 移除 provide，避免 ref 嵌套导致模板无法自动解包
 const device = ref(null)
@@ -1080,10 +1094,14 @@ watch(
 )
 
 const canMutate = computed(() => {
+  // 前台模式：以选中节点是否含 "adb" 操作权限为主开关（细粒度操作各自叠加 hasPortalPerm）。
+  if (portalMode.value) return hasPortalPerm('adb')
   const r = auth.user?.role
   if (!r) return true
   return r === 'admin' || r === 'operator'
 })
+// canPortalAction 供模板按操作键（install_apk/wireless_adb/record/file/...）逐项显隐。
+const canPortalAction = (perm) => hasPortalPerm(perm)
 
 const deviceListenSnapshot = ref(null)
 const deviceListenLoading = ref(false)

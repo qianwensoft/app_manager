@@ -9,7 +9,7 @@
           <template #header>
             <div class="card-head">
               <b>{{ wo.title }}</b>
-              <el-button v-if="!readonly" text type="primary" size="small" @click="openEdit">编辑</el-button>
+              <el-button v-if="!readonly && hasWoPerm('edit_fields')" text type="primary" size="small" @click="openEdit">编辑</el-button>
             </div>
           </template>
           <el-descriptions :column="isMobile ? 1 : 2" border>
@@ -21,7 +21,7 @@
                 :model-value="wo.priority"
                 size="small"
                 style="width: 100px"
-                :disabled="readonly"
+                :disabled="readonly || !hasWoPerm('edit_fields')"
                 @change="changePriority"
               >
                 <el-option label="普通" value="normal" />
@@ -48,7 +48,7 @@
                   </el-popover>
                 </template>
                 <span v-else>-</span>
-                <el-button v-if="!readonly" text type="primary" size="small" @click="startEditBusinessNo">编辑</el-button>
+                <el-button v-if="!readonly && hasWoPerm('edit_fields')" text type="primary" size="small" @click="startEditBusinessNo">编辑</el-button>
               </div>
               <div v-else class="business-no-edit">
                 <el-input v-model="businessNoDraft" placeholder="请输入业务单号" style="max-width:300px" />
@@ -62,7 +62,7 @@
               <el-switch
                 :model-value="wo.visibility === 'public'"
                 active-text="公开" inactive-text="私有"
-                :disabled="readonly"
+                :disabled="readonly || !hasWoPerm('edit_fields')"
                 @change="toggleVisibility"
               />
             </el-descriptions-item>
@@ -86,7 +86,7 @@
                   </span>
                 </template>
                 <span v-else>-</span>
-                <el-button v-if="!readonly" text type="primary" size="small" @click="startEditCodes">编辑</el-button>
+                <el-button v-if="!readonly && hasWoPerm('edit_fields')" text type="primary" size="small" @click="startEditCodes">编辑</el-button>
               </div>
               <div v-else class="codes-edit">
                 <el-input v-model="codesDraft" type="textarea" :rows="2" placeholder="多个编码用逗号分隔" />
@@ -156,7 +156,7 @@
           <template #header>
             <div class="card-head">
               <b>标签</b>
-              <el-button v-if="!readonly" text type="primary" size="small" @click="openTagEdit">编辑</el-button>
+              <el-button v-if="!readonly && hasWoPerm('edit_fields')" text type="primary" size="small" @click="openTagEdit">编辑</el-button>
             </div>
           </template>
           <div class="tags-box">
@@ -169,14 +169,16 @@
           </div>
         </el-card>
 
-        <el-card v-if="!readonly" shadow="never" style="margin-bottom:16px">
+        <el-card v-if="!readonly && (hasWoPerm('change_status') || hasWoPerm('assign'))" shadow="never" style="margin-bottom:16px">
           <template #header><b>处理操作</b></template>
           <div class="actions">
-            <el-button :disabled="wo.status==='in_progress'" @click="setStatus('in_progress')">开始处理</el-button>
-            <el-button type="success" :disabled="wo.status==='resolved'" @click="setStatus('resolved')">标记解决</el-button>
-            <el-button type="info" :disabled="wo.status==='closed'" @click="setStatus('closed')">关闭工单</el-button>
-            <el-button v-if="wo.status==='closed'" type="warning" @click="setStatus('reopened')">重新打开</el-button>
-            <el-button @click="assignDialog = true">转交</el-button>
+            <template v-if="hasWoPerm('change_status')">
+              <el-button :disabled="wo.status==='in_progress'" @click="setStatus('in_progress')">开始处理</el-button>
+              <el-button type="success" :disabled="wo.status==='resolved'" @click="setStatus('resolved')">标记解决</el-button>
+              <el-button type="info" :disabled="wo.status==='closed'" @click="setStatus('closed')">关闭工单</el-button>
+              <el-button v-if="wo.status==='closed'" type="warning" @click="setStatus('reopened')">重新打开</el-button>
+            </template>
+            <el-button v-if="hasWoPerm('assign')" @click="assignDialog = true">转交</el-button>
           </div>
         </el-card>
 
@@ -339,10 +341,25 @@ import {
 import { statusLabel, statusType, priorityType, priorityLabel } from './workOrderConst'
 import ImagePreviewWithRotate from '@/components/ImagePreviewWithRotate.vue'
 import { createWorkOrdersStomp } from '@/utils/workOrdersStomp'
+import { usePortalContext } from '@/composables/usePortalContext'
 
 const route = useRoute()
 const router = useRouter()
 const id = route.params.id
+
+// 资源中心前台模式：按选中节点的 detail_perms 控制工单操作按钮。
+const { ctx: portalCtx, portalMode } = usePortalContext()
+const portalWoPerms = computed(() => {
+  if (!portalMode.value || !portalCtx?.activeNode?.value) return null
+  const n = portalCtx.activeNode.value
+  if (n.node_type !== 'workorder_mgmt') return []
+  return Array.isArray(n.detail_perms) ? n.detail_perms : []
+})
+// hasWoPerm：非前台模式恒为 true（保持后台原行为）；前台模式按节点授予的权限判定。
+const hasWoPerm = (perm) => {
+  if (!portalMode.value) return true
+  return (portalWoPerms.value || []).includes(perm)
+}
 
 const isMobile = ref(window.innerWidth < 768)
 const onResize = () => { isMobile.value = window.innerWidth < 768 }
@@ -356,7 +373,7 @@ const goBack = () => {
   if (from) {
     router.push(from)
   } else {
-    router.push('/work-orders')
+    router.push(portalMode.value ? '/portal/work-orders' : '/work-orders')
   }
 }
 

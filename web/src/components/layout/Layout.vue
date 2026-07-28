@@ -74,6 +74,9 @@
         <el-menu-item index="/work-orders">
           <el-icon><Tickets /></el-icon><span>工单管理</span>
         </el-menu-item>
+        <div class="menu-item-external menu-item-flat" @click="openPortal">
+          <el-icon><Grid /></el-icon><span>资源中心 ↗</span>
+        </div>
         <template v-if="!auth.isViewer">
           <el-menu-item index="/apikeys">
             <el-icon><Key /></el-icon><span>授权管理</span>
@@ -84,6 +87,12 @@
         </template>
         <!-- admin 专属 -->
         <template v-if="auth.isAdmin">
+          <el-menu-item index="/resource-center/nodes">
+            <el-icon><Grid /></el-icon><span>资源节点</span>
+          </el-menu-item>
+          <el-menu-item index="/resource-center/roles">
+            <el-icon><UserFilled /></el-icon><span>资源角色</span>
+          </el-menu-item>
           <el-menu-item index="/users">
             <el-icon><UserFilled /></el-icon><span>用户管理</span>
           </el-menu-item>
@@ -120,7 +129,7 @@
 import { computed, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useRoute, useRouter } from 'vue-router'
-import { Monitor, Phone, VideoCamera, Document, Box, List, Key, Notebook, Connection, Cpu, Bell, Setting, Share, Link, Tools, UserFilled, User, Histogram, Menu, EditPen, Tickets, Loading, Warning } from '@element-plus/icons-vue'
+import { Monitor, Phone, VideoCamera, Document, Box, List, Key, Notebook, Connection, Cpu, Bell, Setting, Share, Link, Tools, UserFilled, User, Histogram, Menu, EditPen, Tickets, Loading, Warning, Grid } from '@element-plus/icons-vue'
 import QuickSearch from './QuickSearch.vue'
 
 const auth = useAuthStore()
@@ -141,6 +150,10 @@ const openFormApp = () => {
   window.open(url, '_blank')
 }
 
+const openPortal = () => {
+  window.open(`${window.location.origin}/portal`, '_blank')
+}
+
 const pageTitle = computed(() => route.meta?.title || route.name || '')
 
 const menuActive = computed(() => {
@@ -156,6 +169,8 @@ const menuActive = computed(() => {
   if (p.startsWith('/deadletter-queue')) return '/deadletter-queue'
   if (p.startsWith('/data')) return '/data'
   if (p.startsWith('/agent-menus')) return '/agent-menus'
+  if (p.startsWith('/resource-center/nodes')) return '/resource-center/nodes'
+  if (p.startsWith('/resource-center/roles')) return '/resource-center/roles'
   if (p.startsWith('/work-orders')) return '/work-orders'
   return p
 })

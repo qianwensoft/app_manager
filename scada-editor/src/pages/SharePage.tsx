@@ -85,6 +85,8 @@ export default function SharePage() {
     httpPollEnabled: false,
     interfaceEnabled: true,
     shareToken: token,
+    globalParams: project?.globalParams,
+    customFunctions: project?.customFunctions,
   })
 
   const activeCanvas: CanvasData | undefined =

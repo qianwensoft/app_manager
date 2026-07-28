@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
-import type { CanvasData, CanvasElement, CanvasProject, DrawingTool, AlignType } from '@/types'
+import type { CanvasData, CanvasElement, CanvasProject, DrawingTool, AlignType, GlobalParam, CustomFunctionDef } from '@/types'
 import type { ScadaWorkflow, WorkflowLib } from '@/types/workflow'
 import { generateId } from '@/utils/canvas'
 
@@ -186,6 +186,10 @@ interface EditorStore {
   deleteWorkflow: (id: string) => void
   duplicateWorkflow: (id: string) => void
   setWorkflowLibs: (libs: WorkflowLib[]) => void
+
+  // actions - 全局参数 / 自定义函数（随 canvas_data 持久化）
+  setGlobalParams: (params: GlobalParam[]) => void
+  setCustomFunctions: (fns: CustomFunctionDef[]) => void
 
   // ui prefs — persisted to localStorage
   liveDataOn: boolean
@@ -651,6 +655,12 @@ export const useEditorStore = create<EditorStore>()(
 
     setWorkflowLibs: (libs) =>
       set((s) => { s.project.workflowLibs = libs; s.isDirty = true }),
+
+    setGlobalParams: (params) =>
+      set((s) => { s.project.globalParams = params; s.isDirty = true }),
+
+    setCustomFunctions: (fns) =>
+      set((s) => { s.project.customFunctions = fns; s.isDirty = true }),
 
     setTool: (tool) => set((s) => { s.activeTool = tool }),
     setZoom: (zoom) => set((s) => { s.zoom = Math.max(0.1, Math.min(5, zoom)) }),

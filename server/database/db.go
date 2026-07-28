@@ -210,6 +210,13 @@ var migrateGroups = [][]interface{}{
 	{
 		&models.X5KernelVersion{},
 	},
+	// Group 12 — resource center (资源中心)
+	{
+		&models.ResourceNode{},
+		&models.ResourceRole{},
+		&models.ResourceRoleNode{},
+		&models.ResourceRoleUser{},
+	},
 }
 
 func runAutoMigrate(db *gorm.DB) error {

@@ -89,6 +89,8 @@ func SetupRouter() *gin.Engine {
 	r.GET("/api/scada/info/share/:token", GetScadaInfoByShareToken)
 	// 免登录：组态分享态调用其画布引用的平台数据接口（只读，token 在 body，白名单校验）
 	r.POST("/api/scada/share/interfaces/:id/invoke", InvokeScadaShareInterface)
+	// 免登录：组态分享态调用其画布引用的外部应用开放接口（只读，token 在 body，白名单校验）
+	r.POST("/api/scada/share/endpoints/:id/call", CallScadaShareEndpoint)
 	// 免登录：表单分享
 	r.GET("/api/form-app/info/share/:token", GetFormAppByShareToken)
 	// 工单报告分享（免登录访问基础信息，需登录模式下需要 JWT）
@@ -148,25 +150,25 @@ func SetupRouter() *gin.Engine {
 		d.GET("/:id/info", GetDeviceInfo)
 		d.GET("/:id/apps", GetDeviceApps)
 		d.POST("/:id/apps/refresh", RefreshDeviceAppsFromAgent)
-		d.POST("/:id/apps/pull-apk", auth.RequireRole("admin", "operator"), PullInstalledApkFromAgent)
-		d.POST("/:id/apps/export-to-server", auth.RequireRole("admin", "operator"), ExportInstalledApkToServer)
+		d.POST("/:id/apps/pull-apk", auth.RequireResourcePermission("device", "install_apk"), PullInstalledApkFromAgent)
+		d.POST("/:id/apps/export-to-server", auth.RequireResourcePermission("device", "install_apk"), ExportInstalledApkToServer)
 		d.POST("/:id/agent/refresh-info", RefreshAgentDeviceInfoFromAgent)
-		d.POST("/:id/agent/open-wireless-adb", auth.RequireRole("admin", "operator"), OpenWirelessAdbOnAgent)
-		d.POST("/:id/agent/trigger-menu", auth.RequireRole("admin", "operator"), TriggerAgentMenuOnAgent)
-		d.POST("/:id/agent/push-update", auth.RequireRole("admin", "operator"), PushAgentUpdate)
-		d.POST("/:id/agent/nav-key", auth.RequireRole("admin", "operator"), AgentNavKey)
-		d.POST("/:id/speed-test", auth.RequireRole("admin", "operator"), DeviceSpeedTest)
+		d.POST("/:id/agent/open-wireless-adb", auth.RequireResourcePermission("device", "wireless_adb"), OpenWirelessAdbOnAgent)
+		d.POST("/:id/agent/trigger-menu", auth.RequireResourcePermission("device", "trigger_menu"), TriggerAgentMenuOnAgent)
+		d.POST("/:id/agent/push-update", auth.RequireResourcePermission("device", "push_update"), PushAgentUpdate)
+		d.POST("/:id/agent/nav-key", auth.RequireResourcePermission("device", "adb"), AgentNavKey)
+		d.POST("/:id/speed-test", auth.RequireResourcePermission("device", "speed_test"), DeviceSpeedTest)
 		d.GET("/:id/file-hub", ListDeviceFileHub)
-		d.POST("/:id/audio-recording/start", auth.RequireRole("admin", "operator"), StartAudioRecording)
-		d.POST("/:id/audio-recording/stop", auth.RequireRole("admin", "operator"), StopAudioRecording)
+		d.POST("/:id/audio-recording/start", auth.RequireResourcePermission("device", "record"), StartAudioRecording)
+		d.POST("/:id/audio-recording/stop", auth.RequireResourcePermission("device", "record"), StopAudioRecording)
 		d.POST("/:id/screen-shares", CreateScreenShare)
 		d.GET("/:id/screen-shares", ListScreenShares)
 		d.DELETE("/:id/screen-shares/:sid", RevokeScreenShare)
-		d.GET("/:id/agent/fs/list", auth.RequireRole("admin", "operator"), AgentFsList)
-		d.GET("/:id/agent/fs/download", auth.RequireRole("admin", "operator"), AgentFsDownload)
+		d.GET("/:id/agent/fs/list", auth.RequireResourcePermission("device", "file"), AgentFsList)
+		d.GET("/:id/agent/fs/download", auth.RequireResourcePermission("device", "file"), AgentFsDownload)
 
 		// ADB 操作
-		op := d.Group("/:id/adb", auth.RequireRole("admin", "operator"))
+		op := d.Group("/:id/adb", auth.RequireResourcePermission("device", "adb"))
 		op.POST("/reboot", AdbReboot)
 		op.POST("/screenshot", AdbScreenshot)
 		op.POST("/keyevent", AdbKeyEvent)
@@ -597,10 +599,10 @@ func SetupRouter() *gin.Engine {
 		wo.PUT("/report-shares/:id", UpdateWorkOrderReportShare)
 		wo.DELETE("/report-shares/:id", DeleteWorkOrderReportShare)
 		wo.GET("/:id", GetWorkOrder)
-		wo.PUT("/:id", auth.RequireRoleOrWoWrite("admin", "operator"), UpdateWorkOrder)
-		wo.DELETE("/:id", auth.RequireRole("admin", "operator"), DeleteWorkOrder)
-		wo.POST("/:id/assign", auth.RequireRole("admin", "operator"), AssignWorkOrder)
-		wo.POST("/:id/status", auth.RequireRoleOrWoWrite("admin", "operator"), ChangeWorkOrderStatus)
+		wo.PUT("/:id", auth.RequireResourcePermission("workorder", "edit_fields"), UpdateWorkOrder)
+		wo.DELETE("/:id", auth.RequireResourcePermission("workorder", "delete"), DeleteWorkOrder)
+		wo.POST("/:id/assign", auth.RequireResourcePermission("workorder", "assign"), AssignWorkOrder)
+		wo.POST("/:id/status", auth.RequireResourcePermission("workorder", "change_status"), ChangeWorkOrderStatus)
 	}
 	fapp := r.Group("/api/form-app", auth.AuthMiddleware(), auth.RequireRole("admin", "operator", "viewer"))
 	{
@@ -825,6 +827,30 @@ func SetupRouter() *gin.Engine {
 	)
 	{
 		mcpGroup.POST("/", mcp.Handle)
+	}
+
+	// 资源中心（Resource Center）后台配置（仅 admin）
+	rc := r.Group("/api/resource-center", auth.AuthMiddleware(), auth.RequireRole("admin"))
+	{
+		rc.GET("/nodes", GetResourceNodes)
+		rc.POST("/nodes", CreateResourceNode)
+		rc.PUT("/nodes/:id", UpdateResourceNode)
+		rc.DELETE("/nodes/:id", DeleteResourceNode)
+		rc.GET("/roles", GetResourceRoles)
+		rc.POST("/roles", CreateResourceRole)
+		rc.PUT("/roles/:id", UpdateResourceRole)
+		rc.DELETE("/roles/:id", DeleteResourceRole)
+		rc.PUT("/roles/:id/nodes", SetResourceRoleNodes)
+		rc.PUT("/roles/:id/users", SetResourceRoleUsers)
+		rc.GET("/matrix", GetResourceMatrix)
+		rc.GET("/perm-catalog", GetResourcePermCatalog)
+	}
+	// 资源中心前台运行时（任意登录用户）
+	portal := r.Group("/api/portal", auth.AuthMiddleware())
+	{
+		portal.GET("/resource-tree", GetPortalResourceTree)
+		portal.GET("/permissions", GetPortalPermissions)
+		portal.GET("/stats", GetPortalStats)
 	}
 
 	// X5 内核管理

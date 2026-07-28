@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useEditorStore } from '@/store/editorStore'
-import type { PointBinding, DataBindingMode, InterfaceFieldMapping, InterfaceSourceType, ValueFormatter, ElementType, ParamSpec } from '@/types'
+import type { PointBinding, DataBindingMode, InterfaceFieldMapping, InterfaceSourceType, InterfaceParamSourceType, ValueFormatter, ElementType, ParamSpec, CanvasElement } from '@/types'
 import { getChartSchema, type BindingFieldDef } from '@/schema/chartSchema'
 import { dataBindingApi, type DataInterfaceItem, type OutboundAppItem, type OutboundWebhookItem, type OutboundEndpointItem, type ScadaSimPointItem } from '@/api/dataBinding'
 import type { PointDataMap } from '@/hooks/useStompPointData'
 import SimPointsModal from './SimPointsModal'
+import ExpressionInput, { type ExprScopeInfo } from './ExpressionInput'
+import GlobalParamsModal from './GlobalParamsModal'
 
 interface Props {
   elementId: string
@@ -14,6 +16,15 @@ interface Props {
 }
 
 // ── Shared primitives ──────────────────────────────────────────────────────────
+
+/**
+ * 阻止抽屉内的键盘事件冒泡到 window 级画布快捷键处理器
+ * （useKeyboardShortcuts）。否则在参数输入框 / 表达式编辑器里
+ * 按退格、复制粘贴、方向键等会被画布拦截（删除元件、切换工具…），
+ * 导致输入框内无法正常编辑。仅拦截冒泡，不 preventDefault，
+ * 输入框 / CodeMirror 自身的原生按键行为完全保留。
+ */
+const stopKeyboardBubble = (e: React.KeyboardEvent) => { e.stopPropagation() }
 
 const Inp = ({ val, onChange, placeholder = '', type = 'text' }: {
   val: string; onChange: (v: string) => void; placeholder?: string; type?: string
@@ -963,6 +974,79 @@ function buildInterfaceTargets(isChart: boolean, schema: ReturnType<typeof getCh
   return ['text', 'fill', 'stroke', 'value']
 }
 
+// 接口参数「来源选择 + 非固定值输入」控件。
+// 固定值(constant)输入由调用方自行渲染（因需按 ParamSpec 类型区分 enum/boolean/number）。
+function ParamSourceControls({
+  name, source, binding, exprScope, elements,
+  onSource, onPath, onExpression, onGlobal, onElementId, onProperty, globalParamKeys,
+}: {
+  name: string
+  source: InterfaceParamSourceType
+  binding?: { path?: string; expression?: string; paramName?: string; elementId?: string; property?: string }
+  exprScope: ExprScopeInfo
+  elements: { id: string; name: string }[]
+  onSource: (name: string, source: InterfaceParamSourceType) => void
+  onPath: (name: string, path: string) => void
+  onExpression: (name: string, expr: string) => void
+  onGlobal: (name: string, paramName: string) => void
+  onElementId: (name: string, elementId: string) => void
+  onProperty: (name: string, property: string) => void
+  globalParamKeys: string[]
+}) {
+  return (
+    <>
+      <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: 6, marginBottom: 6 }}>
+        <Sel val={source} onChange={(v) => onSource(name, v as InterfaceParamSourceType)}>
+          <option value="constant">固定值</option>
+          <option value="global">全局参数</option>
+          <option value="expression">表达式</option>
+          <option value="element">组件值</option>
+          <option value="url">URL 参数</option>
+          <option value="context">SCADA 上下文</option>
+          <option value="point">点位数据</option>
+          <option value="object">组合对象</option>
+        </Sel>
+        {source === 'constant' ? (
+          <span style={{ alignSelf: 'center', fontSize: 10, color: 'var(--text-muted)' }}>按接口契约校验并转换类型</span>
+        ) : source === 'global' ? (
+          <Sel val={binding?.paramName ?? ''} onChange={(v) => onGlobal(name, v)}>
+            <option value="">-- 选择全局参数 --</option>
+            {globalParamKeys.map((k) => <option key={k} value={k}>{k}</option>)}
+          </Sel>
+        ) : source === 'expression' ? (
+          <span style={{ alignSelf: 'center', fontSize: 10, color: 'var(--text-muted)' }}>见下方表达式编辑器</span>
+        ) : source === 'element' ? (
+          <Sel val={binding?.elementId ?? ''} onChange={(v) => onElementId(name, v)}>
+            <option value="">-- 选择组件 --</option>
+            {elements.map((e) => <option key={e.id} value={e.id}>{e.name || e.id}</option>)}
+          </Sel>
+        ) : (
+          <Inp
+            val={binding?.path ?? ''}
+            onChange={(v) => onPath(name, v)}
+            placeholder={source === 'url' ? 'query 参数名' : '点分隔路径'}
+          />
+        )}
+      </div>
+      {source === 'element' && (
+        <Inp
+          val={binding?.property ?? ''}
+          onChange={(v) => onProperty(name, v)}
+          placeholder="属性路径（如 text / pointBinding.pointKey）"
+        />
+      )}
+      {source === 'expression' && (
+        <ExpressionInput
+          value={binding?.expression ?? ''}
+          onChange={(v) => onExpression(name, v)}
+          scope={exprScope}
+          placeholder="如：today('YYYY-MM-DD') 或 params.deviceId"
+        />
+      )}
+    </>
+  )
+}
+
 function IfaceModePanel({ draft, setDraft, isChart, schema, isText, isTable }: {
   draft: PointBinding
   setDraft: (fn: (prev: PointBinding) => PointBinding) => void
@@ -978,6 +1062,18 @@ function IfaceModePanel({ draft, setDraft, isChart, schema, isText, isTable }: {
   const [testLoading, setTestLoading] = useState(false)
   const [testResponse, setTestResponse] = useState<Record<string, unknown> | null>(null)
   const [testError, setTestError] = useState<string>('')
+  const [showGlobals, setShowGlobals] = useState(false)
+
+  const project = useEditorStore((s) => s.project)
+  const activeCanvas = useEditorStore((s) => s.project.canvases[s.project.activeCanvasId])
+  const globalParamList = project.globalParams ?? []
+  const customFnList = project.customFunctions ?? []
+  const exprScope: ExprScopeInfo = {
+    paramKeys: globalParamList.map((p) => p.key).filter(Boolean),
+    functionNames: customFnList.map((f) => f.name).filter(Boolean),
+    elementNames: (activeCanvas?.elements ?? []).map((e) => e.name).filter(Boolean),
+  }
+  const canvasElements = activeCanvas?.elements ?? []
 
   const sourceType = draft.ifaceSourceType ?? 'data_iface'
 
@@ -1113,18 +1209,44 @@ function IfaceModePanel({ draft, setDraft, isChart, schema, isText, isTable }: {
     update({ ifaceParamValues: params, ifaceParamBindings: bindings })
   }
 
-  const setParamSource = (name: string, source: 'constant' | 'url' | 'context' | 'point' | 'element' | 'object') => {
+  const setParamSource = (name: string, source: InterfaceParamSourceType) => {
     const bindings = { ...(draft.ifaceParamBindings ?? {}) }
     const existing = bindings[name]
-    bindings[name] = source === 'constant'
-      ? { source, value: draft.ifaceParamValues?.[name] ?? '' }
-      : { source, path: existing?.path ?? '' }
+    if (source === 'constant') bindings[name] = { source, value: draft.ifaceParamValues?.[name] ?? '' }
+    else if (source === 'global') bindings[name] = { source, paramName: existing?.paramName ?? '' }
+    else if (source === 'expression') bindings[name] = { source, expression: existing?.expression ?? '' }
+    else if (source === 'element') bindings[name] = { source, elementId: existing?.elementId ?? '', property: existing?.property ?? '' }
+    else bindings[name] = { source, path: existing?.path ?? '' }
     update({ ifaceParamBindings: bindings })
   }
 
   const setParamPath = (name: string, path: string) => {
     const bindings = { ...(draft.ifaceParamBindings ?? {}) }
     bindings[name] = { ...(bindings[name] ?? { source: 'constant' as const }), path }
+    update({ ifaceParamBindings: bindings })
+  }
+
+  const setParamExpression = (name: string, expression: string) => {
+    const bindings = { ...(draft.ifaceParamBindings ?? {}) }
+    bindings[name] = { ...(bindings[name] ?? { source: 'expression' as const }), source: 'expression', expression }
+    update({ ifaceParamBindings: bindings })
+  }
+
+  const setParamGlobal = (name: string, paramName: string) => {
+    const bindings = { ...(draft.ifaceParamBindings ?? {}) }
+    bindings[name] = { ...(bindings[name] ?? { source: 'global' as const }), source: 'global', paramName }
+    update({ ifaceParamBindings: bindings })
+  }
+
+  const setParamElementId = (name: string, elementId: string) => {
+    const bindings = { ...(draft.ifaceParamBindings ?? {}) }
+    bindings[name] = { ...(bindings[name] ?? { source: 'element' as const }), source: 'element', elementId }
+    update({ ifaceParamBindings: bindings })
+  }
+
+  const setParamProperty = (name: string, property: string) => {
+    const bindings = { ...(draft.ifaceParamBindings ?? {}) }
+    bindings[name] = { ...(bindings[name] ?? { source: 'element' as const }), source: 'element', property }
     update({ ifaceParamBindings: bindings })
   }
 
@@ -1136,7 +1258,9 @@ function IfaceModePanel({ draft, setDraft, isChart, schema, isText, isTable }: {
   const removeFreeParam = (key: string) => {
     const params = { ...(draft.ifaceParamValues ?? {}) }
     delete params[key]
-    update({ ifaceParamValues: params })
+    const bindings = { ...(draft.ifaceParamBindings ?? {}) }
+    delete bindings[key]
+    update({ ifaceParamValues: params, ifaceParamBindings: bindings })
   }
 
   const renameFreeParam = (oldKey: string, newKey: string) => {
@@ -1345,16 +1469,27 @@ function IfaceModePanel({ draft, setDraft, isChart, schema, isText, isTable }: {
         <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
             <Label>接口参数</Label>
-            {(sourceType === 'webhook' || (sourceType === 'open_api' && paramSpecs.length === 0)) && (
+            <div style={{ display: 'flex', gap: 6 }}>
               <button
-                onClick={addFreeParam}
+                onClick={() => setShowGlobals(true)}
+                title="管理全局参数与自定义函数"
                 style={{
                   padding: '2px 8px', fontSize: 10, cursor: 'pointer',
-                  background: 'var(--accent-muted)', color: 'var(--accent)',
-                  border: '1px solid var(--border-accent)', borderRadius: 'var(--radius-sm)',
+                  background: 'var(--bg-surface)', color: 'var(--text-primary)',
+                  border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
                 }}
-              >+ 添加参数</button>
-            )}
+              >全局参数/函数</button>
+              {(sourceType === 'webhook' || (sourceType === 'open_api' && paramSpecs.length === 0)) && (
+                <button
+                  onClick={addFreeParam}
+                  style={{
+                    padding: '2px 8px', fontSize: 10, cursor: 'pointer',
+                    background: 'var(--accent-muted)', color: 'var(--accent)',
+                    border: '1px solid var(--border-accent)', borderRadius: 'var(--radius-sm)',
+                  }}
+                >+ 添加参数</button>
+              )}
+            </div>
           </div>
 
           {paramSpecs.length === 0 && sourceType !== 'webhook' && sourceType !== 'open_api' && (
@@ -1381,25 +1516,20 @@ function IfaceModePanel({ draft, setDraft, isChart, schema, isText, isTable }: {
                     }}>{param.type}</span>
                   )}
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: 6, marginBottom: 6 }}>
-                  <Sel val={source} onChange={(v) => setParamSource(param.name, v as 'constant' | 'url' | 'context' | 'point' | 'element' | 'object')}>
-                    <option value="constant">固定值</option>
-                    <option value="url">URL 参数</option>
-                    <option value="context">SCADA 上下文</option>
-                    <option value="point">点位数据</option>
-                    <option value="element">组件属性</option>
-                    <option value="object">组合对象</option>
-                  </Sel>
-                  {source === 'constant' ? (
-                    <span style={{ alignSelf: 'center', fontSize: 10, color: 'var(--text-muted)' }}>按接口契约校验并转换类型</span>
-                  ) : (
-                    <Inp
-                      val={paramBinding?.path ?? ''}
-                      onChange={(v) => setParamPath(param.name, v)}
-                      placeholder={source === 'url' ? 'query 参数名' : source === 'element' ? '属性路径（需在组合内指定组件）' : '点分隔路径'}
-                    />
-                  )}
-                </div>
+                <ParamSourceControls
+                  name={param.name}
+                  source={source}
+                  binding={paramBinding}
+                  exprScope={exprScope}
+                  elements={canvasElements}
+                  globalParamKeys={exprScope.paramKeys ?? []}
+                  onSource={setParamSource}
+                  onPath={setParamPath}
+                  onExpression={setParamExpression}
+                  onGlobal={setParamGlobal}
+                  onElementId={setParamElementId}
+                  onProperty={setParamProperty}
+                />
                 {source === 'constant' && (param.enum && param.enum.length > 0 ? (
                   <Combo
                     val={val}
@@ -1415,11 +1545,12 @@ function IfaceModePanel({ draft, setDraft, isChart, schema, isText, isTable }: {
                     <option value="false">false</option>
                   </Sel>
                 ) : (
-                  <Inp
-                    val={val}
+                  <ExpressionInput
+                    value={val}
                     onChange={(v) => setParamValue(param.name, v)}
-                    placeholder={param.default ? String(param.default) : `输入 ${param.name}`}
-                    type={param.type === 'number' || param.type === 'integer' ? 'number' : 'text'}
+                    placeholder={param.default ? String(param.default) : `输入 ${param.name} 或表达式`}
+                    scope={exprScope}
+                    singleLine
                   />
                 ))}
                 {(param.min !== undefined || param.max !== undefined) && (
@@ -1436,30 +1567,55 @@ function IfaceModePanel({ draft, setDraft, isChart, schema, isText, isTable }: {
           {/* Free-form params (webhook / open_api without schema) */}
           {(sourceType === 'webhook' || sourceType === 'open_api') && (
             <>
-              {Object.entries(draft.ifaceParamValues ?? {}).map(([key, val], idx) => (
-                <div key={idx} style={{
-                  display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 6, marginBottom: 6, alignItems: 'center',
-                }}>
-                  <FreeParamNameInput
-                    name={key}
-                    onCommit={(v) => renameFreeParam(key, v)}
-                    options={paramNameSuggestions}
-                  />
-                  <Inp
-                    val={String(val)}
-                    onChange={(v) => setParamValue(key, v)}
-                    placeholder="参数值"
-                  />
-                  <button
-                    onClick={() => removeFreeParam(key)}
-                    style={{
-                      padding: '4px 6px', fontSize: 11, cursor: 'pointer',
-                      background: 'var(--danger-muted)', color: 'var(--danger)',
-                      border: '1px solid rgba(239,68,68,0.25)', borderRadius: 'var(--radius-sm)',
-                    }}
-                  >×</button>
-                </div>
-              ))}
+              {Object.entries(draft.ifaceParamValues ?? {}).map(([key, val]) => {
+                const fb = draft.ifaceParamBindings?.[key]
+                const fsource = fb?.source ?? 'constant'
+                return (
+                  <div key={key} style={{
+                    border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+                    padding: 8, marginBottom: 8, background: 'var(--bg-base)',
+                  }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 6, marginBottom: 6, alignItems: 'center' }}>
+                      <FreeParamNameInput
+                        name={key}
+                        onCommit={(v) => renameFreeParam(key, v)}
+                        options={paramNameSuggestions}
+                      />
+                      <button
+                        onClick={() => removeFreeParam(key)}
+                        style={{
+                          padding: '4px 8px', fontSize: 11, cursor: 'pointer',
+                          background: 'var(--danger-muted)', color: 'var(--danger)',
+                          border: '1px solid rgba(239,68,68,0.25)', borderRadius: 'var(--radius-sm)',
+                        }}
+                      >×</button>
+                    </div>
+                    <ParamSourceControls
+                      name={key}
+                      source={fsource}
+                      binding={fb}
+                      exprScope={exprScope}
+                      elements={canvasElements}
+                      globalParamKeys={exprScope.paramKeys ?? []}
+                      onSource={setParamSource}
+                      onPath={setParamPath}
+                      onExpression={setParamExpression}
+                      onGlobal={setParamGlobal}
+                      onElementId={setParamElementId}
+                      onProperty={setParamProperty}
+                    />
+                    {fsource === 'constant' && (
+                      <ExpressionInput
+                        value={String(val)}
+                        onChange={(v) => setParamValue(key, v)}
+                        placeholder="参数值或表达式"
+                        scope={exprScope}
+                        singleLine
+                      />
+                    )}
+                  </div>
+                )
+              })}
               {Object.keys(draft.ifaceParamValues ?? {}).length === 0 && (
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 0' }}>
                   点击"添加参数"为接口添加请求参数
@@ -1660,6 +1816,8 @@ function IfaceModePanel({ draft, setDraft, isChart, schema, isText, isTable }: {
           ))}
         </div>
       )}
+
+      {showGlobals && <GlobalParamsModal onClose={() => setShowGlobals(false)} />}
     </div>
   )
 }
@@ -1670,8 +1828,24 @@ export default function BindingDrawer({ elementId, scadaCode, pointData, onClose
   const store = useEditorStore()
   const canvas = store.activeCanvas()
   const el = canvas?.elements.find((e) => e.id === elementId)
+  // Guard lives in this thin wrapper so no hooks run after an early return.
+  // When the element is deleted/cleared, the inner (hook-bearing) component
+  // unmounts wholesale instead of rendering a different number of hooks
+  // (which would trigger React error #300 "rendered fewer hooks than expected").
   if (!el) return null
+  return (
+    <BindingDrawerInner
+      el={el}
+      elementId={elementId}
+      scadaCode={scadaCode}
+      pointData={pointData}
+      onClose={onClose}
+    />
+  )
+}
 
+function BindingDrawerInner({ el, elementId, scadaCode, pointData, onClose }: Props & { el: CanvasElement }) {
+  const store = useEditorStore()
   const pb = el.pointBinding ?? { mode: 'point', pointKey: '', deviceCode: '' }
   const schema = getChartSchema(el.type)
   const isChart = !!schema
@@ -1972,7 +2146,7 @@ export default function BindingDrawer({ elementId, scadaCode, pointData, onClose
     return (
       <>
         <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 10000 }} />
-        <div style={{
+        <div onKeyDown={stopKeyboardBubble} style={{
           position: 'fixed', top: 0, right: 0, bottom: 0, zIndex: 10001,
           width: 360,
           background: 'var(--bg-panel)', borderLeft: '1px solid var(--border-strong)',
@@ -1991,7 +2165,7 @@ export default function BindingDrawer({ elementId, scadaCode, pointData, onClose
   if (displayMode === 'float') {
     return (
       <>
-        <div ref={floatRef} style={{
+        <div ref={floatRef} onKeyDown={stopKeyboardBubble} style={{
           position: 'fixed', zIndex: 10001,
           left: floatPos.x, top: floatPos.y,
           width: floatSize.w, height: floatSize.h,
@@ -2028,7 +2202,7 @@ export default function BindingDrawer({ elementId, scadaCode, pointData, onClose
   return (
     <>
       <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 10000 }} />
-      <div style={{
+      <div onKeyDown={stopKeyboardBubble} style={{
         position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 10001,
         background: 'var(--bg-panel)', borderTop: '1px solid var(--border-strong)',
         boxShadow: '0 -8px 32px rgba(0,0,0,0.5)', borderRadius: '12px 12px 0 0',

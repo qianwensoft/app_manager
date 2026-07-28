@@ -15,10 +15,12 @@
     <!-- 右侧内容 -->
     <div style="flex:1;overflow:auto">
       <div style="display:flex;gap:12px;margin-bottom:16px;align-items:center">
-        <el-button type="primary" @click="scan" :loading="scanning">扫描设备</el-button>
-        <el-button @click="showAddDialog = true">手动添加</el-button>
-        <el-button @click="openReverseDialog">设备注册</el-button>
-        <AdbBridgeScan @registered="refresh" />
+        <template v-if="!portalMode">
+          <el-button type="primary" @click="scan" :loading="scanning">扫描设备</el-button>
+          <el-button @click="showAddDialog = true">手动添加</el-button>
+          <el-button @click="openReverseDialog">设备注册</el-button>
+          <AdbBridgeScan @registered="refresh" />
+        </template>
         <el-button :loading="refreshing" @click="refresh" :icon="RefreshIcon">刷新</el-button>
         <div style="flex:1"></div>
         <el-input
@@ -63,9 +65,9 @@
         </el-table-column>
         <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" @click="editDevice(row)">编辑</el-button>
-            <el-button size="small" @click="$router.push(`/devices/${row.id}`)">详情</el-button>
-            <el-button size="small" type="primary" plain @click="$router.push(`/devices/${row.id}?tab=files`)">文件</el-button>
+            <el-button v-if="!portalMode" size="small" @click="editDevice(row)">编辑</el-button>
+            <el-button size="small" @click="$router.push(deviceDetailPath(row.id))">详情</el-button>
+            <el-button size="small" type="primary" plain @click="$router.push(`${deviceDetailPath(row.id)}?tab=files`)">文件</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -98,9 +100,9 @@
                 :icon="MonitorIcon"
                 @click="$router.push(`/screen?device=${d.id}`)"
               >查看屏幕</el-button>
-              <el-button size="small" @click="editDevice(d)">编辑</el-button>
-              <el-button size="small" @click="$router.push(`/devices/${d.id}`)">详情</el-button>
-              <el-button size="small" type="primary" plain @click="$router.push(`/devices/${d.id}?tab=files`)">文件</el-button>
+              <el-button v-if="!portalMode" size="small" @click="editDevice(d)">编辑</el-button>
+              <el-button size="small" @click="$router.push(deviceDetailPath(d.id))">详情</el-button>
+              <el-button size="small" type="primary" plain @click="$router.push(`${deviceDetailPath(d.id)}?tab=files`)">文件</el-button>
             </div>
           </template>
         </el-card>
@@ -205,6 +207,17 @@ import * as deviceApi from '@/api/device'
 import { useEventListenerStore } from '@/stores/eventListeners'
 import NetworkCell from '@/components/NetworkCell.vue'
 import AdbBridgeScan from '@/components/AdbBridgeScan.vue'
+import { usePortalContext } from '@/composables/usePortalContext'
+
+// 资源中心前台模式：按选中节点过滤设备、隐藏管理操作、详情走 portal 路由。
+const { ctx: portalCtx, portalMode } = usePortalContext()
+const portalDeviceIds = computed(() => {
+  if (!portalMode.value || !portalCtx?.activeNode?.value) return null
+  const n = portalCtx.activeNode.value
+  if (n.node_type !== 'device_mgmt') return []
+  return Array.isArray(n.resolved_device_ids) ? n.resolved_device_ids : []
+})
+const deviceDetailPath = (id) => (portalMode.value ? `/portal/devices/${id}` : `/devices/${id}`)
 
 const DEVICES_VIEW_MODE_KEY = 'app-manager-devices-view-mode'
 
@@ -245,6 +258,10 @@ const groups = computed(() => {
 
 const filteredDevices = computed(() => {
   let list = devices.value
+  if (portalDeviceIds.value !== null) {
+    const allow = new Set(portalDeviceIds.value)
+    list = list.filter(d => allow.has(d.id))
+  }
   if (selectedGroup.value === '未分组') {
     list = list.filter(d => !d.group_name)
   } else if (selectedGroup.value) {

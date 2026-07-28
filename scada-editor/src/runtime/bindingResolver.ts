@@ -3,9 +3,20 @@ import type { PointDataMap } from '@/hooks/useStompPointData'
 import { applyFormatter } from '@/hooks/useInterfaceBindingData'
 import { IFACE_GLOBAL_PREFIX, readIfaceField, resolveTemplateValue, toNumber } from './bindingData'
 import { formatDate, formatDateTimeValue } from './dateTimeFormat'
+import { evaluateExpression, interpolateExpression, type ExpressionScope } from './expression'
 
-function applyTransform(raw: number, transform?: string): number {
+/**
+ * 转换表达式作用域：变量 v 为原始值，并注入完整表达式作用域
+ * （全局参数 params/P、点位 point/V、组件 el、时间/工具函数、自定义函数）。
+ * 优先按 `return (transform)` 求值；失败退化为仅 v 可用（向后兼容旧写法）。
+ */
+function applyTransform(raw: number, transform?: string, scope?: ExpressionScope): number {
   if (!transform) return raw
+  if (scope) {
+    const out = evaluateExpression(transform, { ...scope, extra: { v: raw } })
+    const n = Number(out)
+    if (Number.isFinite(n)) return n
+  }
   try {
     // eslint-disable-next-line no-new-func
     return Number(new Function('v', `return (${transform})`)(raw))
@@ -69,8 +80,12 @@ export function resolveBindingNumericValue(el: CanvasElement, pointData: PointDa
   }
 }
 
-/** 解析模板字符串，替换 {{field}} 占位符 */
-function resolveTemplate(template: string, data: PointDataMap, elId?: string): string {
+/**
+ * 解析模板字符串：
+ *  - `{{field}}` 占位符：取接口返回字段/点位数据（原有行为）
+ *  - `${表达式}`：求值表达式（函数/全局参数/组件值/时间函数等），需传入 scope
+ */
+function resolveTemplate(template: string, data: PointDataMap, elId?: string, scope?: ExpressionScope): string {
   // 全局键（STOMP 推送）先铺底，元件专属键后覆盖，保证复制元件各用各的接口数据
   const globalValues = Object.entries(data)
     .filter(([key]) => key.startsWith(IFACE_GLOBAL_PREFIX))
@@ -84,7 +99,12 @@ function resolveTemplate(template: string, data: PointDataMap, elId?: string): s
     : []
 
   const interfaceValues = Object.fromEntries([...globalValues, ...scopedValues])
-  return resolveTemplateValue(template, { ...data, ...interfaceValues })
+  const filled = resolveTemplateValue(template, { ...data, ...interfaceValues })
+  if (scope && filled.includes('${')) {
+    const out = interpolateExpression(filled, scope)
+    return out === undefined || out === null ? '' : String(out)
+  }
+  return filled
 }
 
 /** 提取绑定的原始值（未经数字格式化），供日期时间解析使用 */
@@ -109,7 +129,7 @@ function resolveRawBoundValue(el: CanvasElement, pointData: PointDataMap): unkno
 }
 
 /** 解析元件显示文本（text/button 等） */
-export function resolveElementDisplayValue(el: CanvasElement, pointData: PointDataMap): string | undefined {
+export function resolveElementDisplayValue(el: CanvasElement, pointData: PointDataMap, scope?: ExpressionScope): string | undefined {
   // 日期时间显示：优先于普通绑定解析
   const dt = el.dateTime
   if (dt?.enabled) {
@@ -139,12 +159,12 @@ export function resolveElementDisplayValue(el: CanvasElement, pointData: PointDa
       if (!key) return el.text
       const raw = pointData[key]
       if (raw === undefined) return el.text
-      return applyFormatter(applyTransform(toNumber(raw), binding.transform), fmt)
+      return applyFormatter(applyTransform(toNumber(raw), binding.transform, scope), fmt)
     }
     case 'interface': {
       // 文本组件：优先使用模板
       if (el.type === 'text' && binding.textTemplate) {
-        return resolveTemplate(binding.textTemplate, pointData, el.id)
+        return resolveTemplate(binding.textTemplate, pointData, el.id, scope)
       }
       // 否则使用字段映射
       const mapped = readIfaceField(pointData, 'value', el.id) ?? readIfaceField(pointData, 'text', el.id)
@@ -156,7 +176,7 @@ export function resolveElementDisplayValue(el: CanvasElement, pointData: PointDa
       if (!key) return el.text
       const raw = pointData[key]
       if (raw === undefined) return el.text
-      return applyFormatter(applyTransform(toNumber(raw), binding.transform), fmt)
+      return applyFormatter(applyTransform(toNumber(raw), binding.transform, scope), fmt)
     }
     case 'point':
     default: {
@@ -164,7 +184,7 @@ export function resolveElementDisplayValue(el: CanvasElement, pointData: PointDa
       if (!key) return el.text
       const raw = pointData[key]
       if (raw === undefined) return el.text
-      return applyFormatter(applyTransform(toNumber(raw), binding.transform), fmt)
+      return applyFormatter(applyTransform(toNumber(raw), binding.transform, scope), fmt)
     }
   }
 }

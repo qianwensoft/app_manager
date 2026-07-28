@@ -37,21 +37,26 @@ func CallOutboundEndpoint(c *gin.Context) {
 		return
 	}
 
+	status, payload := executeOutboundEndpointCall(&endpoint, req.ParamValues)
+	c.JSON(status, payload)
+}
+
+// executeOutboundEndpointCall 执行一次外部应用接口调用并返回状态码与响应体。
+// 由已登录调用 (CallOutboundEndpoint) 与免登分享调用 (CallScadaShareEndpoint) 共用。
+func executeOutboundEndpointCall(endpoint *models.OutboundEndpoint, paramValues map[string]interface{}) (int, gin.H) {
 	if !endpoint.Enabled {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "endpoint is disabled"})
-		return
+		return http.StatusBadRequest, gin.H{"error": "endpoint is disabled"}
 	}
 
 	if endpoint.App == nil || !endpoint.App.Enabled {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "app is disabled or not found"})
-		return
+		return http.StatusBadRequest, gin.H{"error": "app is disabled or not found"}
 	}
 
 	// 将 param_values（map[string]interface{}）转为 sampleVars（map[string]string）。
 	// key 不加 {{}} 包装，由 DefaultDebugTemplateVars 统一处理（它直接存入 out[k]=v）。
 	// 这里直接用 {{key}} 格式，与调试接口 sample_vars 字段保持一致。
-	sampleVars := make(map[string]string, len(req.ParamValues))
-	for k, v := range req.ParamValues {
+	sampleVars := make(map[string]string, len(paramValues))
+	for k, v := range paramValues {
 		switch s := v.(type) {
 		case string:
 			sampleVars["{{"+k+"}}"] = s
@@ -63,16 +68,15 @@ func CallOutboundEndpoint(c *gin.Context) {
 	}
 
 	start := time.Now()
-	tr, _, _, meta, _, err := outbound.DebugHTTPEndpoint(database.DB, endpoint.App, endpoint, sampleVars, endpoint.TimeoutMS, nil)
+	tr, _, _, meta, _, err := outbound.DebugHTTPEndpoint(database.DB, endpoint.App, *endpoint, sampleVars, endpoint.TimeoutMS, nil)
 	duration := time.Since(start).Milliseconds()
 
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
+		return http.StatusOK, gin.H{
 			"success":     false,
 			"error":       err.Error(),
 			"duration_ms": duration,
-		})
-		return
+		}
 	}
 
 	httpStatus := 0
@@ -87,19 +91,19 @@ func CallOutboundEndpoint(c *gin.Context) {
 		}
 	}
 
-	ok := err == nil && httpStatus >= 200 && httpStatus < 300
+	ok := httpStatus >= 200 && httpStatus < 300
 
 	var ctxAfter interface{}
 	if meta != nil {
-		ctxAfter, _ = meta["context_after_response"]
+		ctxAfter = meta["context_after_response"]
 	}
 
 	// 与调试接口对齐：返回脚本改写后的最终状态码、响应体解析结果，以及 context 变量快照。
-	c.JSON(http.StatusOK, gin.H{
+	return http.StatusOK, gin.H{
 		"success":                ok,
 		"data":                   data,
 		"status_code":            httpStatus,
 		"duration_ms":            duration,
 		"context_after_response": ctxAfter,
-	})
+	}
 }

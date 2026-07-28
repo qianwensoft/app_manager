@@ -75,10 +75,13 @@ function RowEditor({ initial, scadaCode, onSave, onCancel, saving }: {
   const handleMode = (mode: Mode) => setForm(f => ({ ...f, mode, params_json: defaultParams(mode) }))
 
   return (
-    <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 20000,
-    }}>
+    <div
+      onKeyDown={(e) => e.stopPropagation()}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 20000,
+      }}
+    >
       <div style={{
         background: 'var(--bg-panel)', border: '1px solid var(--border-strong)',
         borderRadius: 10, width: 420, padding: 20, boxShadow: '0 12px 40px rgba(0,0,0,0.5)',
@@ -182,11 +185,14 @@ export default function SimPointsModal({ scadaCode, onClose }: Props) {
       <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 10500 }} />
 
       {/* Modal */}
-      <div style={{
-        position: 'fixed', inset: 0, zIndex: 10501,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        pointerEvents: 'none',
-      }}>
+      <div
+        onKeyDown={(e) => e.stopPropagation()}
+        style={{
+          position: 'fixed', inset: 0, zIndex: 10501,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          pointerEvents: 'none',
+        }}
+      >
         <div style={{
           width: 720, maxHeight: '80vh',
           background: 'var(--bg-panel)', border: '1px solid var(--border-strong)',

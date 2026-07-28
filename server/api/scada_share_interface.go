@@ -62,6 +62,65 @@ func InvokeScadaShareInterface(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true, "kind": res.Kind, "data": res.Rows, "rows": res.Rows})
 }
 
+// CallScadaShareEndpoint permits a share token to invoke only an external app
+// (open_api) endpoint explicitly referenced by that published SCADA document.
+func CallScadaShareEndpoint(c *gin.Context) {
+	var body struct {
+		ShareToken  string                 `json:"share_token"`
+		ParamValues map[string]interface{} `json:"param_values"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	var scada models.ScadaInfo
+	if err := database.DB.Where("share_token = ? AND publish_status = ?", body.ShareToken, 1).First(&scada).Error; err != nil || (scada.ShareExpireTime != nil && time.Now().After(*scada.ShareExpireTime)) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "invalid share token"})
+		return
+	}
+	endpointID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || !shareCanvasReferencesOpenAPI(scada.CanvasData, uint(endpointID)) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "endpoint is not allowed for this share"})
+		return
+	}
+	var endpoint models.OutboundEndpoint
+	if err := database.DB.Preload("App").First(&endpoint, endpointID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "endpoint not found"})
+		return
+	}
+	status, payload := executeOutboundEndpointCall(&endpoint, body.ParamValues)
+	c.JSON(status, payload)
+}
+
+// shareCanvasReferencesOpenAPI reports whether the published canvas references
+// the given outbound endpoint id via an open_api point binding.
+func shareCanvasReferencesOpenAPI(canvasData string, endpointID uint) bool {
+	var project struct {
+		Canvases map[string]struct {
+			Elements []struct {
+				PointBinding struct {
+					IfaceSourceType string `json:"ifaceSourceType"`
+					IfaceID         uint   `json:"ifaceId"`
+				} `json:"pointBinding"`
+			} `json:"elements"`
+		} `json:"canvases"`
+	}
+	if endpointID == 0 {
+		return false
+	}
+	if json.Unmarshal([]byte(canvasData), &project) != nil {
+		return false
+	}
+	for _, canvas := range project.Canvases {
+		for _, element := range canvas.Elements {
+			if element.PointBinding.IfaceSourceType == "open_api" && element.PointBinding.IfaceID == endpointID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func shareCanvasReferencesInterface(canvasData string, interfaceID uint) bool {
 	var project struct {
 		Canvases map[string]struct {

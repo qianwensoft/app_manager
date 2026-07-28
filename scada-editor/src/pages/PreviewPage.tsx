@@ -96,6 +96,8 @@ export default function PreviewPage() {
     httpPollEnabled: dataMode === 'http',
     httpPollIntervalMs: 2000,
     interfaceEnabled: true,
+    globalParams: project?.globalParams,
+    customFunctions: project?.customFunctions,
   })
 
   const activeCanvas: CanvasData | undefined =

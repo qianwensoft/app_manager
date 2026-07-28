@@ -41,6 +41,8 @@ export const DATETIME_TOKENS: { token: string; desc: string; sample: string }[] 
   { token: 'ddd', desc: '星期(简)', sample: '周六' },
   { token: 'MMMM', desc: '月名(全)', sample: 'July' },
   { token: 'MMM', desc: '月名(简)', sample: 'Jul' },
+  { token: 'x', desc: '毫秒时间戳', sample: '1769470800000' },
+  { token: 'X', desc: '秒级时间戳', sample: '1769470800' },
 ]
 
 const pad = (n: number, len = 2) => String(n).padStart(len, '0')
@@ -140,6 +142,9 @@ export function formatDate(date: Date, format: string, locale: 'zh' | 'en' = 'zh
     [/SSS/g, pad(ms, 3)],
     [/A/g, isPM ? 'PM' : 'AM'],
     [/a/g, isPM ? 'pm' : 'am'],
+    // 时间戳 token（dayjs 惯例）：x=毫秒，X=秒
+    [/x/g, String(date.getTime())],
+    [/X/g, String(Math.floor(date.getTime() / 1000))],
   ]
 
   // 用占位符避免已替换文本被二次匹配（如月名 July 里的 y）

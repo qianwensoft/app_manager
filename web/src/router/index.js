@@ -29,6 +29,18 @@ const routes = [
     ]
   },
   {
+    path: '/portal',
+    component: () => import('@/components/layout/PortalLayout.vue'),
+    meta: { requiresAuth: true, title: '资源中心' },
+    children: [
+      { path: '', redirect: { name: 'PortalDevices' } },
+      { path: 'devices', name: 'PortalDevices', meta: { title: '设备' }, component: () => import('@/views/Devices.vue') },
+      { path: 'devices/:id', name: 'PortalDeviceDetail', meta: { title: '设备详情' }, component: () => import('@/views/DeviceDetail.vue') },
+      { path: 'work-orders', name: 'PortalWorkOrders', meta: { title: '工单' }, component: () => import('@/views/work-orders/WorkOrders.vue') },
+      { path: 'work-orders/:id', name: 'PortalWorkOrderDetail', meta: { title: '工单详情' }, component: () => import('@/views/work-orders/WorkOrderDetail.vue') }
+    ]
+  },
+  {
     path: '/',
     component: () => import('@/components/layout/Layout.vue'),
     meta: { requiresAuth: true },
@@ -114,6 +126,8 @@ const routes = [
       { path: 'async-tasks', name: 'AsyncTasksMonitor', meta: { title: '异步任务监控' }, component: () => import('@/views/data/AsyncTasksMonitor.vue') },
       { path: 'deadletter-queue', name: 'DeadLetterQueue', meta: { title: '死信队列管理' }, component: () => import('@/views/data/DeadLetterQueue.vue') },
       { path: 'agent-menus', name: 'AgentMenus', meta: { title: 'Agent 菜单下发' }, component: () => import('@/views/agent-menus/AgentMenus.vue') },
+      { path: 'resource-center/nodes', name: 'ResourceNodes', meta: { title: '资源节点' }, component: () => import('@/views/resource-center/ResourceNodes.vue') },
+      { path: 'resource-center/roles', name: 'ResourceRoles', meta: { title: '资源角色' }, component: () => import('@/views/resource-center/ResourceRoles.vue') },
       { path: 'about', name: 'About', meta: { title: '关于' }, component: () => import('@/views/About.vue') },
       { path: 'system-update', name: 'SystemUpdate', meta: { title: '系统更新' }, component: () => import('@/views/SystemUpdate.vue') }
     ]

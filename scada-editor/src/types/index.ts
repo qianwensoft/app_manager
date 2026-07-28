@@ -210,7 +210,17 @@ export interface InterfaceFieldMapping {
   sourceField: string
 }
 
-export type InterfaceParamSourceType = 'constant' | 'url' | 'context' | 'point' | 'element' | 'object'
+// 接口参数来源：
+// - constant  固定值
+// - url       URL query 参数
+// - context   SCADA 上下文（scadaCode / pointData）
+// - point     点位数据路径
+// - element   组件属性值（引用其它元件）
+// - object    组合对象上下文（组内实例）
+// - global    全局参数（项目级 globalParams）
+// - expression 表达式（可用全局参数 / 时间函数 / 自定义函数 / 组件值）
+export type InterfaceParamSourceType =
+  | 'constant' | 'url' | 'context' | 'point' | 'element' | 'object' | 'global' | 'expression'
 
 export interface InterfaceParamBinding {
   source: InterfaceParamSourceType
@@ -218,6 +228,36 @@ export interface InterfaceParamBinding {
   path?: string
   elementId?: string
   property?: string
+  /** source=global：全局参数名 */
+  paramName?: string
+  /** source=expression：表达式源码（JS 子集，见 runtime/expression.ts） */
+  expression?: string
+}
+
+// 全局参数（项目级，随 canvas_data 持久化）——可在接口参数表达式中通过 params.<key> / P('key') 引用
+export interface GlobalParam {
+  /** 唯一键（标识符，用于表达式引用） */
+  key: string
+  /** 显示名称（可选） */
+  label?: string
+  /** 值类型（用于表单输入与类型转换） */
+  type: 'string' | 'number' | 'boolean' | 'json'
+  /** 默认值（字符串形式存储，按 type 解析） */
+  value: string
+  /** 备注 */
+  description?: string
+}
+
+// 自定义函数（项目级，随 canvas_data 持久化）——注入到接口参数表达式作用域，可直接按名调用
+export interface CustomFunctionDef {
+  /** 函数名（标识符，表达式中直接调用） */
+  name: string
+  /** 形参名列表（逗号分隔或数组） */
+  args: string[]
+  /** 函数体（JS，return 返回值；可用内置时间/工具函数与 params） */
+  body: string
+  /** 备注 */
+  description?: string
 }
 
 export type InterfaceTransportMode = 'polling' | 'stomp'
@@ -392,6 +432,10 @@ export interface CanvasProject {
   workflows?: ScadaWorkflow[]
   /** 脚本可用的外部库清单（URL / 上传） */
   workflowLibs?: WorkflowLib[]
+  /** 全局参数（可在接口参数表达式中引用） */
+  globalParams?: GlobalParam[]
+  /** 自定义函数（注入接口参数表达式作用域） */
+  customFunctions?: CustomFunctionDef[]
 }
 
 export interface CanvasGroupNode {

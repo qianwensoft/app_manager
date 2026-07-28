@@ -9,8 +9,14 @@ export function useKeyboardShortcuts(onSave?: () => void) {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement).tagName
+      const target = e.target as HTMLElement
+      const tag = target.tagName
+      // Skip when typing in a form control OR any editable surface such as
+      // CodeMirror's contenteditable ".cm-content" (used by ExpressionInput).
+      // Otherwise Delete/Backspace, Ctrl+A/C/V, arrows, and tool letters would
+      // hijack keystrokes and mutate the canvas while editing an expression.
       if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      if (target.isContentEditable || target.closest('.cm-editor')) return
 
       const ctrl = e.ctrlKey || e.metaKey
 

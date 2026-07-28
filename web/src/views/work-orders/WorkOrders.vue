@@ -70,8 +70,8 @@
           :disabled="!canArchiveSelection"
           @click="doBatchArchive"
         >批量归档{{ selection.length ? ` (${selection.length})` : '' }}</el-button>
-        <el-button @click="$router.push('/work-orders/archived')">已归档</el-button>
-        <el-button @click="$router.push('/work-orders/settings')">工单设置</el-button>
+        <el-button v-if="!portalMode" @click="$router.push('/work-orders/archived')">已归档</el-button>
+        <el-button v-if="!portalMode" @click="$router.push('/work-orders/settings')">工单设置</el-button>
       </div>
 
       <!-- 列表视图 -->
@@ -306,11 +306,22 @@ import { useAuthStore } from '@/stores/auth'
 import { createWorkOrdersStomp } from '@/utils/workOrdersStomp'
 import QRCodePopover from '@/components/QRCodePopover.vue'
 import WorkOrderStatsDialog from '@/components/WorkOrderStatsDialog.vue'
+import { usePortalContext } from '@/composables/usePortalContext'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const canDrag = computed(() => auth.isOperator)
+
+// 资源中心前台模式：按节点 type_codes 限制可见类型，详情走 portal 路由。
+const { ctx: portalCtx, portalMode } = usePortalContext()
+const portalTypeCodes = computed(() => {
+  if (!portalMode.value || !portalCtx?.activeNode?.value) return null
+  const n = portalCtx.activeNode.value
+  if (n.node_type !== 'workorder_mgmt') return []
+  // 空 type_codes 表示覆盖全部类型（返回 null 即不限制）。
+  return Array.isArray(n.type_codes) && n.type_codes.length ? n.type_codes : null
+})
 
 const rows = ref([])
 const types = ref([])
@@ -460,7 +471,8 @@ const onCardClick = (id) => {
 // 跳转工单详情，携带返回地址
 const goToDetail = (id) => {
   const returnUrl = route.fullPath
-  router.push({ path: `/work-orders/${id}`, query: { from: returnUrl } })
+  const base = portalMode.value ? `/portal/work-orders/${id}` : `/work-orders/${id}`
+  router.push({ path: base, query: { from: returnUrl } })
 }
 
 const typeName = (code) => types.value.find(t => t.code === code)?.name || code || '-'
@@ -610,7 +622,15 @@ const load = async () => {
 }
 
 // “未分类”只能客户端过滤（后端无空 type_code 查询语义）
-const filterNone = (list) => noneOnly.value ? list.filter(r => !r.type_code) : list
+// 前台模式再叠加一层类型白名单，避免「全部」查询返回越权类型的工单。
+const filterNone = (list) => {
+  let out = noneOnly.value ? list.filter(r => !r.type_code) : list
+  if (portalTypeCodes.value) {
+    const allow = new Set(portalTypeCodes.value)
+    out = out.filter(r => allow.has(r.type_code))
+  }
+  return out
+}
 
 const loadBoard = async () => {
   // 看板一次性拉取较多（最多 200），按状态分列
@@ -724,7 +744,7 @@ const notifyEvent = (p) => {
       : `${p.code || ''}：${statusLabel(p.status)}`,
     type: isNew ? 'success' : 'info',
     duration: 4500,
-    onClick: () => { if (p.id) router.push(`/work-orders/${p.id}`) }
+    onClick: () => { if (p.id) goToDetail(p.id) }
   })
 }
 
@@ -853,7 +873,12 @@ const saveContextMenuChanges = async () => {
 onMounted(async () => {
   restoreFromQuery()
   const t = await getWorkOrderTypes()
-  types.value = t.data || []
+  let allTypes = t.data || []
+  if (portalTypeCodes.value) {
+    const allow = new Set(portalTypeCodes.value)
+    allTypes = allTypes.filter(x => allow.has(x.code))
+  }
+  types.value = allTypes
   try { tagDict.value = (await getWorkOrderTagDict()).data || [] } catch { tagDict.value = [] }
   load()
   woStomp.connect()

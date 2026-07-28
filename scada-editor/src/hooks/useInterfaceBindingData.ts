@@ -1,8 +1,9 @@
 import { useEffect, useRef, useCallback } from 'react'
-import type { CanvasElement, PointBinding, ValueFormatter } from '@/types'
+import type { CanvasElement, CustomFunctionDef, PointBinding, ValueFormatter } from '@/types'
 import { resolveInterfaceParams, type InterfaceParamContext } from '@/runtime/interfaceParams'
 import type { PointDataMap } from './useStompPointData'
 import { resolveElementDisplayValue } from '@/runtime/bindingResolver'
+import type { ExpressionScope } from '@/runtime/expression'
 import { flattenBindingValue, getPath, ifaceKeyPrefix, parseBindingValue } from '@/runtime/bindingData'
 
 interface Options {
@@ -13,6 +14,10 @@ interface Options {
   objectContexts?: Record<string, Record<string, unknown>>
   /** 免登分享 token：走 /api/scada/share/interfaces/:id/invoke，不带 JWT */
   shareToken?: string
+  /** 已解析的全局参数值（source=global / expression 使用） */
+  globalParams?: Record<string, unknown>
+  /** 自定义函数定义（source=expression 使用） */
+  customFunctions?: CustomFunctionDef[]
 }
 
 function applyTransform(raw: number, transform?: string): number {
@@ -109,8 +114,9 @@ async function fetchIfaceData(binding: PointBinding, context: InterfaceParamCont
   if (!binding.ifaceId) return {}
   const sourceType = binding.ifaceSourceType ?? 'data_iface'
 
-  // 分享态：外部开放接口/Webhook 无免登代理路径，安全起见跳过（避免走 JWT 路径导致 401 噪声）。
-  if (shareToken && sourceType !== 'data_iface') return {}
+  // 分享态：仅支持平台数据接口 (data_iface) 与外部应用开放接口 (open_api)；
+  // Webhook 无免登代理路径，安全起见跳过（避免走 JWT 路径导致 401 噪声）。
+  if (shareToken && sourceType !== 'data_iface' && sourceType !== 'open_api') return {}
 
   try {
     const token = localStorage.getItem('token') ?? ''
@@ -118,14 +124,18 @@ async function fetchIfaceData(binding: PointBinding, context: InterfaceParamCont
 
     // 分享态：受限只读，token 走 body，服务端按画布引用白名单校验。
     const url = shareToken
-      ? `/api/scada/share/interfaces/${binding.ifaceId}/invoke`
+      ? sourceType === 'open_api'
+        ? `/api/scada/share/endpoints/${binding.ifaceId}/call`
+        : `/api/scada/share/interfaces/${binding.ifaceId}/invoke`
       : sourceType === 'open_api'
         // 外部应用开放接口：走出站代理 /api/outbound/endpoints/:id/call
         ? `/api/outbound/endpoints/${binding.ifaceId}/call`
         : `/api/data/interfaces/${binding.ifaceId}/invoke`
 
     const body = shareToken
-      ? JSON.stringify({ share_token: shareToken, param_values: params, limit: 500 })
+      ? sourceType === 'open_api'
+        ? JSON.stringify({ share_token: shareToken, param_values: params })
+        : JSON.stringify({ share_token: shareToken, param_values: params, limit: 500 })
       : sourceType === 'open_api'
         ? JSON.stringify({ param_values: params })
         : JSON.stringify({ param_values: params, limit: 500 })
@@ -169,11 +179,11 @@ function resolveStaticData(binding: PointBinding): PointDataMap {
  * Polls interface-mode bindings across all elements and calls onData with resolved PointDataMap.
  * Static-mode data is resolved synchronously on mount/update.
  */
-export function useInterfaceBindingData({ elements, onData, scadaCode = '', pointData = {}, objectContexts = {}, shareToken }: Options) {
+export function useInterfaceBindingData({ elements, onData, scadaCode = '', pointData = {}, objectContexts = {}, shareToken, globalParams = {}, customFunctions = [] }: Options) {
   const onDataRef = useRef(onData)
   onDataRef.current = onData
-  const contextRef = useRef({ elements, scadaCode, pointData, objectContexts, shareToken })
-  contextRef.current = { elements, scadaCode, pointData, objectContexts, shareToken }
+  const contextRef = useRef({ elements, scadaCode, pointData, objectContexts, shareToken, globalParams, customFunctions })
+  contextRef.current = { elements, scadaCode, pointData, objectContexts, shareToken, globalParams, customFunctions }
   const timersRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map())
 
   const setupElement = useCallback((el: CanvasElement) => {
@@ -198,6 +208,8 @@ export function useInterfaceBindingData({ elements, onData, scadaCode = '', poin
           elements: current.elements,
           pointData: current.pointData,
           objectContext: current.objectContexts[el.id],
+          globalParams: current.globalParams,
+          customFunctions: current.customFunctions,
         }, el.id, current.shareToken)
         if (Object.keys(data).length) onDataRef.current(data)
       }
@@ -229,6 +241,6 @@ export function useInterfaceBindingData({ elements, onData, scadaCode = '', poin
  * Resolve a single element's display value from the merged pointData map,
  * supporting all 4 binding modes.
  */
-export function resolveElementValue(el: CanvasElement, pointData: PointDataMap): string | undefined {
-  return resolveElementDisplayValue(el, pointData)
+export function resolveElementValue(el: CanvasElement, pointData: PointDataMap, scope?: ExpressionScope): string | undefined {
+  return resolveElementDisplayValue(el, pointData, scope)
 }
