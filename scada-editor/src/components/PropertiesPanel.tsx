@@ -148,6 +148,143 @@ const PairRow = ({ l1, v1, l2, v2, on1, on2 }: {
   </div>
 )
 
+/* ── 扩展数据编辑器 ── */
+function ExtDataEditor({ extData, onChange, allElements, currentElId }: {
+  extData: Record<string, string>
+  onChange: (extData: Record<string, string>) => void
+  allElements: CanvasElement[]
+  currentElId: string
+}) {
+  const entries = Object.entries(extData)
+  const [newKey, setNewKey] = useState('')
+  const [newValue, setNewValue] = useState('')
+
+  const handleAdd = () => {
+    const key = newKey.trim()
+    if (!key) return
+    if (extData[key] !== undefined) return
+    onChange({ ...extData, [key]: newValue })
+    setNewKey('')
+    setNewValue('')
+  }
+
+  const handleRemove = (key: string) => {
+    const next = { ...extData }
+    delete next[key]
+    onChange(next)
+  }
+
+  const handleUpdate = (key: string, value: string) => {
+    onChange({ ...extData, [key]: value })
+  }
+
+  const insertRef = (type: 'self' | 'other', elName?: string) => {
+    const ref = type === 'self' ? `{{ext:${newKey || 'key'}}}` : `{{el:${elName || '元素名'}:${newKey || 'key'}}}`
+    setNewValue((prev) => prev + ref)
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {entries.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {entries.map(([key, value]) => (
+            <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <input
+                value={key}
+                readOnly
+                style={{
+                  width: 80, height: 22, fontSize: 10, padding: '0 4px',
+                  background: 'var(--bg-surface)', border: '1px solid var(--border)',
+                  color: 'var(--text-muted)', borderRadius: 3,
+                }}
+              />
+              <input
+                value={value}
+                onChange={(e) => handleUpdate(key, e.target.value)}
+                style={{
+                  flex: 1, height: 22, fontSize: 10, padding: '0 4px',
+                  background: 'var(--bg-base)', border: '1px solid var(--border)',
+                  color: 'var(--text-primary)', borderRadius: 3,
+                }}
+              />
+              <button
+                onClick={() => handleRemove(key)}
+                style={{
+                  width: 22, height: 22, padding: 0, border: 'none',
+                  background: 'transparent', color: 'var(--danger)', cursor: 'pointer',
+                  borderRadius: 3, fontSize: 14, lineHeight: 1,
+                }}
+              >×</button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
+        引用语法：<code style={{ background: 'var(--bg-surface)', padding: '1px 4px', borderRadius: 2 }}>{'{{ext:key}}'}</code> 本组件 &nbsp;
+        <code style={{ background: 'var(--bg-surface)', padding: '1px 4px', borderRadius: 2 }}>{'{{el:名称:key}}'}</code> 其他组件
+      </div>
+      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+        <input
+          value={newKey}
+          onChange={(e) => setNewKey(e.target.value)}
+          placeholder="key"
+          style={{
+            width: 70, height: 22, fontSize: 10, padding: '0 4px',
+            background: 'var(--bg-base)', border: '1px solid var(--border)',
+            color: 'var(--text-primary)', borderRadius: 3,
+          }}
+        />
+        <input
+          value={newValue}
+          onChange={(e) => setNewValue(e.target.value)}
+          placeholder="value"
+          style={{
+            flex: 1, height: 22, fontSize: 10, padding: '0 4px',
+            background: 'var(--bg-base)', border: '1px solid var(--border)',
+            color: 'var(--text-primary)', borderRadius: 3,
+          }}
+        />
+        <button
+          onClick={handleAdd}
+          style={{
+            padding: '0 8px', height: 22, fontSize: 10,
+            background: 'var(--accent)', color: '#fff', border: 'none',
+            borderRadius: 3, cursor: 'pointer',
+          }}
+        >+</button>
+      </div>
+      <div style={{ display: 'flex', gap: 4 }}>
+        <button
+          onClick={() => insertRef('self')}
+          style={{
+            flex: 1, padding: '3px 0', fontSize: 10,
+            background: 'var(--bg-surface)', color: 'var(--text-muted)',
+            border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer',
+          }}
+        >引用本组件</button>
+        <select
+          onChange={(e) => {
+            if (e.target.value) insertRef('other', e.target.value)
+            e.target.value = ''
+          }}
+          style={{
+            flex: 1, height: 22, fontSize: 10, padding: '0 4px',
+            background: 'var(--bg-base)', border: '1px solid var(--border)',
+            color: 'var(--text-primary)', borderRadius: 3,
+          }}
+        >
+          <option value="">引用其他组件...</option>
+          {allElements
+            .filter((el) => el.id !== currentElId)
+            .map((el) => (
+              <option key={el.id} value={el.name}>{el.name} ({el.type})</option>
+            ))}
+        </select>
+      </div>
+    </div>
+  )
+}
+
 /* ── 日期时间引导式配置 ── */
 function DateTimeConfigSection({ el, onUpdate }: {
   el: CanvasElement
@@ -1683,10 +1820,11 @@ function AnimationEditorSection({ el, onUpdate }: {
   )
 }
 
-function ElementBasicTabContent({ el, onUpdate, onUngroup }: {
+function ElementBasicTabContent({ el, onUpdate, onUngroup, canvas }: {
   el: CanvasElement
   onUpdate: (key: string, value: unknown) => void
   onUngroup: () => void
+  canvas?: { elements: CanvasElement[] }
 }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -1742,6 +1880,13 @@ function ElementBasicTabContent({ el, onUpdate, onUngroup }: {
       )}
 
       <Section title="位置 / 尺寸">
+        <Row label="显示">
+          <Toggle
+            checked={el.visible}
+            onChange={(v) => onUpdate('visible', v)}
+            label={el.visible ? '可见' : '隐藏'}
+          />
+        </Row>
         <PairRow l1="X" v1={el.x} l2="Y" v2={el.y}
           on1={(v) => onUpdate('x', Number(v))}
           on2={(v) => onUpdate('y', Number(v))} />
@@ -1779,6 +1924,15 @@ function ElementBasicTabContent({ el, onUpdate, onUngroup }: {
         <Row label="描边"><ColorPicker val={el.stroke || '#000000'} onChange={(v) => onUpdate('stroke', v)} /></Row>
       </Section>
 
+      <Section title="扩展数据" defaultOpen={false}>
+        <ExtDataEditor
+          extData={el.extData ?? {}}
+          onChange={(extData) => onUpdate('extData', extData)}
+          allElements={canvas?.elements ?? []}
+          currentElId={el.id}
+        />
+      </Section>
+
       {el.type.startsWith('echarts-') && (
         <ChartConfigSection el={el} onUpdate={onUpdate} />
       )}
@@ -1800,13 +1954,93 @@ function ElementBasicTabContent({ el, onUpdate, onUngroup }: {
           <Row label="声音报警">
             <Toggle checked={!!el.alarmSoundEnabled} onChange={(v) => onUpdate('alarmSoundEnabled', v)} label={el.alarmSoundEnabled ? '开启' : '关闭'} />
           </Row>
-          <Row label="标签"><Inp val={el.text || ''} onChange={(v) => onUpdate('text', v)} placeholder="报警" /></Row>
+          <Row label="标签">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <Inp val={el.text || ''} onChange={(v) => onUpdate('text', v)} placeholder="报警" />
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button
+                  onClick={() => {
+                    const current = el.text || ''
+                    const ref = '{{ext:key}}'
+                    onUpdate('text', current + ref)
+                  }}
+                  style={{
+                    flex: 1, padding: '2px 0', fontSize: 10,
+                    background: 'var(--bg-surface)', color: 'var(--text-muted)',
+                    border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer',
+                  }}
+                >+ 本组件</button>
+                <select
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      const current = el.text || ''
+                      const ref = `{{el:${e.target.value}:key}}`
+                      onUpdate('text', current + ref)
+                    }
+                    e.target.value = ''
+                  }}
+                  style={{
+                    flex: 1, height: 22, fontSize: 10, padding: '0 4px',
+                    background: 'var(--bg-base)', border: '1px solid var(--border)',
+                    color: 'var(--text-primary)', borderRadius: 3,
+                  }}
+                >
+                  <option value="">+ 其他组件...</option>
+                  {(canvas?.elements ?? [])
+                    .filter((e) => e.id !== el.id)
+                    .map((e) => (
+                      <option key={e.id} value={e.name}>{e.name}</option>
+                    ))}
+                </select>
+              </div>
+            </div>
+          </Row>
         </Section>
       )}
 
       {(el.type === 'text' || el.type === 'button') && (
         <Section title="文本">
-          <Row label="内容"><Inp val={el.text || ''} onChange={(v) => onUpdate('text', v)} placeholder="输入文字" /></Row>
+          <Row label="内容">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <Inp val={el.text || ''} onChange={(v) => onUpdate('text', v)} placeholder="输入文字" />
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button
+                  onClick={() => {
+                    const current = el.text || ''
+                    const ref = '{{ext:key}}'
+                    onUpdate('text', current + ref)
+                  }}
+                  style={{
+                    flex: 1, padding: '2px 0', fontSize: 10,
+                    background: 'var(--bg-surface)', color: 'var(--text-muted)',
+                    border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer',
+                  }}
+                >+ 本组件引用</button>
+                <select
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      const current = el.text || ''
+                      const ref = `{{el:${e.target.value}:key}}`
+                      onUpdate('text', current + ref)
+                    }
+                    e.target.value = ''
+                  }}
+                  style={{
+                    flex: 1, height: 22, fontSize: 10, padding: '0 4px',
+                    background: 'var(--bg-base)', border: '1px solid var(--border)',
+                    color: 'var(--text-primary)', borderRadius: 3,
+                  }}
+                >
+                  <option value="">+ 引用其他组件...</option>
+                  {(canvas?.elements ?? [])
+                    .filter((e) => e.id !== el.id)
+                    .map((e) => (
+                      <option key={e.id} value={e.name}>{e.name}</option>
+                    ))}
+                </select>
+              </div>
+            </div>
+          </Row>
           <PairRow
             l1="字号" v1={el.fontSize ?? 14} l2="行高" v2={el.lineHeight ?? 1.5}
             on1={(v) => onUpdate('fontSize', Number(v))} on2={(v) => onUpdate('lineHeight', Number(v))} />
@@ -1982,6 +2216,7 @@ export default function PropertiesPanel() {
                 el={selectedEl}
                 onUpdate={update}
                 onUngroup={() => { pushHistory(store.project); store.ungroup(selectedEl.id) }}
+                canvas={canvas}
               />
             )}
             {activeTab === 'data' && (

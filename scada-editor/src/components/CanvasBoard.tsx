@@ -11,6 +11,7 @@ import type { PointDataMap } from '@/hooks/useStompPointData'
 import { useStompPointData } from '@/hooks/useStompPointData'
 import { useInterfaceBindingData, resolveElementValue } from '@/hooks/useInterfaceBindingData'
 import { useHighFreqTextData } from '@/hooks/useHighFreqTextData'
+import { resolveExtDataReference } from '@/runtime/bindingData'
 import { useDateTimeTick } from '@/hooks/useDateTimeTick'
 import { useScadaInfo } from '@/hooks/useScada'
 import ChartWidget from './ChartWidget'
@@ -67,7 +68,7 @@ export default function CanvasBoard() {
 
   const store = useEditorStore()
   const canvas = store.activeCanvas()
-  const { activeTool, selectedIds, zoom, liveDataOn } = store
+  const { activeTool, selectedIds, zoom, liveDataOn, _renderVersion } = store
 
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; id: string } | null>(null)
   const [bindingId, setBindingId] = useState<string | null>(null)
@@ -171,7 +172,7 @@ export default function CanvasBoard() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canvas, zoom, selectedIds, dateTimeTick])
+  }, [canvas, zoom, selectedIds, dateTimeTick, _renderVersion])
 
   useEffect(() => { draw() }, [draw])
 
@@ -491,7 +492,9 @@ export default function CanvasBoard() {
         {/* Text/button DOM overlays — ensure correct stacking above image-bg regardless of zIndex */}
         {textButtonElements.map((el) => {
           const mergedData = { ...pointData, ...highFreqData }
-          const displayText = el.pointBinding ? resolveElementValue(el, mergedData) : el.text
+          const rawText = el.pointBinding ? resolveElementValue(el, mergedData) : el.text ?? ''
+          // 解析扩展数据引用
+          const displayText = resolveExtDataReference(rawText, el, canvas.elements)
           return (
             <div
               key={`tb-${el.id}`}

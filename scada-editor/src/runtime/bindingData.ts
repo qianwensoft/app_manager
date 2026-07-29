@@ -1,4 +1,5 @@
 import type { PointDataMap } from '@/hooks/useStompPointData'
+import type { CanvasElement } from '@/types'
 
 export type BindingValue = string | number | boolean | null | BindingValue[] | { [key: string]: BindingValue }
 
@@ -67,5 +68,43 @@ export function resolveTemplateValue(template: string, context: Record<string, u
   return template.replace(/\{\{\s*([^}]+?)\s*\}\}/g, (match, path: string) => {
     const value = getPath(context, path)
     return value === undefined || value === null ? match : String(value)
+  })
+}
+
+
+
+/**
+ * 解析扩展数据引用：
+ * - {{ext:key}} 引用本组件的 extData[key]
+ * - {{el:元素名:extKey}} 或 {{el:id:extKey}} 引用其他组件的 extData[extKey]
+ *
+ * @param template 原始模板字符串
+ * @param selfEl 当前组件元素
+ * @param allElements 所有元素数组，用于查找被引用的组件
+ * @returns 解析后的字符串
+ */
+export function resolveExtDataReference(
+  template: string | undefined,
+  selfEl: CanvasElement,
+  allElements: CanvasElement[]
+): string {
+  if (!template) return ''
+
+  return template.replace(/\{\{\s*(ext:\w+|el:[^:}]+(?::\w+)?)\s*\}\}/g, (match, ref: string) => {
+    const parts = ref.split(':')
+    if (parts.length < 2) return match
+
+    if (parts[0] === 'ext') {
+      // 本组件扩展数据引用: {{ext:key}}
+      const key = parts[1]
+      return selfEl.extData?.[key] ?? match
+    } else if (parts[0] === 'el') {
+      // 其他组件扩展数据引用: {{el:元素名:extKey}} 或 {{el:id:extKey}}
+      const targetNameOrId = parts[1]
+      const targetKey = parts[2] ?? 'value'
+      const target = allElements.find((e) => e.id === targetNameOrId || e.name === targetNameOrId)
+      return target?.extData?.[targetKey] ?? match
+    }
+    return match
   })
 }

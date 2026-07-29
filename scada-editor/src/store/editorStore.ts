@@ -88,6 +88,41 @@ function pruneGroups(c: CanvasData): void {
   }
 }
 
+// 递归收集组合的所有后代元素 ID（不限层级）
+function collectAllDescendantIds(elements: CanvasElement[], groupId: string): string[] {
+  const group = elements.find((e) => e.id === groupId)
+  if (!group?.children) return []
+  const descendants: string[] = []
+  for (const childId of group.children) {
+    descendants.push(childId)
+    const childDescendants = collectAllDescendantIds(elements, childId)
+    descendants.push(...childDescendants)
+  }
+  return descendants
+}
+
+// 递归移动组合及其所有嵌套子元素
+function moveGroupAndDescendants(
+  elements: CanvasElement[],
+  groupId: string,
+  dx: number,
+  dy: number
+): void {
+  const group = elements.find((e) => e.id === groupId)
+  if (!group?.children) return
+
+  for (const childId of group.children) {
+    const child = elements.find((e) => e.id === childId)
+    if (child) {
+      child.x += dx
+      child.y += dy
+      if (child.type === 'group') {
+        moveGroupAndDescendants(elements, childId, dx, dy)
+      }
+    }
+  }
+}
+
 function defaultCanvas(): CanvasData {
   return {
     id: MAIN_CANVAS_ID,
@@ -126,6 +161,10 @@ interface EditorStore {
   _canvasEl: HTMLCanvasElement | null
   registerCanvasEl: (el: HTMLCanvasElement | null) => void
   getSnapshot: (maxWidth?: number) => string | null
+
+  // render trigger — bump this to force canvas re-render (e.g. after z-order changes)
+  _renderVersion: number
+  bumpRender: () => void
 
   // actions - project
   loadProject: (scadaId: number, project: CanvasProject) => void
@@ -221,9 +260,11 @@ export const useEditorStore = create<EditorStore>()(
     panOffset: { x: 0, y: 0 },
     _clipboard: [],
     _canvasEl: null,
+    _renderVersion: 0,
     liveDataOn: localStorage.getItem('scada:liveDataOn') === 'true',
     layerCollapsed: localStorage.getItem('scada:layerCollapsed') === 'true',
     registerCanvasEl: (el) => set(() => ({ _canvasEl: el })),
+    bumpRender: () => set((s) => { s._renderVersion++ }),
     getSnapshot: (maxWidth = 480) => {
       const el = get()._canvasEl
       if (!el) return null
@@ -364,10 +405,8 @@ export const useEditorStore = create<EditorStore>()(
         if (el.type === 'group' && el.children?.length) {
           const dx = x - el.x
           const dy = y - el.y
-          el.children.forEach((childId) => {
-            const child = c.elements.find((e) => e.id === childId)
-            if (child) { child.x += dx; child.y += dy }
-          })
+          // 递归移动所有嵌套层级的子元素
+          moveGroupAndDescendants(c.elements, id, dx, dy)
         }
         el.x = x; el.y = y; s.isDirty = true
         if (c.adaptiveMode === 'fit' && c.elements.length) {
@@ -562,6 +601,7 @@ export const useEditorStore = create<EditorStore>()(
           .sort((a, b) => a.zIndex - b.zIndex)[0]
         if (next) { const tmp = next.zIndex; next.zIndex = el.zIndex; el.zIndex = tmp }
         s.isDirty = true
+        s._renderVersion++
       }),
 
     sendBackward: (id) =>
@@ -576,6 +616,7 @@ export const useEditorStore = create<EditorStore>()(
           .sort((a, b) => b.zIndex - a.zIndex)[0]
         if (prev) { const tmp = prev.zIndex; prev.zIndex = el.zIndex; el.zIndex = tmp }
         s.isDirty = true
+        s._renderVersion++
       }),
 
     bringToFront: (id) =>
@@ -587,6 +628,7 @@ export const useEditorStore = create<EditorStore>()(
         const maxZ = Math.max(...c.elements.map((e) => e.zIndex))
         el.zIndex = maxZ + 1
         s.isDirty = true
+        s._renderVersion++
       }),
 
     sendToBack: (id) =>
@@ -598,6 +640,7 @@ export const useEditorStore = create<EditorStore>()(
         c.elements.forEach((e) => { if (e.id !== id) e.zIndex += 1 })
         el.zIndex = 0
         s.isDirty = true
+        s._renderVersion++
       }),
 
     reorderLayersByDisplay: (displayOrder) =>
@@ -614,6 +657,7 @@ export const useEditorStore = create<EditorStore>()(
           if (el && zPool[i] !== undefined) el.zIndex = zPool[i]
         })
         s.isDirty = true
+        s._renderVersion++
       }),
 
     addWorkflow: (wf) =>

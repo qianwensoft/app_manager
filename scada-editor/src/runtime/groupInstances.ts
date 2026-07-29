@@ -1,6 +1,6 @@
 import type { CanvasElement, GroupBinding } from '@/types'
 import type { PointDataMap } from '@/hooks/useStompPointData'
-import { getPath, resolveTemplateValue } from './bindingData'
+import { getPath, resolveTemplateValue, resolveExtDataReference } from './bindingData'
 
 export interface GroupInstance {
   key: string
@@ -20,11 +20,20 @@ function resolveItems(binding: GroupBinding, pointData: PointDataMap): unknown[]
   return [value]
 }
 
-function resolveElementTemplates(element: CanvasElement, context: Record<string, unknown>): CanvasElement {
+function resolveElementTemplates(
+  element: CanvasElement,
+  context: Record<string, unknown>,
+  allElements: CanvasElement[]
+): CanvasElement {
   const cloned = structuredClone(element)
-  if (cloned.text) cloned.text = resolveTemplateValue(cloned.text, context)
+  if (cloned.text) {
+    cloned.text = resolveTemplateValue(cloned.text, context)
+    // 解析扩展数据引用
+    cloned.text = resolveExtDataReference(cloned.text, cloned, allElements)
+  }
   if (cloned.pointBinding?.textTemplate) {
     cloned.pointBinding.textTemplate = resolveTemplateValue(cloned.pointBinding.textTemplate, context)
+    cloned.pointBinding.textTemplate = resolveExtDataReference(cloned.pointBinding.textTemplate, cloned, allElements)
   }
   return cloned
 }
@@ -51,7 +60,7 @@ export function expandGroupInstances(elements: CanvasElement[], pointData: Point
       for (const childId of group.children ?? []) {
         const child = byId.get(childId)
         if (!child) continue
-        const expanded = resolveElementTemplates(child, context)
+        const expanded = resolveElementTemplates(child, context, elements)
         expanded.id = `${group.id}:${key}:${child.id}`
         expanded.x = child.x + col * (group.width + gapX)
         expanded.y = child.y + row * (group.height + gapY)

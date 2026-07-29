@@ -119,6 +119,9 @@ export interface CanvasElement {
   alarmSoundEnabled?: boolean
   // 扩展属性
   properties?: Record<string, unknown>
+  // 扩展数据：key-value 字符串，用于组件间数据引用
+  // 引用语法：{{ext:key}} 引用本组件，{{el:元素名:extKey}} 或 {{el:id:extKey}} 引用其他组件
+  extData?: Record<string, string>
   // Table widget fields
   tableColumns?: TableColumn[]
   tableData?: Record<string, unknown>[]

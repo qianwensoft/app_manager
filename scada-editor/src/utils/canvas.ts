@@ -279,6 +279,8 @@ export function hitTestMarquee(
   return elements
     .filter((el) => {
       if (!el.visible) return false
+      // 禁止选中的元素，框选也不能选中
+      if (el.selectable === false) return false
       const ex = el.x * zoom
       const ey = el.y * zoom
       const ew = el.width * zoom

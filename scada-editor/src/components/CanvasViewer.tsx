@@ -4,6 +4,7 @@ import { drawGrid, drawElement } from '@/utils/canvas'
 import type { PointDataMap } from '@/hooks/useStompPointData'
 import { resolveElementValue } from '@/hooks/useInterfaceBindingData'
 import { useRuntimeStore } from '@/store/runtimeStore'
+import { resolveExtDataReference } from '@/runtime/bindingData'
 import { useEditorStore } from '@/store/editorStore'
 import { useAnimationTick } from '@/hooks/useAnimationTick'
 import { useDateTimeTick } from '@/hooks/useDateTimeTick'
@@ -284,7 +285,9 @@ export default function CanvasViewer({
           <FormFieldWidget key={el.id} el={el} zoom={z} isPreview={true} canvas={canvas} valuesRef={formValuesRef} pointData={pointData} />
         ))}
         {domElements.map((el) => {
-          const displayText = resolveElementValue(el, pointData)
+          const rawText = resolveElementValue(el, pointData)
+          // 解析扩展数据引用
+          const displayText = resolveExtDataReference(rawText, el, canvas.elements)
           const isWfSource = componentSourceIds.has(el.id)
           const hasEvents = !!el.events?.length || isWfSource
           const isBtn = el.type === 'button'
