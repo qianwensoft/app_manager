@@ -10,29 +10,14 @@
       </div>
       <el-menu :router="true" :default-active="menuActive" background-color="#1d2935" text-color="#aaa" active-text-color="#fff">
         <template v-if="!auth.isViewer">
-          <el-menu-item index="/">
+          <el-menu-item index="/dashboard">
             <el-icon><Monitor /></el-icon><span>总览</span>
           </el-menu-item>
           <el-menu-item index="/devices">
             <el-icon><Phone /></el-icon><span>设备管理</span>
           </el-menu-item>
-          <el-menu-item index="/qrcode">
-            <el-icon><Connection /></el-icon><span>扫码接入</span>
-          </el-menu-item>
-          <el-menu-item index="/screen">
-            <el-icon><VideoCamera /></el-icon><span>屏幕查看</span>
-          </el-menu-item>
-          <el-menu-item index="/shell">
-            <el-icon><Cpu /></el-icon><span>Shell 终端</span>
-          </el-menu-item>
-          <el-menu-item index="/logcat">
-            <el-icon><Document /></el-icon><span>Logcat</span>
-          </el-menu-item>
           <el-menu-item index="/events">
             <el-icon><Bell /></el-icon><span>自定义事件</span>
-          </el-menu-item>
-          <el-menu-item index="/event-definitions">
-            <el-icon><Setting /></el-icon><span>事件定义</span>
           </el-menu-item>
           <el-menu-item index="/outbound/apps">
             <el-icon><Link /></el-icon><span>外部应用</span>
@@ -74,15 +59,9 @@
         <el-menu-item index="/work-orders">
           <el-icon><Tickets /></el-icon><span>工单管理</span>
         </el-menu-item>
-        <div class="menu-item-external menu-item-flat" @click="openPortal">
-          <el-icon><Grid /></el-icon><span>资源中心 ↗</span>
-        </div>
         <template v-if="!auth.isViewer">
           <el-menu-item index="/apikeys">
             <el-icon><Key /></el-icon><span>授权管理</span>
-          </el-menu-item>
-          <el-menu-item index="/thirdparty">
-            <el-icon><Connection /></el-icon><span>第三方平台</span>
           </el-menu-item>
         </template>
         <!-- admin 专属 -->
@@ -110,6 +89,10 @@
         <span class="route-title">{{ pageTitle }}</span>
         <div class="header-right">
           <QuickSearch />
+          <el-button link @click="openPortal" class="resource-center-btn">
+            <el-icon><Grid /></el-icon>
+            <span>资源中心</span>
+          </el-button>
           <span class="username">
             <el-icon><User /></el-icon>
             {{ auth.user?.username }}
@@ -158,7 +141,7 @@ const pageTitle = computed(() => route.meta?.title || route.name || '')
 
 const menuActive = computed(() => {
   const p = route.path
-  if (p === '/' || p === '') return '/'
+  if (p === '/' || p === '' || p.startsWith('/dashboard')) return '/dashboard'
   if (p.startsWith('/devices')) return '/devices'
   if (p.startsWith('/event-definitions')) return '/event-definitions'
   if (p.startsWith('/outbound/apps')) return '/outbound/apps'
@@ -246,5 +229,15 @@ onMounted(() => {
 .layout-main--bleed > * {
   flex: 1;
   min-height: 0;
+}
+.resource-center-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 14px;
+  padding: 8px 12px;
+}
+.resource-center-btn:hover {
+  color: var(--el-color-primary);
 }
 </style>

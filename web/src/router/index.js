@@ -33,7 +33,8 @@ const routes = [
     component: () => import('@/components/layout/PortalLayout.vue'),
     meta: { requiresAuth: true, title: '资源中心' },
     children: [
-      { path: '', redirect: { name: 'PortalDevices' } },
+      { path: '', redirect: { name: 'PortalHome' } },
+      { path: 'home', alias: '/', name: 'PortalHome', meta: { title: '概览' }, component: { render: () => null } },
       { path: 'devices', name: 'PortalDevices', meta: { title: '设备' }, component: () => import('@/views/Devices.vue') },
       { path: 'devices/:id', name: 'PortalDeviceDetail', meta: { title: '设备详情' }, component: () => import('@/views/DeviceDetail.vue') },
       { path: 'work-orders', name: 'PortalWorkOrders', meta: { title: '工单' }, component: () => import('@/views/work-orders/WorkOrders.vue') },
@@ -45,7 +46,7 @@ const routes = [
     component: () => import('@/components/layout/Layout.vue'),
     meta: { requiresAuth: true },
     children: [
-      { path: '', name: 'Dashboard', meta: { title: '总览' }, component: () => import('@/views/Dashboard.vue') },
+      { path: 'dashboard', name: 'Dashboard', meta: { title: '总览' }, component: () => import('@/views/Dashboard.vue') },
       { path: 'devices', name: 'Devices', meta: { title: '设备管理' }, component: () => import('@/views/Devices.vue') },
       { path: 'devices/:id', name: 'DeviceDetail', meta: { title: '设备详情' }, component: () => import('@/views/DeviceDetail.vue') },
       { path: 'qrcode', name: 'QRCode', meta: { title: '扫码接入' }, component: () => import('@/views/QRCode.vue') },
