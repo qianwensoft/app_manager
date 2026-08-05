@@ -115,11 +115,39 @@
     </div>
 
     <script>
+        const params = new URLSearchParams(window.location.search)
         const providerId = (() => {
-            const v = new URLSearchParams(window.location.search).get('provider_id')
+            const v = params.get('provider_id')
             return v ? parseInt(v) : 1
         })()
-        const redirectTo = new URLSearchParams(window.location.search).get('redirect_to') || '/'
+        // 默认登录成功回首页
+        const rawRedirect = params.get('redirect_to') || '/'
+        const sig = params.get('sig') || ''
+        const exp = params.get('exp') || ''
+        const isSigned = !!(sig && exp)
+
+        // 工单详情「单独授权」链接：redirect_to 被严格限制为内部工单嵌入页
+        // （/embed/work-orders/<id> 可带任意查询参数如 ?readonly=1 或 wo_scopes），
+        // 访问权限由 JWT 中的 wo_scopes（wo:rw:<id>）界定。目标只能是本系统内部
+        // 工单页，不存在 open-redirect 风险，因此这类路径允许免签名透传。
+        function isSafeWorkOrderPath(p) {
+            if (typeof p !== 'string') return false
+            if (!p.startsWith('/') || p.startsWith('//')) return false
+            return /^\/embed\/work-orders\/\d+(\?.*)?$/.test(p)
+        }
+
+        // P0 安全：默认降级为 '/'；仅当携带有效 HMAC 签名（sig + exp）或命中
+        // 上述内部工单白名单时，才保留 redirect_to。
+        let redirectTo = '/'
+        // 仅签名链接才把 redirect_to/sig/exp 透传给后端做白名单 + 签名校验；
+        // 单独授权的工单链接走 wo_scopes，不参与后端 redirect 校验（免签名）。
+        let passSignedRedirect = false
+        if (isSigned) {
+            redirectTo = rawRedirect
+            passSignedRedirect = true
+        } else if (isSafeWorkOrderPath(rawRedirect)) {
+            redirectTo = rawRedirect
+        }
 
         function setIcon(type) {
             const el = document.getElementById('icon')
@@ -147,19 +175,31 @@
         }
 
         async function run() {
-            const token = new URLSearchParams(window.location.search).get('eteams_token')
+            const token = params.get('eteams_token')
             if (!token) {
                 showError('未获取到 eteams_token，请从 eTeams 中点击链接访问。')
                 return
             }
 
             try {
-                const params = new URLSearchParams(window.location.search)
                 const woScopesRaw = params.get('wo_scopes')
                 const woScopes = woScopesRaw
                     ? woScopesRaw.split(',').map(s => s.trim()).filter(Boolean)
                     : []
-                const loginBody = { provider_id: providerId, eteams_token: token }
+
+                // P0：仅签名链接才把 HMAC 参数透传给后端做白名单 + 签名校验。
+                // 单独授权的工单链接（wo_scopes）不带签名，redirect_to 留空，
+                // 后端按「无跳转风险」放行，跳转在前端限定为内部工单页。
+                const loginBody = {
+                    provider_id: providerId,
+                    eteams_token: token,
+                    base_url: window.location.origin
+                }
+                if (passSignedRedirect) {
+                    loginBody.redirect_to = redirectTo
+                    loginBody.sig = sig
+                    loginBody.exp = exp
+                }
                 if (woScopes.length) loginBody.wo_scopes = woScopes
 
                 const res = await fetch(window.location.origin + '/api/auth/thirdparty/login', {
