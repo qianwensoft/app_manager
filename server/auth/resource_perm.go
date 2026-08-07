@@ -87,9 +87,62 @@ func ResolveUserResourcePerms(userID uint) *ResourcePermSet {
 	for _, ru := range roleUsers {
 		roleIDs = append(roleIDs, ru.RoleID)
 	}
+	
+	// 收集角色级别的设备授权（全局生效，不依赖节点配置）
+	roleDeviceGroupIDs := map[uint]bool{}
+	roleDeviceIDs := map[uint]bool{}
+
+	var roleDeviceGroups []models.ResourceRoleDeviceGroup
+	database.DB.Where("role_id IN ?", roleIDs).Find(&roleDeviceGroups)
+	for _, rdg := range roleDeviceGroups {
+		roleDeviceGroupIDs[rdg.GroupID] = true
+	}
+
+	var roleDevices []models.ResourceRoleDevice
+	database.DB.Where("role_id IN ?", roleIDs).Find(&roleDevices)
+	for _, rd := range roleDevices {
+		roleDeviceIDs[rd.DeviceID] = true
+	}
+
+	// 收集角色级别的工单类型授权（全局生效，不依赖节点配置）
+	roleWorkOrderTypeCodes := map[string]bool{}
+	var roleWorkOrderTypes []models.ResourceRoleWorkOrderType
+	database.DB.Where("role_id IN ?", roleIDs).Find(&roleWorkOrderTypes)
+	for _, rwot := range roleWorkOrderTypes {
+		roleWorkOrderTypeCodes[rwot.TypeCode] = true
+	}
+
 	var roleNodes []models.ResourceRoleNode
 	database.DB.Where("role_id IN ?", roleIDs).Find(&roleNodes)
 	if len(roleNodes) == 0 {
+		// 即使没有资源节点，如果有角色级设备授权或工单类型授权，也应该允许访问
+		if len(roleDeviceGroupIDs) > 0 || len(roleDeviceIDs) > 0 {
+			groupIDs := make([]uint, 0, len(roleDeviceGroupIDs))
+			for gid := range roleDeviceGroupIDs {
+				groupIDs = append(groupIDs, gid)
+			}
+			deviceIDs := make([]uint, 0, len(roleDeviceIDs))
+			for did := range roleDeviceIDs {
+				deviceIDs = append(deviceIDs, did)
+			}
+			// 添加一个默认设备节点，包含所有权限
+			set.DeviceNodes = append(set.DeviceNodes, ResourceDeviceNode{
+				GroupIDs:    groupIDs,
+				DeviceIDs:   deviceIDs,
+				DetailPerms: ResourceDevicePerms, // 授予所有设备权限
+			})
+		}
+		if len(roleWorkOrderTypeCodes) > 0 {
+			typeCodes := make([]string, 0, len(roleWorkOrderTypeCodes))
+			for tc := range roleWorkOrderTypeCodes {
+				typeCodes = append(typeCodes, tc)
+			}
+			// 添加一个默认工单节点，包含所有权限
+			set.WorkOrderNodes = append(set.WorkOrderNodes, ResourceWorkOrderNode{
+				TypeCodes:   typeCodes,
+				DetailPerms: ResourceWorkOrderPerms, // 授予所有工单权限
+			})
+		}
 		return set
 	}
 	nodeIDSet := map[uint]bool{}
@@ -109,9 +162,12 @@ func ResolveUserResourcePerms(userID uint) *ResourcePermSet {
 		}
 		switch n.NodeType {
 		case "device_mgmt":
+			// 节点配置的设备范围，按该节点自身的操作权限授予。
+			// 角色级别的设备授权在循环外统一以「全部权限」追加，因此这里不再合并，
+			// 避免把角色级授权的权限收窄为某个 device_mgmt 节点的 detail_perms。
 			set.DeviceNodes = append(set.DeviceNodes, ResourceDeviceNode{
-				GroupIDs:    cfg.GroupIDs,
-				DeviceIDs:   cfg.DeviceIDs,
+				GroupIDs:    append([]uint(nil), cfg.GroupIDs...),
+				DeviceIDs:   append([]uint(nil), cfg.DeviceIDs...),
 				DetailPerms: cfg.DetailPerms,
 			})
 		case "workorder_mgmt":
@@ -121,6 +177,38 @@ func ResolveUserResourcePerms(userID uint) *ResourcePermSet {
 			})
 		}
 	}
+
+	// 角色级别的设备授权全局生效，不依赖是否绑定 device_mgmt 节点。
+	// 与工单类型授权保持一致：只要存在角色级设备授权，就补一个「全部权限」的设备节点。
+	if len(roleDeviceGroupIDs) > 0 || len(roleDeviceIDs) > 0 {
+		groupIDs := make([]uint, 0, len(roleDeviceGroupIDs))
+		for gid := range roleDeviceGroupIDs {
+			groupIDs = append(groupIDs, gid)
+		}
+		deviceIDs := make([]uint, 0, len(roleDeviceIDs))
+		for did := range roleDeviceIDs {
+			deviceIDs = append(deviceIDs, did)
+		}
+		set.DeviceNodes = append(set.DeviceNodes, ResourceDeviceNode{
+			GroupIDs:    groupIDs,
+			DeviceIDs:   deviceIDs,
+			DetailPerms: ResourceDevicePerms,
+		})
+	}
+
+	// 如果有角色级别的工单类型授权，添加到权限集中
+	if len(roleWorkOrderTypeCodes) > 0 {
+		typeCodes := make([]string, 0, len(roleWorkOrderTypeCodes))
+		for tc := range roleWorkOrderTypeCodes {
+			typeCodes = append(typeCodes, tc)
+		}
+		// 添加一个默认工单节点，包含所有权限
+		set.WorkOrderNodes = append(set.WorkOrderNodes, ResourceWorkOrderNode{
+			TypeCodes:   typeCodes,
+			DetailPerms: ResourceWorkOrderPerms, // 授予所有工单权限
+		})
+	}
+
 	return set
 }
 
@@ -169,6 +257,7 @@ func (s *ResourcePermSet) AllowsWorkOrder(typeCode, perm string) bool {
 
 // RequireResourcePermission 资源中心敏感操作校验中间件。
 //   - admin / operator：后台角色，直接放行（后台行为不变）。
+//   - wo:rw:<id> scope（SSO 单工单授权）：直接放行，无需资源角色。
 //   - 其它登录用户：解析其资源角色权限集，校验目标资源与操作，失败 403。
 //
 // resourceKind: "device" | "workorder"；device 从路由 :id 解析设备并取其分组，
@@ -180,6 +269,20 @@ func RequireResourcePermission(resourceKind, perm string) gin.HandlerFunc {
 			c.Next()
 			return
 		}
+		
+		// 工单操作：优先检查 SSO 单工单授权 scope（wo:rw:<id>）
+		if resourceKind == "workorder" {
+			woID := strings.TrimSpace(c.Param("id"))
+			if woID != "" {
+				if v, ok := c.Get("wo_scopes"); ok {
+					if scopes, ok := v.([]string); ok && containsStr(scopes, "wo:rw:"+woID) {
+						c.Next()
+						return
+					}
+				}
+			}
+		}
+		
 		userID := c.GetUint("user_id")
 		if userID == 0 {
 			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
@@ -205,18 +308,8 @@ func RequireResourcePermission(resourceKind, perm string) gin.HandlerFunc {
 				return
 			}
 		case "workorder":
-			// 分享链接工单读写作用域（wo:rw:<id>）保持兼容。
-			woID := strings.TrimSpace(c.Param("id"))
-			if woID != "" {
-				if v, ok := c.Get("wo_scopes"); ok {
-					if scopes, ok := v.([]string); ok && containsStr(scopes, "wo:rw:"+woID) {
-						c.Next()
-						return
-					}
-				}
-			}
 			var wo models.WorkOrder
-			if err := database.DB.Select("type_code").First(&wo, woID).Error; err != nil {
+			if err := database.DB.Select("type_code").First(&wo, c.Param("id")).Error; err != nil {
 				c.JSON(http.StatusNotFound, gin.H{"error": "work order not found"})
 				c.Abort()
 				return
