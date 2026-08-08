@@ -102,6 +102,10 @@ export interface CallInterfaceAction extends ActionBase {
   type: 'call_interface'
   ifaceId?: number
   ifaceCode?: string
+  /** 外部应用 ID（outbound_apps 表）：优先级高于 ifaceId/ifaceCode */
+  outboundAppId?: number
+  /** 外部接口 ID（outbound_endpoints 表）：配合 outboundAppId 使用 */
+  outboundEndpointId?: number
   /** 入参映射：param_key ← 值来源 */
   param_map?: Array<{ key: string; src: ValueSrc }>
   /** 结果回填：接口返回字段（点路径）→ 上下文 key（按 result_scope） */
@@ -168,6 +172,7 @@ export type WorkflowSource =
   | { kind: 'canvas_exit' }
   | { kind: 'custom_event'; eventName: string }
   | { kind: 'context_change'; scope: Exclude<StateScopeKind, 'element'>; key: string }
+  | { kind: 'agent_scan'; deviceId?: number; scanType?: 'qrcode' | 'barcode' | 'nfc' | 'any' }
 
 export type WorkflowSourceKind = WorkflowSource['kind']
 

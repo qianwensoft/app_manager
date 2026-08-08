@@ -164,11 +164,41 @@ class AgentService : LifecycleService() {
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(serviceJob + Dispatchers.Default)
 
+    /** 登录成功后触发菜单同步 */
+    private val loginSuccessReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+            val cfg = com.appmanager.agent.config.AgentConfig.get(this@AgentService)
+            if (cfg.serverUrl.isNotEmpty() && cfg.deviceToken.isNotEmpty()) {
+                com.appmanager.agent.AgentMenuSync.fetchManifestAsync(
+                    serviceScope, this@AgentService, cfg.serverUrl, cfg.deviceToken
+                )
+            }
+        }
+    }
+
+    /** Token 真正失效时更新通知，提示用户重新登录 */
+    private val tokenExpiredReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+            setConnState(STATE_ERROR, "登录已失效，请在 App 中重新登录")
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        // 恢复上次持久化的菜单 intent_action 监听（App 重启后重新注册）
         com.appmanager.agent.MenuIntentReceiver.reregister(this)
+
+        // 注册 auth 相关广播
+        androidx.core.content.ContextCompat.registerReceiver(
+            this, loginSuccessReceiver,
+            android.content.IntentFilter(com.appmanager.agent.auth.AgentAuth.ACTION_LOGIN_SUCCESS),
+            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        androidx.core.content.ContextCompat.registerReceiver(
+            this, tokenExpiredReceiver,
+            android.content.IntentFilter(com.appmanager.agent.auth.AgentAuth.ACTION_TOKEN_EXPIRED),
+            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED
+        )
 
         // 初始化 X5 内核（仅 Android 9+ 启用）
         try {
@@ -336,7 +366,6 @@ class AgentService : LifecycleService() {
         detachInstallCallback(this)
         super.onDestroy()
         serviceJob.cancel()
-        // stopSelf() 若在初始化前触发（如未配置 serverUrl），lateinit 未赋值会崩溃
         if (::heartbeatManager.isInitialized) heartbeatManager.stop()
         if (::deviceInfoCollector.isInitialized) deviceInfoCollector.stop()
         foregroundAppMonitor?.stop()
@@ -348,6 +377,8 @@ class AgentService : LifecycleService() {
         CustomEventBroadcastHelper.stop(this)
         com.appmanager.agent.util.CustomEventProbeHelper.stop(this)
         com.appmanager.agent.MenuIntentReceiver.unregister(this)
+        try { unregisterReceiver(loginSuccessReceiver) } catch (_: Exception) {}
+        try { unregisterReceiver(tokenExpiredReceiver) } catch (_: Exception) {}
         if (::webSocket.isInitialized) webSocket.disconnect()
         activeWsServerUrl = ""
         activeWsDeviceToken = ""
@@ -493,6 +524,29 @@ class AgentService : LifecycleService() {
                 Log.e(TAG, "pushDeviceInfoNow", e)
             }
         }
+    }
+
+    /**
+     * MDM 模式切换后调用：
+     * 1. 刷新前台通知（在连接状态文字旁显示 MDM 徽标）
+     * 2. 立即推送一次 device_info，让服务端获知最新 mdm_enabled 状态
+     */
+    fun onMdmModeChanged(enabled: Boolean, enterpriseCode: String) {
+        val connText = when (connState) {
+            STATE_CONNECTED    -> "已连接"
+            STATE_CONNECTING   -> "连接中..."
+            STATE_ERROR        -> "连接失败：$connDetail"
+            else               -> "重连中..."
+        }
+        val notifText = if (enabled) {
+            val badge = if (enterpriseCode.isNotEmpty()) "MDM·$enterpriseCode" else "MDM"
+            "[$badge] $connText"
+        } else {
+            connText
+        }
+        updateNotification(notifText)
+        // 立即上报最新 device_info（含 mdm_enabled / enterprise_code 字段）
+        pushDeviceInfoNow("mdm_mode_change")
     }
 
     /** 服务端 HTTP 截图：经 WS 下发 capture_screenshot，需当前已开启投屏并持有 MediaProjection。 */

@@ -50,6 +50,12 @@ class HeartbeatManager(
                             Log.e(TAG, "X5 kernel check failed", e)
                         }
                     }
+                    // 每 5 分钟检查一次 userToken 是否即将过期，自动 refresh
+                    try {
+                        com.appmanager.agent.auth.AgentAuth.refreshIfNeeded(context!!)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Token refresh check failed", e)
+                    }
                 }
 
                 delay(30_000L)

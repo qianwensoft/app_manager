@@ -41,6 +41,10 @@ var Registry = []Entry{
 		AllowTSOnly: []string{"preview_path", "content_version"}},
 
 	{Name: "Device", Model: models.Device{}, TSRelPath: "api/device.ts", TSInterface: "Device"},
+
+	{Name: "DocumentNode", Model: models.DocumentNode{}, TSRelPath: "api/document.ts", TSInterface: "DocumentNode"},
+	{Name: "DocumentVersion", Model: models.DocumentVersion{}, TSRelPath: "api/document.ts", TSInterface: "DocumentVersion"},
+	{Name: "DocumentRole", Model: models.DocumentRole{}, TSRelPath: "api/document.ts", TSInterface: "DocumentRole"},
 }
 
 // FieldDiff compares Go JSON fields with TS interface fields.

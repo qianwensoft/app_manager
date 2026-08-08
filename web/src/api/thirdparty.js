@@ -7,6 +7,10 @@ export const updateThirdPartyProvider = (id, data) => http.put(`/thirdparty/${id
 export const deleteThirdPartyProvider = (id) => http.delete(`/thirdparty/${id}`)
 export const getThirdPartyTokenStatus = (id) => http.get(`/thirdparty/${id}/token`)
 
+// SSO 跳转安全（P0）：后端签名 + 白名单预览
+export const buildSignedSSOCallback = (id, payload) => http.post(`/thirdparty/${id}/sso/sign`, payload)
+export const previewThirdPartyAllowlist = (id) => http.get(`/thirdparty/${id}/sso/allowlist`)
+
 // FreePass
 export const getFreePassAuthorizeURL = (id) => http.get(`/thirdparty/${id}/authorize`)
 export const refreshFreePassToken = (id) => http.post(`/thirdparty/${id}/freepass/refresh`)

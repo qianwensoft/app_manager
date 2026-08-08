@@ -5,6 +5,7 @@ ROOT       := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 WEB        := $(ROOT)/web
 SCADA_EDITOR := $(ROOT)/scada-editor
 FORM_APP   := $(ROOT)/form-app
+DOCS_APP   := $(ROOT)/docs-app
 SERVER     := $(ROOT)/server
 AGENT      := $(ROOT)/agent
 BRIDGE     := $(ROOT)/bridge
@@ -35,6 +36,7 @@ PBC40_SERVICE := app-manager
 	deps-web web web-build \
 	deps-scada-editor scada-editor-build \
 	deps-form-app form-app-build \
+	deps-docs-app docs-app-build \
 	server server-only server-only-linux-amd64 server-linux-amd64 server-linux-arm64 server-darwin-amd64 server-darwin-arm64 server-windows-amd64 \
 	agent agent-debug agent-release agent-release-build install-agent bump-agent-version \
 	bridge bridge-linux-amd64 bridge-linux-arm64 bridge-darwin-amd64 bridge-darwin-arm64 bridge-windows-amd64 bridge-all \
@@ -91,6 +93,7 @@ web-build: deps-web
 	cd $(WEB) && $(NPM) run build
 	$(MAKE) scada-editor-build
 	$(MAKE) form-app-build
+	$(MAKE) docs-app-build
 
 web: web-build
 
@@ -109,6 +112,14 @@ form-app-build: deps-form-app
 	cd $(FORM_APP) && $(NPM) run build
 	rm -rf $(WEB)/dist/form-app
 	cp -R $(FORM_APP)/dist $(WEB)/dist/form-app
+
+deps-docs-app:
+	cd $(DOCS_APP) && $(NPM) install
+
+docs-app-build: deps-docs-app
+	cd $(DOCS_APP) && $(NPM) run build
+	rm -rf $(WEB)/dist/docs-app
+	cp -R $(DOCS_APP)/dist $(WEB)/dist/docs-app
 
 # ─── Go 服务端 ─────────────────────────────────────────────────────────────
 

@@ -19,3 +19,7 @@ export const getStompStats = () => http.get('/settings/stomp-stats')
 // AI（Claude）配置
 export const getClaudeConfig = () => http.get('/settings/claude')
 export const updateClaudeConfig = (data) => http.put('/settings/claude', data)
+
+// OnlyOffice Document Server 配置
+export const getOnlyOfficeConfig = () => http.get('/settings/onlyoffice')
+export const updateOnlyOfficeConfig = (data) => http.put('/settings/onlyoffice', data)

@@ -33,6 +33,22 @@ type ResourceRole struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+// ResourceRoleDeviceGroup 资源角色 - 设备分组 关联（授权整个分组）。
+type ResourceRoleDeviceGroup struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	RoleID    uint      `gorm:"uniqueIndex:idx_role_devgroup;index" json:"role_id"`
+	GroupID   uint      `gorm:"uniqueIndex:idx_role_devgroup;index" json:"group_id"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// ResourceRoleDevice 资源角色 - 单独设备 关联（授权指定设备）。
+type ResourceRoleDevice struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	RoleID    uint      `gorm:"uniqueIndex:idx_role_device;index" json:"role_id"`
+	DeviceID  uint      `gorm:"uniqueIndex:idx_role_device;index" json:"device_id"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // ResourceRoleNode 资源角色 - 资源节点 关联（决定角色可见哪些节点）。
 type ResourceRoleNode struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
@@ -46,6 +62,14 @@ type ResourceRoleUser struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
 	RoleID    uint      `gorm:"uniqueIndex:idx_role_user;index" json:"role_id"`
 	UserID    uint      `gorm:"uniqueIndex:idx_role_user;index" json:"user_id"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// ResourceRoleWorkOrderType 资源角色 - 工单类型 关联（直接授权工单类型，独立于节点配置）。
+type ResourceRoleWorkOrderType struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	RoleID    uint      `gorm:"uniqueIndex:idx_role_wotype;index" json:"role_id"`
+	TypeCode  string    `gorm:"uniqueIndex:idx_role_wotype;size:64;index" json:"type_code"`
 	CreatedAt time.Time `json:"created_at"`
 }
 

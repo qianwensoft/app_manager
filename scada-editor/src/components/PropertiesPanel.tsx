@@ -148,6 +148,377 @@ const PairRow = ({ l1, v1, l2, v2, on1, on2 }: {
   </div>
 )
 
+/* ── 表达式自动补全输入框 ── */
+type ExprSuggestion = {
+  /** 显示的标签 */
+  label: string
+  /** 分类说明 */
+  hint: string
+  /** 实际插入的文本 */
+  insert: string
+  /** 插入后光标相对末尾的偏移（负数表示回退，用于定位到括号内） */
+  cursorOffset?: number
+}
+
+function ExpressionAutocompleteInput({ value, onChange, placeholder, extDataKeys, elementNames }: {
+  value: string
+  onChange: (v: string) => void
+  placeholder?: string
+  extDataKeys: string[]
+  elementNames: string[]
+}) {
+  const taRef = useRef<HTMLTextAreaElement>(null)
+  const [open, setOpen] = useState(false)
+  const [activeIdx, setActiveIdx] = useState(0)
+  const [caret, setCaret] = useState(0)
+
+  // 内置变量与函数建议
+  const baseSuggestions: ExprSuggestion[] = [
+    { label: 'v', hint: '绑定值', insert: 'v' },
+    { label: 'text', hint: '显示文本', insert: 'text' },
+    { label: 'Number()', hint: '转数字', insert: 'Number()', cursorOffset: -1 },
+    { label: 'String()', hint: '转文本', insert: 'String()', cursorOffset: -1 },
+    { label: 'Math.abs()', hint: '绝对值', insert: 'Math.abs()', cursorOffset: -1 },
+    { label: 'Math.max()', hint: '最大值', insert: 'Math.max()', cursorOffset: -1 },
+    { label: 'Math.min()', hint: '最小值', insert: 'Math.min()', cursorOffset: -1 },
+  ]
+
+  // 计算光标前正在输入的 token（含点号，如 ext.ma）
+  const getToken = (text: string, pos: number): { token: string; start: number } => {
+    let start = pos
+    while (start > 0 && /[A-Za-z0-9_.$']/.test(text[start - 1])) start--
+    return { token: text.slice(start, pos), start }
+  }
+
+  // 根据当前 token 生成建议列表
+  const buildSuggestions = (text: string, pos: number): ExprSuggestion[] => {
+    const { token } = getToken(text, pos)
+
+    // 正在输入 ext. → 提示扩展数据 key
+    if (/^ext\.[A-Za-z0-9_$]*$/.test(token)) {
+      const partial = token.slice(4).toLowerCase()
+      return extDataKeys
+        .filter((k) => k.toLowerCase().startsWith(partial))
+        .map((k) => ({ label: `ext.${k}`, hint: '扩展数据', insert: `ext.${k}` }))
+    }
+
+    // 正在输入 el( → 提示其他组件名
+    const beforeCaret = text.slice(0, pos)
+    const elMatch = beforeCaret.match(/el\(\s*'([^')]*)$/)
+    if (elMatch) {
+      const partial = elMatch[1].toLowerCase()
+      return elementNames
+        .filter((n) => n.toLowerCase().includes(partial))
+        .map((n) => ({
+          label: n,
+          hint: '组件引用',
+          insert: `el('${n}', 'extData.key')`,
+          cursorOffset: 0,
+        }))
+    }
+
+    // 通用建议：内置变量/函数 + ext + el 模板
+    const all: ExprSuggestion[] = [
+      ...baseSuggestions,
+      { label: 'ext.', hint: '扩展数据', insert: 'ext.', cursorOffset: 0 },
+      { label: "el('名称','extData.key')", hint: '其他组件', insert: "el('名称', 'extData.key')", cursorOffset: 0 },
+    ]
+    if (!token) return all
+    const lower = token.toLowerCase()
+    return all.filter((s) => s.label.toLowerCase().includes(lower) || s.insert.toLowerCase().includes(lower))
+  }
+
+  const suggestions = open ? buildSuggestions(value, caret) : []
+
+  const applySuggestion = (s: ExprSuggestion) => {
+    const ta = taRef.current
+    const pos = ta ? ta.selectionStart : caret
+
+    // 计算要替换的 token 范围
+    const beforeCaret = value.slice(0, pos)
+    const elMatch = beforeCaret.match(/el\(\s*'([^')]*)$/)
+    let start: number
+    if (elMatch && !s.insert.startsWith('el(') && s.hint === '组件引用') {
+      // el(' 场景：只替换 el(' 后的部分名称，并补上完整模板
+      start = pos - elMatch[1].length
+      const head = value.slice(0, beforeCaret.lastIndexOf('el('))
+      const tail = value.slice(pos)
+      // 去掉已输入的 el(' 前缀，用完整模板替换
+      const newVal = head + s.insert + tail
+      const cursorPos = head.length + s.insert.length + (s.cursorOffset ?? 0)
+      onChange(newVal)
+      requestAnimationFrame(() => {
+        if (taRef.current) {
+          taRef.current.focus()
+          taRef.current.setSelectionRange(cursorPos, cursorPos)
+        }
+      })
+      setOpen(false)
+      return
+    } else {
+      start = getToken(value, pos).start
+    }
+
+    const newVal = value.slice(0, start) + s.insert + value.slice(pos)
+    const cursorPos = start + s.insert.length + (s.cursorOffset ?? 0)
+    onChange(newVal)
+    requestAnimationFrame(() => {
+      if (taRef.current) {
+        taRef.current.focus()
+        taRef.current.setSelectionRange(cursorPos, cursorPos)
+      }
+    })
+    setOpen(false)
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!open || suggestions.length === 0) {
+      // Ctrl/Cmd + Space 手动唤起
+      if ((e.ctrlKey || e.metaKey) && e.key === ' ') {
+        e.preventDefault()
+        setCaret(taRef.current?.selectionStart ?? 0)
+        setActiveIdx(0)
+        setOpen(true)
+      }
+      return
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setActiveIdx((i) => (i + 1) % suggestions.length)
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setActiveIdx((i) => (i - 1 + suggestions.length) % suggestions.length)
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault()
+      applySuggestion(suggestions[activeIdx])
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      setOpen(false)
+    }
+  }
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <textarea
+        ref={taRef}
+        value={value}
+        onChange={(e) => {
+          onChange(e.target.value)
+          setCaret(e.target.selectionStart)
+          setActiveIdx(0)
+          setOpen(true)
+        }}
+        onKeyDown={handleKeyDown}
+        onClick={() => setCaret(taRef.current?.selectionStart ?? 0)}
+        onFocus={() => { setCaret(taRef.current?.selectionStart ?? 0); setOpen(true) }}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder={placeholder}
+        rows={2}
+        spellCheck={false}
+        style={{
+          width: '100%', fontSize: 10, padding: '4px',
+          background: 'var(--bg-base)', border: '1px solid var(--border)',
+          color: 'var(--text-primary)', borderRadius: 3, fontFamily: 'var(--font-mono)',
+          resize: 'vertical',
+        }}
+      />
+      {open && suggestions.length > 0 && (
+        <div
+          style={{
+            position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
+            marginTop: 2, maxHeight: 180, overflowY: 'auto',
+            background: 'var(--bg-base)', border: '1px solid var(--accent)',
+            borderRadius: 4, boxShadow: '0 4px 12px rgba(0,0,0,0.35)',
+          }}
+        >
+          {suggestions.map((s, i) => (
+            <div
+              key={`${s.label}-${i}`}
+              onMouseDown={(e) => { e.preventDefault(); applySuggestion(s) }}
+              onMouseEnter={() => setActiveIdx(i)}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                gap: 8, padding: '4px 8px', cursor: 'pointer', fontSize: 10,
+                background: i === activeIdx ? 'var(--accent)' : 'transparent',
+                color: i === activeIdx ? '#fff' : 'var(--text-primary)',
+              }}
+            >
+              <code style={{ fontFamily: 'var(--font-mono)', fontSize: 10 }}>{s.label}</code>
+              <span style={{ fontSize: 8, opacity: 0.7, flexShrink: 0 }}>{s.hint}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ── 条件颜色规则编辑器 ── */
+function ConditionalColorRulesEditor({ rules, onChange, propertyLabel, extDataKeys = [], elementNames = [] }: {
+  rules: Array<{ condition: string; color: string; label?: string }>
+  onChange: (rules: Array<{ condition: string; color: string; label?: string }>) => void
+  propertyLabel: string
+  extDataKeys?: string[]
+  elementNames?: string[]
+}) {
+  const [expanded, setExpanded] = useState(false)
+
+  const addRule = () => {
+    onChange([...rules, { condition: '', color: '#ff0000', label: '' }])
+    setExpanded(true)
+  }
+
+  const updateRule = (index: number, field: 'condition' | 'color' | 'label', value: string) => {
+    const updated = [...rules]
+    updated[index] = { ...updated[index], [field]: value }
+    onChange(updated)
+  }
+
+  const removeRule = (index: number) => {
+    onChange(rules.filter((_, i) => i !== index))
+  }
+
+  const moveRule = (index: number, direction: 'up' | 'down') => {
+    if ((direction === 'up' && index === 0) || (direction === 'down' && index === rules.length - 1)) return
+    const updated = [...rules]
+    const target = direction === 'up' ? index - 1 : index + 1
+    ;[updated[index], updated[target]] = [updated[target], updated[index]]
+    onChange(updated)
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 500 }}>
+          {propertyLabel} ({rules.length})
+        </span>
+        <div style={{ display: 'flex', gap: 4 }}>
+          {rules.length > 0 && (
+            <button
+              onClick={() => setExpanded(!expanded)}
+              style={{
+                padding: '2px 6px', fontSize: 9, cursor: 'pointer',
+                background: 'var(--bg-surface)', border: '1px solid var(--border)',
+                color: 'var(--text-muted)', borderRadius: 3,
+              }}
+            >
+              {expanded ? '收起' : '展开'}
+            </button>
+          )}
+          <button
+            onClick={addRule}
+            style={{
+              padding: '2px 6px', fontSize: 9, cursor: 'pointer',
+              background: 'var(--accent)', border: 'none',
+              color: '#fff', borderRadius: 3,
+            }}
+          >
+            + 添加规则
+          </button>
+        </div>
+      </div>
+
+      {expanded && rules.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, paddingLeft: 8, borderLeft: '2px solid var(--border)' }}>
+          {rules.map((rule, index) => (
+            <div key={index} style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: 6, background: 'var(--bg-surface)', borderRadius: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'space-between' }}>
+                <span style={{ fontSize: 9, color: 'var(--accent)', fontWeight: 600 }}>规则 {index + 1}</span>
+                <div style={{ display: 'flex', gap: 2 }}>
+                  <button
+                    onClick={() => moveRule(index, 'up')}
+                    disabled={index === 0}
+                    style={{
+                      width: 18, height: 18, padding: 0, cursor: index === 0 ? 'not-allowed' : 'pointer',
+                      background: 'var(--bg-base)', border: '1px solid var(--border)',
+                      color: index === 0 ? 'var(--border)' : 'var(--text-muted)', borderRadius: 2, fontSize: 10,
+                    }}
+                  >↑</button>
+                  <button
+                    onClick={() => moveRule(index, 'down')}
+                    disabled={index === rules.length - 1}
+                    style={{
+                      width: 18, height: 18, padding: 0, cursor: index === rules.length - 1 ? 'not-allowed' : 'pointer',
+                      background: 'var(--bg-base)', border: '1px solid var(--border)',
+                      color: index === rules.length - 1 ? 'var(--border)' : 'var(--text-muted)', borderRadius: 2, fontSize: 10,
+                    }}
+                  >↓</button>
+                  <button
+                    onClick={() => removeRule(index)}
+                    style={{
+                      width: 18, height: 18, padding: 0, cursor: 'pointer',
+                      background: 'transparent', border: 'none',
+                      color: 'var(--danger)', borderRadius: 2, fontSize: 14, lineHeight: 1,
+                    }}
+                  >×</button>
+                </div>
+              </div>
+
+              <div>
+                <div style={{ fontSize: 8, color: 'var(--text-muted)', marginBottom: 2 }}>规则名称（可选）</div>
+                <input
+                  value={rule.label ?? ''}
+                  onChange={(e) => updateRule(index, 'label', e.target.value)}
+                  placeholder="如：高温告警"
+                  style={{
+                    width: '100%', height: 22, fontSize: 10, padding: '0 4px',
+                    background: 'var(--bg-base)', border: '1px solid var(--border)',
+                    color: 'var(--text-primary)', borderRadius: 3,
+                  }}
+                />
+              </div>
+
+              <div>
+                <div style={{ fontSize: 8, color: 'var(--text-muted)', marginBottom: 2 }}>
+                  条件表达式 <span style={{ opacity: 0.6 }}>（输入触发提示，↑↓ 选择，Enter 确认）</span>
+                </div>
+                <ExpressionAutocompleteInput
+                  value={rule.condition}
+                  onChange={(v) => updateRule(index, 'condition', v)}
+                  placeholder="如：Number(text) > Number(ext.max)"
+                  extDataKeys={extDataKeys}
+                  elementNames={elementNames}
+                />
+              </div>
+
+              <div>
+                <div style={{ fontSize: 8, color: 'var(--text-muted)', marginBottom: 2 }}>颜色</div>
+                <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                  <input
+                    type="color"
+                    value={rule.color}
+                    onChange={(e) => updateRule(index, 'color', e.target.value)}
+                    style={{
+                      width: 32, height: 24, cursor: 'pointer',
+                      border: '1px solid var(--border)', borderRadius: 3,
+                    }}
+                  />
+                  <input
+                    type="text"
+                    value={rule.color}
+                    onChange={(e) => updateRule(index, 'color', e.target.value)}
+                    style={{
+                      flex: 1, height: 24, fontSize: 10, padding: '0 4px',
+                      background: 'var(--bg-base)', border: '1px solid var(--border)',
+                      color: 'var(--text-primary)', borderRadius: 3, fontFamily: 'var(--font-mono)',
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {rules.length === 0 && (
+        <div style={{ fontSize: 9, color: 'var(--text-muted)', textAlign: 'center', padding: '8px 0' }}>
+          暂无规则，点击"添加规则"开始配置
+        </div>
+      )}
+    </div>
+  )
+}
+
 /* ── 扩展数据编辑器 ── */
 function ExtDataEditor({ extData, onChange, allElements, currentElId }: {
   extData: Record<string, string>
@@ -178,8 +549,12 @@ function ExtDataEditor({ extData, onChange, allElements, currentElId }: {
     onChange({ ...extData, [key]: value })
   }
 
-  const insertRef = (type: 'self' | 'other', elName?: string) => {
-    const ref = type === 'self' ? `{{ext:${newKey || 'key'}}}` : `{{el:${elName || '元素名'}:${newKey || 'key'}}}`
+  const insertRef = (type: 'self' | 'other' | 'comp' | 'global', elName?: string) => {
+    let ref: string
+    if (type === 'self') ref = `{{ext:${newKey || 'key'}}}`
+    else if (type === 'other') ref = `{{el:${elName || '元素名'}:${newKey || 'key'}}}`
+    else if (type === 'comp') ref = `{{comp:${elName || '组件名'}:value}}`
+    else ref = `{{global:${'路径'}}}`
     setNewValue((prev) => prev + ref)
   }
 
@@ -219,9 +594,14 @@ function ExtDataEditor({ extData, onChange, allElements, currentElId }: {
           ))}
         </div>
       )}
-      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
+      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.6 }}>
         引用语法：<code style={{ background: 'var(--bg-surface)', padding: '1px 4px', borderRadius: 2 }}>{'{{ext:key}}'}</code> 本组件 &nbsp;
-        <code style={{ background: 'var(--bg-surface)', padding: '1px 4px', borderRadius: 2 }}>{'{{el:名称:key}}'}</code> 其他组件
+        <code style={{ background: 'var(--bg-surface)', padding: '1px 4px', borderRadius: 2 }}>{'{{el:名称:key}}'}</code> 其他组件扩展 &nbsp;
+        <code style={{ background: 'var(--bg-surface)', padding: '1px 4px', borderRadius: 2 }}>{'{{comp:名称:value}}'}</code> 组件快照 &nbsp;
+        <code style={{ background: 'var(--bg-surface)', padding: '1px 4px', borderRadius: 2 }}>{'{{global:a.b}}'}</code> 全局上下文
+      </div>
+      <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+        值支持类型化：数字/布尔/JSON 数组或对象会在解析时自动识别（如 <code style={{ background: 'var(--bg-surface)', padding: '1px 4px', borderRadius: 2 }}>[1,2,3]</code>）
       </div>
       <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
         <input
@@ -273,13 +653,41 @@ function ExtDataEditor({ extData, onChange, allElements, currentElId }: {
             color: 'var(--text-primary)', borderRadius: 3,
           }}
         >
-          <option value="">引用其他组件...</option>
+          <option value="">引用其他组件扩展...</option>
           {allElements
             .filter((el) => el.id !== currentElId)
             .map((el) => (
               <option key={el.id} value={el.name}>{el.name} ({el.type})</option>
             ))}
         </select>
+      </div>
+      <div style={{ display: 'flex', gap: 4 }}>
+        <select
+          onChange={(e) => {
+            if (e.target.value) insertRef('comp', e.target.value)
+            e.target.value = ''
+          }}
+          style={{
+            flex: 1, height: 22, fontSize: 10, padding: '0 4px',
+            background: 'var(--bg-base)', border: '1px solid var(--border)',
+            color: 'var(--text-primary)', borderRadius: 3,
+          }}
+        >
+          <option value="">组件快照取值...</option>
+          {allElements
+            .filter((el) => el.id !== currentElId && el.name)
+            .map((el) => (
+              <option key={el.id} value={el.name}>{el.name} → value</option>
+            ))}
+        </select>
+        <button
+          onClick={() => insertRef('global')}
+          style={{
+            flex: 1, padding: '3px 0', fontSize: 10,
+            background: 'var(--bg-surface)', color: 'var(--text-muted)',
+            border: '1px solid var(--border)', borderRadius: 3, cursor: 'pointer',
+          }}
+        >引用全局上下文</button>
       </div>
     </div>
   )
@@ -1826,6 +2234,12 @@ function ElementBasicTabContent({ el, onUpdate, onUngroup, canvas }: {
   onUngroup: () => void
   canvas?: { elements: CanvasElement[] }
 }) {
+  // 条件样式表达式自动补全的数据源
+  const condExtDataKeys = Object.keys(el.extData ?? {})
+  const condElementNames = (canvas?.elements ?? [])
+    .filter((e) => e.id !== el.id && e.name)
+    .map((e) => e.name)
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
       {el.type === 'group' && (
@@ -1931,6 +2345,54 @@ function ElementBasicTabContent({ el, onUpdate, onUngroup, canvas }: {
           allElements={canvas?.elements ?? []}
           currentElId={el.id}
         />
+      </Section>
+
+      <Section title="条件样式" defaultOpen={false}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ fontSize: 9, color: 'var(--text-muted)', lineHeight: 1.4, padding: 6, background: 'var(--bg-surface)', borderRadius: 3 }}>
+            根据表达式动态设置颜色。规则按顺序评估，首个匹配的规则生效。
+            <br />
+            可用变量：<code style={{ color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>v</code>=绑定值，
+            <code style={{ color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>text</code>=显示文本，
+            <code style={{ color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>ext.key</code>=扩展数据，
+            <code style={{ color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>el('名称','extData.key')</code>=其他组件
+          </div>
+
+          {(el.type === 'text' || el.type === 'button' || el.type.startsWith('form-')) && (
+            <ConditionalColorRulesEditor
+              rules={el.conditionalStyles?.fontColor ?? []}
+              onChange={(rules) => {
+                const updated = { ...(el.conditionalStyles ?? {}), fontColor: rules }
+                onUpdate('conditionalStyles', updated)
+              }}
+              propertyLabel="文本颜色"
+              extDataKeys={condExtDataKeys}
+              elementNames={condElementNames}
+            />
+          )}
+
+          <ConditionalColorRulesEditor
+            rules={el.conditionalStyles?.fill ?? []}
+            onChange={(rules) => {
+              const updated = { ...(el.conditionalStyles ?? {}), fill: rules }
+              onUpdate('conditionalStyles', updated)
+            }}
+            propertyLabel="填充色"
+            extDataKeys={condExtDataKeys}
+            elementNames={condElementNames}
+          />
+
+          <ConditionalColorRulesEditor
+            rules={el.conditionalStyles?.stroke ?? []}
+            onChange={(rules) => {
+              const updated = { ...(el.conditionalStyles ?? {}), stroke: rules }
+              onUpdate('conditionalStyles', updated)
+            }}
+            propertyLabel="边框色"
+            extDataKeys={condExtDataKeys}
+            elementNames={condElementNames}
+          />
+        </div>
       </Section>
 
       {el.type.startsWith('echarts-') && (

@@ -93,4 +93,9 @@ export interface PaperSpec {
   /** 整体原点偏移（mm）：补偿打印机物理起点/标签校准误差，作用于 canvas 所有元素坐标 */
   offset_x_mm?: number
   offset_y_mm?: number
+  /**
+   * TSPL 文本字体名，缺省 CHNGB.BF2（简体中文 GBK）。
+   * 不同机型内置字体名不同，如繁体机用 TSS24.BF2，英文机用 0/4/ROMAN.TTF 等。
+   */
+  tspl_font?: string
 }

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useScadaGroups, useScadaInfos, useCreateInfo, useDeleteInfo, usePublish, useUnpublish } from '@/hooks/useScada'
+import { useScadaGroups, useScadaInfos, useCreateInfo, useDeleteInfo, useCopyInfo, usePublish, useUnpublish } from '@/hooks/useScada'
 import { useStompScadaEvents } from '@/hooks/useStompScadaEvents'
 import type { ScadaGroup } from '@/types'
 
@@ -110,15 +110,19 @@ function ScadaCard({
   onEdit,
   onPreview,
   onDelete,
+  onCopy,
   onTogglePublish,
   publishBusy,
+  copyBusy,
 }: {
   info: CardInfo
   onEdit: () => void
   onPreview: () => void
   onDelete: () => void
+  onCopy: () => void
   onTogglePublish: () => void
   publishBusy: boolean
+  copyBusy: boolean
 }) {
   const [hover, setHover] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -316,6 +320,21 @@ function ScadaCard({
             <Svg d={Icons.eye} size={12} /> 预览
           </button>
           <button
+            onClick={(e) => { e.stopPropagation(); if (!copyBusy) onCopy() }}
+            disabled={copyBusy}
+            className="icon-btn focus-accent"
+            style={{
+              width: 30, height: 30, borderRadius: 'var(--radius-sm)',
+              background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+              color: 'var(--text-secondary)', display: 'flex',
+              alignItems: 'center', justifyContent: 'center',
+              cursor: copyBusy ? 'default' : 'pointer', opacity: copyBusy ? 0.5 : 1,
+            }}
+            title="复制组态"
+          >
+            <Svg d={Icons.copy} size={12} />
+          </button>
+          <button
             onClick={onDelete}
             className="icon-btn focus-accent"
             style={{
@@ -384,6 +403,7 @@ export default function ScadaListPage() {
   const { data: infos = [], isLoading, refetch } = useScadaInfos(selectedGroupId)
   const createInfo = useCreateInfo()
   const deleteInfo = useDeleteInfo()
+  const copyInfo = useCopyInfo()
   const publish = usePublish()
   const unpublish = useUnpublish()
   const publishBusy = publish.isPending || unpublish.isPending
@@ -598,11 +618,13 @@ export default function ScadaListPage() {
                   key={info.id}
                   info={info}
                   publishBusy={publishBusy}
+                  copyBusy={copyInfo.isPending}
                   onEdit={() => navigate(`/editor/${info.id}`)}
                   onPreview={() => navigate(`/preview/${info.id}`)}
                   onTogglePublish={() =>
                     info.publish_status === 1 ? unpublish.mutate(info.id) : publish.mutate(info.id)
                   }
+                  onCopy={() => copyInfo.mutate(info)}
                   onDelete={() => { if (confirm('确认删除？此操作不可恢复')) deleteInfo.mutate(info.id) }}
                 />
               ))}

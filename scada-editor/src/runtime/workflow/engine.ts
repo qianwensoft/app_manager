@@ -35,6 +35,7 @@ export interface WorkflowRuntime {
   triggerLifecycle: (kind: 'canvas_enter' | 'canvas_exit') => void
   notifyPointData: (next: PointDataMap) => void
   runWorkflowById: (id: string, base?: Partial<WorkflowContext>) => void
+  triggerAgentScan: (eventData: { device_id: number; event_type: string; value: string }) => void
 }
 
 const NULL_STORE: ContextStore = {
@@ -222,13 +223,31 @@ export function setupWorkflows(workflows: ScadaWorkflow[], deps: WorkflowEngineD
     }
   }
 
+  // ── agent_scan：设备扫码事件触发 ──
+  const triggerAgentScan = (eventData: { device_id: number; event_type: string; value: string }) => {
+    for (const wf of enabled) {
+      if (wf.source.kind !== 'agent_scan') continue
+      // 设备过滤
+      if (wf.source.deviceId && wf.source.deviceId !== eventData.device_id) continue
+      // 扫码类型过滤
+      const scanType = wf.source.scanType ?? 'any'
+      if (scanType !== 'any') {
+        const eventType = eventData.event_type.toLowerCase()
+        if (scanType === 'qrcode' && !eventType.includes('qrcode') && !eventType.includes('qr')) continue
+        if (scanType === 'barcode' && !eventType.includes('barcode') && !eventType.includes('scan')) continue
+        if (scanType === 'nfc' && !eventType.includes('nfc')) continue
+      }
+      fire(wf, { event: eventData })
+    }
+  }
+
   // ── 按 id 触发（供 ElementEvent 的 trigger-workflow 动作） ──
   const runWorkflowById = (id: string, base: Partial<WorkflowContext> = {}) => {
     const wf = enabled.find((w) => w.id === id)
     if (wf) fire(wf, base)
   }
 
-  return { cleanup: () => disposers.forEach((d) => d()), triggerComponent, triggerLifecycle, notifyPointData, runWorkflowById }
+  return { cleanup: () => disposers.forEach((d) => d()), triggerComponent, triggerLifecycle, notifyPointData, runWorkflowById, triggerAgentScan }
 }
 
 /**

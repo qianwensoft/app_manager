@@ -331,7 +331,7 @@ const loadAux = async () => {
     devicePerms.value = cat.device_perms || []
     workorderPerms.value = cat.workorder_perms || []
   } catch { /* ignore */ }
-  try { deviceGroupTree.value = (await getDeviceGroupsTree()).items || [] } catch { deviceGroupTree.value = [] }
+  try { deviceGroupTree.value = (await getDeviceGroupsTree()).data || [] } catch { deviceGroupTree.value = [] }
   try { devices.value = (await getAllDevices()).data || [] } catch { devices.value = [] }
   try { woTypes.value = (await getWorkOrderTypesForConfig()).data || [] } catch { woTypes.value = [] }
   try { scadaInfos.value = (await getScadaInfosForConfig()).data || [] } catch { scadaInfos.value = [] }

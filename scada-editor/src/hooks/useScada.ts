@@ -96,6 +96,28 @@ export function useDeleteInfo() {
   })
 }
 
+// 复制组态：拉取源组态完整数据（含 canvas_data），以新编码创建副本。
+// 副本重置发布态与分享 token，保留画布内容与分组。
+export function useCopyInfo() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (source: ScadaInfo) => {
+      // 拉取完整数据（列表接口通常不含 canvas_data）
+      const full = await scadaApi.getInfo(source.id).then((r) => r.data)
+      const suffix = Date.now().toString(36)
+      const body: Partial<ScadaInfo> = {
+        scada_name: `${full.scada_name} 副本`,
+        scada_code: `${full.scada_code}_copy_${suffix}`,
+        group_id: full.group_id,
+        description: full.description,
+        canvas_data: full.canvas_data,
+      }
+      return scadaApi.createInfo(body).then((r) => r.data)
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['scada', 'infos'] }),
+  })
+}
+
 // save canvas
 export function useSaveCanvas() {
   const qc = useQueryClient()

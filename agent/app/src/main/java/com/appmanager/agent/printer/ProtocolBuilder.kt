@@ -270,6 +270,13 @@ object ProtocolBuilder {
 
     // ── TSPL（标签机，如 TSC） ─────────────────────────────────────
     // paper.type=label 时用配置的宽高(mm)生成 SIZE/GAP；否则沿用默认 60x40。
+    // 字体：GBK 编码须用 CHNGB.BF2（简体中文 GB2312/GBK），不可用 TSS24.BF2（繁体 Big5）。
+    // paper.tspl_font 可覆盖默认字体，用于适配不同机型（如 ROMAN.TTF / TSS24.BF2）。
+    private fun tsplFont(paper: JSONObject?): String {
+        val f = paper?.optString("tspl_font", "")
+        return if (!f.isNullOrBlank()) f else "CHNGB.BF2"
+    }
+
     private fun buildTspl(content: JSONArray, paper: JSONObject?): ByteArray {
         val sb = StringBuilder()
         if (paper?.optString("type") == "label"
@@ -294,7 +301,8 @@ object ProtocolBuilder {
                 "text" -> {
                     val size = op.optInt("size", 1).coerceIn(1, 3)
                     val text = op.optString("text", "").replace("\"", "")
-                    sb.append("TEXT 20,$y,\"TSS24.BF2\",0,$size,$size,\"$text\"\r\n")
+                    val font = tsplFont(paper)
+                    sb.append("TEXT 20,$y,\"$font\",0,$size,$size,\"$text\"\r\n")
                     y += 30 + size * 10
                 }
                 "barcode" -> {
@@ -320,7 +328,9 @@ object ProtocolBuilder {
     }
 
     // ── TSPL 坐标布局 ──────────────────────────────────────────────
-    // 元素坐标/尺寸单位 mm，按实际 dpi 换算为 dots。字体用通用 TSS24.BF2，可按机型调整。
+    // 元素坐标/尺寸单位 mm，按实际 dpi 换算为 dots。
+    // 字体由 tsplFont(paper) 决定：paper.tspl_font 可覆盖，缺省 CHNGB.BF2（简体中文固件机）。
+    // 若打印机无该字体文件，TEXT 命令会被静默跳过——文字不出来时先换内置编号字体（"0"~"8"）排查。
     private fun buildTsplCanvas(elements: JSONArray, paper: JSONObject?, dpi: Int, values: JSONObject?): ByteArray {
         val sb = StringBuilder()
         if (paper?.optString("type") == "label"
@@ -350,7 +360,8 @@ object ProtocolBuilder {
                 "text" -> {
                     val mag = el.optInt("font_size", 1).coerceIn(1, 10)
                     val text = el.optString("text", "").replace("\"", "")
-                    sb.append("TEXT $x,$y,\"TSS24.BF2\",$rotate,$mag,$mag,\"$text\"\r\n")
+                    val font = tsplFont(paper)
+                    sb.append("TEXT $x,$y,\"$font\",$rotate,$mag,$mag,\"$text\"\r\n")
                 }
                 "barcode" -> {
                     val data = el.optString("data", "").replace("\"", "")

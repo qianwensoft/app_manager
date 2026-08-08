@@ -5,7 +5,7 @@
  */
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Input, InputNumber, Select, Switch, Collapse, Space, Tooltip } from 'antd'
+import { Button, Input, InputNumber, Select, Switch, Collapse, Space, Tooltip, Modal } from 'antd'
 import type { FieldDef } from '@/runtime/types'
 import type { PrinterTemplate, PrintOp, PrintProtocol, PrintGenSide, PaperType } from '@/runtime/printerTypes'
 import PrintDebugModal from './PrintDebugModal'
@@ -107,16 +107,30 @@ export default function PrintersConfigSection({
                 <div style={{ display: 'flex', gap: 8 }}>
                   <div style={{ flex: 1 }}>
                     <label style={labelStyle}>协议</label>
-                    <Select<PrintProtocol>
-                      size="small" style={{ width: '100%' }}
-                      value={tpl.protocol}
-                      onChange={v => updTemplate(idx, { protocol: v })}
-                      options={[
-                        { value: 'escpos', label: 'ESC/POS（小票机）' },
-                        { value: 'cpcl', label: 'CPCL（标签/便携）' },
-                        { value: 'tspl', label: 'TSPL（标签机）' },
-                      ]}
-                    />
+                    <Tooltip title="协议须与打印机硬件语言一致；坐标布局模式下切换协议会影响打印效果">
+                      <Select<PrintProtocol>
+                        size="small" style={{ width: '100%' }}
+                        value={tpl.protocol}
+                        onChange={v => {
+                          if (tpl.layout_mode === 'canvas' && (tpl.elements || []).length > 0 && v !== tpl.protocol) {
+                            Modal.confirm({
+                              title: '切换打印协议',
+                              content: `当前模板已有坐标元素（按 ${tpl.protocol.toUpperCase()} 设计）。CPCL 与 TSPL 字体大小、行高不同，切换后打印效果会变化。建议在「高级设计」中为不同打印机分别建立模板。`,
+                              okText: '仍然切换',
+                              cancelText: '取消',
+                              onOk: () => updTemplate(idx, { protocol: v }),
+                            })
+                          } else {
+                            updTemplate(idx, { protocol: v })
+                          }
+                        }}
+                        options={[
+                          { value: 'escpos', label: 'ESC/POS（小票机）' },
+                          { value: 'cpcl', label: 'CPCL（标签/便携）' },
+                          { value: 'tspl', label: 'TSPL（标签机）' },
+                        ]}
+                      />
+                    </Tooltip>
                   </div>
                   <div style={{ flex: 1 }}>
                     <Tooltip title="agent=端上按结构化指令生成协议字节；frontend=前端写原始协议指令透传">

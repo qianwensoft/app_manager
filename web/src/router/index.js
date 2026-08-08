@@ -121,6 +121,7 @@ const routes = [
       { path: 'users', name: 'Users', meta: { title: '用户管理' }, component: () => import('@/views/Users.vue') },
       { path: 'audit', name: 'AuditLog', meta: { title: '审计日志' }, component: () => import('@/views/AuditLog.vue') },
       { path: 'settings', name: 'Settings', meta: { title: '系统管理' }, component: () => import('@/views/Settings.vue') },
+      { path: 'settings/onlyoffice', redirect: { name: 'Settings', query: { tab: 'onlyoffice' } } },
       { path: 'data', name: 'DataStack', meta: { title: '数据源与接口' }, component: () => import('@/views/data/DataStack.vue') },
       { path: 'workflow-designer', name: 'WorkflowDesigner', meta: { title: '工作流设计器' }, component: () => import('@/views/data/WorkflowDesigner.vue') },
       { path: 'workflow-logs', name: 'WorkflowExecutionLogs', meta: { title: '工作流执行日志' }, component: () => import('@/views/data/WorkflowExecutionLogs.vue') },

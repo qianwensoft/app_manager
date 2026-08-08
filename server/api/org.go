@@ -172,7 +172,7 @@ func RemoveUserDepartment(c *gin.Context) {
 func ListDeviceGroupsTree(c *gin.Context) {
 	var rows []models.DeviceGroup
 	database.DB.Order("sort_order ASC, id ASC").Find(&rows)
-	c.JSON(http.StatusOK, gin.H{"items": buildGroupTree(rows, nil)})
+	c.JSON(http.StatusOK, gin.H{"data": buildGroupTree(rows, nil)})
 }
 
 func CreateDeviceGroup(c *gin.Context) {

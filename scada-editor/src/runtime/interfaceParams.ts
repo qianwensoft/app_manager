@@ -13,6 +13,10 @@ export interface InterfaceParamContext {
   globalParams?: Record<string, unknown>
   /** 自定义函数定义（source=expression 使用） */
   customFunctions?: CustomFunctionDef[]
+  /** 全局上下文快照（表达式中 global / G() 使用） */
+  globalContext?: Record<string, unknown>
+  /** 组件快照映射（表达式中 components / C() 使用） */
+  components?: Record<string, unknown>
 }
 
 function coerceParamValue(value: unknown, spec?: ParamSpec): unknown {
@@ -35,6 +39,8 @@ function toExpressionScope(context: InterfaceParamContext): ExpressionScope {
     scadaCode: context.scadaCode,
     urlSearch: context.urlSearch,
     customFunctions: context.customFunctions,
+    global: context.globalContext,
+    components: context.components,
   }
 }
 

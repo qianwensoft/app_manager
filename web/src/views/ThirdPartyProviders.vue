@@ -45,6 +45,23 @@
           </el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="SSO 安全" min-width="160">
+        <template #default="{ row }">
+          <div style="font-size:12px;line-height:1.7">
+            <div>
+              <el-tag :type="row.redirect_allow_enabled === false ? 'info' : 'success'" size="small" style="margin-right:4px">
+                白名单{{ row.redirect_allow_enabled === false ? '关' : '开' }}
+              </el-tag>
+              <el-tag :type="row.hmac_configured ? 'success' : 'danger'" size="small">
+                HMAC {{ row.hmac_configured ? '已配置' : '未配置' }}
+              </el-tag>
+            </div>
+            <div style="color:#909399;margin-top:2px">
+              key: {{ row.hmac_key_source || '—' }}
+            </div>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column label="操作" width="340" fixed="right">
         <template #default="{ row }">
           <el-button size="small" @click="openEdit(row)">编辑</el-button>
@@ -135,6 +152,60 @@
           </div>
         </el-form-item>
 
+        <!-- SSO 跳转安全配置（P0） -->
+        <el-divider content-position="left">SSO 跳转安全（P0）</el-divider>
+
+        <el-form-item label="启用白名单校验">
+          <el-switch
+            v-model="form.redirect_allow_enabled"
+            active-text="启用"
+            inactive-text="禁用（向后兼容）"
+          />
+          <div style="font-size:11px;color:#909399;margin-top:4px">
+            启用后，第三方登录后的目标路径必须在下方白名单中且 HMAC 签名有效；否则拒绝登录。
+          </div>
+        </el-form-item>
+
+        <el-form-item label="redirect_to 白名单">
+          <el-input
+            v-model="form.redirectAllowText"
+            type="textarea"
+            :rows="3"
+            placeholder='["/", "/devices", "/work-orders/*", "/embed/work-orders/*"]'
+          />
+          <div style="font-size:11px;color:#909399;margin-top:4px">
+            JSON 数组，支持精确路径与 "/*" 前缀通配。留空时回退到系统级 server.sso.redirect_to_whitelist 配置。
+          </div>
+          <div v-if="form.effective_allowlist && form.effective_allowlist.length" style="font-size:11px;color:#67c23a;margin-top:4px">
+            实际生效：{{ JSON.stringify(form.effective_allowlist) }}
+          </div>
+        </el-form-item>
+
+        <el-form-item label="HMAC 签名密钥">
+          <el-input
+            v-model="form.hmac_secret"
+            type="password"
+            show-password
+            placeholder="留空则使用系统级 server.sso.hmac_secret；密钥 ≥ 32 字节"
+          />
+          <div style="font-size:11px;color:#909399;margin-top:4px">
+            当前 key 来源：<b>{{ form.hmac_key_source || '未配置' }}</b>。修改后将立即用于签发新的 SSO 链接。
+          </div>
+        </el-form-item>
+
+        <el-form-item v-if="editingId && form.hmac_configured" label=" ">
+          <el-checkbox v-model="form.clear_hmac_secret">
+            清空本 Provider 的 HMAC 密钥（回退到系统密钥）
+          </el-checkbox>
+        </el-form-item>
+
+        <el-form-item label="时钟偏移容忍(秒)">
+          <el-input-number v-model="form.hmac_clock_skew_sec" :min="0" :max="3600" :step="30" />
+          <div style="font-size:11px;color:#909399;margin-top:4px">
+            默认 300 秒；签名过期判定允许此范围的偏差。
+          </div>
+        </el-form-item>
+
         <el-form-item v-if="editingId" label="状态">
           <el-switch v-model="form.enabled" active-text="启用" inactive-text="禁用" />
         </el-form-item>
@@ -157,9 +228,9 @@
     </el-dialog>
 
     <!-- SSO Test dialog -->
-    <el-dialog v-model="showTestDialog" title="测试 SSO 免登链接" width="680px">
+    <el-dialog v-model="showTestDialog" title="测试 SSO 免登链接（带白名单与 HMAC 签名）" width="760px">
       <el-alert type="info" :closable="false" show-icon style="margin-bottom:16px">
-        生成 SSO 免登链接，可在 eTeams 等第三方平台中发送此链接，用户点击后自动登录到本系统指定页面。
+        生成 SSO 免登链接，跳转目标会在白名单内校验并附带 HMAC-SHA256 签名（防 open-redirect 与链接篡改）。
       </el-alert>
 
       <el-form label-width="120px">
@@ -219,14 +290,27 @@
           </div>
         </el-form-item>
 
-        <el-form-item label="生成的链接" v-if="generatedSsoUrl">
+        <el-form-item label="签名有效期">
+          <el-input-number v-model="testForm.ttlSeconds" :min="60" :max="86400" :step="60" />
+          <span style="margin-left:8px;color:#909399;font-size:12px">秒（默认 300，最大 86400）</span>
+        </el-form-item>
+
+        <el-form-item v-if="generatedSsoUrl" label="生成的链接">
           <el-input v-model="generatedSsoUrl" readonly>
             <template #append>
               <el-button @click="copySsoUrl">复制</el-button>
             </template>
           </el-input>
           <div style="font-size:11px;color:#909399;margin-top:4px">
-            将此链接发送到 eTeams IM 中，用户点击后自动免登到指定页面
+            链接带 sig/exp/kid 参数；签名密钥后端保存，前端不可见。
+          </div>
+        </el-form-item>
+
+        <el-form-item v-if="generatedSigInfo" label="签名信息">
+          <div style="font-size:12px;color:#606266;line-height:1.7">
+            <div>key_id：<code>{{ generatedSigInfo.key_id }}</code></div>
+            <div>exp：<code>{{ generatedSigInfo.exp }}</code>（{{ formatExp(generatedSigInfo.exp) }}）</div>
+            <div>sig：<code>{{ generatedSigInfo.sig.slice(0, 16) }}…</code></div>
           </div>
         </el-form-item>
       </el-form>
@@ -247,12 +331,15 @@ import {
   createThirdPartyProvider,
   updateThirdPartyProvider,
   deleteThirdPartyProvider,
+  getThirdPartyProvider,
   getThirdPartyTokenStatus,
   getFreePassAuthorizeURL,
   refreshFreePassToken,
   getWechatPreAuthCode,
   refreshWechatToken,
-  setWechatTicket
+  setWechatTicket,
+  buildSignedSSOCallback,
+  previewThirdPartyAllowlist
 } from '@/api/thirdparty'
 import { listOutboundApps } from '@/api/outbound'
 import { getWorkOrders } from '@/api/workOrder'
@@ -269,12 +356,14 @@ const ticketProviderId = ref(null)
 const showTestDialog = ref(false)
 const testProviderId = ref(null)
 const generatedSsoUrl = ref('')
+const generatedSigInfo = ref(null)
 
 const testForm = ref({
   targetType: 'work-order',
   workOrderId: null,
   customPath: '',
-  operable: false
+  operable: false,
+  ttlSeconds: 300
 })
 
 const searchedWorkOrders = ref([])
@@ -293,12 +382,27 @@ const defaultForm = () => ({
   callback_url: '',
   outbound_app_id: null,
   default_role: 'viewer',
+  // SSO 安全
+  redirect_allow_enabled: true,
+  redirectAllowText: '',
+  redirect_allowlist_json: '',
+  effective_allowlist: [],
+  hmac_secret: '',
+  clear_hmac_secret: false,
+  hmac_configured: false,
+  hmac_key_source: '',
+  hmac_clock_skew_sec: 300,
   enabled: true
 })
 const form = ref(defaultForm())
 
 const typeLabel = (t) => ({ freepass: 'FreePass', wechat: '微信开放平台' }[t] || t)
 const formatTime = (t) => t ? new Date(t).toLocaleString('zh-CN') : '-'
+const formatExp = (exp) => {
+  const d = new Date(Number(exp) * 1000)
+  if (isNaN(d.getTime())) return '-'
+  return d.toLocaleString('zh-CN')
+}
 
 const load = async () => {
   providers.value = await listThirdPartyProviders()
@@ -331,22 +435,36 @@ const openCreate = () => {
   showDialog.value = true
 }
 
-const openEdit = (row) => {
+const openEdit = async (row) => {
   editingId.value = row.id
-  form.value = {
-    name: row.name,
-    type: row.type,
-    description: row.description || '',
-    open_api_origin: row.open_api_origin || '',
-    corp_id: row.corp_id || '',
-    app_key: row.app_key || '',
-    app_secret: '',
-    component_app_id: row.component_app_id || '',
-    component_app_secret: '',
-    callback_url: row.callback_url || '',
-    outbound_app_id: row.outbound_app_id ? Number(row.outbound_app_id) : null,
-    default_role: row.default_role || 'viewer',
-    enabled: row.enabled
+  try {
+    const detail = await getThirdPartyProvider(row.id)
+    form.value = {
+      name: detail.name,
+      type: detail.type,
+      description: detail.description || '',
+      open_api_origin: detail.open_api_origin || '',
+      corp_id: detail.corp_id || '',
+      app_key: detail.app_key || '',
+      app_secret: '',
+      component_app_id: detail.component_app_id || '',
+      component_app_secret: '',
+      callback_url: detail.callback_url || '',
+      outbound_app_id: detail.outbound_app_id ? Number(detail.outbound_app_id) : null,
+      default_role: detail.default_role || 'viewer',
+      redirect_allow_enabled: detail.redirect_allow_enabled !== false,
+      redirectAllowText: detail.redirect_allowlist_json || '',
+      redirect_allowlist_json: detail.redirect_allowlist_json || '',
+      effective_allowlist: detail.effective_redirect_allowlist || [],
+      hmac_secret: '',
+      clear_hmac_secret: false,
+      hmac_configured: !!detail.hmac_configured,
+      hmac_key_source: detail.hmac_key_source || '',
+      hmac_clock_skew_sec: detail.hmac_clock_skew_sec || 300,
+      enabled: detail.enabled
+    }
+  } catch {
+    ElMessage.error('加载平台详情失败')
   }
   showDialog.value = true
 }
@@ -354,11 +472,40 @@ const openEdit = (row) => {
 const save = async () => {
   saving.value = true
   try {
+    // 将白名单文本框转换为 JSON 字符串
+    const redirectText = (form.value.redirectAllowText || '').trim()
+    let allowJson = ''
+    if (redirectText) {
+      // 用户可直接粘贴 JSON；也接受逗号/换行分隔的纯列表
+      if (redirectText.startsWith('[')) {
+        allowJson = redirectText
+      } else {
+        const arr = redirectText.split(/[\n,]/).map(s => s.trim()).filter(Boolean)
+        allowJson = JSON.stringify(arr)
+      }
+      // 校验 JSON 合法性
+      try { JSON.parse(allowJson) } catch {
+        ElMessage.error('白名单 JSON 格式错误')
+        saving.value = false
+        return
+      }
+    }
+    const payload = {
+      ...form.value,
+      redirect_allowlist_json: allowJson,
+      redirect_allow_enabled: form.value.redirect_allow_enabled
+    }
+    if (!payload.hmac_secret && !payload.clear_hmac_secret) {
+      // 编辑时未填密钥且未勾选清空 → 不提交字段，保留原值
+      delete payload.hmac_secret
+      delete payload.clear_hmac_secret
+    }
+    // 新建且未勾选清空也允许留空（自动使用系统密钥）
     if (editingId.value) {
-      await updateThirdPartyProvider(editingId.value, form.value)
+      await updateThirdPartyProvider(editingId.value, payload)
       ElMessage.success('已保存')
     } else {
-      await createThirdPartyProvider(form.value)
+      await createThirdPartyProvider(payload)
       ElMessage.success('创建成功')
     }
     showDialog.value = false
@@ -419,11 +566,13 @@ const submitTicket = async () => {
 const openTestSso = (row) => {
   testProviderId.value = row.id
   generatedSsoUrl.value = ''
+  generatedSigInfo.value = null
   testForm.value = {
     targetType: 'work-order',
     workOrderId: null,
     customPath: '',
-    operable: false
+    operable: false,
+    ttlSeconds: 300
   }
   searchedWorkOrders.value = []
   showTestDialog.value = true
@@ -431,6 +580,7 @@ const openTestSso = (row) => {
 
 const handleTargetTypeChange = () => {
   generatedSsoUrl.value = ''
+  generatedSigInfo.value = null
 }
 
 const searchWorkOrders = async (query) => {
@@ -483,6 +633,12 @@ const generateSsoUrl = async () => {
     return
   }
 
+  // 0) 先快速校验 Provider 已配置签名（避免后端再 403）
+  if (!provider.hmac_configured) {
+    ElMessage.warning('该第三方平台尚未配置 HMAC 密钥；请到「编辑」中填写，或确认系统级 server.sso.hmac_secret 已配置。')
+    return
+  }
+
   let redirectTo = '/'
 
   if (testForm.value.targetType === 'work-order') {
@@ -492,28 +648,44 @@ const generateSsoUrl = async () => {
     }
     const readonlyParam = testForm.value.operable ? '' : '?readonly=1'
     redirectTo = `/embed/work-orders/${testForm.value.workOrderId}${readonlyParam}`
-  } else if (testForm.value.targetType === 'custom') {
-    if (!testForm.value.customPath.trim()) {
-      ElMessage.warning('请输入目标路径')
-      return
-    }
+  } else if (testForm.value.customPath && testForm.value.customPath.trim()) {
     redirectTo = testForm.value.customPath.trim()
     if (!redirectTo.startsWith('/')) {
       redirectTo = '/' + redirectTo
     }
   }
 
-  // 构建回调 URL（工单可操作时附带 wo_scopes）
-  let callbackUrl = `${window.location.origin}/auth-eteams-callback.html?provider_id=${provider.id}&redirect_to=${encodeURIComponent(redirectTo)}`
-  if (testForm.value.targetType === 'work-order' && testForm.value.operable && testForm.value.workOrderId) {
-    callbackUrl += `&wo_scopes=${encodeURIComponent('wo:rw:' + testForm.value.workOrderId)}`
+  // 1) 走后端签名接口（白名单 + HMAC 都在后端校验，前端永不接触密钥）
+  try {
+    const resp = await buildSignedSSOCallback(provider.id, {
+      redirect_to: redirectTo,
+      base_url: window.location.origin,
+      ttl_seconds: testForm.value.ttlSeconds || 300
+    })
+    let callbackUrl = resp.callback_url
+    // 工单「可操作」→ 追加工单级写权限 scope（wo_scopes 不参与 HMAC 签名，
+    // 由回调页透传给 /api/auth/thirdparty/login，写入 JWT）。只读则不下发任何 scope。
+    if (testForm.value.targetType === 'work-order' && testForm.value.operable && testForm.value.workOrderId) {
+      const sep = callbackUrl.includes('?') ? '&' : '?'
+      callbackUrl += `${sep}wo_scopes=${encodeURIComponent('wo:rw:' + testForm.value.workOrderId)}`
+    }
+    generatedSsoUrl.value = callbackUrl
+    generatedSigInfo.value = { sig: resp.sig, exp: resp.exp, key_id: resp.key_id }
+
+    // 2) 把这个 callback URL 拼到 eTeams 免登入口
+    const baseUrl = (provider.open_api_origin || '').replace(/\/$/, '')
+    if (!baseUrl) {
+      ElMessage.warning('第三方平台 open_api_origin 为空，无法拼接免登入口')
+      return
+    }
+    generatedSsoUrl.value =
+      `${baseUrl}/api/bs/open/auth/third?app_key=${encodeURIComponent(provider.app_key)}&redirect_uri=${encodeURIComponent(callbackUrl)}`
+
+    ElMessage.success(`链接已生成（key=${resp.key_id}，有效期 ${resp.ttl_seconds}s）`)
+  } catch (e) {
+    const detail = e?.response?.data || {}
+    ElMessage.error(`生成失败：${detail.error || e.message}${detail.allowlist ? '（允许：' + JSON.stringify(detail.allowlist) + '）' : ''}`)
   }
-
-  // 构建 eTeams 免登 URL
-  const baseUrl = provider.open_api_origin.replace(/\/$/, '')
-  generatedSsoUrl.value = `${baseUrl}/api/bs/open/auth/third?app_key=${encodeURIComponent(provider.app_key)}&redirect_uri=${encodeURIComponent(callbackUrl)}`
-
-  ElMessage.success('链接已生成')
 }
 
 const copySsoUrl = () => {

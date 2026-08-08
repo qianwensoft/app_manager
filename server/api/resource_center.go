@@ -178,6 +178,24 @@ func GetResourceRoles(c *gin.Context) {
 	for _, ru := range rus {
 		roleUsers[ru.RoleID] = append(roleUsers[ru.RoleID], ru.UserID)
 	}
+	roleDeviceGroups := map[uint][]uint{}
+	var rdgs []models.ResourceRoleDeviceGroup
+	database.DB.Find(&rdgs)
+	for _, rdg := range rdgs {
+		roleDeviceGroups[rdg.RoleID] = append(roleDeviceGroups[rdg.RoleID], rdg.GroupID)
+	}
+	roleDevices := map[uint][]uint{}
+	var rds []models.ResourceRoleDevice
+	database.DB.Find(&rds)
+	for _, rd := range rds {
+		roleDevices[rd.RoleID] = append(roleDevices[rd.RoleID], rd.DeviceID)
+	}
+	roleWorkOrderTypes := map[uint][]string{}
+	var rwots []models.ResourceRoleWorkOrderType
+	database.DB.Find(&rwots)
+	for _, rwot := range rwots {
+		roleWorkOrderTypes[rwot.RoleID] = append(roleWorkOrderTypes[rwot.RoleID], rwot.TypeCode)
+	}
 
 	out := make([]map[string]interface{}, 0, len(roles))
 	for _, r := range roles {
@@ -189,15 +207,30 @@ func GetResourceRoles(c *gin.Context) {
 		if userIDs == nil {
 			userIDs = []uint{}
 		}
+		groupIDs := roleDeviceGroups[r.ID]
+		if groupIDs == nil {
+			groupIDs = []uint{}
+		}
+		devIDs := roleDevices[r.ID]
+		if devIDs == nil {
+			devIDs = []uint{}
+		}
+		typeCodes := roleWorkOrderTypes[r.ID]
+		if typeCodes == nil {
+			typeCodes = []string{}
+		}
 		out = append(out, map[string]interface{}{
-			"id":          r.ID,
-			"name":        r.Name,
-			"code":        r.Code,
-			"description": r.Description,
-			"created_at":  r.CreatedAt,
-			"updated_at":  r.UpdatedAt,
-			"node_ids":    nodeIDs,
-			"user_ids":    userIDs,
+			"id":                    r.ID,
+			"name":                  r.Name,
+			"code":                  r.Code,
+			"description":           r.Description,
+			"created_at":            r.CreatedAt,
+			"updated_at":            r.UpdatedAt,
+			"node_ids":              nodeIDs,
+			"user_ids":              userIDs,
+			"device_group_ids":      groupIDs,
+			"device_ids":            devIDs,
+			"work_order_type_codes": typeCodes,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"data": out})
@@ -275,6 +308,12 @@ func DeleteResourceRole(c *gin.Context) {
 		if e := tx.Where("role_id = ?", role.ID).Delete(&models.ResourceRoleUser{}).Error; e != nil {
 			return e
 		}
+		if e := tx.Where("role_id = ?", role.ID).Delete(&models.ResourceRoleDeviceGroup{}).Error; e != nil {
+			return e
+		}
+		if e := tx.Where("role_id = ?", role.ID).Delete(&models.ResourceRoleDevice{}).Error; e != nil {
+			return e
+		}
 		return nil
 	})
 	if err != nil {
@@ -346,6 +385,85 @@ func SetResourceRoleUsers(c *gin.Context) {
 		}
 		for _, uid := range uniqueUints(body.UserIDs) {
 			if e := tx.Create(&models.ResourceRoleUser{RoleID: role.ID, UserID: uid}).Error; e != nil {
+				return e
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+type setRoleDevicesBody struct {
+	DeviceGroupIDs []uint `json:"device_group_ids"`
+	DeviceIDs      []uint `json:"device_ids"`
+}
+
+// SetResourceRoleDevices 全量替换角色授权的设备分组与设备集合。
+func SetResourceRoleDevices(c *gin.Context) {
+	id := c.Param("id")
+	var role models.ResourceRole
+	if err := database.DB.First(&role, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+	var body setRoleDevicesBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		if e := tx.Where("role_id = ?", role.ID).Delete(&models.ResourceRoleDeviceGroup{}).Error; e != nil {
+			return e
+		}
+		if e := tx.Where("role_id = ?", role.ID).Delete(&models.ResourceRoleDevice{}).Error; e != nil {
+			return e
+		}
+		for _, gid := range uniqueUints(body.DeviceGroupIDs) {
+			if e := tx.Create(&models.ResourceRoleDeviceGroup{RoleID: role.ID, GroupID: gid}).Error; e != nil {
+				return e
+			}
+		}
+		for _, did := range uniqueUints(body.DeviceIDs) {
+			if e := tx.Create(&models.ResourceRoleDevice{RoleID: role.ID, DeviceID: did}).Error; e != nil {
+				return e
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+type setRoleWorkOrderTypesBody struct {
+	TypeCodes []string `json:"type_codes"`
+}
+
+// SetResourceRoleWorkOrderTypes 全量替换角色授权的工单类型集合。
+func SetResourceRoleWorkOrderTypes(c *gin.Context) {
+	id := c.Param("id")
+	var role models.ResourceRole
+	if err := database.DB.First(&role, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+	var body setRoleWorkOrderTypesBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		if e := tx.Where("role_id = ?", role.ID).Delete(&models.ResourceRoleWorkOrderType{}).Error; e != nil {
+			return e
+		}
+		for _, code := range uniqueStrings(body.TypeCodes) {
+			if e := tx.Create(&models.ResourceRoleWorkOrderType{RoleID: role.ID, TypeCode: code}).Error; e != nil {
 				return e
 			}
 		}
@@ -702,4 +820,20 @@ func GetPortalPermissions(c *gin.Context) {
 	resp["devices"] = devs
 	resp["workorders"] = wos
 	c.JSON(http.StatusOK, resp)
+}
+
+// ---------------------------------------------------------------------------
+// 辅助函数
+// ---------------------------------------------------------------------------
+
+func uniqueStrings(arr []string) []string {
+	seen := make(map[string]bool)
+	result := []string{}
+	for _, v := range arr {
+		if v != "" && !seen[v] {
+			seen[v] = true
+			result = append(result, v)
+		}
+	}
+	return result
 }

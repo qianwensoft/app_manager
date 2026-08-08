@@ -61,7 +61,23 @@ func Login(c *gin.Context) {
 	token, _ := auth.GenerateToken(user.ID, user.Username, user.Role)
 	now := time.Now()
 	database.DB.Model(&user).Update("last_login_at", &now)
-	c.JSON(http.StatusOK, gin.H{"token": token, "user": user})
+
+	// 生成 refresh token 并存库（旧 token 保留，新 token 追加；30天有效）
+	plain, hash, rtExp, err := auth.GenerateRefreshToken()
+	if err == nil {
+		database.DB.Create(&models.RefreshToken{
+			UserID:    user.ID,
+			TokenHash: hash,
+			ExpiresAt: rtExp,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"token":         token,
+		"expires_at":    auth.TokenExpireAt(),
+		"refresh_token": plain,
+		"user":          user,
+	})
 }
 
 func Me(c *gin.Context) {
@@ -69,6 +85,60 @@ func Me(c *gin.Context) {
 	var user models.User
 	database.DB.First(&user, userID)
 	c.JSON(http.StatusOK, gin.H{"data": user})
+}
+
+// RefreshAccessToken POST /api/auth/refresh
+// 用有效的 refresh_token 换新的 access_token（滚动刷新 refresh_token）。
+func RefreshAccessToken(c *gin.Context) {
+	var req struct {
+		RefreshToken string `json:"refresh_token" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	hash := auth.HashRefreshToken(req.RefreshToken)
+	var rt models.RefreshToken
+	if err := database.DB.
+		Where("token_hash = ? AND revoked = ? AND expires_at > ?", hash, false, time.Now()).
+		First(&rt).Error; err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "refresh token 无效或已过期，请重新登录"})
+		return
+	}
+
+	var user models.User
+	if err := database.DB.First(&user, rt.UserID).Error; err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户不存在"})
+		return
+	}
+
+	// 签发新 access token
+	newToken, err := auth.GenerateToken(user.ID, user.Username, user.Role)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "token 生成失败"})
+		return
+	}
+
+	// 滚动 refresh token：吊销旧的，生成新的
+	database.DB.Model(&rt).Update("revoked", true)
+	plain, newHash, rtExp, err := auth.GenerateRefreshToken()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "refresh token 生成失败"})
+		return
+	}
+	database.DB.Create(&models.RefreshToken{
+		UserID:    user.ID,
+		TokenHash: newHash,
+		ExpiresAt: rtExp,
+	})
+
+	c.JSON(http.StatusOK, gin.H{
+		"token":         newToken,
+		"expires_at":    auth.TokenExpireAt(),
+		"refresh_token": plain,
+		"user":          user,
+	})
 }
 
 func CreateAPIKey(c *gin.Context) {

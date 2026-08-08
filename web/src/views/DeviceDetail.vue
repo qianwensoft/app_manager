@@ -1,11 +1,11 @@
 <template>
   <div v-if="device">
-    <el-tabs v-model="activeMainTab" @tab-change="onMainTabChange">
+    <el-tabs v-model="activeMainTab" @tab-change="onMainTabChange" class="device-detail-tabs">
       <el-tab-pane label="设备信息" name="info">
-        <el-descriptions :column="2" border>
+        <el-descriptions :column="isMobile ? 1 : 2" border>
           <el-descriptions-item label="设备 ID">{{ device.id }}</el-descriptions-item>
           <el-descriptions-item label="Serial">{{ device.serial || '—' }}</el-descriptions-item>
-          <el-descriptions-item label="硬件串号" :span="2">
+          <el-descriptions-item label="硬件串号" :span="isMobile ? 1 : 2">
             {{ device.android_serial || '—' }}
             <el-text v-if="!device.android_serial" type="info" size="small" style="margin-left:8px">由 Agent 上报后显示</el-text>
           </el-descriptions-item>
@@ -51,7 +51,7 @@
               {{ device.allow_remote_screen ? '端上已允许' : '端上未允许' }}
             </el-tag>
           </el-descriptions-item>
-          <el-descriptions-item label="Agent Token" :span="2">
+          <el-descriptions-item label="Agent Token" :span="isMobile ? 1 : 2">
             <span v-if="device.agent_token">{{ device.agent_token }}</span>
             <el-text v-else type="warning">未绑定 — 屏幕/Shell/Logcat 需与手机端一致，请到「设备管理」填写扫码页上的 Token</el-text>
           </el-descriptions-item>
@@ -125,7 +125,7 @@
           「安装 APK」会先上传到服务器再下发安装任务；纯 Agent 设备由手机端完成系统安装界面。需账号为管理员/运维。
         </div>
 
-        <el-descriptions v-if="speedResult" :column="2" border style="margin-top:12px;max-width:640px" title="最近一次测速（服务器 ↔ Agent）">
+        <el-descriptions v-if="speedResult" :column="isMobile ? 1 : 2" border style="margin-top:12px;max-width:640px" title="最近一次测速（服务器 ↔ Agent）">
           <el-descriptions-item label="WS 往返 (RTT)">{{ speedResult.rtt_ms != null ? `${speedResult.rtt_ms} ms` : '-' }}</el-descriptions-item>
           <el-descriptions-item label="下行">
             <template v-if="speedResult.download_ms != null">{{ fmtMbps(speedResult.download_mbps) }}（{{ speedResult.download_ms }} ms / {{ fmtBytes(speedResult.download_bytes) }}）</template>
@@ -135,7 +135,7 @@
             <template v-if="speedResult.upload_ms != null">{{ fmtMbps(speedResult.upload_mbps) }}（{{ speedResult.upload_ms }} ms / {{ fmtBytes(speedResult.upload_bytes) }}）</template>
             <template v-else>-</template>
           </el-descriptions-item>
-          <el-descriptions-item v-if="speedResult.error" label="说明" :span="2">
+          <el-descriptions-item v-if="speedResult.error" label="说明" :span="isMobile ? 1 : 2">
             <el-text type="warning">{{ speedResult.error }}</el-text>
           </el-descriptions-item>
         </el-descriptions>
@@ -785,7 +785,426 @@
         <el-divider />
         <el-button type="danger" @click="deleteDevice">删除设备</el-button>
       </el-tab-pane>
+
+      <!-- MDM 管理 -->
+      <el-tab-pane label="MDM 管理" name="mdm">
+        <div v-loading="mdmLoading" style="padding:4px 0">
+
+          <!-- 模式开关 + 企业绑定 -->
+          <el-card shadow="never" style="margin-bottom:16px">
+            <template #header>
+              <span style="font-weight:600">MDM 模式</span>
+              <el-tag v-if="mdmConfig.mdm_enabled" type="success" size="small" style="margin-left:8px">已开启</el-tag>
+              <el-tag v-else type="info" size="small" style="margin-left:8px">未开启</el-tag>
+            </template>
+            <el-form label-width="100px" size="small">
+              <el-form-item label="MDM 模式">
+                <el-switch
+                  v-model="mdmConfig.mdm_enabled"
+                  :disabled="!canMutate"
+                  @change="saveMdmConfig"
+                />
+                <span style="margin-left:10px;color:#909399;font-size:12px">
+                  开启后可使用 NTP 配置、设备策略等 MDM 功能
+                </span>
+              </el-form-item>
+              <el-form-item label="关联企业">
+                <el-select
+                  v-model="mdmConfig.enterprise_id"
+                  placeholder="选择企业标识（可选）"
+                  clearable
+                  :disabled="!canMutate"
+                  style="width:260px"
+                  @change="saveMdmConfig"
+                >
+                  <el-option
+                    v-for="e in mdmEnterprises"
+                    :key="e.id"
+                    :label="`${e.name}（${e.code}）`"
+                    :value="e.id"
+                  />
+                </el-select>
+              </el-form-item>
+            </el-form>
+
+            <!-- DO 激活提示：MDM 开启且 DO 未激活时，显示在模式卡内 -->
+            <div
+              v-if="mdmConfig.mdm_enabled && mdmCapabilities && !mdmCapabilities.is_device_owner"
+              style="margin-top:8px;display:flex;align-items:center;gap:10px;background:#f0f9ff;border:1px solid #bee3f8;border-radius:6px;padding:8px 12px"
+            >
+              <el-icon color="#409eff" size="16"><InfoFilled /></el-icon>
+              <span style="flex:1;font-size:12px;color:#1a56db">
+                激活 Device Owner 可解锁全部高级策略（相机/截屏/密码/擦除等）
+              </span>
+              <el-button size="small" type="primary" plain @click="showDoActivationGuide">
+                🔳 生成激活二维码
+              </el-button>
+            </div>
+          </el-card>
+
+          <!-- 能力矩阵 -->
+          <el-card shadow="never" style="margin-bottom:16px">
+            <template #header>
+              <span style="font-weight:600">当前设备 MDM 能力</span>
+              <el-button
+                v-if="canMutate"
+                size="small"
+                :loading="mdmSyncing"
+                style="margin-left:12px"
+                @click="syncMdmStatus"
+              >同步能力</el-button>
+              <span v-if="mdmConfig.last_sync_at" style="margin-left:12px;color:#909399;font-size:12px">
+                最后同步：{{ mdmConfig.last_sync_at }}
+              </span>
+            </template>
+
+            <div v-if="!mdmCapabilities" style="color:#909399;font-size:13px;padding:8px 0">
+              尚未同步，点击「同步能力」获取设备最新 MDM 权限状态。
+            </div>
+            <div v-else style="display:flex;flex-wrap:wrap;gap:12px">
+              <el-tag
+                v-for="cap in mdmCapabilityList"
+                :key="cap.key"
+                :type="cap.value ? 'success' : 'danger'"
+                effect="light"
+                size="large"
+                style="padding:8px 14px"
+              >
+                <el-icon style="margin-right:4px">
+                  <component :is="cap.value ? 'CircleCheck' : 'CircleClose'" />
+                </el-icon>
+                {{ cap.label }}
+              </el-tag>
+            </div>
+
+            <!-- Device Owner 提示 -->
+            <el-alert
+              v-if="mdmCapabilities && !mdmCapabilities.is_device_owner"
+              type="warning"
+              :closable="false"
+              show-icon
+              style="margin-top:12px"
+              title="Device Owner 未激活"
+              description="部分高级 MDM 功能（密码策略、禁用相机、远程擦除等）需要将本 Agent 设为 Device Owner。请在设备初始化阶段通过 QR 码注册或 ADB 命令激活。"
+            />
+            <el-alert
+              v-if="mdmCapabilities && !mdmCapabilities.has_write_secure_settings"
+              type="info"
+              :closable="false"
+              show-icon
+              style="margin-top:8px"
+              title="WRITE_SECURE_SETTINGS 未授权"
+              :description="`NTP 写入、系统全局设置修改等功能需要此权限，可通过 ADB 一次性授权：adb shell pm grant com.appmanager.agent android.permission.WRITE_SECURE_SETTINGS`"
+            />
+          </el-card>
+
+          <!-- NTP 配置 -->
+          <el-card v-if="mdmConfig.mdm_enabled" shadow="never">
+            <template #header>
+              <span style="font-weight:600">NTP 服务器配置</span>
+              <el-button
+                v-if="canMutate"
+                size="small"
+                :loading="ntpFetching"
+                style="margin-left:12px"
+                @click="fetchNtpConfig"
+              >从设备读取</el-button>
+            </template>
+            <el-form :model="ntpForm" label-width="120px" size="small" style="max-width:480px">
+              <el-form-item label="NTP 服务器">
+                <el-input v-model="ntpForm.ntp_server" placeholder="如：pool.ntp.org" :disabled="!canMutate" />
+              </el-form-item>
+              <el-form-item label="超时（ms）">
+                <el-input-number
+                  v-model="ntpForm.ntp_timeout"
+                  :min="1000"
+                  :max="60000"
+                  :step="1000"
+                  :disabled="!canMutate"
+                  style="width:160px"
+                />
+              </el-form-item>
+              <el-form-item v-if="canMutate">
+                <el-button type="primary" :loading="ntpSaving" @click="saveNtpConfig">下发到设备</el-button>
+              </el-form-item>
+            </el-form>
+          </el-card>
+
+          <!-- ── Device Owner 高级策略管理 ── -->
+          <el-card
+            v-if="mdmConfig.mdm_enabled"
+            shadow="never"
+            style="margin-top:16px"
+          >
+            <template #header>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <span style="font-weight:600;font-size:14px">🛡️ 高级策略管理</span>
+                <el-tag v-if="mdmCapabilities?.is_device_owner" type="success" size="small">Device Owner ✓</el-tag>
+                <el-tag v-else type="warning" size="small">Device Owner 未激活（高级策略禁用）</el-tag>
+                <span style="flex:1" />
+                <span v-if="policySnapshot" style="font-size:12px;color:#909399">
+                  已同步 {{ policySnapshotTime }}
+                </span>
+                <el-button size="small" :loading="snapshotLoading" @click="doGetPolicySnapshot">
+                  🔄 同步状态
+                </el-button>
+                <el-button
+                  v-if="mdmCapabilities?.is_device_owner && canMutate"
+                  size="small" type="warning" plain
+                  :loading="clearingPolicies"
+                  @click="doClearAllPolicies"
+                >
+                  🧹 清除所有策略
+                </el-button>
+                <el-button
+                  v-if="mdmCapabilities?.is_device_owner && auth.user?.role === 'admin'"
+                  size="small" type="danger" plain
+                  :loading="revokingDO"
+                  @click="doRevokeDO"
+                >
+                  ⚠️ 撤销 Device Owner
+                </el-button>
+              </div>
+            </template>
+
+            <!-- 策略列表表格 -->
+            <el-table
+              :data="policyRows"
+              border
+              size="small"
+              v-loading="snapshotLoading"
+              style="margin-bottom:12px"
+              :row-class-name="({row}) => row.danger ? 'policy-row-danger' : ''"
+            >
+              <!-- 策略名称 -->
+              <el-table-column label="策略" width="160" show-overflow-tooltip>
+                <template #default="{ row }">
+                  <span>{{ row.icon }} {{ row.label }}</span>
+                </template>
+              </el-table-column>
+
+              <!-- 当前状态 -->
+              <el-table-column label="当前状态" width="200">
+                <template #default="{ row }">
+                  <el-tag
+                    v-if="row.statusTag"
+                    :type="row.statusTag.type"
+                    size="small"
+                  >{{ row.statusTag.text }}</el-tag>
+                  <span v-else style="color:#c0c4cc;font-size:12px">未同步</span>
+                </template>
+              </el-table-column>
+
+              <!-- 快捷操作 -->
+              <el-table-column label="操作" min-width="300">
+                <template #default="{ row }">
+                  <component :is="'div'" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+
+                    <!-- 开关类：相机/截屏 -->
+                    <template v-if="row.type === 'toggle'">
+                      <el-switch
+                        v-model="row.value"
+                        :disabled="!canMutate || row.saving || (row.requiresDO && !mdmCapabilities?.is_device_owner)"
+                        :active-text="row.activeText || '禁用'"
+                        :inactive-text="row.inactiveText || '正常'"
+                        @change="(v) => row.onChange(v)"
+                      />
+                    </template>
+
+                    <!-- 锁屏/重启 快捷按钮 -->
+                    <template v-else-if="row.type === 'action'">
+                      <el-button
+                        v-for="act in row.actions"
+                        :key="act.label"
+                        size="small"
+                        :type="act.type || 'default'"
+                        :loading="act.loading && act.loading.value"
+                        :disabled="!canMutate || (row.requiresDO && !mdmCapabilities?.is_device_owner)"
+                        @click="act.handler"
+                      >{{ act.label }}</el-button>
+                    </template>
+
+                    <!-- 密码策略 -->
+                    <template v-else-if="row.type === 'password'">
+                      <el-select v-model="pwdPolicy.quality" size="small" style="width:130px" :disabled="!canMutate">
+                        <el-option label="不限制" value="none" />
+                        <el-option label="纯数字" value="numeric" />
+                        <el-option label="字母" value="alphabetic" />
+                        <el-option label="字母+数字" value="alphanumeric" />
+                        <el-option label="复杂" value="complex" />
+                      </el-select>
+                      <el-input-number v-model="pwdPolicy.minLength" :min="0" :max="16" size="small" style="width:90px" :disabled="!canMutate" />
+                      <el-button size="small" type="primary" :loading="pwdSaving" :disabled="!canMutate" @click="applyPasswordPolicy">下发</el-button>
+                    </template>
+
+                    <!-- Kiosk 模式 -->
+                    <template v-else-if="row.type === 'kiosk'">
+                      <el-input v-model="kioskForm.packages" size="small" placeholder="com.example.kiosk" style="width:180px" :disabled="!canMutate" />
+                      <el-button size="small" :loading="kioskAppLoading" @click="openKioskAppPicker">📱 选择</el-button>
+                      <el-button size="small" type="primary" :loading="kioskSaving" :disabled="!canMutate" @click="enableKiosk">启用</el-button>
+                      <el-button size="small" :loading="kioskSaving" :disabled="!canMutate" @click="disableKiosk">退出</el-button>
+                    </template>
+
+                    <!-- 时区 -->
+                    <template v-else-if="row.type === 'timezone'">
+                      <el-input v-model="timeForm.timezone" size="small" placeholder="Asia/Shanghai" style="width:150px" :disabled="!canMutate" />
+                      <el-button size="small" type="primary" :loading="timeSaving" :disabled="!canMutate" @click="applyDeviceTime">下发</el-button>
+                    </template>
+
+                    <!-- 应用管控（包名输入） -->
+                    <template v-else-if="row.type === 'app'">
+                      <el-input v-model="appRestrForm.packageName" size="small" placeholder="com.example.app" style="width:160px" :disabled="!canMutate" />
+                      <el-switch v-model="appRestrForm.hidden" :disabled="!canMutate" active-text="隐藏" inactive-text="" />
+                      <el-switch v-model="appRestrForm.uninstallBlocked" :disabled="!canMutate" active-text="禁卸载" inactive-text="" />
+                      <el-button size="small" type="primary" :loading="appRestrSaving" :disabled="!canMutate" @click="applyAppRestriction">下发</el-button>
+                    </template>
+
+                    <!-- 危险操作 -->
+                    <template v-else-if="row.type === 'danger'">
+                      <el-button
+                        v-if="auth.user?.role === 'admin' && canMutate"
+                        size="small"
+                        type="danger"
+                        :loading="wipePreparing || wipeConfirming"
+                        @click="startWipeFlow"
+                      >擦除设备（恢复出厂）</el-button>
+                    </template>
+
+                  </component>
+                </template>
+              </el-table-column>
+            </el-table>
+
+            <!-- 用户限制 - 独立展开区 -->
+            <el-collapse accordion style="border:1px solid #ebeef5;border-radius:4px">
+              <el-collapse-item title="👤 用户限制（UserRestrictions）" name="ur">
+                <div style="display:flex;flex-wrap:wrap;gap:8px 24px;padding:4px 0">
+                  <el-checkbox
+                    v-for="r in userRestrictionList"
+                    :key="r.key"
+                    v-model="r.enabled"
+                    :disabled="!canMutate || urSaving"
+                    @change="(v) => applyUserRestriction(r.key, v)"
+                  >{{ r.label }}</el-checkbox>
+                </div>
+              </el-collapse-item>
+            </el-collapse>
+          </el-card>
+
+        </div>
+      </el-tab-pane>
     </el-tabs>
+
+    <!-- 擦除设备确认对话框 -->
+    <el-dialog v-model="wipeDialogVisible" title="⚠️ 擦除设备确认" width="420px" :close-on-click-modal="false">
+      <p style="margin:0 0 12px;color:#606266">此操作将擦除设备所有数据并恢复出厂设置，<strong>不可撤销</strong>。</p>
+      <p style="margin:0 0 8px">请输入设备型号「<strong>{{ device && device.model }}</strong>」进行确认：</p>
+      <el-input v-model="wipeConfirmInput" :placeholder="device && device.model" clearable />
+      <template #footer>
+        <el-button @click="wipeDialogVisible = false">取消</el-button>
+        <el-button type="danger" :loading="wipeConfirming"
+          :disabled="wipeConfirmInput !== (device && device.model)"
+          @click="doConfirmWipe">确认擦除</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- Device Owner 激活向导对话框 -->
+    <el-dialog v-model="doGuideDialogVisible" title="🔳 Device Owner 激活向导" width="560px" destroy-on-close>
+      <el-tabs>
+        <!-- Tab 1: Agent 扫码激活（root 设备） -->
+        <el-tab-pane label="📷 Agent 扫码激活（root 设备）">
+          <div style="text-align:center;padding:12px 0">
+            <img v-if="doQrDataUrl" :src="doQrDataUrl" style="width:200px;height:200px;border:1px solid #eee;border-radius:4px" />
+            <div v-else style="width:200px;height:200px;background:#f5f7fa;display:inline-flex;align-items:center;justify-content:center;border-radius:4px">
+              <span style="color:#909399">生成中...</span>
+            </div>
+            <div style="margin-top:12px;font-size:13px;color:#606266;line-height:1.8">
+              1. 打开 Agent 主界面的 MDM 状态卡片<br>
+              2. 点击「第二步」中的 <strong>📷 扫码激活</strong> 按钮<br>
+              3. 扫描上方二维码，设备将自动尝试 root 激活<br>
+              <span style="color:#e6a23c">⚠️ 仅适用于已获取 root 权限的设备</span>
+            </div>
+          </div>
+        </el-tab-pane>
+
+        <!-- Tab 2: ADB 命令（通用） -->
+        <el-tab-pane label="💻 ADB 命令（通用）">
+          <div style="padding:12px 0">
+            <div style="margin-bottom:10px;font-size:13px;color:#606266">
+              在电脑上通过 USB ADB 执行（debug 包支持有账号激活）：
+            </div>
+            <div style="background:#1e1e1e;color:#d4d4d4;padding:12px;border-radius:6px;font-family:monospace;font-size:13px;word-break:break-all">
+              {{ doAdbCommand }}
+            </div>
+            <el-button size="small" style="margin-top:8px" @click="copyDoAdbCommand">📋 复制命令</el-button>
+            <div style="margin-top:12px;font-size:13px;color:#606266">
+              <strong>debug APK 安装命令：</strong>
+              <div style="background:#1e1e1e;color:#d4d4d4;padding:8px 12px;border-radius:4px;font-family:monospace;font-size:12px;margin-top:6px">
+                adb install -t &lt;agent-debug.apk&gt;
+              </div>
+            </div>
+          </div>
+        </el-tab-pane>
+
+        <!-- Tab 3: 出厂重置 DPC 二维码（新设备） -->
+        <el-tab-pane label="🏭 出厂重置引导（新设备）">
+          <div style="text-align:center;padding:12px 0">
+            <img v-if="dpcQrDataUrl" :src="dpcQrDataUrl" style="width:200px;height:200px;border:1px solid #eee;border-radius:4px" />
+            <div v-else style="width:200px;height:200px;background:#f5f7fa;display:inline-flex;align-items:center;justify-content:center;border-radius:4px">
+              <span style="color:#909399">生成中...</span>
+            </div>
+            <div style="margin-top:12px;font-size:13px;color:#606266;line-height:1.8">
+              1. 将设备<strong>恢复出厂设置</strong><br>
+              2. 进入初始化向导，连续点击欢迎页面 <strong>6次</strong> 进入 QR 扫码模式<br>
+              3. 扫描上方二维码，Android 会自动下载并安装 Agent 并设为 DO<br>
+              <span style="color:#e6a23c">⚠️ 需要设备能访问服务器下载 APK</span>
+            </div>
+          </div>
+        </el-tab-pane>
+      </el-tabs>
+    </el-dialog>
+
+    <!-- Kiosk 应用选择对话框 -->
+    <el-dialog v-model="kioskAppPickerVisible" title="📱 选择 Kiosk 锁定应用" width="580px" destroy-on-close>
+      <div v-if="kioskAppLoading" style="text-align:center;padding:24px">
+        <el-icon class="is-loading" size="32"><Loading /></el-icon>
+        <div style="margin-top:8px;color:#909399">正在获取设备应用列表...</div>
+      </div>
+      <template v-else>
+        <div style="margin-bottom:10px;display:flex;gap:8px;align-items:center">
+          <el-input v-model="kioskAppSearch" placeholder="搜索包名 / 应用名" size="small" clearable style="flex:1" />
+          <el-button size="small" @click="refreshKioskAppList" :disabled="!device?.agent_connected">
+            🔄 从设备刷新
+          </el-button>
+          <span style="font-size:12px;color:#909399">
+            {{ kioskDeviceApps.length }} 个应用，已选 {{ kioskSelectedApps.length }}
+          </span>
+        </div>
+        <el-alert
+          v-if="kioskDeviceApps.length === 0"
+          type="info" :closable="false" show-icon style="margin-bottom:10px"
+          title="未获取到应用列表"
+          description="请点击「从设备刷新」从设备实时拉取已安装应用（需 Agent 在线）"
+        />
+        <el-table
+          :data="kioskFilteredApps"
+          size="small"
+          max-height="360"
+          @selection-change="kioskSelectedApps = $event"
+        >
+          <el-table-column type="selection" width="42" />
+          <el-table-column prop="app_label" label="应用名" min-width="120" show-overflow-tooltip />
+          <el-table-column prop="package_name" label="包名" min-width="180" show-overflow-tooltip />
+          <el-table-column prop="version_name" label="版本" width="90" show-overflow-tooltip />
+        </el-table>
+      </template>
+      <template #footer>
+        <el-button @click="kioskAppPickerVisible = false">取消</el-button>
+        <el-button type="primary" :disabled="!kioskSelectedApps.length" @click="applyKioskAppSelection">
+          确定（{{ kioskSelectedApps.length }} 个应用）
+        </el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog
       v-model="recordingPlayerVisible"
@@ -804,7 +1223,7 @@
       />
     </el-dialog>
 
-    <el-dialog v-model="agentFilePreviewVisible" :title="agentFilePreviewName" width="80%" destroy-on-close>
+    <el-dialog v-model="agentFilePreviewVisible" :title="agentFilePreviewName" :width="isMobile ? '96vw' : '80%'" destroy-on-close>
       <img v-if="agentFilePreviewType === 'image'" :src="agentFilePreviewUrl" style="max-width:100%;display:block;margin:0 auto" />
       <video v-else-if="agentFilePreviewType === 'video'" :src="agentFilePreviewUrl" controls playsinline style="max-width:100%;display:block;margin:0 auto" />
     </el-dialog>
@@ -825,14 +1244,17 @@ import { WS_BASE } from '@/utils/ws'
 import http from '@/api/http'
 import * as eventsApi from '@/api/events'
 import * as ob from '@/api/outbound'
+import * as mdmApi from '@/api/mdm'
 import { createEventAnalysisStomp } from '@/utils/eventAnalysisStomp'
 import QRCode from 'qrcode'
 import WirelessAdbPanel from '@/components/WirelessAdbPanel.vue'
 import { useWirelessAdb } from '@/composables/useWirelessAdb'
 import { usePortalContext } from '@/composables/usePortalContext'
+import { useIsMobile } from '@/composables/useIsMobile'
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const { isMobile } = useIsMobile()
 // 资源中心前台模式：详情操作按选中节点的 detail_perms 逐项显隐。
 const { ctx: portalCtx, portalMode } = usePortalContext()
 const portalDetailPerms = computed(() => {
@@ -888,7 +1310,9 @@ const activeMainTab = ref(
           ? 'adb'
           : route.query.tab === 'events'
             ? 'events'
-            : 'info'
+            : route.query.tab === 'mdm'
+              ? 'mdm'
+              : 'info'
 )
 const fileHub = ref({ recordings: [], media: [] })
 const fileHubLoading = ref(false)
@@ -1089,6 +1513,10 @@ watch(
     if (t === 'events') {
       activeMainTab.value = 'events'
       loadDeviceEventsOutbound()
+    }
+    if (t === 'mdm') {
+      activeMainTab.value = 'mdm'
+      loadMdmConfig()
     }
   }
 )
@@ -1516,6 +1944,9 @@ const onMainTabChange = (name) => {
   }
   if (name === 'events') {
     loadDeviceEventsOutbound()
+  }
+  if (name === 'mdm') {
+    loadMdmConfig()
   }
 }
 
@@ -2036,6 +2467,9 @@ onMounted(async () => {
   if (route.query.tab === 'events') {
     loadDeviceEventsOutbound()
   }
+  if (route.query.tab === 'mdm') {
+    loadMdmConfig()
+  }
   const recordingStart = sessionStorage.getItem(`recording_${route.params.id}`)
   if (recordingStart) {
     isRecording.value = true
@@ -2056,6 +2490,591 @@ onUnmounted(() => {
   if (isRecording.value) stopRecording()
   stopEventAnalysisStomp()
 })
+
+// ── MDM 管理 ──────────────────────────────────────────────────────────────
+const mdmLoading   = ref(false)
+const mdmSyncing   = ref(false)
+const ntpFetching  = ref(false)
+const ntpSaving    = ref(false)
+const mdmConfig    = ref({ mdm_enabled: false, enterprise_id: null, last_sync_at: null })
+const mdmEnterprises = ref([])
+const mdmCapabilities = ref(null)
+const ntpForm      = ref({ ntp_server: '', ntp_timeout: 5000 })
+
+// 能力矩阵展示列表
+const mdmCapabilityList = computed(() => {
+  if (!mdmCapabilities.value) return []
+  const c = mdmCapabilities.value
+  return [
+    { key: 'is_device_owner',            label: 'Device Owner',   value: c.is_device_owner },
+    { key: 'has_write_secure_settings',  label: 'WRITE_SECURE_SETTINGS', value: c.has_write_secure_settings },
+    { key: 'can_set_ntp',                label: '设置 NTP',        value: c.can_set_ntp },
+    { key: 'can_set_system_time',        label: '设置系统时间',     value: c.can_set_system_time },
+    { key: 'can_set_password_policy',    label: '密码策略',         value: c.can_set_password_policy },
+    { key: 'can_control_apps',           label: '应用管控',         value: c.can_control_apps },
+    { key: 'can_disable_camera',         label: '禁用相机',         value: c.can_disable_camera },
+    { key: 'can_wipe_device',            label: '远程擦除',         value: c.can_wipe_device },
+    { key: 'can_set_keyguard',           label: '锁屏策略',         value: c.can_set_keyguard },
+  ]
+})
+
+const loadMdmConfig = async () => {
+  mdmLoading.value = true
+  try {
+    const res = await mdmApi.getDeviceMDM(route.params.id)
+    mdmConfig.value = {
+      mdm_enabled:   res.config?.mdm_enabled   ?? false,
+      enterprise_id: res.config?.enterprise_id || null,
+      last_sync_at:  res.config?.last_sync_at  || null,
+    }
+    mdmEnterprises.value = res.enterprises || []
+    if (res.config?.capabilities_json) {
+      try { mdmCapabilities.value = JSON.parse(res.config.capabilities_json) } catch { /* ignore */ }
+    }
+    // 始终从DB字段补充/覆盖关键能力（DB字段比capabilities_json 更可靠）
+    mdmCapabilities.value = {
+      ...(mdmCapabilities.value || {}),
+      is_device_owner:          res.config?.is_device_owner          ?? false,
+      has_write_secure_settings:res.config?.has_write_secure_settings ?? false,
+      can_set_ntp:              (res.config?.has_write_secure_settings || res.config?.is_device_owner) ?? false,
+    }
+    // Device Owner 已激活时自动同步策略快照
+    if (mdmCapabilities.value?.is_device_owner) {
+      doGetPolicySnapshot()
+    }
+    if (res.config?.ntp_server) {
+      ntpForm.value.ntp_server  = res.config.ntp_server
+      ntpForm.value.ntp_timeout = res.config.ntp_timeout || 5000
+    }
+  } catch {
+    ElMessage.error('加载 MDM 配置失败')
+  } finally {
+    mdmLoading.value = false
+  }
+}
+
+const saveMdmConfig = async () => {
+  // 关闭 MDM 时弹确认：提示策略会被自动清除
+  if (!mdmConfig.value.mdm_enabled) {
+    try {
+      await ElMessageBox.confirm(
+        '关闭 MDM 模式将自动清除设备上所有已生效的策略：\n• 相机 / 截屏禁用\n• 密码策略\n• Kiosk 锁定\n• 应用卸载封锁 / 隐藏\n• 用户限制\n\n如需保留策略请取消，手动清除后再关闭。',
+        '⚠️ 确认关闭 MDM 模式',
+        { type: 'warning', confirmButtonText: '确认关闭并清除策略', cancelButtonText: '取消', distinguishCancelAndClose: true }
+      )
+    } catch {
+      // 取消 → 恢复开关
+      mdmConfig.value.mdm_enabled = true
+      return
+    }
+  }
+  try {
+    await mdmApi.updateDeviceMDM(route.params.id, {
+      mdm_enabled:   mdmConfig.value.mdm_enabled,
+      enterprise_id: mdmConfig.value.enterprise_id || 0,
+    })
+    ElMessage.success('MDM 配置已保存')
+    if (!mdmConfig.value.mdm_enabled) {
+      // 重置前端策略快照（策略已被清除）
+      policySnapshot.value = null
+      hwPolicy.value = { cameraDisabled: false, screenCaptureDisabled: false }
+      pwdPolicy.value = { quality: 'none', minLength: 0 }
+      kioskForm.value.packages = ''
+    }
+  } catch (e) {
+    ElMessage.error('保存失败: ' + (e?.response?.data?.error || e.message))
+  }
+}
+
+const syncMdmStatus = async () => {
+  mdmSyncing.value = true
+  try {
+    const res = await mdmApi.syncDeviceMDMStatus(route.params.id)
+    if (res.capabilities) mdmCapabilities.value = res.capabilities
+    if (res.config?.last_sync_at) mdmConfig.value.last_sync_at = res.config.last_sync_at
+    ElMessage.success('MDM 能力已同步')
+  } catch (e) {
+    ElMessage.error('同步失败: ' + (e?.response?.data?.error || e.message))
+  } finally {
+    mdmSyncing.value = false
+  }
+}
+
+const fetchNtpConfig = async () => {
+  ntpFetching.value = true
+  try {
+    const res = await mdmApi.fetchDeviceNTPConfig(route.params.id)
+    ntpForm.value.ntp_server  = res.ntp_server  || ''
+    ntpForm.value.ntp_timeout = res.ntp_timeout || 5000
+    ElMessage.success('已从设备读取 NTP 配置')
+  } catch (e) {
+    ElMessage.error('读取失败: ' + (e?.response?.data?.error || e.message))
+  } finally {
+    ntpFetching.value = false
+  }
+}
+
+const saveNtpConfig = async () => {
+  if (!ntpForm.value.ntp_server) {
+    ElMessage.warning('请输入 NTP 服务器地址')
+    return
+  }
+  ntpSaving.value = true
+  try {
+    await mdmApi.setDeviceNTPConfig(route.params.id, {
+      ntp_server:  ntpForm.value.ntp_server,
+      ntp_timeout: ntpForm.value.ntp_timeout,
+    })
+    ElMessage.success('NTP 配置已下发到设备')
+  } catch (e) {
+    ElMessage.error('下发失败: ' + (e?.response?.data?.error || e.message))
+  } finally {
+    ntpSaving.value = false
+  }
+}
+
+// ── Device Owner 策略 ────────────────────────────────────────────────────────
+const dpmLocking     = ref(false)
+const dpmRebooting   = ref(false)
+const clearingPolicies = ref(false)
+const revokingDO       = ref(false)
+const snapshotLoading= ref(false)
+const policySnapshot = ref(null)
+const hwSaving       = ref(false)
+const pwdSaving      = ref(false)
+const urSaving       = ref(false)
+const appRestrSaving = ref(false)
+const kioskSaving    = ref(false)
+const timeSaving     = ref(false)
+const wipePreparing  = ref(false)
+const wipeConfirming = ref(false)
+const wipeDialogVisible = ref(false)
+const wipeConfirmInput  = ref('')
+const wipeToken         = ref('')
+
+const hwPolicy = ref({ cameraDisabled: false, screenCaptureDisabled: false })
+const pwdPolicy = ref({ quality: 'none', minLength: 0 })
+const appRestrForm = ref({ packageName: '', hidden: false, uninstallBlocked: false })
+const kioskForm = ref({ packages: '' })
+const timeForm  = ref({ timezone: 'Asia/Shanghai' })
+
+const userRestrictionList = ref([
+  { key: 'no_factory_reset',         label: '禁止恢复出厂',    enabled: false },
+  { key: 'no_install_apps',          label: '禁止安装应用',    enabled: false },
+  { key: 'no_uninstall_apps',        label: '禁止卸载应用',    enabled: false },
+  { key: 'no_usb_file_transfer',     label: '禁止 USB 传输',   enabled: false },
+  { key: 'no_debugging_features',    label: '禁止调试功能',    enabled: false },
+  { key: 'no_config_wifi',           label: '禁止修改 WiFi',   enabled: false },
+  { key: 'no_config_bluetooth',      label: '禁止修改蓝牙',    enabled: false },
+  { key: 'no_add_user',              label: '禁止添加用户',     enabled: false },
+])
+
+// 快捷操作
+const doLockNow = async () => {
+  dpmLocking.value = true
+  try {
+    await mdmApi.lockDevice(route.params.id)
+    ElMessage.success('锁屏指令已下发')
+  } catch (e) {
+    ElMessage.error('锁屏失败: ' + (e?.response?.data?.error || e.message))
+  } finally {
+    dpmLocking.value = false
+  }
+}
+
+const doReboot = async () => {
+  try {
+    await ElMessageBox.confirm('确定通过 Device Owner 重启设备？', '确认重启', { type: 'warning' })
+    dpmRebooting.value = true
+    await mdmApi.mdmRebootDevice(route.params.id)
+    ElMessage.success('重启指令已下发')
+  } catch (e) {
+    if (e !== 'cancel') ElMessage.error('重启失败: ' + (e?.response?.data?.error || e?.message || ''))
+  } finally {
+    dpmRebooting.value = false
+  }
+}
+
+const policySnapshotTime = ref('')
+
+const doGetPolicySnapshot = async () => {
+  snapshotLoading.value = true
+  try {
+    const res = await mdmApi.getPolicySnapshot(route.params.id)
+    policySnapshot.value = res.snapshot
+    policySnapshotTime.value = new Date().toLocaleTimeString()
+    if (res.snapshot) {
+      const s = res.snapshot
+      hwPolicy.value.cameraDisabled        = s.camera_disabled ?? false
+      hwPolicy.value.screenCaptureDisabled = s.screen_capture_disabled ?? false
+      if (s.password_quality != null) {
+        const qMap = { 0:'none', 65536:'numeric', 131072:'alphabetic', 196608:'alphanumeric', 262144:'complex' }
+        pwdPolicy.value.quality   = qMap[s.password_quality] ?? 'none'
+        pwdPolicy.value.minLength = s.password_min_length ?? 0
+      }
+      if (s.lock_task_packages) {
+        kioskForm.value.packages = s.lock_task_packages
+      }
+    }
+  } catch (e) {
+    ElMessage.error('获取策略快照失败: ' + (e?.response?.data?.error || e.message))
+  } finally {
+    snapshotLoading.value = false
+  }
+}
+
+const doClearAllPolicies = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '将清除设备上所有已生效的策略（相机/截屏/密码/Kiosk/卸载封锁/用户限制），但不撤销 Device Owner 身份。',
+      '确认清除所有策略', { type: 'warning' }
+    )
+  } catch { return }
+  clearingPolicies.value = true
+  try {
+    await mdmApi.clearAllMDMPolicies(route.params.id)
+    ElMessage.success('所有策略已清除')
+    policySnapshot.value = null
+    hwPolicy.value = { cameraDisabled: false, screenCaptureDisabled: false }
+    pwdPolicy.value = { quality: 'none', minLength: 0 }
+    kioskForm.value.packages = ''
+    doGetPolicySnapshot()
+  } catch (e) {
+    ElMessage.error('清除失败: ' + (e?.response?.data?.error || e.message))
+  } finally {
+    clearingPolicies.value = false
+  }
+}
+
+const doRevokeDO = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '撤销 Device Owner 后：\n• 所有策略自动清除\n• Agent App 可以被正常卸载\n• 高级策略功能不再可用（除非重新激活）\n\n确认撤销？',
+      '⚠️ 撤销 Device Owner', { type: 'error', confirmButtonText: '确认撤销' }
+    )
+  } catch { return }
+  revokingDO.value = true
+  try {
+    const res = await mdmApi.revokeDeviceOwner(route.params.id)
+    ElMessage.success(res.message || 'Device Owner 已撤销')
+    // 刷新 MDM 能力状态
+    await syncMdmStatus()
+  } catch (e) {
+    ElMessage.error('撤销失败: ' + (e?.response?.data?.error || e.message))
+  } finally {
+    revokingDO.value = false
+  }
+}
+
+const policyRows = computed(() => {
+  const isDO = mdmCapabilities.value?.is_device_owner ?? false
+  const hasSnap = !!policySnapshot.value
+  const locked = isDO ? null : { type: 'info', text: '🔒 需要 Device Owner' }
+  return [
+    {
+      icon: '📷', label: '相机', type: 'toggle', requiresDO: true,
+      value: hwPolicy.value.cameraDisabled,
+      activeText: '已禁用', inactiveText: '正常',
+      saving: hwSaving.value,
+      onChange: (v) => applyHardwarePolicy('camera_disabled', v),
+      statusTag: isDO && hasSnap
+        ? (hwPolicy.value.cameraDisabled ? { type: 'danger', text: '已禁用' } : { type: 'success', text: '正常' })
+        : locked,
+    },
+    {
+      icon: '📸', label: '截屏', type: 'toggle', requiresDO: true,
+      value: hwPolicy.value.screenCaptureDisabled,
+      activeText: '已禁用', inactiveText: '正常',
+      saving: hwSaving.value,
+      onChange: (v) => applyHardwarePolicy('screen_capture_disabled', v),
+      statusTag: isDO && hasSnap
+        ? (hwPolicy.value.screenCaptureDisabled ? { type: 'danger', text: '已禁用' } : { type: 'success', text: '正常' })
+        : locked,
+    },
+    {
+      icon: '🔐', label: '密码策略', type: 'password', requiresDO: true,
+      statusTag: isDO && hasSnap && pwdPolicy.value.quality !== 'none'
+        ? { type: 'warning', text: `${pwdPolicy.value.quality}${pwdPolicy.value.minLength > 0 ? '，最短' + pwdPolicy.value.minLength + '位' : ''}` }
+        : (isDO && hasSnap ? { type: 'info', text: '不限制' } : locked),
+    },
+    {
+      icon: '🏠', label: 'Kiosk', type: 'kiosk', requiresDO: true,
+      statusTag: isDO && hasSnap
+        ? (kioskForm.value.packages ? { type: 'warning', text: 'Kiosk: ' + kioskForm.value.packages.substring(0, 20) } : { type: 'success', text: '未启用' })
+        : locked,
+    },
+    {
+      icon: '⏰', label: '时区', type: 'timezone', requiresDO: true,
+      statusTag: isDO && hasSnap ? { type: 'info', text: timeForm.value.timezone || 'Asia/Shanghai' } : locked,
+    },
+    {
+      icon: '📦', label: '应用管控', type: 'app', requiresDO: true,
+      statusTag: isDO ? null : locked,
+    },
+    {
+      icon: '🔒', label: '锁屏 / 重启', type: 'action', requiresDO: true,
+      actions: [
+        { label: '立即锁屏', type: 'default', loading: dpmLocking, handler: doLockNow },
+        { label: 'DPM 重启', type: 'default', loading: dpmRebooting, handler: doReboot },
+      ],
+      statusTag: isDO ? null : locked,
+    },
+    {
+      icon: '⚠️', label: '擦除设备', type: 'danger', danger: true, requiresDO: true,
+      statusTag: isDO ? { type: 'danger', text: '不可逆操作' } : locked,
+    },
+  ]
+})
+
+// 硬件管控
+const applyHardwarePolicy = async (field, value) => {
+  hwSaving.value = true
+  try {
+    await mdmApi.setHardwarePolicy(route.params.id, { [field]: value })
+    ElMessage.success('硬件策略已下发')
+    doGetPolicySnapshot()
+  } catch (e) {
+    ElMessage.error('下发失败: ' + (e?.response?.data?.error || e.message))
+    if (field === 'camera_disabled') hwPolicy.value.cameraDisabled = !value
+    else hwPolicy.value.screenCaptureDisabled = !value
+  } finally {
+    hwSaving.value = false
+  }
+}
+
+// 密码策略
+const applyPasswordPolicy = async () => {
+  pwdSaving.value = true
+  try {
+    await mdmApi.setPasswordPolicy(route.params.id, {
+      quality: pwdPolicy.value.quality,
+      min_length: pwdPolicy.value.minLength,
+    })
+    ElMessage.success('密码策略已下发')
+    doGetPolicySnapshot()
+  } catch (e) {
+    ElMessage.error('下发失败: ' + (e?.response?.data?.error || e.message))
+  } finally {
+    pwdSaving.value = false
+  }
+}
+
+// 用户限制
+const applyUserRestriction = async (key, enabled) => {
+  urSaving.value = true
+  try {
+    await mdmApi.setUserRestriction(route.params.id, { restriction: key, enabled })
+    ElMessage.success(`限制 ${key} 已${enabled ? '添加' : '移除'}`)
+    doGetPolicySnapshot()
+  } catch (e) {
+    ElMessage.error('下发失败: ' + (e?.response?.data?.error || e.message))
+    const r = userRestrictionList.value.find(x => x.key === key)
+    if (r) r.enabled = !enabled
+  } finally {
+    urSaving.value = false
+  }
+}
+
+// 应用管控
+const applyAppRestriction = async () => {
+  if (!appRestrForm.value.packageName) { ElMessage.warning('请输入包名'); return }
+  appRestrSaving.value = true
+  try {
+    await mdmApi.setAppRestriction(route.params.id, {
+      package_name:      appRestrForm.value.packageName,
+      hidden:            appRestrForm.value.hidden,
+      uninstall_blocked: appRestrForm.value.uninstallBlocked,
+    })
+    ElMessage.success('应用管控策略已下发')
+    doGetPolicySnapshot()
+  } catch (e) {
+    ElMessage.error('下发失败: ' + (e?.response?.data?.error || e.message))
+  } finally {
+    appRestrSaving.value = false
+  }
+}
+
+// Kiosk
+const enableKiosk = async () => {
+  const pkgs = kioskForm.value.packages.split(',').map(s => s.trim()).filter(Boolean)
+  if (!pkgs.length) { ElMessage.warning('请输入至少一个包名'); return }
+  kioskSaving.value = true
+  try {
+    await mdmApi.setKioskMode(route.params.id, { enabled: true, packages: pkgs })
+    ElMessage.success('Kiosk 已启用')
+    doGetPolicySnapshot()
+  } catch (e) {
+    ElMessage.error('启用失败: ' + (e?.response?.data?.error || e.message))
+  } finally {
+    kioskSaving.value = false
+  }
+}
+
+const disableKiosk = async () => {
+  kioskSaving.value = true
+  try {
+    await mdmApi.setKioskMode(route.params.id, { enabled: false, packages: [] })
+    ElMessage.success('Kiosk 已退出')
+  } catch (e) {
+    ElMessage.error('退出失败: ' + (e?.response?.data?.error || e.message))
+  } finally {
+    kioskSaving.value = false
+  }
+}
+
+// 时间
+const applyDeviceTime = async () => {
+  timeSaving.value = true
+  try {
+    await mdmApi.setDeviceTime(route.params.id, { timezone: timeForm.value.timezone })
+    ElMessage.success('时区已下发')
+  } catch (e) {
+    ElMessage.error('下发失败: ' + (e?.response?.data?.error || e.message))
+  } finally {
+    timeSaving.value = false
+  }
+}
+
+// 擦除设备（两步流程）
+const startWipeFlow = async () => {
+  wipePreparing.value = true
+  try {
+    const res = await mdmApi.prepareWipeDevice(route.params.id)
+    wipeToken.value = res.token
+    wipeConfirmInput.value = ''
+    wipeDialogVisible.value = true
+  } catch (e) {
+    ElMessage.error('准备失败: ' + (e?.response?.data?.error || e.message))
+  } finally {
+    wipePreparing.value = false
+  }
+}
+
+const doConfirmWipe = async () => {
+  wipeConfirming.value = true
+  try {
+    await mdmApi.confirmWipeDevice(route.params.id, {
+      token:   wipeToken.value,
+      confirm: wipeConfirmInput.value,
+    })
+    wipeDialogVisible.value = false
+    ElMessage.success('擦除指令已下发，设备即将恢复出厂设置')
+  } catch (e) {
+    ElMessage.error('擦除失败: ' + (e?.response?.data?.error || e.message))
+  } finally {
+    wipeConfirming.value = false
+  }
+}
+
+
+// ── Device Owner QR 激活向导 ───────────────────────────────────────────────
+const doGuideDialogVisible = ref(false)
+const doQrDataUrl  = ref('')
+const dpcQrDataUrl = ref('')
+const doAdbCommand = `adb shell dpm set-device-owner com.appmanager.agent/.admin.DeviceAdminReceiver`
+
+const showDoActivationGuide = async () => {
+  doGuideDialogVisible.value = true
+  doQrDataUrl.value  = ''
+  dpcQrDataUrl.value = ''
+  await nextTick()
+
+  try {
+    // QR 1：Agent root 扫码激活
+    doQrDataUrl.value = await QRCode.toDataURL(JSON.stringify({
+      type: 'mdm_do_activate',
+      component: 'com.appmanager.agent/.admin.DeviceAdminReceiver',
+    }), { width: 200, margin: 2 })
+  } catch (e) {
+    ElMessage.error('生成激活码失败: ' + e.message)
+  }
+
+  try {
+    // QR 2：DPC 出厂重置引导——服务器地址从当前页面推导（Vite dev→8081 port，生产同 origin）
+    const serverBase = window.location.origin.replace(':3000', ':8081').replace(':3001', ':8081')
+    dpcQrDataUrl.value = await QRCode.toDataURL(JSON.stringify({
+      'android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME':
+        'com.appmanager.agent/.admin.DeviceAdminReceiver',
+      'android.app.extra.PROVISIONING_DEVICE_ADMIN_PACKAGE_DOWNLOAD_LOCATION':
+        `${serverBase}/api/agent-updates/latest/download`,
+      'android.app.extra.PROVISIONING_SKIP_ENCRYPTION': true,
+      'android.app.extra.PROVISIONING_ADMIN_EXTRAS_BUNDLE': { server_url: serverBase },
+    }), { width: 200, margin: 2 })
+  } catch (e) {
+    ElMessage.error('生成 DPC 二维码失败: ' + e.message)
+  }
+}
+
+const copyDoAdbCommand = () => {
+  navigator.clipboard.writeText(doAdbCommand).then(() => ElMessage.success('已复制'))
+}
+
+// ── Kiosk 快速应用选择 ──────────────────────────────────────────────────────
+const kioskAppPickerVisible = ref(false)
+const kioskAppLoading  = ref(false)
+const kioskAppSearch   = ref('')
+const kioskDeviceApps  = ref([])
+const kioskSelectedApps = ref([])
+
+const kioskFilteredApps = computed(() => {
+  const q = kioskAppSearch.value.toLowerCase()
+  if (!q) return kioskDeviceApps.value
+  return kioskDeviceApps.value.filter(a =>
+    (a.app_label || '').toLowerCase().includes(q) ||
+    (a.package_name || '').toLowerCase().includes(q)
+  )
+})
+
+const openKioskAppPicker = async () => {
+  kioskAppPickerVisible.value = true
+  kioskAppLoading.value = true
+  kioskDeviceApps.value = []
+  kioskSelectedApps.value = []
+  kioskAppSearch.value = ''
+  try {
+    // 直接使用已导入的 deviceApi，获取设备已安装应用列表
+    const res = await deviceApi.getDeviceApps(route.params.id)
+    const list = res?.data || []
+    if (list.length === 0 && device.value?.agent_connected) {
+      // 缓存为空且 Agent 在线，自动从设备拉取一次
+      ElMessage.info('应用列表为空，正在从设备实时获取...')
+      const refreshRes = await deviceApi.refreshDeviceApps(route.params.id)
+      kioskDeviceApps.value = refreshRes?.data || []
+    } else {
+      kioskDeviceApps.value = list
+    }
+  } catch (e) {
+    ElMessage.error('获取应用列表失败: ' + (e?.response?.data?.error || e.message))
+  } finally {
+    kioskAppLoading.value = false
+  }
+}
+
+const refreshKioskAppList = async () => {
+  if (!device.value?.agent_connected) {
+    ElMessage.warning('Agent 未在线，无法从设备获取应用列表')
+    return
+  }
+  kioskAppLoading.value = true
+  try {
+    ElMessage.info('正在从设备获取应用列表，请稍候...')
+    const res = await deviceApi.refreshDeviceApps(route.params.id)
+    kioskDeviceApps.value = res?.data || []
+    ElMessage.success(`已从设备获取 ${kioskDeviceApps.value.length} 个应用`)
+  } catch (e) {
+    ElMessage.error('刷新失败: ' + (e?.response?.data?.error || e.message))
+  } finally {
+    kioskAppLoading.value = false
+  }
+}
+
+const applyKioskAppSelection = () => {
+  const pkgs = kioskSelectedApps.value.map(a => a.package_name).filter(Boolean)
+  kioskForm.value.packages = pkgs.join(',')
+  kioskAppPickerVisible.value = false
+}
+
+
 </script>
 
 <style scoped>
@@ -2125,4 +3144,46 @@ onUnmounted(() => {
   max-width: 100%;
 }
 
+/* ── 移动端适配 ─────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Tab 头允许横向滚动，避免标签换行挤压 */
+  .device-detail-tabs :deep(.el-tabs__nav-wrap) {
+    padding: 0 4px;
+  }
+  .device-detail-tabs :deep(.el-tabs__item) {
+    padding: 0 12px;
+    font-size: 14px;
+  }
+  /* 表格在窄屏可横向滚动，固定列仍可访问操作 */
+  .device-detail-tabs :deep(.el-table) {
+    font-size: 13px;
+  }
+  /* 行内表单在窄屏堆叠，避免输入框溢出 */
+  .device-detail-tabs :deep(.el-form--inline .el-form-item) {
+    display: flex;
+    width: 100%;
+    margin-right: 0;
+  }
+  .device-detail-tabs :deep(.el-form--inline .el-form-item__content) {
+    flex: 1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .device-detail-tabs :deep(.el-form--inline .el-form-item__content .el-select),
+  .device-detail-tabs :deep(.el-form--inline .el-form-item__content .el-input) {
+    width: auto !important;
+    flex: 1;
+    min-width: 140px;
+  }
+  /* 应用搜索/路径等固定宽度输入自适应 */
+  .device-detail-tabs :deep(.el-input),
+  .device-detail-tabs :deep(.el-select) {
+    max-width: 100%;
+  }
+  /* 录屏播放/文件预览弹窗接近全屏 */
+  .file-hub-video {
+    max-height: 60vh;
+  }
+}
 </style>

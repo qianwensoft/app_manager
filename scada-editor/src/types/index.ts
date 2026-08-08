@@ -122,6 +122,8 @@ export interface CanvasElement {
   // 扩展数据：key-value 字符串，用于组件间数据引用
   // 引用语法：{{ext:key}} 引用本组件，{{el:元素名:extKey}} 或 {{el:id:extKey}} 引用其他组件
   extData?: Record<string, string>
+  // 条件样式规则：根据表达式动态设置颜色
+  conditionalStyles?: ConditionalStyles
   // Table widget fields
   tableColumns?: TableColumn[]
   tableData?: Record<string, unknown>[]
@@ -281,6 +283,29 @@ export interface ValueFormatter {
   template?: string
 }
 
+// 条件颜色规则：支持表达式判定动态设置颜色
+export interface ConditionalColorRule {
+  // 条件表达式（JS 表达式，可访问 v=绑定值、el()=组件值、ext=扩展数据等）
+  // 示例：Number(v) > Number(el('xx', 'extData.max'))
+  condition: string
+  // 满足条件时应用的颜色
+  color: string
+  // 规则名称（可选，用于界面显示）
+  label?: string
+}
+
+// 样式条件规则集：针对不同样式属性的条件规则
+export interface ConditionalStyles {
+  // 文本颜色规则
+  fontColor?: ConditionalColorRule[]
+  // 填充色规则
+  fill?: ConditionalColorRule[]
+  // 边框色规则
+  stroke?: ConditionalColorRule[]
+  // 背景色规则（可扩展）
+  backgroundColor?: ConditionalColorRule[]
+}
+
 // 日期时间显示配置（挂在 text/button 元件的 dateTime 字段）
 // - source=current：显示系统当前时间，按 refreshMs 自动刷新
 // - source=data：把绑定数据值解析为时间后格式化显示（自动兼容时间戳/字符串）
@@ -301,6 +326,18 @@ export interface DateTimeConfig {
   locale?: 'zh' | 'en'
 }
 
+/**
+ * 图表系列/分类的数据来源。
+ * - key：默认，使用实时数据 Map 中的 key（即 chartSeriesKeys 里的键）。
+ * - component：从其他组件快照取值，ref 形如 `<组件名或id>.ext.flow` / `.value` / `.params.max`。
+ * - global：从全局上下文取值，ref 形如 `line1.temp` 或任意点分路径。
+ * component/global 解析出的值若为数组则整段作为该系列数据；标量则视为单点。
+ */
+export interface ChartKeySource {
+  type: 'key' | 'component' | 'global'
+  ref?: string
+}
+
 export interface PointBinding {
   // 绑定模式，默认 point（向后兼容）
   mode?: DataBindingMode
@@ -312,6 +349,14 @@ export interface PointBinding {
   transform?: string
   chartSeriesKeys?: string[][]
   chartCategoryKey?: string
+  // 系列名称（与 chartSeriesKeys 平行）。在数据定义中直接配置，优先于样式里的 seriesNames。
+  chartSeriesNames?: string[]
+  // 系列颜色（与 chartSeriesKeys 平行）。空串=用样式面板的 seriesColors 按序回退。
+  chartSeriesColors?: string[]
+  // 系列/分类数据来源（与 chartSeriesKeys 平行；缺省=数据键）。
+  // 允许直接从其他组件的扩展属性或全局上下文取数组，无需写表达式。
+  chartSeriesSources?: ChartKeySource[]
+  chartCategorySource?: ChartKeySource
 
   // === static 模式 ===
   // 存储静态数据，key 对应 chartSeriesKeys 中的 key 或元素属性名

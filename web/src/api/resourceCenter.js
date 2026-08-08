@@ -17,6 +17,10 @@ export const setResourceRoleNodes = (id, nodeIds) =>
   http.put(`/resource-center/roles/${id}/nodes`, { node_ids: nodeIds })
 export const setResourceRoleUsers = (id, userIds) =>
   http.put(`/resource-center/roles/${id}/users`, { user_ids: userIds })
+export const setResourceRoleDevices = (id, deviceGroupIds, deviceIds) =>
+  http.put(`/resource-center/roles/${id}/devices`, { device_group_ids: deviceGroupIds, device_ids: deviceIds })
+export const setResourceRoleWorkOrderTypes = (id, typeCodes) =>
+  http.put(`/resource-center/roles/${id}/work-order-types`, { type_codes: typeCodes })
 
 // 矩阵 + 权限键目录
 export const getResourceMatrix = () => http.get('/resource-center/matrix')

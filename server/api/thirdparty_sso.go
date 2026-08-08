@@ -25,6 +25,11 @@ type ETeamsLoginRequest struct {
 	AppKey      string   `json:"app_key"`                         // 可选：配合 account 使用
 	AppSecret   string   `json:"app_secret"`                      // 可选：配合 account 使用
 	WoScopes    []string `json:"wo_scopes"`                       // 工单级写权限，格式 "wo:rw:<id>"
+	// P0：redirect_to + HMAC 签名（来自前端静态回调页透传）
+	RedirectTo string `json:"redirect_to"`
+	Sig        string `json:"sig"`
+	Exp        string `json:"exp"`
+	BaseURL    string `json:"base_url"`
 }
 
 // ThirdPartyLogin POST /api/auth/thirdparty/login
@@ -48,6 +53,24 @@ func ThirdPartyLogin(c *gin.Context) {
 
 	if !provider.Enabled {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "provider disabled"})
+		return
+	}
+
+	// P0 安全：校验 redirect_to 白名单 + HMAC 签名。
+	// BaseURL 取请求 Origin 头（避免 path-only 签名被跨域劫持）。
+	baseURL := req.BaseURL
+	if baseURL == "" {
+		baseURL = c.GetHeader("Origin")
+	}
+	if baseURL == "" {
+		baseURL = c.Request.Referer()
+	}
+	if err := VerifyRedirect(&provider, req.RedirectTo, req.Sig, req.Exp, baseURL, time.Now()); err != nil {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error":   "redirect_to rejected",
+			"detail":  err.Error(),
+			"tip":     "redirect_to 必须在白名单内且需要有效 HMAC 签名；请在「第三方平台」配置中重新生成 SSO 链接",
+		})
 		return
 	}
 

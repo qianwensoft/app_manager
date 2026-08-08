@@ -2,25 +2,30 @@ package config
 
 import (
 	"os"
+	"strconv"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	Server    ServerConfig    `yaml:"server"`
-	Database  DatabaseConfig  `yaml:"database"`
-	Storage   StorageConfig   `yaml:"storage"`
-	ADB       ADBConfig       `yaml:"adb"`
-	FFmpeg    FFmpegConfig    `yaml:"ffmpeg"`
-	Chrome    ChromeConfig    `yaml:"chrome"`
-	JWT       JWTConfig       `yaml:"jwt"`
-	Heartbeat HeartbeatConfig `yaml:"heartbeat"`
-	MQTT      MQTTConfig      `yaml:"mqtt"`
-	Claude    ClaudeConfig    `yaml:"claude"`
-	Channel   ChannelConfig   `yaml:"channel"`
-	RateLimit RateLimitConfig `yaml:"rate_limit"`
-	Cluster   ClusterConfig   `yaml:"cluster"`
-	WebRTC    WebRTCConfig    `yaml:"webrtc"`
+	Server     ServerConfig     `yaml:"server"`
+	Database   DatabaseConfig   `yaml:"database"`
+	Storage    StorageConfig    `yaml:"storage"`
+	ADB        ADBConfig        `yaml:"adb"`
+	FFmpeg     FFmpegConfig     `yaml:"ffmpeg"`
+	Chrome     ChromeConfig     `yaml:"chrome"`
+	JWT        JWTConfig        `yaml:"jwt"`
+	Heartbeat  HeartbeatConfig  `yaml:"heartbeat"`
+	MQTT       MQTTConfig       `yaml:"mqtt"`
+	Claude     ClaudeConfig     `yaml:"claude"`
+	AI         AIConfig         `yaml:"ai"`
+	OnlyOffice OnlyOfficeConfig `yaml:"onlyoffice"`
+	Channel    ChannelConfig    `yaml:"channel"`
+	RateLimit  RateLimitConfig  `yaml:"rate_limit"`
+	Cluster    ClusterConfig    `yaml:"cluster"`
+	WebRTC     WebRTCConfig     `yaml:"webrtc"`
+	SSO        SSOConfig        `yaml:"sso"`
 }
 
 // WebRTCConfig 摄像头/投屏 WebRTC 的 ICE 配置。
@@ -37,6 +42,30 @@ type ClusterConfig struct {
 	Enabled  bool   `yaml:"enabled"`
 	NodeID   string `yaml:"node_id"`
 	RedisURL string `yaml:"redis_url"`
+}
+
+// SSOConfig 第三方平台 SSO 跳转安全配置（P0）。
+// 作用于全部 ThirdPartyProvider 的「redirect_to」白名单与 HMAC 签名，
+// 各 Provider 可在 third_party_providers 表中覆盖 redirect_allowlist_json 与 hmac_secret。
+type SSOConfig struct {
+	// Enabled 是否启用 SSO 安全校验；为 false 时仅放行（向后兼容旧系统）。
+	Enabled bool `yaml:"enabled"`
+	// RedirectToWhitelist 系统级默认 redirect_to 白名单（精确路径或 "/*" 前缀通配）。
+	// 例如: ["/", "/devices", "/work-orders/*", "/embed/work-orders/*"]
+	RedirectToWhitelist []string `yaml:"redirect_to_whitelist"`
+	// HMACSecret 系统级默认 HMAC-SHA256 密钥（用于签发/校验 redirect_to）。
+	// 建议 ≥ 32 字节随机字符串；可通过 SSO_HMAC_SECRET 环境变量覆盖。
+	HMACSecret string `yaml:"hmac_secret"`
+	// HMACClockSkewSec 签名时钟偏移容忍（秒），默认 300。
+	HMACClockSkewSec int `yaml:"hmac_clock_skew_sec"`
+}
+
+// HMACSecretOrDefault 返回 SSO HMAC 密钥（Provider 级 > 系统级）。
+func (s SSOConfig) ClockSkewOrDefault() int {
+	if s.HMACClockSkewSec > 0 {
+		return s.HMACClockSkewSec
+	}
+	return 300
 }
 
 // RateLimitConfig API 限流（内存令牌桶，按 IP 或 API Key 分桶）。
@@ -106,6 +135,7 @@ type ServerConfig struct {
 	WebDistDir     string `yaml:"web_dist_dir"`     // Vue 主应用目录，默认 ./web/dist
 	ScadaEditorDir string `yaml:"scada_editor_dir"` // SCADA 编辑器目录，默认 ./web/dist/scada-editor
 	FormAppDir     string `yaml:"form_app_dir"`     // 表单应用目录，默认 ./web/dist/form-app
+	DocsAppDir     string `yaml:"docs_app_dir"`     // 文档管理应用目录，默认 ./web/dist/docs-app
 }
 
 // WebDistPath 返回 Vue 主应用目录，未配置时使用默认值
@@ -142,6 +172,19 @@ func (s ServerConfig) FormAppPath() string {
 	return dir
 }
 
+// DocsAppPath 返回文档管理应用目录，未配置时使用默认值，支持开发模式 fallback
+func (s ServerConfig) DocsAppPath() string {
+	if s.DocsAppDir != "" {
+		return s.DocsAppDir
+	}
+	// 默认：优先 web/dist/docs-app（make 构建后），fallback 到 docs-app/dist（开发模式）
+	dir := "./web/dist/docs-app"
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		dir = "../docs-app/dist"
+	}
+	return dir
+}
+
 type DatabaseConfig struct {
 	Type string `yaml:"type"`
 	DSN  string `yaml:"dsn"`
@@ -150,6 +193,17 @@ type DatabaseConfig struct {
 type StorageConfig struct {
 	Path      string `yaml:"path"`
 	MaxSizeMB int64  `yaml:"max_size_mb"`
+	// DocMaxSizeMB 文档管理模块上传上限（MB）。Office/PDF 通常更大，独立于全局 MaxSizeMB。默认 100MB。
+	DocMaxSizeMB int64 `yaml:"doc_max_size_mb"`
+}
+
+// DocMaxBytes 返回文档上传上限（字节），未配置时默认 100MB。
+func (s StorageConfig) DocMaxBytes() int64 {
+	mb := s.DocMaxSizeMB
+	if mb <= 0 {
+		mb = 100
+	}
+	return mb * 1024 * 1024
 }
 
 type ADBConfig struct {
@@ -192,6 +246,91 @@ type ClaudeConfig struct {
 	Model    string `yaml:"model"`     // default: claude-opus-4-5
 	BaseURL  string `yaml:"base_url"`  // 代理 API 地址，默认 https://api.anthropic.com
 	ProxyURL string `yaml:"proxy_url"` // HTTP/HTTPS/SOCKS5 请求代理，如 http://127.0.0.1:7890
+}
+
+// AIConfig AI 助手可切换 provider（claude / qwen）。
+type AIConfig struct {
+	Provider string `yaml:"provider"` // "claude" | "qwen"，默认 claude
+	// Qwen / DashScope 配置（provider=qwen 时生效）
+	QwenAPIKey  string `yaml:"qwen_api_key"`
+	QwenModel   string `yaml:"qwen_model"`    // 默认 qwen-plus
+	QwenBaseURL string `yaml:"qwen_base_url"` // 默认 https://dashscope.aliyuncs.com
+}
+
+// OnlyOfficeConfig OnlyOffice Document Server 集成配置（按需接入）。
+// 基础连接信息（enabled / internal_url / public_url / jwt_secret）控制后端
+// 是否能向 OnlyOffice 发起请求并被 Document Server 信任；其余字段控制
+// 编辑器 UI 行为、保存策略、品牌定制与下载/回调超时。
+type OnlyOfficeConfig struct {
+	Enabled     bool   `yaml:"enabled"`
+	InternalURL string `yaml:"internal_url"` // Document Server 内网地址（Go 服务器访问）
+	PublicURL   string `yaml:"public_url"`   // Document Server 公网地址（浏览器访问）
+	JWTSecret   string `yaml:"jwt_secret"`   // JWT 签名密钥
+
+	// 编辑器 UI / 行为
+	Lang         string `yaml:"lang"`           // 编辑器界面语言，默认 zh-CN
+	DefaultMode  string `yaml:"default_mode"`   // 默认编辑器模式 edit | view，默认 edit
+	Autosave     bool   `yaml:"autosave"`       // 自动保存（编辑过程中定时上传快照）
+	Forcesave    bool   `yaml:"forcesave"`      // 强制保存（保存按钮触发后必写入新版本）
+	AllowPrint   bool   `yaml:"allow_print"`    // 是否允许打印/导出为 PDF
+	AllowComment bool   `yaml:"allow_comment"`  // 是否允许评论与协同批注
+
+	// 品牌定制（仅在 enabled 时生效）
+	CustomLogoURL    string `yaml:"custom_logo_url"`    // 点击 logo 跳转的链接
+	CustomLogoImage  string `yaml:"custom_logo_image"`  // logo 图片 URL（默认空，使用 DS 自带）
+
+	// 网络 / 超时
+	DownloadTimeoutSec int `yaml:"download_timeout_sec"` // 拉取 OnlyOffice 回调结果文件超时（秒），默认 60
+	FileTokenTTLSec    int `yaml:"file_token_ttl_sec"`   // ds_file 短期 token 有效期（秒），默认 86400（24h）
+}
+
+// LangOrDefault 返回配置的编辑器语言（默认 zh-CN）。
+func (o OnlyOfficeConfig) LangOrDefault() string {
+	if o.Lang != "" {
+		return o.Lang
+	}
+	return "zh-CN"
+}
+
+// DefaultModeOrDefault 返回配置的默认编辑模式 edit|view，默认 edit。
+func (o OnlyOfficeConfig) DefaultModeOrDefault() string {
+	if o.DefaultMode == "view" || o.DefaultMode == "edit" {
+		return o.DefaultMode
+	}
+	return "edit"
+}
+
+// DownloadTimeout 返回下载 OnlyOffice 回调结果的超时时长（秒），默认 60。
+func (o OnlyOfficeConfig) DownloadTimeout() time.Duration {
+	sec := o.DownloadTimeoutSecOrDefault()
+	return time.Duration(sec) * time.Second
+}
+
+// DownloadTimeoutSecOrDefault 返回下载超时秒数（默认 60）。
+func (o OnlyOfficeConfig) DownloadTimeoutSecOrDefault() int {
+	if o.DownloadTimeoutSec > 0 {
+		return o.DownloadTimeoutSec
+	}
+	return 60
+}
+
+// FileTokenTTL 返回 ds_file 短期 token 有效期（秒），默认 86400（24h）。
+func (o OnlyOfficeConfig) FileTokenTTL() time.Duration {
+	sec := o.FileTokenTTLSecOrDefault()
+	return time.Duration(sec) * time.Second
+}
+
+// FileTokenTTLSecOrDefault 返回 ds_file token 有效期秒数（默认 86400）。
+func (o OnlyOfficeConfig) FileTokenTTLSecOrDefault() int {
+	if o.FileTokenTTLSec > 0 {
+		return o.FileTokenTTLSec
+	}
+	return 86400
+}
+
+// IsEnabled 判定 OnlyOffice 是否已接入并启用。
+func (o OnlyOfficeConfig) IsEnabled() bool {
+	return o.Enabled && o.InternalURL != "" && o.PublicURL != ""
 }
 
 type ChannelConfig struct {
@@ -249,6 +388,96 @@ func Load(path string) error {
 	}
 	if C.Claude.Model == "" {
 		C.Claude.Model = "claude-opus-4-5"
+	}
+	// AI provider
+	if v := os.Getenv("AI_PROVIDER"); v != "" {
+		C.AI.Provider = v
+	}
+	if v := os.Getenv("QWEN_API_KEY"); v != "" {
+		C.AI.QwenAPIKey = v
+	}
+	if v := os.Getenv("QWEN_MODEL"); v != "" {
+		C.AI.QwenModel = v
+	}
+	if v := os.Getenv("QWEN_BASE_URL"); v != "" {
+		C.AI.QwenBaseURL = v
+	}
+	// OnlyOffice 基础连接
+	if v := os.Getenv("ONLYOFFICE_ENABLED"); v != "" {
+		switch v {
+		case "1", "true", "TRUE", "True", "yes", "on":
+			C.OnlyOffice.Enabled = true
+		case "0", "false", "FALSE", "False", "no", "off":
+			C.OnlyOffice.Enabled = false
+		}
+	}
+	if v := os.Getenv("ONLYOFFICE_INTERNAL_URL"); v != "" {
+		C.OnlyOffice.InternalURL = v
+	}
+	if v := os.Getenv("ONLYOFFICE_PUBLIC_URL"); v != "" {
+		C.OnlyOffice.PublicURL = v
+	}
+	if v := os.Getenv("ONLYOFFICE_JWT_SECRET"); v != "" {
+		C.OnlyOffice.JWTSecret = v
+	}
+	// OnlyOffice 编辑器行为
+	if v := os.Getenv("ONLYOFFICE_LANG"); v != "" {
+		C.OnlyOffice.Lang = v
+	}
+	if v := os.Getenv("ONLYOFFICE_DEFAULT_MODE"); v != "" {
+		C.OnlyOffice.DefaultMode = v
+	}
+	if v := os.Getenv("ONLYOFFICE_AUTOSAVE"); v != "" {
+		switch v {
+		case "1", "true", "TRUE", "True", "yes", "on":
+			C.OnlyOffice.Autosave = true
+		case "0", "false", "FALSE", "False", "no", "off":
+			C.OnlyOffice.Autosave = false
+		}
+	}
+	if v := os.Getenv("ONLYOFFICE_FORCESAVE"); v != "" {
+		switch v {
+		case "1", "true", "TRUE", "True", "yes", "on":
+			C.OnlyOffice.Forcesave = true
+		case "0", "false", "FALSE", "False", "no", "off":
+			C.OnlyOffice.Forcesave = false
+		}
+	}
+	if v := os.Getenv("ONLYOFFICE_ALLOW_PRINT"); v != "" {
+		switch v {
+		case "1", "true", "TRUE", "True", "yes", "on":
+			C.OnlyOffice.AllowPrint = true
+		case "0", "false", "FALSE", "False", "no", "off":
+			C.OnlyOffice.AllowPrint = false
+		}
+	}
+	if v := os.Getenv("ONLYOFFICE_ALLOW_COMMENT"); v != "" {
+		switch v {
+		case "1", "true", "TRUE", "True", "yes", "on":
+			C.OnlyOffice.AllowComment = true
+		case "0", "false", "FALSE", "False", "no", "off":
+			C.OnlyOffice.AllowComment = false
+		}
+	}
+	if v := os.Getenv("ONLYOFFICE_CUSTOM_LOGO_URL"); v != "" {
+		C.OnlyOffice.CustomLogoURL = v
+	}
+	if v := os.Getenv("ONLYOFFICE_CUSTOM_LOGO_IMAGE"); v != "" {
+		C.OnlyOffice.CustomLogoImage = v
+	}
+	if v := os.Getenv("ONLYOFFICE_DOWNLOAD_TIMEOUT_SEC"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			C.OnlyOffice.DownloadTimeoutSec = n
+		}
+	}
+	if v := os.Getenv("ONLYOFFICE_FILE_TOKEN_TTL_SEC"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			C.OnlyOffice.FileTokenTTLSec = n
+		}
+	}
+	// SSO 安全配置
+	if v := os.Getenv("SSO_HMAC_SECRET"); v != "" {
+		C.SSO.HMACSecret = v
 	}
 	return nil
 }

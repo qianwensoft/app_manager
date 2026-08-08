@@ -8,6 +8,7 @@
             v-if="!shareMode"
             v-model="deviceId"
             placeholder="选择设备"
+            class="screen-device-select"
             style="width:200px"
             @change="onDeviceChange"
           >
@@ -256,6 +257,11 @@
           </div>
 
           <aside v-if="!shareMode" class="screen-quick-rail" aria-label="快速操作">
+            <div
+              v-if="quickPanelOpen"
+              class="screen-quick-mask"
+              @click="quickPanelOpen = false"
+            />
             <div class="screen-quick-panel" :class="{ 'screen-quick-panel--open': quickPanelOpen }">
               <div class="screen-quick-panel__scroll">
 
@@ -503,7 +509,7 @@
       </div>
     </div>
 
-    <el-dialog v-model="shareDialogVisible" title="屏幕分享链接" width="520px" destroy-on-close>
+    <el-dialog v-model="shareDialogVisible" title="屏幕分享链接" :width="isMobile ? '94vw' : '520px'" destroy-on-close>
       <div style="display:flex;flex-direction:column;gap:14px">
         <div>
           <div style="font-size:13px;color:#606266;margin-bottom:8px">可操作能力</div>
@@ -1065,6 +1071,111 @@
   background: #111;
 }
 
+.screen-quick-mask {
+  display: none;
+}
+
+/* ── 移动端适配 ─────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .screen-page-toolbar {
+    margin-bottom: 8px;
+  }
+  /* 设备选择器占满一行，便于点选 */
+  .screen-device-select {
+    width: 100% !important;
+    max-width: 100%;
+  }
+  /* 工具栏第一行按钮换行后撑满，触摸友好 */
+  .screen-page-toolbar .el-button {
+    margin-left: 0;
+  }
+
+  /* 右侧快速栏改为底部抽屉：整块 rail 定位到底部，tab 悬浮在右下 */
+  .screen-quick-rail {
+    position: static;
+  }
+  .screen-quick-mask {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.35);
+    z-index: 1400;
+  }
+  /* 面板改为从底部滑入的半屏抽屉 */
+  .screen-quick-panel {
+    position: fixed;
+    right: 0;
+    left: 0;
+    top: auto;
+    bottom: 0;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 70vh;
+    max-height: 70vh;
+    border-top-left-radius: 14px;
+    border-top-right-radius: 14px;
+    transform: translateY(100%);
+    z-index: 1500;
+  }
+  .screen-quick-panel--open {
+    transform: translateY(0);
+    box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.28);
+  }
+  /* 顶部加一条抓手指示 */
+  .screen-quick-panel::before {
+    content: '';
+    position: absolute;
+    top: 6px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 40px;
+    height: 4px;
+    border-radius: 2px;
+    background: #c0c4cc;
+    z-index: 2;
+  }
+  .screen-quick-panel__scroll {
+    padding-top: 18px;
+    overflow-y: auto;
+  }
+  /* 触发按钮固定到右下角，改为圆形浮动按钮 */
+  .screen-quick-tab {
+    position: fixed;
+    right: 12px;
+    bottom: 16px;
+    z-index: 1300;
+    width: 48px;
+    height: 48px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: rgba(64, 158, 255, 0.95);
+    color: #fff;
+    box-shadow: 0 3px 12px rgba(0, 0, 0, 0.3);
+    flex-direction: row;
+  }
+  .screen-quick-tab:hover {
+    background: rgba(64, 158, 255, 0.95);
+  }
+  .screen-quick-tab--open {
+    /* 面板打开时按钮位于抽屉之上，仍可点击收起 */
+    z-index: 1600;
+    background: rgba(60, 60, 60, 0.95);
+  }
+  .screen-quick-tab__text {
+    writing-mode: horizontal-tb;
+    letter-spacing: 0;
+    font-size: 12px;
+  }
+  .screen-quick-tab__chev {
+    display: none;
+  }
+
+  /* 摄像头浮窗在窄屏缩小 */
+  .camera-overlay-window {
+    width: 108px;
+  }
+}
 </style>
 
 <script setup>
@@ -1077,9 +1188,11 @@ import { FullScreen, Close, Refresh } from '@element-plus/icons-vue'
 import { Client } from '@stomp/stompjs'
 import * as deviceApi from '@/api/device'
 import { WS_BASE } from '@/utils/ws'
+import { useIsMobile } from '@/composables/useIsMobile'
 
 const route = useRoute()
 const auth = useAuthStore()
+const { isMobile } = useIsMobile()
 const eventListeners = useEventListenerStore()
 const devices = ref([])
 const deviceId = ref(route.query.device != null ? String(route.query.device) : '')

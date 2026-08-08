@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  声明本 App 作为 Device Admin / Device Owner 时需要使用的策略集合。
+  Device Owner 激活方式：
+    adb shell dpm set-device-owner com.appmanager.agent/.admin.DeviceAdminReceiver
+-->
+<device-admin>
+    <uses-policies>
+        <!-- 锁屏 -->
+        <force-lock />
+        <!-- 密码策略 -->
+        <limit-password />
+        <!-- 擦除设备 -->
+        <wipe-data />
+        <!-- 禁用相机（Device Owner 下通过 DPM API 实现，此处声明兼容旧版 API） -->
+        <disable-camera />
+        <!-- 禁用部分锁屏功能 -->
+        <disable-keyguard-features />
+        <!-- 加密存储 -->
+        <encrypted-storage />
+        <!-- 过期密码 -->
+        <expire-password />
+        <!-- 监控锁屏尝试 -->
+        <watch-login />
+    </uses-policies>
+</device-admin>

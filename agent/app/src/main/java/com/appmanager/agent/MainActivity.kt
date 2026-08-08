@@ -118,6 +118,31 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** MDM 状态变更广播：服务端下发 set_mdm_mode 后触发，实时刷新 MDM 卡片。 */
+    private val mdmStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            runOnUiThread { updateMdmCard() }
+        }
+    }
+
+    /** Token 失效广播：弹出重新登录对话框。 */
+    private val tokenExpiredReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            runOnUiThread { showTokenExpiredDialog() }
+        }
+    }
+
+    /** Device Admin 激活结果回调。 */
+    private val daActivationLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) { updateMdmCard() }
+
+    /** MDM DO 激活扫码（扫 Web 端生成的 mdm_do_activate 二维码） */
+    private val mdmQrLauncher = registerForActivityResult(ScanContract()) { result ->
+        val text = result.contents ?: return@registerForActivityResult
+        handleMdmDoQr(text)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -157,6 +182,7 @@ class MainActivity : AppCompatActivity() {
         updateDeviceInfo(AgentConfig.get(this))
         updateReverseRegisterVisibility()
         buildFrontPageTiles()
+        updateMdmCard()
     }
 
     override fun onStart() {
@@ -165,12 +191,18 @@ class MainActivity : AppCompatActivity() {
         ContextCompat.registerReceiver(this, profileUiReceiver, f, ContextCompat.RECEIVER_NOT_EXPORTED)
         val cf = IntentFilter(AgentService.ACTION_CONN_STATE)
         ContextCompat.registerReceiver(this, connStateReceiver, cf, ContextCompat.RECEIVER_NOT_EXPORTED)
+        val mf = IntentFilter("com.appmanager.agent.MDM_STATE_CHANGED")
+        ContextCompat.registerReceiver(this, mdmStateReceiver, mf, ContextCompat.RECEIVER_NOT_EXPORTED)
+        val tf = IntentFilter(com.appmanager.agent.auth.AgentAuth.ACTION_TOKEN_EXPIRED)
+        ContextCompat.registerReceiver(this, tokenExpiredReceiver, tf, ContextCompat.RECEIVER_NOT_EXPORTED)
     }
 
     override fun onStop() {
         super.onStop()
         try { unregisterReceiver(profileUiReceiver) } catch (_: Exception) {}
         try { unregisterReceiver(connStateReceiver) } catch (_: Exception) {}
+        try { unregisterReceiver(mdmStateReceiver) } catch (_: Exception) {}
+        try { unregisterReceiver(tokenExpiredReceiver) } catch (_: Exception) {}
     }
 
     // ── 动态前台磁贴 ─────────────────────────────────────────────────
@@ -421,6 +453,251 @@ class MainActivity : AppCompatActivity() {
         val alias = if (config.deviceAlias.isNotEmpty()) config.deviceAlias else "未命名"
         val codeLine = if (machineCode.isNotEmpty()) machineCode else "未获取"
         tvDeviceInfo.text = "分组: $group\n别名: $alias\n机器码: $codeLine"
+    }
+
+    /** Token 失效时弹出重新登录对话框（仅在 Activity 可见时触发）。 */
+    private fun showTokenExpiredDialog() {
+        if (isFinishing || isDestroyed) return
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("⚠️ 登录已失效")
+            .setMessage("用户登录 Token 已过期，请重新登录以继续使用工单、表单等需要用户身份的功能。")
+            .setCancelable(false)
+            .setPositiveButton("去登录") { _, _ ->
+                startActivity(Intent(this, com.appmanager.agent.ui.LoginActivity::class.java))
+            }
+            .setNegativeButton("稍后再说", null)
+            .show()
+    }
+
+    /**
+     * 硬件扫码头模式：注册一次性广播接收器，等待扫码枪扫描 QR 码。
+     * 复用 ScanBroadcastHelper 支持的所有厂商广播格式（内置 + 自定义）。
+     */
+    private fun launchMdmHardwareScan() {
+        val filter = com.appmanager.agent.util.ScanBroadcastHelper.createScanIntentFilter(this)
+        var dismissed = false
+
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+                if (dismissed) return
+                val raw = com.appmanager.agent.util.ScanBroadcastHelper.SCAN_EXTRA_KEYS
+                    .mapNotNull { intent?.getStringExtra(it) }
+                    .firstOrNull { it.isNotBlank() }
+                if (!raw.isNullOrBlank()) {
+                    dismissed = true
+                    try { unregisterReceiver(this) } catch (_: Exception) {}
+                    runOnUiThread { handleMdmDoQr(raw.trim()) }
+                }
+            }
+        }
+
+        try {
+            androidx.core.content.ContextCompat.registerReceiver(
+                this, receiver, filter,
+                androidx.core.content.ContextCompat.RECEIVER_EXPORTED
+            )
+        } catch (e: Exception) {
+            android.widget.Toast.makeText(this, "注册扫码监听失败: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        android.app.AlertDialog.Builder(this)
+            .setTitle("📷 等待扫码枪扫码")
+            .setMessage("请将扫码头对准 Web 端 MDM 页面「扫码激活」标签中的二维码进行扫描。")
+            .setCancelable(true)
+            .setNegativeButton("取消") { _, _ ->
+                dismissed = true
+                try { unregisterReceiver(receiver) } catch (_: Exception) {}
+            }
+            .setOnCancelListener {
+                dismissed = true
+                try { unregisterReceiver(receiver) } catch (_: Exception) {}
+            }
+            .show()
+    }
+
+    private fun handleMdmDoQr(qrText: String) {
+        try {
+            val json = org.json.JSONObject(qrText)
+            if (json.optString("type") != "mdm_do_activate") {
+                android.widget.Toast.makeText(this, "二维码类型不匹配，请扫描 Web 端 MDM 页面生成的激活码", android.widget.Toast.LENGTH_LONG).show()
+                return
+            }
+            val component = json.optString("component",
+                "${packageName}/.admin.DeviceAdminReceiver")
+
+            // 尝试通过 root 激活 Device Owner
+            activateDoViaRoot(component)
+        } catch (e: Exception) {
+            android.widget.Toast.makeText(this, "二维码解析失败: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun activateDoViaRoot(component: String) {
+        val dialog = android.app.AlertDialog.Builder(this)
+            .setTitle("正在激活 Device Owner...")
+            .setMessage("正在通过 root 权限执行 dpm set-device-owner，请稍候...")
+            .setCancelable(false)
+            .show()
+
+        Thread {
+            try {
+                val cmd = "dpm set-device-owner $component"
+                val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
+                val exitCode = process.waitFor()
+                val output = process.inputStream.bufferedReader().readText().trim()
+                val errOutput = process.errorStream.bufferedReader().readText().trim()
+                val result = if (output.isNotEmpty()) output else if (errOutput.isNotEmpty()) errOutput else "退出码: $exitCode"
+
+                runOnUiThread {
+                    dialog.dismiss()
+                    if (exitCode == 0) {
+                        android.app.AlertDialog.Builder(this)
+                            .setTitle("✅ Device Owner 激活成功")
+                            .setMessage("$result\n\n高级策略管理功能已解锁！")
+                            .setPositiveButton("刷新状态") { _, _ -> updateMdmCard() }
+                            .show()
+                    } else {
+                        android.app.AlertDialog.Builder(this)
+                            .setTitle("❌ 激活失败")
+                            .setMessage("$result\n\n可能原因：\n• 设备未 root\n• 设备已有其他 Device Owner\n• 存在已登录账号（可添加 android:testOnly=true 绕过）")
+                            .setPositiveButton("确定", null)
+                            .setNeutralButton("刷新状态") { _, _ -> updateMdmCard() }
+                            .show()
+                    }
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    dialog.dismiss()
+                    android.app.AlertDialog.Builder(this)
+                        .setTitle("执行失败")
+                        .setMessage("${e.message}\n\n设备可能没有 root 权限，请改用 ADB 命令激活。")
+                        .setPositiveButton("确定", null)
+                        .show()
+                }
+            }
+        }.start()
+    }
+
+    /** 刷新 MDM 状态卡片：读取 SharedPreferences + DPM，按策略状态填充 UI。 */
+    private fun updateMdmCard() {
+        val card          = findViewById<View>(R.id.card_mdm_status)       ?: return
+        val tvEnterprise  = findViewById<TextView>(R.id.tvMdmEnterprise)   ?: return
+        val tvOwner       = findViewById<TextView>(R.id.tvMdmOwnerBadge)   ?: return
+        val tvSecure      = findViewById<TextView>(R.id.tvMdmWriteSecure)  ?: return
+        val tvPolicies    = findViewById<TextView>(R.id.tvMdmPolicies)     ?: return
+        val divider       = findViewById<View>(R.id.dividerMdmAction)
+        val layoutDa      = findViewById<View>(R.id.layout_activate_da)
+        val layoutDo      = findViewById<View>(R.id.layout_activate_do)
+        val tvDoCmd       = findViewById<TextView>(R.id.tvDoAdbCommand)
+        val btnCopyCmd    = findViewById<View>(R.id.btn_copy_do_command)
+        val btnDoRefresh  = findViewById<View>(R.id.btn_do_refresh)
+
+        val prefs          = getSharedPreferences("mdm_prefs", Context.MODE_PRIVATE)
+        val mdmEnabled     = prefs.getBoolean("mdm_enabled", false)
+        val enterpriseCode = prefs.getString("enterprise_code", "") ?: ""
+
+        if (!mdmEnabled) {
+            card.visibility = View.GONE
+            return
+        }
+        card.visibility = View.VISIBLE
+        tvEnterprise.text = if (enterpriseCode.isNotEmpty()) "企业: $enterpriseCode" else "企业: 未关联"
+
+        val dpm    = getSystemService(Context.DEVICE_POLICY_SERVICE) as android.app.admin.DevicePolicyManager
+        val admin  = android.content.ComponentName(this, com.appmanager.agent.admin.DeviceAdminReceiver::class.java)
+        val isDA   = dpm.isAdminActive(admin)      // 设备管理员
+        val isDO   = dpm.isDeviceOwnerApp(packageName) // Device Owner
+
+        // Device Owner 徽章
+        tvOwner.text = when {
+            isDO  -> "Device Owner ✓"
+            isDA  -> "设备管理员 ✓（DO未激活）"
+            else  -> "设备管理员 ✗"
+        }
+        tvOwner.setBackgroundColor(if (isDO) 0x1A4CAF50 else if (isDA) 0x1AFF9800 else 0x1AF44336)
+        tvOwner.setTextColor(if (isDO) 0xFF4CAF50.toInt() else if (isDA) 0xFFE65100.toInt() else 0xFFF44336.toInt())
+
+        val hasWriteSecure = checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) ==
+                PackageManager.PERMISSION_GRANTED
+        tvSecure.text = if (hasWriteSecure) "WRITE_SECURE ✓" else "WRITE_SECURE ✗"
+        tvSecure.setBackgroundColor(if (hasWriteSecure) 0x1A4CAF50 else 0x1AF44336)
+        tvSecure.setTextColor(if (hasWriteSecure) 0xFF4CAF50.toInt() else 0xFFF44336.toInt())
+
+        // 活跃策略摘要
+        if (isDO) {
+            val policies = mutableListOf<String>()
+            if (dpm.getCameraDisabled(admin))        policies += "• 相机已禁用"
+            if (dpm.getScreenCaptureDisabled(admin)) policies += "• 禁止截屏"
+            val pwdQuality = dpm.getPasswordQuality(admin)
+            if (pwdQuality > android.app.admin.DevicePolicyManager.PASSWORD_QUALITY_UNSPECIFIED) {
+                val label = when (pwdQuality) {
+                    android.app.admin.DevicePolicyManager.PASSWORD_QUALITY_NUMERIC      -> "纯数字"
+                    android.app.admin.DevicePolicyManager.PASSWORD_QUALITY_ALPHABETIC   -> "字母"
+                    android.app.admin.DevicePolicyManager.PASSWORD_QUALITY_ALPHANUMERIC -> "字母+数字"
+                    android.app.admin.DevicePolicyManager.PASSWORD_QUALITY_COMPLEX      -> "复杂"
+                    else -> "已设置"
+                }
+                val minLen = dpm.getPasswordMinimumLength(admin)
+                policies += "• 密码策略: $label${if (minLen > 0) "，最短${minLen}位" else ""}"
+            }
+            val lockPkgs = try { dpm.getLockTaskPackages(admin) } catch (_: Exception) { emptyArray() }
+            if (lockPkgs.isNotEmpty()) policies += "• Kiosk: ${lockPkgs.joinToString()}"
+            tvPolicies.text = policies.joinToString("\n")
+            tvPolicies.visibility = if (policies.isEmpty()) View.GONE else View.VISIBLE
+        } else {
+            tvPolicies.visibility = View.GONE
+        }
+
+        // ── 激活引导区块 ──────────────────────────────────────────────
+        val needGuide = !isDO
+        divider?.visibility  = if (needGuide) View.VISIBLE else View.GONE
+
+        // 步骤一：设备管理员未激活
+        layoutDa?.visibility = if (!isDA) View.VISIBLE else View.GONE
+        if (!isDA) {
+            val btnDa = layoutDa?.findViewById<View>(R.id.btn_activate_da)
+            btnDa?.setOnClickListener {
+                val intent = android.content.Intent(
+                    android.app.admin.DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN
+                ).apply {
+                    putExtra(android.app.admin.DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin)
+                    putExtra(
+                        android.app.admin.DevicePolicyManager.EXTRA_ADD_EXPLANATION,
+                        "激活后管理端可下发设备策略（锁屏策略、应用管控等）"
+                    )
+                }
+                daActivationLauncher.launch(intent)
+            }
+        }
+
+        // 步骤二：DA 已激活，提示 DO ADB 命令
+        layoutDo?.visibility = if (isDA && !isDO) View.VISIBLE else View.GONE
+        if (isDA && !isDO) {
+            val doCmd = "adb shell dpm set-device-owner ${packageName}/.admin.DeviceAdminReceiver"
+            tvDoCmd?.text = doCmd
+            btnCopyCmd?.setOnClickListener {
+                val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("dpm command", doCmd))
+                android.widget.Toast.makeText(this, "已复制", android.widget.Toast.LENGTH_SHORT).show()
+            }
+            val btnScanQr = layoutDo?.findViewById<View>(R.id.btn_scan_do_qr)
+            btnScanQr?.setOnClickListener {
+                val scanMode = com.appmanager.agent.config.AgentConfig.get(this).scanMode
+                if (scanMode == com.appmanager.agent.config.AgentConfig.SCAN_MODE_HARDWARE) {
+                    launchMdmHardwareScan()
+                } else {
+                    val options = com.journeyapps.barcodescanner.ScanOptions().apply {
+                        setDesiredBarcodeFormats(com.journeyapps.barcodescanner.ScanOptions.QR_CODE)
+                        setPrompt("扫描 Web MDM 页面的「激活 Device Owner」二维码")
+                        setBeepEnabled(false)
+                        setCameraId(0)
+                    }
+                    mdmQrLauncher.launch(options)
+                }
+            }
+            btnDoRefresh?.setOnClickListener { updateMdmCard() }
+        }
     }
 
     /**

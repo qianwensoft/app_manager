@@ -2,7 +2,7 @@
  * 单个 WorkflowAction 编辑器：动作类型下拉 + 各类型专属字段 + 共享降级（when/timeout/retry/onError）。
  * 被 NodeInspector（DAG tool 节点）与线性动作链复用。
  */
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type {
   WorkflowAction, WorkflowActionType, ElementSelector, ConditionExpr, ConditionOperator, StateScopeKind,
 } from '@/types/workflow'
@@ -11,12 +11,27 @@ import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import ScriptEditor from './ScriptEditor'
+import http from '@/api/http'
 
 interface Props {
   action: WorkflowAction
   onChange: (a: WorkflowAction) => void
   elements: CanvasElement[]
   canvases: { id: number; name: string }[]
+}
+
+interface OutboundApp {
+  id: number
+  name: string
+  app_code: string
+}
+
+interface OutboundEndpoint {
+  id: number
+  app_id: number
+  name: string
+  method: string
+  path: string
 }
 
 const ACTION_LABELS: Record<WorkflowActionType, string> = {
@@ -223,12 +238,64 @@ export default function ActionEditor({ action, onChange, elements, canvases }: P
 function CallInterfaceFields({ action, patch }: { action: Extract<WorkflowAction, { type: 'call_interface' }>; patch: (u: Partial<WorkflowAction>) => void }) {
   const paramMap = action.param_map ?? []
   const resultMap = action.result_map ?? []
+  const [outboundApps, setOutboundApps] = useState<OutboundApp[]>([])
+  const [outboundEndpoints, setOutboundEndpoints] = useState<OutboundEndpoint[]>([])
+
+  useEffect(() => {
+    http.get<{ data: OutboundApp[] }>('/outbound/apps').then((res: any) => {
+      setOutboundApps(res.data || [])
+    }).catch(() => setOutboundApps([]))
+  }, [])
+
+  useEffect(() => {
+    if (action.outboundAppId) {
+      http.get<{ data: OutboundEndpoint[] }>('/outbound/endpoints', { params: { app_id: action.outboundAppId } })
+        .then((res: any) => setOutboundEndpoints(res.data || []))
+        .catch(() => setOutboundEndpoints([]))
+    } else {
+      setOutboundEndpoints([])
+    }
+  }, [action.outboundAppId])
+
   return (
     <>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-        <div style={{ flex: 1 }}><label style={labelStyle}>接口 ID</label><Input type="number" value={action.ifaceId ?? ''} onChange={(e) => patch({ ifaceId: e.target.value === '' ? undefined : Number(e.target.value) })} /></div>
-        <div style={{ flex: 1 }}><label style={labelStyle}>接口 Code</label><Input value={action.ifaceCode ?? ''} onChange={(e) => patch({ ifaceCode: e.target.value || undefined })} /></div>
+      <div style={rowStyle}>
+        <label style={labelStyle}>调用类型</label>
+        <Select value={action.outboundAppId ? 'outbound' : 'data_interface'} onChange={(e) => {
+          if (e.target.value === 'outbound') {
+            patch({ outboundAppId: outboundApps[0]?.id, outboundEndpointId: undefined, ifaceId: undefined, ifaceCode: undefined })
+          } else {
+            patch({ outboundAppId: undefined, outboundEndpointId: undefined })
+          }
+        }}>
+          <option value="data_interface">数据接口（内部）</option>
+          <option value="outbound">外部应用接口</option>
+        </Select>
       </div>
+
+      {action.outboundAppId ? (
+        <>
+          <div style={rowStyle}>
+            <label style={labelStyle}>外部应用</label>
+            <Select value={action.outboundAppId ?? ''} onChange={(e) => patch({ outboundAppId: e.target.value === '' ? undefined : Number(e.target.value), outboundEndpointId: undefined })}>
+              <option value="">（选择应用）</option>
+              {outboundApps.map((app) => <option key={app.id} value={app.id}>{app.name}</option>)}
+            </Select>
+          </div>
+          <div style={rowStyle}>
+            <label style={labelStyle}>外部接口</label>
+            <Select value={action.outboundEndpointId ?? ''} onChange={(e) => patch({ outboundEndpointId: e.target.value === '' ? undefined : Number(e.target.value) })}>
+              <option value="">（选择接口）</option>
+              {outboundEndpoints.map((ep) => <option key={ep.id} value={ep.id}>{ep.name}（{ep.method} {ep.path}）</option>)}
+            </Select>
+          </div>
+        </>
+      ) : (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+          <div style={{ flex: 1 }}><label style={labelStyle}>接口 ID</label><Input type="number" value={action.ifaceId ?? ''} onChange={(e) => patch({ ifaceId: e.target.value === '' ? undefined : Number(e.target.value) })} /></div>
+          <div style={{ flex: 1 }}><label style={labelStyle}>接口 Code</label><Input value={action.ifaceCode ?? ''} onChange={(e) => patch({ ifaceCode: e.target.value || undefined })} /></div>
+        </div>
+      )}
       <div style={rowStyle}>
         <label style={labelStyle}>入参映射</label>
         {paramMap.map((p, i) => (

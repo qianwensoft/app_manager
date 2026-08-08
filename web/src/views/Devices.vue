@@ -1,9 +1,9 @@
 <template>
-  <div style="display:flex;gap:16px;height:calc(100vh - 100px)">
+  <div class="dev-layout">
     <!-- 左侧分组 -->
-    <div style="width:200px;border-right:1px solid #ddd;padding-right:16px">
-      <div style="font-weight:bold;margin-bottom:12px">分组筛选</div>
-      <el-menu :default-active="selectedGroup" @select="handleGroupSelect">
+    <div class="dev-side">
+      <div class="dev-side-title">分组筛选</div>
+      <el-menu :default-active="selectedGroup" @select="handleGroupSelect" class="dev-side-menu">
         <el-menu-item index="">全部设备 ({{ devices.length }})</el-menu-item>
         <el-menu-item v-for="g in groups" :key="g" :index="g">
           {{ g }} ({{ devices.filter(d => d.group_name === g).length }})
@@ -13,21 +13,22 @@
     </div>
 
     <!-- 右侧内容 -->
-    <div style="flex:1;overflow:auto">
-      <div style="display:flex;gap:12px;margin-bottom:16px;align-items:center">
+    <div class="dev-main">
+      <div class="dev-toolbar">
         <template v-if="!portalMode">
           <el-button type="primary" @click="scan" :loading="scanning">扫描设备</el-button>
           <el-button @click="showAddDialog = true">手动添加</el-button>
           <el-button @click="openReverseDialog">设备注册</el-button>
+          <el-button @click="showQRCodeDialog = true">扫码接入</el-button>
           <AdbBridgeScan @registered="refresh" />
         </template>
         <el-button :loading="refreshing" @click="refresh" :icon="RefreshIcon">刷新</el-button>
-        <div style="flex:1"></div>
+        <div class="dev-toolbar-spacer"></div>
         <el-input
           v-model="searchKey"
           placeholder="搜索名称/别名/型号/设备号"
           clearable
-          style="width:220px"
+          class="dev-search"
         />
         <el-radio-group v-model="viewMode" size="small">
           <el-radio-button value="table">列表</el-radio-button>
@@ -73,7 +74,7 @@
       </el-table>
 
       <!-- 卡片视图 -->
-      <div v-else style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px">
+      <div v-else class="dev-card-grid">
         <el-card v-for="d in filteredDevices" :key="d.id" shadow="hover">
           <template #header>
             <div style="display:flex;justify-content:space-between;align-items:center">
@@ -197,10 +198,57 @@
       >确认注册</el-button>
     </template>
   </el-dialog>
+
+  <!-- 扫码接入对话框 -->
+  <el-dialog v-model="showQRCodeDialog" title="扫码接入设备" width="600px" align-center>
+    <div style="display:flex;flex-direction:column;align-items:center">
+      <p style="color:#666;margin-bottom:20px">使用Android Agent应用扫描二维码快速接入</p>
+      <canvas ref="qrCanvas" style="padding:20px;background:#fff;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.1)"></canvas>
+      <div style="margin-top:20px;text-align:center;line-height:2">
+        <p><strong>服务器地址：</strong>{{ qrServerUrl }}</p>
+        <p><strong>设备Token：</strong>{{ qrDeviceToken }}</p>
+        <el-button type="primary" @click="regenerateQRCode" style="margin-top:10px">重新生成</el-button>
+      </div>
+      <div style="margin-top:16px;width:100%;max-width:360px">
+        <el-input
+          v-model="qrFormAppBaseUrl"
+          placeholder="表单调试地址（dev，可选，如 http://192.168.1.x:5175）"
+          clearable
+          @input="onQRDebugInput"
+        >
+          <template #prepend>表单调试</template>
+        </el-input>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <el-button size="small" @click="fillQRDebug(4175)">本机 preview :4175</el-button>
+          <el-button size="small" @click="fillQRDebug(5175)">本机 dev :5175</el-button>
+          <el-button v-if="qrFormAppBaseUrl" size="small" text @click="fillQRDebug(null)">清空</el-button>
+        </div>
+        <p v-if="qrFormAppBaseUrl" style="color:#e6a23c;font-size:12px;margin-top:6px;text-align:center">
+          二维码已含调试地址：表单将从此地址加载（仅调试用，正式接入请留空）
+        </p>
+      </div>
+
+      <el-divider>下载 Agent 应用</el-divider>
+
+      <div style="display:flex;flex-direction:column;align-items:center">
+        <template v-if="agentApkId">
+          <canvas ref="downloadQrCanvas" style="padding:16px;background:#fff;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.1)"></canvas>
+          <p style="margin-top:10px;color:#666">扫码下载最新版 Agent APK</p>
+          <el-input :value="agentApkUrl" readonly size="small" style="width:100%;max-width:360px;margin-top:4px">
+            <template #append>
+              <el-button @click="copyAgentApkUrl">复制</el-button>
+            </template>
+          </el-input>
+          <el-button type="success" @click="downloadAgentApk" style="margin-top:12px">直接下载</el-button>
+        </template>
+        <el-empty v-else description="尚未上传 Agent APK，请先在「Agent 更新」中上传" :image-size="60" />
+      </div>
+    </div>
+  </el-dialog>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh as RefreshIcon, Monitor as MonitorIcon } from '@element-plus/icons-vue'
 import * as deviceApi from '@/api/device'
@@ -208,6 +256,9 @@ import { useEventListenerStore } from '@/stores/eventListeners'
 import NetworkCell from '@/components/NetworkCell.vue'
 import AdbBridgeScan from '@/components/AdbBridgeScan.vue'
 import { usePortalContext } from '@/composables/usePortalContext'
+import QRCode from 'qrcode'
+import http from '@/api/http'
+import { copyText } from '@/utils/clipboard'
 
 // 资源中心前台模式：按选中节点过滤设备、隐藏管理操作、详情走 portal 路由。
 const { ctx: portalCtx, portalMode } = usePortalContext()
@@ -215,6 +266,8 @@ const portalDeviceIds = computed(() => {
   if (!portalMode.value || !portalCtx?.activeNode?.value) return null
   const n = portalCtx.activeNode.value
   if (n.node_type !== 'device_mgmt') return []
+  // 聚合节点且 resolved_device_ids 为 null（管理员）表示不过滤，展示全部设备。
+  if (n.aggregate && n.resolved_device_ids == null) return null
   return Array.isArray(n.resolved_device_ids) ? n.resolved_device_ids : []
 })
 const deviceDetailPath = (id) => (portalMode.value ? `/portal/devices/${id}` : `/devices/${id}`)
@@ -282,7 +335,9 @@ const filteredDevices = computed(() => {
 })
 
 const load = async () => {
-  const res = await deviceApi.getDevices()
+  // 前台模式传 portal=1，后端按资源角色授权设备范围返回（覆盖归属过滤）。
+  const params = portalMode.value ? { portal: 1 } : undefined
+  const res = await deviceApi.getDevices(params)
   devices.value = res.data
 }
 
@@ -388,6 +443,102 @@ const doClaim = async () => {
   }
 }
 
+// ── 扫码接入 ────────────────────────────────────────────────────
+const showQRCodeDialog = ref(false)
+const qrCanvas = ref(null)
+const qrServerUrl = ref('')
+const qrDeviceToken = ref('')
+const qrFormAppBaseUrl = ref('')
+
+const QR_DEBUG_URL_KEY = 'qr_form_app_base_url'
+
+function generateToken() {
+  const chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
+  let token = ''
+  for (let i = 0; i < 16; i++) token += chars[Math.floor(Math.random() * chars.length)]
+  return token
+}
+
+async function renderConfigQR() {
+  qrServerUrl.value = `ws://${window.location.host}`
+  const config = { serverUrl: qrServerUrl.value, deviceToken: qrDeviceToken.value }
+  const base = qrFormAppBaseUrl.value.trim()
+  if (base) config.formAppBaseUrl = base
+  await nextTick()
+  if (qrCanvas.value) {
+    await QRCode.toCanvas(qrCanvas.value, JSON.stringify(config), { width: 280, margin: 2 })
+  }
+}
+
+async function generateQRCodeConfig() {
+  qrDeviceToken.value = generateToken()
+  await renderConfigQR()
+}
+
+function regenerateQRCode() {
+  generateQRCodeConfig()
+}
+
+function fillQRDebug(port) {
+  qrFormAppBaseUrl.value = port ? `http://${window.location.hostname}:${port}` : ''
+  onQRDebugInput()
+}
+
+function onQRDebugInput() {
+  const v = qrFormAppBaseUrl.value.trim()
+  if (v) localStorage.setItem(QR_DEBUG_URL_KEY, v)
+  else localStorage.removeItem(QR_DEBUG_URL_KEY)
+  renderConfigQR()
+}
+
+// 下载 Agent 应用二维码 + 地址
+const downloadQrCanvas = ref(null)
+const agentApkId = ref(null)
+
+const agentApkUrl = computed(() =>
+  agentApkId.value ? `${window.location.origin}/api/agent-updates/${agentApkId.value}/download` : ''
+)
+
+async function renderDownloadQR() {
+  try {
+    const res = await http.get('/agent-updates/latest')
+    const id = res.data?.id
+    if (!id) {
+      agentApkId.value = null
+      return
+    }
+    agentApkId.value = id
+    await nextTick()
+    if (downloadQrCanvas.value) {
+      await QRCode.toCanvas(downloadQrCanvas.value, agentApkUrl.value, { width: 200, margin: 2 })
+    }
+  } catch {
+    // 未上传 APK 时不显示二维码，属正常状态
+    agentApkId.value = null
+  }
+}
+
+function downloadAgentApk() {
+  if (agentApkId.value) {
+    window.open(agentApkUrl.value)
+  }
+}
+
+function copyAgentApkUrl() {
+  if (!agentApkUrl.value) return
+  copyText(agentApkUrl.value)
+  ElMessage.success('下载地址已复制')
+}
+
+watch(showQRCodeDialog, async (visible) => {
+  if (visible) {
+    qrFormAppBaseUrl.value = localStorage.getItem(QR_DEBUG_URL_KEY) || ''
+    await nextTick()
+    await generateQRCodeConfig()
+    await renderDownloadQR()
+  }
+})
+
 const eventListeners = useEventListenerStore()
 let profileListenerId = null
 
@@ -403,3 +554,47 @@ onUnmounted(() => {
   if (profileListenerId) eventListeners.revoke(profileListenerId)
 })
 </script>
+
+<style scoped>
+.dev-layout { display: flex; gap: 16px; height: calc(100vh - 100px); }
+.dev-side { width: 200px; flex-shrink: 0; border-right: 1px solid #ddd; padding-right: 16px; }
+.dev-side-title { font-weight: bold; margin-bottom: 12px; }
+.dev-main { flex: 1; min-width: 0; overflow: auto; }
+.dev-toolbar { display: flex; gap: 12px; margin-bottom: 16px; align-items: center; flex-wrap: wrap; }
+.dev-toolbar-spacer { flex: 1; }
+.dev-search { width: 220px; }
+.dev-card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+
+/* ── 移动端适配 ─────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .dev-layout { flex-direction: column; height: auto; gap: 12px; }
+  /* 分组筛选改为顶部横向滚动条 */
+  .dev-side {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid #ddd;
+    padding-right: 0;
+    padding-bottom: 8px;
+  }
+  .dev-side-menu {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    border-bottom: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .dev-side-menu :deep(.el-menu-item) {
+    flex-shrink: 0;
+    height: 40px;
+    line-height: 40px;
+    border-bottom: none;
+  }
+  .dev-main { overflow: visible; }
+  .dev-toolbar { gap: 8px; }
+  .dev-toolbar-spacer { display: none; }
+  .dev-search { width: 100%; order: -1; }
+  /* 卡片单列，表格横向滚动 */
+  .dev-card-grid { grid-template-columns: 1fr; gap: 12px; }
+  .dev-main :deep(.el-table) { overflow-x: auto; }
+}
+</style>

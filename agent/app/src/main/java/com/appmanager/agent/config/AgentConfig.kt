@@ -36,8 +36,12 @@ data class AgentConfig(
     val userToken: String = "",
     /** 登录用户名（用于个人中心展示登录状态，空=未登录）。 */
     val userName: String = "",
-    /** 登录用户角色（admin / operator / viewer）。 */
+    /** 用户登录角色（admin / operator / viewer）。 */
     val userRole: String = "",
+    /** 用于无感续期的 refresh token（服务端签发，30 天有效）。 */
+    val refreshToken: String = "",
+    /** access token 的过期 Unix 时间戳（秒）；0 = 旧版兼容（不检查）。 */
+    val userTokenExpiry: Long = 0L,
     /** 后台下发的自定义扫描广播事件 JSON 数组（["action1","action2"]）。 */
     val customScanActionsJson: String = "",
 ) {
@@ -85,6 +89,8 @@ data class AgentConfig(
                 userToken = prefs.getString("user_token", "") ?: "",
                 userName = prefs.getString("user_name", "") ?: "",
                 userRole = prefs.getString("user_role", "") ?: "",
+                refreshToken = prefs.getString("refresh_token", "") ?: "",
+                userTokenExpiry = prefs.getLong("user_token_expiry", 0L),
                 customScanActionsJson = prefs.getString("custom_scan_actions_json", "") ?: "",
             )
         }
@@ -109,6 +115,8 @@ data class AgentConfig(
                 putString("user_token", config.userToken)
                 putString("user_name", config.userName)
                 putString("user_role", config.userRole)
+                putString("refresh_token", config.refreshToken)
+                putLong("user_token_expiry", config.userTokenExpiry)
                 putString("custom_scan_actions_json", config.customScanActionsJson)
                 apply()
             }

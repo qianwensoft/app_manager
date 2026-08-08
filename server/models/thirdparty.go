@@ -40,6 +40,19 @@ type ThirdPartyProvider struct {
 	// DefaultRole 未映射角色的默认角色
 	DefaultRole string `gorm:"size:20;default:viewer" json:"default_role"`
 
+	// ── SSO 跳转安全配置（P0）──────────────────────────────────────────
+	// RedirectAllowlistJSON 允许的 redirect_to 路径白名单（JSON 字符串数组）。
+	// 支持精确路径（如 "/devices"）和前缀通配（如 "/work-orders/*"）。
+	// 留空时回退到系统级 server.sso.redirect_to_whitelist 配置。
+	RedirectAllowlistJSON string `gorm:"column:redirect_allowlist_json;type:text" json:"-"`
+	// RedirectAllowEnabled 是否启用白名单校验；为 false 时不校验（仅作向后兼容）。
+	RedirectAllowEnabled bool `gorm:"default:true" json:"redirect_allow_enabled"`
+	// HMACSecret 用于签发 redirect_to 的 HMAC-SHA256 密钥。
+	// 留空时使用系统级 server.sso.hmac_secret；两者都为空则拒绝签发链接（fail-closed）。
+	HMACSecret string `gorm:"column:hmac_secret;size:128" json:"-"`
+	// HMACClockSkewSec 签名时钟偏移容忍（秒），默认 300。
+	HMACClockSkewSec int `gorm:"default:300" json:"hmac_clock_skew_sec"`
+
 	Enabled   bool      `gorm:"default:true" json:"enabled"`
 	CreatedBy uint      `json:"created_by"`
 	CreatedAt time.Time `json:"created_at"`

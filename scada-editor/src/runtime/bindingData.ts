@@ -1,5 +1,6 @@
 import type { PointDataMap } from '@/hooks/useStompPointData'
 import type { CanvasElement } from '@/types'
+import { getGlobalContext } from './workflow/globalContext'
 
 export type BindingValue = string | number | boolean | null | BindingValue[] | { [key: string]: BindingValue }
 
@@ -77,6 +78,8 @@ export function resolveTemplateValue(template: string, context: Record<string, u
  * 解析扩展数据引用：
  * - {{ext:key}} 引用本组件的 extData[key]
  * - {{el:元素名:extKey}} 或 {{el:id:extKey}} 引用其他组件的 extData[extKey]
+ * - {{comp:名称:路径}} 引用组件快照任意路径（value / ext.键 / params.键 / chart.键）
+ * - {{global:点分路径}} 引用全局上下文任意路径
  *
  * @param template 原始模板字符串
  * @param selfEl 当前组件元素
@@ -90,20 +93,34 @@ export function resolveExtDataReference(
 ): string {
   if (!template) return ''
 
-  return template.replace(/\{\{\s*(ext:\w+|el:[^:}]+(?::\w+)?)\s*\}\}/g, (match, ref: string) => {
-    const parts = ref.split(':')
-    if (parts.length < 2) return match
+  return template.replace(/\{\{\s*(ext:\w+|el:[^:}]+(?::\w+)?|comp:[^:}]+:[^}]+|global:[^}]+)\s*\}\}/g, (match, ref: string) => {
+    const ci = ref.indexOf(':')
+    const scheme = ref.slice(0, ci)
+    const rest = ref.slice(ci + 1)
 
-    if (parts[0] === 'ext') {
+    if (scheme === 'ext') {
       // 本组件扩展数据引用: {{ext:key}}
-      const key = parts[1]
-      return selfEl.extData?.[key] ?? match
-    } else if (parts[0] === 'el') {
+      return selfEl.extData?.[rest] ?? match
+    } else if (scheme === 'el') {
       // 其他组件扩展数据引用: {{el:元素名:extKey}} 或 {{el:id:extKey}}
-      const targetNameOrId = parts[1]
-      const targetKey = parts[2] ?? 'value'
+      const parts = rest.split(':')
+      const targetNameOrId = parts[0]
+      const targetKey = parts[1] ?? 'value'
       const target = allElements.find((e) => e.id === targetNameOrId || e.name === targetNameOrId)
       return target?.extData?.[targetKey] ?? match
+    } else if (scheme === 'comp') {
+      // 组件快照引用: {{comp:名称:value}} / {{comp:名称:ext.键}}
+      const di = rest.indexOf(':')
+      const compKey = di === -1 ? rest : rest.slice(0, di)
+      const path = di === -1 ? 'value' : rest.slice(di + 1)
+      const ctx = getGlobalContext().getAll() as Record<string, unknown>
+      const components = (ctx.components ?? {}) as Record<string, unknown>
+      const v = getPath(components[compKey], path)
+      return v === undefined || v === null ? match : String(v)
+    } else if (scheme === 'global') {
+      // 全局上下文引用: {{global:a.b.c}}
+      const v = getPath(getGlobalContext().getAll(), rest)
+      return v === undefined || v === null ? match : String(v)
     }
     return match
   })

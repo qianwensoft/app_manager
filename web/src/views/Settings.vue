@@ -386,6 +386,119 @@
         <X5KernelManagement />
       </el-tab-pane>
 
+      <!-- OnlyOffice 配置 -->
+      <el-tab-pane label="OnlyOffice 配置" name="onlyoffice">
+        <h3 style="margin: 0 0 16px">OnlyOffice Document Server</h3>
+        <el-form :model="onlyofficeForm" label-width="170px" style="max-width: 720px">
+          <el-form-item label="启用 OnlyOffice">
+            <el-switch v-model="onlyofficeForm.enabled" />
+            <span style="margin-left: 10px; color: #909399; font-size: 12px">
+              关闭后文档管理中的 word/excel/ppt 显示「未启用」提示
+            </span>
+          </el-form-item>
+
+          <el-divider content-position="left">连接信息</el-divider>
+
+          <el-form-item label="内网地址 (internal_url)" required>
+            <el-input
+              v-model="onlyofficeForm.internal_url"
+              placeholder="如 http://127.0.0.1:9000"
+              clearable
+            />
+            <div class="form-tip">Go 服务访问 Document Server 的地址（局域网/Docker 内网地址）。</div>
+          </el-form-item>
+
+          <el-form-item label="公网地址 (public_url)" required>
+            <el-input
+              v-model="onlyofficeForm.public_url"
+              placeholder="如 https://docs.example.com"
+              clearable
+            />
+            <div class="form-tip">浏览器访问 Document Server 的地址；浏览器需要能从该 URL 加载 api.js。</div>
+          </el-form-item>
+
+          <el-form-item label="JWT 密钥">
+            <el-input
+              v-model="onlyofficeForm.jwt_secret"
+              type="password"
+              show-password
+              :placeholder="onlyofficeJwtSet ? '已配置（留空则不修改）' : '与 DS local.json services.CoEditingConfig.secret 一致'"
+            />
+            <div class="form-tip">
+              留空则不修改已有密钥；如要显式清空，请联系管理员通过 env 变量重置。
+            </div>
+          </el-form-item>
+
+          <el-divider content-position="left">编辑器行为</el-divider>
+
+          <el-form-item label="界面语言">
+            <el-input v-model="onlyofficeForm.lang" placeholder="zh-CN" clearable style="max-width: 200px" />
+          </el-form-item>
+
+          <el-form-item label="默认模式">
+            <el-radio-group v-model="onlyofficeForm.default_mode">
+              <el-radio-button label="edit">编辑</el-radio-button>
+              <el-radio-button label="view">预览</el-radio-button>
+            </el-radio-group>
+            <span style="margin-left: 12px; color: #909399; font-size: 12px">仅在用户有编辑权限时生效；无权限始终为预览</span>
+          </el-form-item>
+
+          <el-form-item label="自动保存">
+            <el-switch v-model="onlyofficeForm.autosave" />
+          </el-form-item>
+
+          <el-form-item label="强制保存">
+            <el-switch v-model="onlyofficeForm.forcesave" />
+            <span style="margin-left: 10px; color: #909399; font-size: 12px">保存按钮触发后必写入新版本</span>
+          </el-form-item>
+
+          <el-form-item label="允许打印/导出 PDF">
+            <el-switch v-model="onlyofficeForm.allow_print" />
+          </el-form-item>
+
+          <el-form-item label="允许评论与批注">
+            <el-switch v-model="onlyofficeForm.allow_comment" />
+          </el-form-item>
+
+          <el-divider content-position="left">品牌定制</el-divider>
+
+          <el-form-item label="Logo 跳转链接">
+            <el-input v-model="onlyofficeForm.custom_logo_url" placeholder="留空使用 DS 默认" clearable />
+          </el-form-item>
+
+          <el-form-item label="Logo 图片 URL">
+            <el-input v-model="onlyofficeForm.custom_logo_image" placeholder="留空使用 DS 默认" clearable />
+          </el-form-item>
+
+          <el-divider content-position="left">网络与安全</el-divider>
+
+          <el-form-item label="回调下载超时 (秒)">
+            <el-input-number v-model="onlyofficeForm.download_timeout_sec" :min="1" :max="3600" :step="10" />
+            <span style="margin-left: 10px; color: #909399; font-size: 12px">拉取 DS 回调结果文件超时，默认 60</span>
+          </el-form-item>
+
+          <el-form-item label="ds_file Token 有效期 (秒)">
+            <el-input-number v-model="onlyofficeForm.file_token_ttl_sec" :min="60" :max="604800" :step="3600" />
+            <span style="margin-left: 10px; color: #909399; font-size: 12px">DS 回源下载文件时的临时 token TTL，默认 86400（24h）</span>
+          </el-form-item>
+
+          <el-form-item>
+            <el-button type="primary" :loading="onlyofficeSaving" @click="saveOnlyOfficeConfig">保存</el-button>
+            <el-tag v-if="onlyofficeJwtSet" type="success" style="margin-left: 12px">JWT 密钥已配置</el-tag>
+            <el-tag v-else type="warning" style="margin-left: 12px">尚未配置 JWT 密钥</el-tag>
+            <el-tag v-if="onlyofficeEnabled" type="success" style="margin-left: 6px">已启用</el-tag>
+            <el-tag v-else type="info" style="margin-left: 6px">未启用</el-tag>
+          </el-form-item>
+
+          <el-alert
+            type="info"
+            :closable="false"
+            title="启用 OnlyOffice 后，文档管理中的 word/excel/ppt 文件将以在线编辑器方式打开。保存后写入 YAML 文件，重启后仍然生效。"
+            show-icon
+          />
+        </el-form>
+      </el-tab-pane>
+
       <el-tab-pane label="AI 配置" name="ai">
         <h3 style="margin: 0 0 16px">Claude（Anthropic）配置</h3>
         <el-form label-width="120px" style="max-width: 560px">
@@ -487,9 +600,66 @@
           </div>
         </div>
       </el-tab-pane>
+
+      <!-- MDM 企业标识管理 -->
+      <el-tab-pane label="MDM 企业标识" name="mdm">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <span style="font-size:14px;color:#606266">管理用于设备 MDM 授权的企业标识，每台设备可关联一个企业标识后使用对应的 MDM 功能。</span>
+          <el-button type="primary" size="small" @click="openMdmEnterpriseDialog()">新增企业标识</el-button>
+        </div>
+        <el-table :data="mdmEnterprises" border size="small" v-loading="mdmEntLoading" empty-text="暂无企业标识">
+          <el-table-column prop="id" label="ID" width="70" align="center" />
+          <el-table-column prop="name" label="名称" min-width="140" show-overflow-tooltip />
+          <el-table-column prop="code" label="企业码" width="160" show-overflow-tooltip />
+          <el-table-column prop="description" label="描述" min-width="180" show-overflow-tooltip />
+          <el-table-column label="允许能力" min-width="160" show-overflow-tooltip>
+            <template #default="{ row }">
+              <span v-if="!row.allowed_caps_json || row.allowed_caps_json === '[]'" style="color:#909399">全部</span>
+              <span v-else>{{ formatAllowedCaps(row.allowed_caps_json) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="80" align="center">
+            <template #default="{ row }">
+              <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '启用' : '停用' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="160" align="center" fixed="right">
+            <template #default="{ row }">
+              <el-button size="small" @click="openMdmEnterpriseDialog(row)">编辑</el-button>
+              <el-button size="small" type="danger" @click="deleteMdmEnterprise(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
     </el-tabs>
 
-    <!-- 上传对话框 -->
+    <!-- MDM 企业标识 新增/编辑 对话框 -->
+    <el-dialog
+      v-model="mdmEntDialogVisible"
+      :title="mdmEntForm.id ? '编辑企业标识' : '新增企业标识'"
+      width="480px"
+      :close-on-click-modal="false"
+    >
+      <el-form :model="mdmEntForm" label-width="100px" size="small">
+        <el-form-item label="名称" required>
+          <el-input v-model="mdmEntForm.name" placeholder="如：华南区生产设备" />
+        </el-form-item>
+        <el-form-item label="企业码" required>
+          <el-input v-model="mdmEntForm.code" placeholder="唯一标识，如：prod-south" :disabled="!!mdmEntForm.id" />
+          <div class="form-tip">企业码创建后不可修改，建议使用英文+短横线</div>
+        </el-form-item>
+        <el-form-item label="描述">
+          <el-input v-model="mdmEntForm.description" type="textarea" :rows="2" />
+        </el-form-item>
+        <el-form-item label="启用">
+          <el-switch v-model="mdmEntForm.enabled" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="mdmEntDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="mdmEntSaving" @click="saveMdmEnterprise">保存</el-button>
+      </template>
+    </el-dialog>
     <el-dialog v-model="uploadDialogVisible" title="上传 Agent APK" width="520px" :close-on-click-modal="false">
       <el-form :model="uploadForm" label-width="100px">
         <el-form-item label="APK 文件" required>
@@ -542,10 +712,11 @@ import { ref, onMounted, computed, watch, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowRight, Search } from '@element-plus/icons-vue'
-import { getHeartbeatSettings, updateHeartbeatSettings, getSystemInfo, updateEnvSettings, checkFFmpeg, installFFmpeg, getAgentConnections, getAgentOnlineTrend, getApiCallTrend, getApiCallDetails, getStompStats, getClaudeConfig, updateClaudeConfig } from '@/api/settings'
+import { getHeartbeatSettings, updateHeartbeatSettings, getSystemInfo, updateEnvSettings, checkFFmpeg, installFFmpeg, getAgentConnections, getAgentOnlineTrend, getApiCallTrend, getApiCallDetails, getStompStats, getClaudeConfig, updateClaudeConfig, getOnlyOfficeConfig, updateOnlyOfficeConfig } from '@/api/settings'
 import { uploadAgentAPK, listAgentUpdates, downloadAgentAPK, deleteAgentUpdate } from '@/api/agentUpdate'
 import { getRegisterSetting, updateRegisterSetting } from '@/api/user'
 import { pushAgentUpdate } from '@/api/device'
+import * as mdmApi from '@/api/mdm'
 import TrendChart from '@/components/TrendChart.vue'
 import X5KernelManagement from '@/views/X5KernelManagement.vue'
 import { Client } from '@stomp/stompjs'
@@ -584,6 +755,97 @@ const envForm = ref({
 const aiForm = ref({ api_key: '', model: 'claude-opus-4-5', base_url: '', proxy_url: '' })
 const aiKeySet = ref(false)
 const aiSaving = ref(false)
+
+// OnlyOffice Document Server 配置
+const onlyofficeForm = ref({
+  enabled: false,
+  internal_url: '',
+  public_url: '',
+  jwt_secret: '',
+  lang: 'zh-CN',
+  default_mode: 'edit',
+  autosave: true,
+  forcesave: true,
+  allow_print: true,
+  allow_comment: true,
+  custom_logo_url: '',
+  custom_logo_image: '',
+  download_timeout_sec: 60,
+  file_token_ttl_sec: 86400,
+})
+const onlyofficeJwtSet = ref(false)
+const onlyofficeEnabled = ref(false)
+const onlyofficeSaving = ref(false)
+
+const loadOnlyOfficeConfig = async () => {
+  try {
+    const res = await getOnlyOfficeConfig()
+    onlyofficeJwtSet.value = !!res.jwt_secret_set
+    onlyofficeEnabled.value = !!res.enabled
+    onlyofficeForm.value = {
+      enabled: !!res.enabled,
+      internal_url: res.internal_url || '',
+      public_url: res.public_url || '',
+      jwt_secret: '',
+      lang: res.lang || 'zh-CN',
+      default_mode: res.default_mode || 'edit',
+      autosave: !!res.autosave,
+      forcesave: !!res.forcesave,
+      allow_print: !!res.allow_print,
+      allow_comment: !!res.allow_comment,
+      custom_logo_url: res.custom_logo_url || '',
+      custom_logo_image: res.custom_logo_image || '',
+      download_timeout_sec: res.download_timeout_sec || 60,
+      file_token_ttl_sec: res.file_token_ttl_sec || 86400,
+    }
+  } catch (e) {
+    // 静默失败
+  }
+}
+
+const saveOnlyOfficeConfig = async () => {
+  // 前端基础校验，避免无效请求。
+  const f = onlyofficeForm.value
+  if (f.enabled) {
+    if (!f.internal_url || !f.public_url) {
+      ElMessage.error('启用 OnlyOffice 时 internal_url 和 public_url 必填')
+      return
+    }
+  }
+  if (f.default_mode !== 'edit' && f.default_mode !== 'view') {
+    ElMessage.error('默认模式仅接受 edit 或 view')
+    return
+  }
+  onlyofficeSaving.value = true
+  try {
+    const payload = {
+      enabled: f.enabled,
+      internal_url: f.internal_url || '',
+      public_url: f.public_url || '',
+      lang: f.lang || '',
+      default_mode: f.default_mode,
+      autosave: f.autosave,
+      forcesave: f.forcesave,
+      allow_print: f.allow_print,
+      allow_comment: f.allow_comment,
+      custom_logo_url: f.custom_logo_url || '',
+      custom_logo_image: f.custom_logo_image || '',
+      download_timeout_sec: f.download_timeout_sec,
+      file_token_ttl_sec: f.file_token_ttl_sec,
+    }
+    // 仅在用户实际填了新密钥时才发送 jwt_secret 字段（避免误清空）。
+    if (f.jwt_secret) payload.jwt_secret = f.jwt_secret
+    const res = await updateOnlyOfficeConfig(payload)
+    onlyofficeJwtSet.value = !!res.jwt_secret_set
+    onlyofficeEnabled.value = !!res.enabled
+    onlyofficeForm.value.jwt_secret = ''
+    ElMessage.success('保存成功')
+  } catch (e) {
+    // http 拦截器已提示错误
+  } finally {
+    onlyofficeSaving.value = false
+  }
+}
 
 const loadAiConfig = async () => {
   try {
@@ -916,6 +1178,7 @@ onMounted(async () => {
   loadUpdates()
   loadSystemInfo()
   loadAiConfig()
+  loadOnlyOfficeConfig()
 
   // 如果初始标签是 monitor，加载监控数据并启动 STOMP
   if (activeTab.value === 'monitor') {
@@ -1219,6 +1482,88 @@ const deleteAPK = async (id) => {
     ElMessage.error('删除失败')
   }
 }
+
+// ── MDM 企业标识管理 ─────────────────────────────────────────────────────
+const mdmEnterprises     = ref([])
+const mdmEntLoading      = ref(false)
+const mdmEntDialogVisible= ref(false)
+const mdmEntSaving       = ref(false)
+const mdmEntForm         = ref({ id: null, name: '', code: '', description: '', enabled: true })
+
+const loadMdmEnterprises = async () => {
+  mdmEntLoading.value = true
+  try {
+    const res = await mdmApi.listMDMEnterprises()
+    mdmEnterprises.value = res.items || res.data || []
+  } catch {
+    ElMessage.error('加载 MDM 企业标识失败')
+  } finally {
+    mdmEntLoading.value = false
+  }
+}
+
+const openMdmEnterpriseDialog = (row = null) => {
+  if (row) {
+    mdmEntForm.value = { id: row.id, name: row.name, code: row.code, description: row.description || '', enabled: row.enabled }
+  } else {
+    mdmEntForm.value = { id: null, name: '', code: '', description: '', enabled: true }
+  }
+  mdmEntDialogVisible.value = true
+}
+
+const saveMdmEnterprise = async () => {
+  if (!mdmEntForm.value.name || !mdmEntForm.value.code) {
+    ElMessage.warning('名称和企业码不能为空')
+    return
+  }
+  mdmEntSaving.value = true
+  try {
+    if (mdmEntForm.value.id) {
+      await mdmApi.updateMDMEnterprise(mdmEntForm.value.id, {
+        name: mdmEntForm.value.name,
+        description: mdmEntForm.value.description,
+        enabled: mdmEntForm.value.enabled,
+      })
+    } else {
+      await mdmApi.createMDMEnterprise({
+        name: mdmEntForm.value.name,
+        code: mdmEntForm.value.code,
+        description: mdmEntForm.value.description,
+        enabled: mdmEntForm.value.enabled,
+      })
+    }
+    ElMessage.success('保存成功')
+    mdmEntDialogVisible.value = false
+    loadMdmEnterprises()
+  } catch (e) {
+    ElMessage.error('保存失败: ' + (e?.response?.data?.error || e.message))
+  } finally {
+    mdmEntSaving.value = false
+  }
+}
+
+const deleteMdmEnterprise = async (row) => {
+  try {
+    await ElMessageBox.confirm(`确定删除企业标识「${row.name}」？`, '确认删除', { type: 'warning' })
+    await mdmApi.deleteMDMEnterprise(row.id)
+    ElMessage.success('已删除')
+    loadMdmEnterprises()
+  } catch {
+    /* cancelled or error */
+  }
+}
+
+const formatAllowedCaps = (json) => {
+  try {
+    const arr = JSON.parse(json)
+    return Array.isArray(arr) ? arr.join('、') : json
+  } catch { return json }
+}
+
+// 切换到 MDM 标签时加载
+watch(() => activeTab.value ?? '', (name) => {
+  if (name === 'mdm') loadMdmEnterprises()
+})
 </script>
 
 <style scoped>

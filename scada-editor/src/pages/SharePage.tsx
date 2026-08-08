@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from 'react'
 import { useScadaByShareToken } from '@/hooks/useScada'
 import { useCanvasBindingData } from '@/hooks/useCanvasBindingData'
 import CanvasViewer from '@/components/CanvasViewer'
+import SerialScannerPanel from '@/components/SerialScannerPanel'
 import type { CanvasProject, CanvasData } from '@/types'
 import { shouldAutoLandscape, isLandscape } from '@/utils/deviceDetect'
 import { useToastHost } from '@/components/ToastHost'
@@ -26,6 +27,16 @@ export default function SharePage() {
     resetGlobalContext()
     return () => resetGlobalContext()
   }, [token])
+
+  // 设置网页标题
+  useEffect(() => {
+    if (info?.scada_name) {
+      document.title = info.scada_name
+    }
+    return () => {
+      document.title = 'SCADA Editor'
+    }
+  }, [info?.scada_name])
 
   useEffect(() => {
     if (!info?.canvas_data) return
@@ -157,6 +168,7 @@ export default function SharePage() {
         </div>
       )}
       {toastNode}
+      <SerialScannerPanel />
     </div>
   )
 }

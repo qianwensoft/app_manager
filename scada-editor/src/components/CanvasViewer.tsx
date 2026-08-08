@@ -2,9 +2,9 @@ import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import type { CanvasData, ChartConfig } from '@/types'
 import { drawGrid, drawElement } from '@/utils/canvas'
 import type { PointDataMap } from '@/hooks/useStompPointData'
-import { resolveElementValue } from '@/hooks/useInterfaceBindingData'
 import { useRuntimeStore } from '@/store/runtimeStore'
-import { resolveExtDataReference } from '@/runtime/bindingData'
+import { resolveElementText } from '@/runtime/bindingResolver'
+import { buildComponentsSnapshot } from '@/runtime/workflow/componentsSnapshot'
 import { useEditorStore } from '@/store/editorStore'
 import { useAnimationTick } from '@/hooks/useAnimationTick'
 import { useDateTimeTick } from '@/hooks/useDateTimeTick'
@@ -14,6 +14,7 @@ import { useConditionEvents } from '@/hooks/useConditionEvents'
 import { useWorkflowRuntime } from '@/hooks/useWorkflowRuntime'
 import type { ScadaWorkflow, WorkflowLib } from '@/types/workflow'
 import type { CanvasElement } from '@/types'
+import { resolveConditionalStyles } from '@/runtime/conditionalStyles'
 import AnimationStyleInjector from './AnimationStyleInjector'
 import ElementEventHitLayer from './ElementEventHitLayer'
 import ChartWidget from './ChartWidget'
@@ -229,6 +230,18 @@ export default function CanvasViewer({
 
   useConditionEvents(canvas.elements, pointData, eventCtx)
 
+  // 构建表达式作用域（用于条件样式和数据绑定解析）
+  const componentsSnapshot = useMemo(
+    () => buildComponentsSnapshot(canvas.elements, pointData),
+    [canvas.elements, pointData],
+  )
+  const exprScope = useMemo(() => ({
+    elements: canvas.elements,
+    pointData,
+    scadaCode,
+    components: componentsSnapshot,
+  }), [canvas.elements, pointData, scadaCode, componentsSnapshot])
+
   const fireDomEvents = (el: (typeof domElements)[0], trigger: 'click' | 'dblclick' | 'hover') => {
     runTriggeredEvents(el, trigger, { ...eventCtx, element: el })
     // 组件 UI 事件同时触发以该元素为源的 component 工作流
@@ -285,12 +298,14 @@ export default function CanvasViewer({
           <FormFieldWidget key={el.id} el={el} zoom={z} isPreview={true} canvas={canvas} valuesRef={formValuesRef} pointData={pointData} />
         ))}
         {domElements.map((el) => {
-          const rawText = resolveElementValue(el, pointData)
-          // 解析扩展数据引用
-          const displayText = resolveExtDataReference(rawText, el, canvas.elements)
+          const displayText = resolveElementText(el, pointData, canvas.elements, exprScope)
           const isWfSource = componentSourceIds.has(el.id)
           const hasEvents = !!el.events?.length || isWfSource
           const isBtn = el.type === 'button'
+          
+          // 解析条件样式
+          const conditionalStyles = resolveConditionalStyles(el, pointData, exprScope)
+          
           return (
             <div
               key={el.id}
@@ -310,14 +325,14 @@ export default function CanvasViewer({
                   el.textAlign === 'left' ? 'flex-start'
                   : el.textAlign === 'right' ? 'flex-end'
                   : 'center',
-                color: el.fontColor || '#fff',
+                color: conditionalStyles.fontColor ?? el.fontColor ?? '#fff',
                 fontSize: (el.fontSize ?? 14) * z,
                 fontFamily: el.fontFamily || 'sans-serif',
                 fontWeight: el.fontWeight === 'bold' ? 'bold' : 'normal',
                 fontStyle: el.fontStyle === 'italic' ? 'italic' : 'normal',
-                background: isBtn ? (el.fill || 'transparent') : 'transparent',
+                background: isBtn ? (conditionalStyles.fill ?? el.fill ?? 'transparent') : 'transparent',
                 borderRadius: isBtn ? ((el.borderRadius ?? 4) * z) : undefined,
-                border: isBtn && el.stroke ? `${(el.strokeWidth ?? 1) * z}px solid ${el.stroke}` : undefined,
+                border: isBtn && (conditionalStyles.stroke ?? el.stroke) ? `${(el.strokeWidth ?? 1) * z}px solid ${conditionalStyles.stroke ?? el.stroke}` : undefined,
                 pointerEvents: (isBtn || hasEvents) ? 'auto' : 'none',
                 cursor: (isBtn || hasEvents) ? 'pointer' : 'default',
                 userSelect: 'none',

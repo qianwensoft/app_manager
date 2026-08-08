@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from 'react'
 import { useScadaInfo } from '@/hooks/useScada'
 import { useCanvasBindingData } from '@/hooks/useCanvasBindingData'
 import CanvasViewer from '@/components/CanvasViewer'
+import SerialScannerPanel from '@/components/SerialScannerPanel'
 import type { CanvasProject, CanvasData } from '@/types'
 import { shouldAutoLandscape, isLandscape } from '@/utils/deviceDetect'
 import { useToastHost } from '@/components/ToastHost'
@@ -307,6 +308,7 @@ export default function PreviewPage() {
         )}
       </div>
       {toastNode}
+      <SerialScannerPanel />
     </div>
   )
 }

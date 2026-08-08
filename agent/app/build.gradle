@@ -15,8 +15,8 @@ android {
         applicationId "com.appmanager.agent"
         minSdk 21
         targetSdk 34
-        versionCode 268
-        versionName "2.3.21"
+        versionCode 291
+        versionName "2.3.44"
     }
 
     signingConfigs {
@@ -29,10 +29,16 @@ android {
     }
 
     buildTypes {
+        debug {
+            // testOnly=true 允许有账号时通过 ADB 激活 Device Owner（仅调试用）
+            manifestPlaceholders = [testOnly: "true"]
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             signingConfig signingConfigs.release
+            // release 包正常安装，不设 testOnly
+            manifestPlaceholders = [testOnly: "false"]
         }
     }
 

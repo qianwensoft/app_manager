@@ -17,6 +17,7 @@ interface Props {
 const SOURCE_LABELS: Record<string, string> = {
   point_change: '点位', condition: '条件', component: '组件', timer: '定时',
   canvas_enter: '进入', canvas_exit: '退出', custom_event: '事件', context_change: '上下文',
+  agent_scan: '扫码',
 }
 
 export default function WorkflowListPanel({ workflows, selectedId, onSelect, onAdd, onDelete, onDuplicate, onToggleEnabled }: Props) {

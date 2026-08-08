@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"app-manager/agent"
+	"app-manager/auth"
 	"app-manager/barcode"
 	"app-manager/database"
 	"app-manager/models"
@@ -149,10 +150,40 @@ func ListWorkOrders(c *gin.Context) {
 			pattern, pattern, pattern, pattern, pattern)
 	}
 
-	// 非管理员：仅公开 或 自己创建/被指派的工单。
+	// 非管理员的可见范围。
 	if c.GetString("role") != "admin" {
 		uid := c.GetUint("user_id")
-		q = q.Where("visibility = ? OR created_by = ? OR assigned_to = ?", "public", uid, uid)
+		if c.Query("portal") == "1" {
+			// 资源中心前台：按资源角色授权的工单类型范围过滤（聚合用户全部工单角色）。
+			// 资源授权即代表可见该类型全部工单，覆盖默认的归属可见性规则，
+			// 使列表口径与概览统计（GetPortalStats）保持一致。
+			perms := auth.ResolveUserResourcePerms(uid)
+			if len(perms.WorkOrderNodes) == 0 {
+				c.JSON(http.StatusOK, gin.H{"data": []any{}, "total": 0, "page": page, "limit": limit})
+				return
+			}
+			allTypes := false
+			typeSet := map[string]bool{}
+			for _, n := range perms.WorkOrderNodes {
+				if len(n.TypeCodes) == 0 {
+					allTypes = true
+					break
+				}
+				for _, tc := range n.TypeCodes {
+					typeSet[tc] = true
+				}
+			}
+			if !allTypes {
+				codes := make([]string, 0, len(typeSet))
+				for tc := range typeSet {
+					codes = append(codes, tc)
+				}
+				q = q.Where("type_code IN ?", codes)
+			}
+		} else {
+			// 普通后台：仅公开 或 自己创建/被指派的工单。
+			q = q.Where("visibility = ? OR created_by = ? OR assigned_to = ?", "public", uid, uid)
+		}
 	}
 
 	var total int64

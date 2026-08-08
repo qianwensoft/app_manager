@@ -58,6 +58,16 @@ func SetupRouter() *gin.Engine {
 		c.Next()
 	})
 	formAppGroup.StaticFS("", gin.Dir(formAppDir, false))
+	// docs-app: 同样禁用缓存，避免加载旧版本 JS
+	docsAppDir := config.C.Server.DocsAppPath()
+	docsAppGroup := r.Group("/docs-app")
+	docsAppGroup.Use(func(c *gin.Context) {
+		c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+		c.Header("Pragma", "no-cache")
+		c.Header("Expires", "0")
+		c.Next()
+	})
+	docsAppGroup.StaticFS("", gin.Dir(docsAppDir, false))
 
 	// Prometheus（内网抓取；生产请用防火墙或反向代理限制访问）
 	r.GET("/metrics", PrometheusMetrics)
@@ -134,6 +144,8 @@ func SetupRouter() *gin.Engine {
 		a.POST("/apikey", auth.AuthMiddleware(), CreateAPIKey)
 		a.GET("/apikey", auth.AuthMiddleware(), ListAPIKeys)
 		a.DELETE("/apikey/:id", auth.AuthMiddleware(), RevokeAPIKey)
+		// Refresh token — 无需 AuthMiddleware，用 refresh_token 换新 access_token
+		a.POST("/refresh", RefreshAccessToken)
 	}
 
 	// 设备
@@ -239,6 +251,9 @@ func SetupRouter() *gin.Engine {
 		settings.GET("/claude", GetClaudeSettings)
 		settings.PUT("/claude", UpdateClaudeSettings)
 		settings.POST("/claude/demo-chat", ClaudeDemoChat)
+		// OnlyOffice Document Server 配置
+		settings.GET("/onlyoffice", GetOnlyOfficeSettings)
+		settings.PUT("/onlyoffice", UpdateOnlyOfficeSettings)
 	}
 
 	// 用户管理（仅 admin）
@@ -742,10 +757,52 @@ func SetupRouter() *gin.Engine {
 		// User Sync
 		tp.POST("/:id/sync-users", SyncUsersFromProvider)
 		tp.GET("/:id/sync-status", GetUserSyncStatus)
+
+		// SSO 跳转安全：签名生成 + 白名单预览（P0）
+		tp.POST("/:id/sso/sign", BuildSignedCallback)
+		tp.GET("/:id/sso/allowlist", PreviewAllowlist)
 	}
 
 	// Third party API call (accessible to operators for form-app scanner)
 	r.POST("/api/thirdparty/call", auth.AuthMiddleware(), CallThirdPartyApi)
+
+	// MDM 企业标识管理（admin only）
+	mdmAdmin := r.Group("/api/mdm", auth.AuthMiddleware(), auth.RequireRole("admin"))
+	{
+		mdmAdmin.GET("/enterprises", ListMDMEnterprises)
+		mdmAdmin.POST("/enterprises", CreateMDMEnterprise)
+		mdmAdmin.PUT("/enterprises/:id", UpdateMDMEnterprise)
+		mdmAdmin.DELETE("/enterprises/:id", DeleteMDMEnterprise)
+	}
+	// 企业列表选择器（operator 也可访问，用于设备 MDM 配置下拉）
+	r.GET("/api/mdm/enterprises/list", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"), GetMDMEnterpriseList)
+	// 设备 MDM 配置（admin/operator）
+	devMdm := r.Group("/api/devices/:id/mdm", auth.AuthMiddleware(), auth.RequireRole("admin", "operator"))
+	{
+		devMdm.GET("", GetDeviceMDMConfig)
+		devMdm.PUT("", UpdateDeviceMDMConfig)
+		devMdm.POST("/sync", SyncDeviceMDMStatus)
+		devMdm.POST("/ntp", GetDeviceNTPConfig)
+		devMdm.PUT("/ntp", SetDeviceNTPConfig)
+		// Device Owner 策略
+		devMdm.POST("/reboot", MDMRebootDevice)
+		devMdm.PUT("/hardware", SetHardwarePolicy)
+		devMdm.PUT("/password-policy", SetPasswordPolicy)
+		devMdm.PUT("/user-restriction", SetUserRestriction)
+		devMdm.PUT("/app-restriction", SetAppRestriction)
+		devMdm.PUT("/kiosk", SetKioskMode)
+		devMdm.PUT("/time", SetDeviceTime)
+		devMdm.POST("/policy-snapshot", GetPolicySnapshot)
+		devMdm.POST("/clear-policies", ClearAllMDMPolicies)
+	}
+	// 危险操作（admin only）
+	devMdmAdmin := r.Group("/api/devices/:id/mdm", auth.AuthMiddleware(), auth.RequireRole("admin"))
+	{
+		devMdmAdmin.POST("/lock", LockDevice)
+		devMdmAdmin.POST("/wipe/prepare", PrepareWipeDevice)
+		devMdmAdmin.POST("/wipe/confirm", ConfirmWipeDevice)
+		devMdmAdmin.POST("/revoke-do", RevokeDeviceOwner)
+	}
 
 	// WebSocket
 	r.GET("/ws/stomp", StompWSAuth, StompWS)
@@ -842,6 +899,8 @@ func SetupRouter() *gin.Engine {
 		rc.DELETE("/roles/:id", DeleteResourceRole)
 		rc.PUT("/roles/:id/nodes", SetResourceRoleNodes)
 		rc.PUT("/roles/:id/users", SetResourceRoleUsers)
+		rc.PUT("/roles/:id/devices", SetResourceRoleDevices)
+		rc.PUT("/roles/:id/work-order-types", SetResourceRoleWorkOrderTypes)
 		rc.GET("/matrix", GetResourceMatrix)
 		rc.GET("/perm-catalog", GetResourcePermCatalog)
 	}
@@ -852,6 +911,58 @@ func SetupRouter() *gin.Engine {
 		portal.GET("/permissions", GetPortalPermissions)
 		portal.GET("/stats", GetPortalStats)
 	}
+
+	// 文档管理（Document Management）
+	// 节点树：读取任意登录用户（内部按文档角色过滤）；写操作按细粒度文档权限校验。
+	docs := r.Group("/api/docs", auth.AuthMiddleware())
+	{
+		docs.GET("/nodes", GetDocumentNodes)
+		docs.POST("/nodes", auth.RequireRole("admin", "operator"), CreateDocumentNode)
+		docs.PUT("/nodes/:id", auth.RequireDocumentPermission("edit"), UpdateDocumentNode)
+		docs.DELETE("/nodes/:id", auth.RequireDocumentPermission("delete"), DeleteDocumentNode)
+		docs.POST("/nodes/:id/upload", auth.RequireDocumentPermission("edit"), UploadDocumentFile)
+		docs.GET("/nodes/:id/download", auth.RequireDocumentPermission("download"), DownloadDocumentFile)
+		docs.GET("/nodes/:id/content", auth.RequireDocumentPermission("read"), GetDocumentContent)
+		docs.PUT("/nodes/:id/content", auth.RequireDocumentPermission("edit"), SaveDocumentContent)
+		docs.GET("/nodes/:id/versions", auth.RequireDocumentPermission("read"), GetDocumentVersions)
+		docs.POST("/nodes/:id/revert/:versionId", auth.RequireDocumentPermission("edit"), RevertDocumentVersion)
+		// 按 URL 编码解析节点（任意登录用户；handler 内部按权限过滤）。
+		docs.GET("/nodes/code/:code", resolveDocNodeByCode)
+
+		// 文档角色（仅 admin 配置）
+		docs.GET("/roles", auth.RequireRole("admin"), GetDocumentRoles)
+		docs.POST("/roles", auth.RequireRole("admin"), CreateDocumentRole)
+		docs.PUT("/roles/:id", auth.RequireRole("admin"), UpdateDocumentRole)
+		docs.DELETE("/roles/:id", auth.RequireRole("admin"), DeleteDocumentRole)
+		docs.PUT("/roles/:id/nodes", auth.RequireRole("admin"), SetDocumentRoleNodes)
+		docs.PUT("/roles/:id/users", auth.RequireRole("admin"), SetDocumentRoleUsers)
+		docs.GET("/perm-catalog", GetDocumentPermCatalog)
+		docs.GET("/portal/permissions", GetDocumentPortalPermissions)
+
+		// AI 助手（可切换 provider）
+		docs.POST("/ai/chat", DocumentAIChat)
+		docs.POST("/ai/transform", DocumentAITransform)
+
+		// 项目管理（分类 + 项目）
+		docs.GET("/project-categories", GetDocumentProjectCategories)
+		docs.POST("/project-categories", auth.RequireRole("admin"), CreateDocumentProjectCategory)
+		docs.PUT("/project-categories/:id", auth.RequireRole("admin"), UpdateDocumentProjectCategory)
+		docs.DELETE("/project-categories/:id", auth.RequireRole("admin"), DeleteDocumentProjectCategory)
+		docs.GET("/projects", GetDocumentProjects)
+		docs.GET("/projects/code/:code", GetDocumentProjectByCode)
+		docs.POST("/projects", auth.RequireRole("admin", "operator"), CreateDocumentProject)
+		docs.PUT("/projects/:id", auth.RequireRole("admin", "operator"), UpdateDocumentProject)
+		docs.DELETE("/projects/:id", auth.RequireRole("admin", "operator"), DeleteDocumentProject)
+
+		// 锚点管理
+		docs.PUT("/nodes/:id/anchors", auth.RequireDocumentPermission("edit"), UpdateDocumentAnchors)
+
+		// OnlyOffice：config 需登录；file/callback 由 Document Server 回源，用 ds_token 鉴权。
+		docs.GET("/onlyoffice/config/:id", auth.RequireDocumentPermission("read"), GetOnlyOfficeConfig)
+	}
+	// OnlyOffice 回源下载与保存回调（免登录 JWT，凭 ds_token）。
+	r.GET("/api/docs/onlyoffice/file/:id", OnlyOfficeFileDownload)
+	r.POST("/api/docs/onlyoffice/callback/:id", OnlyOfficeCallback)
 
 	// X5 内核管理
 	RegisterX5KernelRoutes(r)
@@ -869,6 +980,10 @@ func SetupRouter() *gin.Engine {
 		}
 		if len(path) >= 10 && path[:10] == "/form-app/" {
 			c.File(config.C.Server.FormAppPath() + "/index.html")
+			return
+		}
+		if len(path) >= 10 && path[:10] == "/docs-app/" {
+			c.File(config.C.Server.DocsAppPath() + "/index.html")
 			return
 		}
 		c.File(config.C.Server.WebDistPath() + "/index.html")

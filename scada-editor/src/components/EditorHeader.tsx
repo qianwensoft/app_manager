@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useEditorStore } from '@/store/editorStore'
-import { useSaveCanvas, usePublish, useUnpublish } from '@/hooks/useScada'
+import { useSaveCanvas, usePublish, useUnpublish, useUpdateInfo } from '@/hooks/useScada'
 import { useHistory } from '@/hooks/useHistory'
 import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -34,6 +34,7 @@ const Icons = {
   Publish: 'M12 2v13M12 2 7 7M12 2l5 5M5 16v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3',
   Unpublish: 'M12 15V2M12 15l-5-5M12 15l5-5M5 16v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3',
   Workflow: 'M6 3v12M6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM18 9v3a3 3 0 0 1-3 3H9',
+  Globe: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20ZM2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20',
 }
 
 /* ── Divider ── */
@@ -50,13 +51,24 @@ interface Props {
 
 export default function EditorHeader({ scadaName, scadaCode, publishStatus, onPreview, onBack, onWorkflow }: Props) {
   const store = useEditorStore()
-  const { isDirty, zoom, setZoom, project, scadaId } = store
+  const { isDirty, zoom, setZoom, project, scadaId, liveDataOn, globalContextOpen, toggleGlobalContext } = store
   const saveCanvas = useSaveCanvas()
   const publish = usePublish()
   const unpublish = useUnpublish()
+  const updateInfo = useUpdateInfo()
   const { undo, redo, canUndo, canRedo } = useHistory()
   const [showPolicies, setShowPolicies] = useState(false)
   const [showPoints, setShowPoints] = useState(false)
+  const [isEditingTitle, setIsEditingTitle] = useState(false)
+  const [editingTitle, setEditingTitle] = useState('')
+  const titleInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (isEditingTitle && titleInputRef.current) {
+      titleInputRef.current.focus()
+      titleInputRef.current.select()
+    }
+  }, [isEditingTitle])
 
   const openInNewTab = (path: string) => window.open(path, '_blank')
 
@@ -82,6 +94,31 @@ export default function EditorHeader({ scadaName, scadaCode, publishStatus, onPr
   const doUnpublish = () => {
     if (!scadaId || publishBusy) return
     unpublish.mutate(scadaId)
+  }
+
+  const startEditTitle = () => {
+    setEditingTitle(scadaName || '')
+    setIsEditingTitle(true)
+  }
+
+  const saveTitle = () => {
+    if (!scadaId || !editingTitle.trim()) {
+      setIsEditingTitle(false)
+      return
+    }
+    if (editingTitle.trim() === scadaName) {
+      setIsEditingTitle(false)
+      return
+    }
+    updateInfo.mutate(
+      { id: scadaId, body: { scada_name: editingTitle.trim() } },
+      { onSuccess: () => setIsEditingTitle(false) }
+    )
+  }
+
+  const cancelEditTitle = () => {
+    setIsEditingTitle(false)
+    setEditingTitle('')
   }
 
   return (
@@ -129,13 +166,47 @@ export default function EditorHeader({ scadaName, scadaCode, publishStatus, onPr
 
       {/* Title + dirty */}
       {scadaName && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, maxWidth: 180 }}>
-          <span style={{
-            fontSize: 12, color: 'var(--text-secondary)',
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>
-            {scadaName}
-          </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, maxWidth: 240 }}>
+          {isEditingTitle ? (
+            <input
+              ref={titleInputRef}
+              value={editingTitle}
+              onChange={(e) => setEditingTitle(e.target.value)}
+              onBlur={saveTitle}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') saveTitle()
+                if (e.key === 'Escape') cancelEditTitle()
+              }}
+              disabled={updateInfo.isPending}
+              style={{
+                fontSize: 12, color: 'var(--text-primary)',
+                background: 'var(--bg-surface)',
+                border: '1px solid var(--accent)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '2px 6px',
+                outline: 'none',
+                minWidth: 120,
+                maxWidth: 180,
+              }}
+            />
+          ) : (
+            <span
+              onClick={startEditTitle}
+              title="点击修改标题"
+              style={{
+                fontSize: 12, color: 'var(--text-secondary)',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                cursor: 'pointer',
+                padding: '2px 4px',
+                borderRadius: 'var(--radius-sm)',
+                transition: 'background var(--duration-fast)',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-elevated)' }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+            >
+              {scadaName}
+            </span>
+          )}
           {isDirty && (
             <span style={{
               width: 6, height: 6, borderRadius: '50%',
@@ -249,6 +320,20 @@ export default function EditorHeader({ scadaName, scadaCode, publishStatus, onPr
           </Button>
         </Tooltip>
       )}
+
+      {/* Global context — 仅加载数据时可用 */}
+      <Tooltip content={liveDataOn ? '全局上下文' : '开启「加载数据」后可查看全局上下文'}>
+        <Button
+          size="icon"
+          variant="ghost"
+          onClick={toggleGlobalContext}
+          disabled={!liveDataOn}
+          aria-label="全局上下文"
+          style={globalContextOpen ? { color: 'var(--accent)', background: 'var(--accent-muted)' } : undefined}
+        >
+          <Icon d={Icons.Globe} size={13} />
+        </Button>
+      </Tooltip>
 
       {/* Save */}
       <button

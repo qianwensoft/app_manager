@@ -1,7 +1,7 @@
 import type { CanvasElement, PointBinding } from '@/types'
 import type { PointDataMap } from '@/hooks/useStompPointData'
 import { applyFormatter } from '@/hooks/useInterfaceBindingData'
-import { IFACE_GLOBAL_PREFIX, readIfaceField, resolveTemplateValue, toNumber } from './bindingData'
+import { IFACE_GLOBAL_PREFIX, readIfaceField, resolveTemplateValue, resolveExtDataReference, toNumber } from './bindingData'
 import { formatDate, formatDateTimeValue } from './dateTimeFormat'
 import { evaluateExpression, interpolateExpression, type ExpressionScope } from './expression'
 
@@ -126,6 +126,42 @@ function resolveRawBoundValue(el: CanvasElement, pointData: PointDataMap): unkno
       return key ? pointData[key] : undefined
     }
   }
+}
+
+/**
+ * 解析元件「内容」文本（text/button 静态内容或绑定结果）为最终展示字符串。
+ *
+ * 处理顺序：
+ *  1. 取原始文本：有 pointBinding 走 resolveElementDisplayValue（含模板/格式化），
+ *     否则用 el.text。
+ *  2. 解析扩展数据引用：{{ext:key}} / {{el:名:键}} / {{comp:名:路径}} / {{global:路径}}。
+ *  3. 若仍含 `${...}` 表达式，且提供了 scope，则做表达式插值（可用 el()/C()/G()/P()/V()、
+ *     Number()、算术运算、时间/工具函数等）。这样纯文本「内容」框也能直接写表达式，
+ *     无需切到接口模式的「文本模板」。
+ */
+export function resolveElementText(
+  el: CanvasElement,
+  pointData: PointDataMap,
+  allElements: CanvasElement[],
+  scope?: ExpressionScope,
+): string {
+  // 内容框显式表达式优先：当 el.text 写了 ${...} 时，它是作者意图的最终内容，
+  // 绑定/接口数据仅作为作用域供表达式取用（el()/V()/components 等）。
+  // 否则（无内容表达式）才用绑定解析值（接口字段映射/文本模板/日期时间/点位）。
+  // 修复：元件同时配置了接口绑定与内容表达式时，绑定的单值会在数据到达后
+  // 覆盖掉表达式结果（表现为“刚开始显示总和，接着仅显示一个数字”）。
+  const hasContentExpr = !!scope && typeof el.text === 'string' && el.text.includes('${')
+  const raw = hasContentExpr
+    ? el.text
+    : (el.pointBinding || el.dateTime?.enabled)
+      ? resolveElementDisplayValue(el, pointData, scope)
+      : el.text
+  const referenced = resolveExtDataReference(raw ?? '', el, allElements)
+  if (scope && referenced.includes('${')) {
+    const out = interpolateExpression(referenced, scope)
+    return out === undefined || out === null ? '' : String(out)
+  }
+  return referenced
 }
 
 /** 解析元件显示文本（text/button 等） */

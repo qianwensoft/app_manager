@@ -16,42 +16,9 @@
     <div class="main">
       <div class="toolbar">
         <el-input v-model="filters.search_key" placeholder="搜索工单号/业务单号/标题/其他编码" clearable style="width:280px" @keyup.enter="reload" @clear="reload" />
-        <el-select v-model="filters.status" placeholder="状态" clearable style="width:130px" @change="reload">
-          <el-option v-for="s in statusOptions" :key="s.value" :label="s.label" :value="s.value" />
-        </el-select>
-        <el-input v-model="filters.device_id" placeholder="设备ID" clearable style="width:120px" @keyup.enter="reload" />
-        <el-input v-model="filters.business_no" placeholder="业务单号" clearable style="width:150px" @keyup.enter="reload" />
-        <el-select
-          v-model="filters.tags"
-          multiple
-          filterable
-          collapse-tags
-          collapse-tags-tooltip
-          clearable
-          placeholder="标签"
-          style="width:200px"
-          @change="onTagFilter"
-        >
-          <el-option
-            v-for="t in tagDict"
-            :key="t.code"
-            :label="t.name"
-            :value="t.code"
-          >
-            <span :style="t.color ? `display:inline-block;width:8px;height:8px;border-radius:50%;background:${t.color};margin-right:6px` : ''" />
-            {{ t.name }}
-          </el-option>
-        </el-select>
-        <el-date-picker
-          v-model="filters.createdRange"
-          type="datetimerange"
-          range-separator="-"
-          start-placeholder="创建开始"
-          end-placeholder="创建结束"
-          style="width:360px"
-          @change="reload"
-          clearable
-        />
+        <el-button :icon="advancedFiltersVisible ? 'el-icon-arrow-up' : 'el-icon-arrow-down'" @click="advancedFiltersVisible = !advancedFiltersVisible" class="filter-toggle-btn">
+          {{ advancedFiltersVisible ? '收起筛选' : '更多筛选' }}
+        </el-button>
         <el-button @click="reload">查询</el-button>
         <el-button type="success" @click="showStatistics">统计报告</el-button>
         <el-button type="primary" :loading="exporting" @click="doExport">导出</el-button>
@@ -73,6 +40,48 @@
         <el-button v-if="!portalMode" @click="$router.push('/work-orders/archived')">已归档</el-button>
         <el-button v-if="!portalMode" @click="$router.push('/work-orders/settings')">工单设置</el-button>
       </div>
+
+      <!-- 高级筛选面板（可折叠，默认收起） -->
+      <el-collapse-transition>
+        <div v-show="advancedFiltersVisible" class="advanced-filters">
+          <el-select v-model="filters.status" placeholder="状态" clearable style="width:130px" @change="reload">
+            <el-option v-for="s in statusOptions" :key="s.value" :label="s.label" :value="s.value" />
+          </el-select>
+          <el-input v-model="filters.device_id" placeholder="设备ID" clearable style="width:120px" @keyup.enter="reload" />
+          <el-input v-model="filters.business_no" placeholder="业务单号" clearable style="width:150px" @keyup.enter="reload" />
+          <el-select
+            v-model="filters.tags"
+            multiple
+            filterable
+            collapse-tags
+            collapse-tags-tooltip
+            clearable
+            placeholder="标签"
+            style="width:200px"
+            @change="onTagFilter"
+          >
+            <el-option
+              v-for="t in tagDict"
+              :key="t.code"
+              :label="t.name"
+              :value="t.code"
+            >
+              <span :style="t.color ? `display:inline-block;width:8px;height:8px;border-radius:50%;background:${t.color};margin-right:6px` : ''" />
+              {{ t.name }}
+            </el-option>
+          </el-select>
+          <el-date-picker
+            v-model="filters.createdRange"
+            type="datetimerange"
+            range-separator="-"
+            start-placeholder="创建开始"
+            end-placeholder="创建结束"
+            style="width:360px"
+            @change="reload"
+            clearable
+          />
+        </div>
+      </el-collapse-transition>
 
       <!-- 列表视图 -->
       <template v-if="view === 'list'">
@@ -335,6 +344,7 @@ const limit = ref(20)
 const loading = ref(false)
 const exporting = ref(false)
 const view = ref('list')
+const advancedFiltersVisible = ref(false)
 const filters = ref({ status: '', type_code: '', device_id: '', business_no: '', tags: [], search_key: '', createdRange: null })
 const statsDialog = ref(null)
 
@@ -521,12 +531,23 @@ const buildQuery = () => {
   return q
 }
 const syncQuery = () => {
-  router.replace({ query: buildQuery() }).catch(() => {})
+  // 保留资源中心前台上下文参数（node / agg），避免被筛选同步清除后退回概览。
+  const preserved = {}
+  if (route.query.node) preserved.node = route.query.node
+  if (route.query.agg) preserved.agg = route.query.agg
+  router.replace({ query: { ...preserved, ...buildQuery() } }).catch(() => {})
 }
 // 从地址栏还原（首次进入 / 后退前进）。
+const isMobile = () => window.innerWidth <= 768
+
 const restoreFromQuery = () => {
   const q = route.query
-  view.value = q.view === 'board' ? 'board' : 'list'
+  if (q.view === 'board' || q.view === 'list') {
+    view.value = q.view
+  } else {
+    // 移动端默认看板，桌面端默认列表
+    view.value = isMobile() ? 'board' : 'list'
+  }
   filters.value.status = q.status || ''
   filters.value.device_id = q.device_id || ''
   filters.value.business_no = q.business_no || ''
@@ -607,6 +628,7 @@ const load = async () => {
       if (filters.value.type_code) params.type_code = filters.value.type_code
       if (filters.value.tags.length) params.tags = filters.value.tags.join(',')
       if (filters.value.search_key) params.search_key = filters.value.search_key
+      if (portalMode.value) params.portal = 1
       if (filters.value.createdRange && filters.value.createdRange.length === 2) {
         params.created_start = filters.value.createdRange[0].toISOString()
         params.created_end = filters.value.createdRange[1].toISOString()
@@ -639,6 +661,7 @@ const loadBoard = async () => {
   if (filters.value.device_id) params.device_id = filters.value.device_id
   if (filters.value.tags.length) params.tags = filters.value.tags.join(',')
   if (filters.value.search_key) params.search_key = filters.value.search_key
+  if (portalMode.value) params.portal = 1
   if (filters.value.createdRange && filters.value.createdRange.length === 2) {
     params.created_start = filters.value.createdRange[0].toISOString()
     params.created_end = filters.value.createdRange[1].toISOString()
@@ -656,9 +679,10 @@ const loadBoard = async () => {
 const loadTypeCounts = async () => {
   // 各类型计数 + 未分类计数（用 total，limit=1）
   const counts = {}
+  const extra = portalMode.value ? { portal: 1 } : {}
   await Promise.all([
     ...types.value.map(async t => {
-      const r = await getWorkOrders({ type_code: t.code, limit: 1 })
+      const r = await getWorkOrders({ type_code: t.code, limit: 1, ...extra })
       counts[t.code] = r.total || 0
     })
   ])
@@ -899,6 +923,8 @@ onUnmounted(() => {
 .main { flex: 1; min-width: 0; }
 .toolbar { display: flex; gap: 10px; margin-bottom: 12px; align-items: center; flex-wrap: wrap; }
 .spacer { flex: 1; }
+/* 高级筛选展开面板 */
+.advanced-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 0 12px; border-bottom: 1px solid #ebeef5; margin-bottom: 10px; }
 .pager { margin-top: 12px; justify-content: flex-end; }
 .board { display: flex; flex-direction: column; gap: 12px; }
 .board-cols { display: flex; gap: 12px; align-items: stretch; flex: 1; min-height: 0; }
@@ -945,5 +971,46 @@ onUnmounted(() => {
 .board-card-line.board-card-title { font-size: 14px; color: #303133; margin-top: 0; }
 @media (prefers-reduced-motion: reduce) {
   .board-card, .wo-tag-clickable { transition: none; }
+}
+
+/* ── 移动端适配 ─────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .wo-layout { flex-direction: column; gap: 12px; }
+  /* 类型筛选改为顶部横向滚动 */
+  .side {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid #ebeef5;
+    padding-right: 0;
+    padding-bottom: 8px;
+  }
+  .side-title { padding-left: 0; }
+  .side :deep(.el-menu) {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .side :deep(.el-menu-item) { flex-shrink: 0; }
+  /* 工具栏紧凑布局，更多筛选按钮在移动端默认可见 */
+  .toolbar { gap: 8px; }
+  .toolbar > * { flex: 1 1 auto; }
+  .toolbar :deep(.el-input),
+  .toolbar :deep(.el-date-editor) { width: 100% !important; min-width: 0; }
+  /* 高级筛选项占满整行 */
+  .advanced-filters { padding: 8px 0 10px; gap: 8px; }
+  .advanced-filters > * { width: 100% !important; }
+  .spacer { display: none; }
+  /* 看板三列改纵向堆叠，避免横向溢出 */
+  .board-cols { flex-direction: column; }
+  .board-list { min-height: 120px; }
+  /* 全屏看板在移动端也纵向堆叠、可整体滚动 */
+  .board-fullscreen { padding: 10px; overflow-y: auto; }
+  .board-fullscreen .board-cols { height: auto; }
+  .board-fullscreen .board-col { overflow: visible; }
+  /* 列表表格横向滚动 */
+  .main :deep(.el-table) { overflow-x: auto; }
+  .pager { justify-content: center; }
+  .pager :deep(.el-pagination) { flex-wrap: wrap; }
 }
 </style>

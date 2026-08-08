@@ -1,15 +1,23 @@
 /**
- * 触发源编辑器：配置工作流的 6 种触发源。
+ * 触发源编辑器：配置工作流的触发源（含 Agent 扫码）。
  */
+import { useState, useEffect } from 'react'
 import type { WorkflowSource } from '@/types/workflow'
 import type { CanvasElement } from '@/types'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
+import http from '@/api/http'
 
 interface Props {
   source: WorkflowSource
   onChange: (s: WorkflowSource) => void
   elements: CanvasElement[]
+}
+
+interface Device {
+  id: number
+  name: string
+  serial: string
 }
 
 const KIND_LABELS: Record<WorkflowSource['kind'], string> = {
@@ -21,6 +29,7 @@ const KIND_LABELS: Record<WorkflowSource['kind'], string> = {
   canvas_exit: '画布退出',
   custom_event: '自定义事件',
   context_change: '上下文变量变化',
+  agent_scan: 'Agent 扫码触发',
 }
 
 const labelStyle: React.CSSProperties = { display: 'block', fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }
@@ -36,11 +45,22 @@ function defaultForKind(kind: WorkflowSource['kind']): WorkflowSource {
     case 'canvas_exit': return { kind }
     case 'custom_event': return { kind, eventName: '' }
     case 'context_change': return { kind, scope: 'global', key: '' }
+    case 'agent_scan': return { kind, scanType: 'any' }
   }
 }
 
 export default function SourceEditor({ source, onChange, elements }: Props) {
   const kind = source.kind
+  const [devices, setDevices] = useState<Device[]>([])
+
+  useEffect(() => {
+    if (source.kind === 'agent_scan') {
+      http.get<{ data: Device[] }>('/devices').then((res: any) => {
+        setDevices(res.data || [])
+      }).catch(() => setDevices([]))
+    }
+  }, [source.kind])
+
   return (
     <div>
       <div style={rowStyle}>
@@ -131,6 +151,32 @@ export default function SourceEditor({ source, onChange, elements }: Props) {
 
       {(source.kind === 'canvas_enter' || source.kind === 'canvas_exit') && (
         <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>画布{source.kind === 'canvas_enter' ? '进入' : '退出'}时触发，无需额外配置。</div>
+      )}
+
+      {source.kind === 'agent_scan' && (
+        <>
+          <div style={rowStyle}>
+            <label style={labelStyle}>设备（留空=监听所有设备）</label>
+            <Select value={source.deviceId ?? ''} onChange={(e) => onChange({ ...source, deviceId: e.target.value === '' ? undefined : Number(e.target.value) })}>
+              <option value="">（所有设备）</option>
+              {devices.map((d) => (
+                <option key={d.id} value={d.id}>{d.name || d.serial}（{d.id}）</option>
+              ))}
+            </Select>
+          </div>
+          <div style={rowStyle}>
+            <label style={labelStyle}>扫码类型</label>
+            <Select value={source.scanType ?? 'any'} onChange={(e) => onChange({ ...source, scanType: e.target.value as 'qrcode' | 'barcode' | 'nfc' | 'any' })}>
+              <option value="any">任意类型</option>
+              <option value="qrcode">二维码 QR Code</option>
+              <option value="barcode">条码 Barcode</option>
+              <option value="nfc">NFC</option>
+            </Select>
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: -6 }}>
+            扫码值通过 $event.value 访问，设备 ID 通过 $event.device_id 访问
+          </div>
+        </>
       )}
     </div>
   )

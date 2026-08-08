@@ -29,6 +29,28 @@ describe('evaluateExpression', () => {
     expect(evaluateExpression("el('e1', 'text')", { elements: [el] })).toBe('hello')
   })
 
+  it("el(name,'text'|'value') prefers the components snapshot (数据绑定 result) over raw static text", () => {
+    const el: CanvasElement = {
+      id: 'e1', type: 'text', name: '库存-1序', x: 0, y: 0, width: 1, height: 1,
+      rotation: 0, visible: true, locked: false, zIndex: 0, text: '静态占位',
+    }
+    const components = { '库存-1序': { value: 42, text: '42 件' }, e1: { value: 42, text: '42 件' } }
+    // text → 快照展示值（含格式化）
+    expect(evaluateExpression("el('库存-1序', 'text')", { elements: [el], components })).toBe('42 件')
+    // value → 快照原始值（适合参与数值运算）
+    expect(evaluateExpression("Number(el('库存-1序', 'value'))", { elements: [el], components })).toBe(42)
+    // 无快照时回退到元件静态字段
+    expect(evaluateExpression("el('库存-1序', 'text')", { elements: [el] })).toBe('静态占位')
+  })
+
+  it('sums two bound components via el(...,value)', () => {
+    const a: CanvasElement = { id: 'a', type: 'text', name: '库存-1序', x: 0, y: 0, width: 1, height: 1, rotation: 0, visible: true, locked: false, zIndex: 0, text: '' }
+    const b: CanvasElement = { id: 'b', type: 'text', name: '库存-2序', x: 0, y: 0, width: 1, height: 1, rotation: 0, visible: true, locked: false, zIndex: 0, text: '' }
+    const components = { '库存-1序': { value: 10, text: '10' }, '库存-2序': { value: 15, text: '15' } }
+    const expr = "Number(el('库存-1序','value')) + Number(el('库存-2序','value'))"
+    expect(evaluateExpression(expr, { elements: [a, b], components })).toBe(25)
+  })
+
   it('reads url params', () => {
     expect(evaluateExpression("url('id')", { urlSearch: '?id=abc' })).toBe('abc')
   })

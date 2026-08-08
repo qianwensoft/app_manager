@@ -35,9 +35,17 @@ export function useStompPointData({ scadaCode, onData, enabled = true, shareToke
             if (iface?.binding_id) {
               const rows = iface.rows
               const first = Array.isArray(rows) ? rows[0] : rows
+              const fields = Object.entries(first && typeof first === 'object' ? first as Record<string, unknown> : {})
+              // binding_id 即元件 id：写入元件专属命名空间 __ifx_<id>__<key>，
+              // 避免多个 stomp 接口绑定的元件先后推送时互相覆盖全局 __iface_ 键。
+              // 同时保留全局 __iface_ 键作向后兼容（单绑定/旧读取路径）。
+              const scopedPrefix = `__ifx_${iface.binding_id}__`
               onDataRef.current({
                 ...data,
-                ...Object.fromEntries(Object.entries(first && typeof first === 'object' ? first as Record<string, unknown> : {}).map(([key, value]) => [`__iface_${key}`, value])),
+                ...Object.fromEntries(fields.flatMap(([key, value]) => [
+                  [`${scopedPrefix}${key}`, value],
+                  [`__iface_${key}`, value],
+                ])),
               })
             } else {
               onDataRef.current(data)

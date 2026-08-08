@@ -134,6 +134,10 @@ fun collectDeviceInfoData(context: Context): DeviceInfoData {
         androidSerial = DeviceMachineId.get(context),
         foregroundPackage = foregroundPackage,
         x5KernelVersion = x5Version,
-        x5KernelState = x5State
+        x5KernelState = x5State,
+        mdmEnabled = context.getSharedPreferences("mdm_prefs", Context.MODE_PRIVATE)
+            .getBoolean("mdm_enabled", false),
+        enterpriseCode = context.getSharedPreferences("mdm_prefs", Context.MODE_PRIVATE)
+            .getString("enterprise_code", "") ?: ""
     )
 }

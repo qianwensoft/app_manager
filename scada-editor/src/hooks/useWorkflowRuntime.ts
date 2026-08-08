@@ -2,15 +2,17 @@
  * 工作流运行时接入 Hook。
  *
  * 职责：
- *  - 依据传入的 workflows（含全局/画布作用域）构建引擎，注册 6 种触发源
+ *  - 依据传入的 workflows（含全局/画布作用域）构建引擎，注册触发源（含 agent_scan）
  *  - 维护运行时覆盖层：属性覆盖（elementOverrides）+ 绑定覆盖（pointOverrides）
  *  - 把 pointData 变化喂给引擎（point_change / condition 边沿）
+ *  - 订阅 Agent JSBridge 扫码事件（优先）或 STOMP /topic/device-events（降级）
  *  - 挂载/卸载时触发 canvas_enter / canvas_exit
  *  - 暴露 triggerComponent / runWorkflowById 供组件事件与 trigger-workflow 动作调用
  *
  * 返回合成后的 pointData（叠加绑定覆盖）与 elements（叠加属性覆盖），供 CanvasViewer 直接消费。
  */
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { Client } from '@stomp/stompjs'
 import type { CanvasElement } from '@/types'
 import type { ScadaWorkflow, WorkflowLib } from '@/types/workflow'
 import type { PointDataMap } from '@/hooks/useStompPointData'
@@ -21,6 +23,7 @@ import { createContextStore } from '@/runtime/workflow/contextStore'
 import { loadLibs } from '@/runtime/workflow/libLoader'
 import type { WorkflowEngineDeps } from '@/runtime/workflow/types'
 import { makeCallInterface } from '@/runtime/workflow/callInterface'
+import '@/runtime/scadaEventBus'  // 导入副作用：注册 window.scadaEventBus
 
 interface Options {
   /** 当前画布 id（用于按 canvas 作用域过滤工作流） */
@@ -139,6 +142,75 @@ export function useWorkflowRuntime(opts: Options): Result {
   useEffect(() => {
     runtimeRef.current?.notifyPointData(mergedPointData)
   }, [mergedPointData])
+
+  // 订阅设备扫码事件（agent_scan 触发源），支持三种方案自动选择
+  useEffect(() => {
+    if (!enabled) return
+    // 检查是否有 agent_scan 类型的工作流
+    const hasAgentScanWorkflow = activeWorkflows.some((w) => w.source.kind === 'agent_scan')
+    if (!hasAgentScanWorkflow) return
+
+    // 通用事件处理器
+    const handler = (data: { value: string; event_type: string; device_id: string | number }) => {
+      // 解析 device_id（可能是字符串或数字）
+      const deviceId = typeof data.device_id === 'string' ? parseInt(data.device_id, 10) || 0 : data.device_id
+      runtimeRef.current?.triggerAgentScan({
+        device_id: deviceId,
+        event_type: data.event_type,
+        value: data.value,
+      })
+    }
+
+    // 方案 1: Agent WebView JSBridge（优先，无需网络，延迟 <10ms）
+    // 方案 2: Web Serial API（桌面浏览器串口扫码，无需网络）
+    // 两者都通过 window.scadaEventBus 派发事件
+    if (typeof window !== 'undefined' && (window as any).scadaEventBus) {
+      ;(window as any).scadaEventBus.on('agent_scan', handler)
+      return () => {
+        ;(window as any).scadaEventBus.off('agent_scan', handler)
+      }
+    }
+
+    // 方案 3: STOMP WebSocket（降级，用于浏览器预览且未连接串口）
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+    const wsUrl = shareToken
+      ? `${proto}://${window.location.host}/ws/stomp-scada?share_token=${encodeURIComponent(shareToken)}`
+      : `${proto}://${window.location.host}/ws/stomp${(() => { const t = localStorage.getItem('token') ?? ''; return t ? `?token=${t}` : '' })()}`
+
+    const client = new Client({
+      brokerURL: wsUrl,
+      reconnectDelay: 5000,
+      onConnect: () => {
+        client.subscribe('/topic/device-events', (msg) => {
+          try {
+            const event = JSON.parse(msg.body) as { device_id: number; event_type: string; event_data: string }
+            // 解析 event_data 提取扫码值
+            let scanValue = ''
+            try {
+              const data = JSON.parse(event.event_data || '{}')
+              scanValue = data.value || data.barcode || data.data || ''
+            } catch {
+              scanValue = event.event_data || ''
+            }
+            runtimeRef.current?.triggerAgentScan({
+              device_id: event.device_id,
+              event_type: event.event_type,
+              value: scanValue,
+            })
+          } catch (e) {
+            console.warn('[workflow] device-events parse failed', e)
+          }
+        })
+      },
+      onStompError: () => { /* silently ignore */ },
+      onWebSocketError: () => { /* silently ignore */ },
+    })
+
+    client.activate()
+    return () => {
+      client.deactivate()
+    }
+  }, [enabled, activeWorkflows, shareToken])
 
   const triggerComponent = useCallback((elementId: string, event: 'click' | 'dblclick' | 'hover') => {
     runtimeRef.current?.triggerComponent(elementId, event)

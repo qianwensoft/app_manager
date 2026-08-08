@@ -3,6 +3,7 @@ package api
 import (
 	"app-manager/adb"
 	"app-manager/agent"
+	"app-manager/auth"
 	"app-manager/config"
 	"app-manager/database"
 	"app-manager/models"
@@ -72,7 +73,28 @@ func ListDevices(c *gin.Context) {
 	q := database.DB
 	if c.GetString("role") != "admin" {
 		uid := c.GetUint("user_id")
-		q = q.Where("user_id = ?", uid)
+		if c.Query("portal") == "1" {
+			// 资源中心前台：按资源角色授权的设备范围过滤（聚合用户全部设备角色），
+			// 覆盖默认的归属过滤，使列表口径与概览统计（GetPortalStats）一致。
+			perms := auth.ResolveUserResourcePerms(uid)
+			idSet := map[uint]bool{}
+			for _, n := range perms.DeviceNodes {
+				for _, id := range expandDeviceScope(n.GroupIDs, n.DeviceIDs) {
+					idSet[id] = true
+				}
+			}
+			if len(idSet) == 0 {
+				c.JSON(http.StatusOK, gin.H{"data": []any{}})
+				return
+			}
+			ids := make([]uint, 0, len(idSet))
+			for id := range idSet {
+				ids = append(ids, id)
+			}
+			q = q.Where("id IN ?", ids)
+		} else {
+			q = q.Where("user_id = ?", uid)
+		}
 	}
 	if sk := strings.TrimSpace(c.Query("search_key")); sk != "" {
 		like := "%" + sk + "%"

@@ -45,3 +45,25 @@ mqtt:
   password: ""
   client_id: app-manager
   qos: 1
+
+# OnlyOffice Document Server 集成（按需启用）。
+# 不启用时（enabled: false），文档管理中的 word/excel/ppt 文档显示「OnlyOffice 未启用」提示。
+# 启用后需确保：
+#   1. Document Server 已部署并能响应 healthcheck；
+#   2. internal_url 与 public_url 按网络拓扑正确填写（通常公网/内网分别填）；
+#   3. Document Server 的 local.json 中 services.CoEditingConfig.secret 与本 jwt_secret 一致。
+onlyoffice:
+  enabled: false
+  internal_url: ""           # Go 服务访问 DS 的地址，如 http://127.0.0.1:9000
+  public_url: ""             # 浏览器访问 DS 的地址，如 https://docs.example.com
+  jwt_secret: ""             # 与 Document Server services.CoEditingConfig.secret 一致；留空则不签 token（DS 端需关闭 JWT 校验）
+  lang: zh-CN                # 编辑器界面语言
+  default_mode: edit         # 默认编辑器模式 edit | view
+  autosave: true             # 编辑过程中自动保存快照
+  forcesave: true            # 保存按钮触发后必写入新版本
+  allow_print: true          # 是否允许打印/导出 PDF
+  allow_comment: true        # 是否允许评论与协同批注
+  custom_logo_url: ""        # 自定义 logo 跳转链接（留空使用 DS 默认）
+  custom_logo_image: ""      # 自定义 logo 图片 URL（留空使用 DS 默认）
+  download_timeout_sec: 60   # 拉取 OnlyOffice 回调结果文件超时（秒）
+  file_token_ttl_sec: 86400  # ds_file 短期 token 有效期（秒），默认 24 小时

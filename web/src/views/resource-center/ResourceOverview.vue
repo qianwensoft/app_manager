@@ -9,7 +9,11 @@
     </div>
 
     <div class="rc-ov-grid">
-      <div class="rc-stat-card rc-stat-device">
+      <div 
+        class="rc-stat-card rc-stat-device" 
+        :class="{ clickable: stats.device.total > 0 }"
+        @click="goToDevices"
+      >
         <div class="rc-stat-icon"><el-icon><Cpu /></el-icon></div>
         <div class="rc-stat-body">
           <div class="rc-stat-label">授权设备数</div>
@@ -21,7 +25,11 @@
         </div>
       </div>
 
-      <div class="rc-stat-card rc-stat-wo">
+      <div 
+        class="rc-stat-card rc-stat-wo"
+        :class="{ clickable: stats.workorder.total > 0 }"
+        @click="goToWorkOrders"
+      >
         <div class="rc-stat-icon"><el-icon><Tickets /></el-icon></div>
         <div class="rc-stat-body">
           <div class="rc-stat-label">相关工单数</div>
@@ -62,10 +70,10 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, inject } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh, Cpu, Tickets, Grid } from '@element-plus/icons-vue'
-import { getPortalStats } from '@/api/portal'
+import { getPortalStats, getPortalResourceTree } from '@/api/portal'
 
 const loading = ref(false)
 const isAdmin = ref(false)
@@ -74,6 +82,12 @@ const stats = ref({
   workorder: { total: 0, open: 0, in_progress: 0, closed: 0 },
   node_counts: {}
 })
+const resourceTree = ref([])
+
+// 注入父组件提供的方法
+const navigateToNode = inject('navigateToNode', null)
+// 聚合多角色授权范围后跳转（点击概览卡片时优先使用）。
+const navigateToAggregate = inject('navigateToAggregate', null)
 
 const NODE_LABELS = {
   group: '分组', device_mgmt: '设备管理', workorder_mgmt: '工单管理',
@@ -97,16 +111,63 @@ const barWidth = (count) => {
   return `${Math.round((count / max) * 100)}%`
 }
 
+// 查找第一个指定类型的节点
+const findFirstNodeByType = (nodeType) => {
+  const traverse = (nodes) => {
+    for (const node of nodes) {
+      if (node.node_type === nodeType) {
+        return node
+      }
+      if (node.children?.length) {
+        const found = traverse(node.children)
+        if (found) return found
+      }
+    }
+    return null
+  }
+  return traverse(resourceTree.value)
+}
+
+const goToDevices = () => {
+  if (stats.value.device.total === 0) return
+  // 聚合全部授权设备范围后进入设备管理，与概览统计口径一致。
+  if (navigateToAggregate) {
+    navigateToAggregate('device_mgmt')
+    return
+  }
+  const node = findFirstNodeByType('device_mgmt')
+  if (node && navigateToNode) {
+    navigateToNode(node)
+  }
+}
+
+const goToWorkOrders = () => {
+  if (stats.value.workorder.total === 0) return
+  // 聚合全部授权工单类型后进入工单管理，与概览统计口径一致。
+  if (navigateToAggregate) {
+    navigateToAggregate('workorder_mgmt')
+    return
+  }
+  const node = findFirstNodeByType('workorder_mgmt')
+  if (node && navigateToNode) {
+    navigateToNode(node)
+  }
+}
+
 const load = async () => {
   loading.value = true
   try {
-    const res = await getPortalStats()
-    isAdmin.value = !!res.is_admin
+    const [statsRes, treeRes] = await Promise.all([
+      getPortalStats(),
+      getPortalResourceTree()
+    ])
+    isAdmin.value = !!statsRes.is_admin
     stats.value = {
-      device: res.device || { total: 0, online: 0, offline: 0 },
-      workorder: res.workorder || { total: 0, open: 0, in_progress: 0, closed: 0 },
-      node_counts: res.node_counts || {}
+      device: statsRes.device || { total: 0, online: 0, offline: 0 },
+      workorder: statsRes.workorder || { total: 0, open: 0, in_progress: 0, closed: 0 },
+      node_counts: statsRes.node_counts || {}
     }
+    resourceTree.value = treeRes.data || []
   } catch (e) {
     ElMessage.error('加载概览统计失败')
   } finally {
@@ -123,7 +184,9 @@ onMounted(load)
 .rc-ov-title { font-size: 20px; font-weight: 700; color: #1d2935; }
 .rc-ov-sub { font-size: 13px; color: #909399; margin-top: 4px; }
 .rc-ov-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
-.rc-stat-card { display: flex; gap: 16px; padding: 20px; background: #fff; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+.rc-stat-card { display: flex; gap: 16px; padding: 20px; background: #fff; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,.06); transition: all 0.3s; }
+.rc-stat-card.clickable { cursor: pointer; }
+.rc-stat-card.clickable:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,.12); }
 .rc-stat-icon { width: 56px; height: 56px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 28px; color: #fff; flex-shrink: 0; }
 .rc-stat-device .rc-stat-icon { background: linear-gradient(135deg, #409eff, #2b74d4); }
 .rc-stat-wo .rc-stat-icon { background: linear-gradient(135deg, #67c23a, #4c9c2e); }

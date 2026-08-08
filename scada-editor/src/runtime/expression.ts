@@ -17,7 +17,7 @@
  */
 import type { CanvasElement, CustomFunctionDef, GlobalParam } from '@/types'
 import { formatDate, parseAnyToDate } from './dateTimeFormat'
-import { getPath, parseBindingValue } from './bindingData'
+import { getPath, parseBindingValue, resolveExtDataReference } from './bindingData'
 import type { PointDataMap } from '@/hooks/useStompPointData'
 
 export interface ExpressionScope {
@@ -35,6 +35,10 @@ export interface ExpressionScope {
   urlSearch?: string
   /** 自定义函数定义 */
   customFunctions?: CustomFunctionDef[]
+  /** 全局上下文快照（$global / global.*，与工作流全局上下文一致） */
+  global?: Record<string, unknown>
+  /** 组件快照映射（components.<名称|id>.*，含 params/ext/value/chart） */
+  components?: Record<string, unknown>
   /** 额外注入作用域的变量（如转换表达式的原始值 v） */
   extra?: Record<string, unknown>
 }
@@ -51,6 +55,9 @@ function fmt(d: Date, pattern: string, locale: 'zh' | 'en' = 'zh'): string | num
   if (pattern === 'X') return Math.floor(d.getTime() / 1000)
   return formatDate(d, pattern, locale)
 }
+
+/** el() 嵌套解析最大递归深度（防止 extData 相互引用形成环导致栈溢出） */
+const MAX_EL_DEPTH = 8
 
 const startOf = (d: Date) => { d.setHours(0, 0, 0, 0); return d }
 const endOf = (d: Date) => { d.setHours(23, 59, 59, 999); return d }
@@ -160,17 +167,70 @@ function buildHelpers(scope: ExpressionScope) {
   const obj = scope.obj ?? {}
   const urlSearch = scope.urlSearch ?? (typeof window !== 'undefined' ? window.location.search : '')
 
+  const global = scope.global ?? {}
+  const components = scope.components ?? {}
+
   const P = (key: string) => params[key]
   const V = (path: string) => getPath(point, path)
   const url = (name: string) => new URLSearchParams(urlSearch).get(name) ?? undefined
+  // 当前 el() 递归深度（防止 extData 相互引用形成环）
+  const elDepth = Number((scope.extra as Record<string, unknown> | undefined)?.__elDepth ?? 0)
+  /**
+   * 深度解析 el() 取到的值：若为字符串且含嵌套引用/表达式，则递归求值。
+   *  - `{{ext:key}} / {{el:名:键}} / {{comp:...}} / {{global:...}}`：按 owner 元件解析引用
+   *  - `${...}`：按当前作用域插值（递归深度 +1）
+   * 例：el('全检-配置','extData.max') 的值为
+   *     `${Number(el('1序-配置','extData.max')) + Number(el('2序-配置','extData.max'))}`
+   *     → 递归求值得到数字，供 Number()/比较使用。
+   */
+  const resolveNested = (raw: unknown, owner: CanvasElement): unknown => {
+    if (typeof raw !== 'string') return raw
+    if (elDepth >= MAX_EL_DEPTH) return raw
+    let s = raw
+    if (s.includes('{{')) s = resolveExtDataReference(s, owner, elements)
+    if (typeof s === 'string' && s.includes('${')) {
+      const childScope: ExpressionScope = {
+        ...scope,
+        extra: { ...(scope.extra ?? {}), __elDepth: elDepth + 1 },
+      }
+      return interpolateExpression(s, childScope)
+    }
+    return s
+  }
   const el = (selector: string, property?: string) => {
     const found = elements.find((e) => e.id === selector) ?? elements.find((e) => e.name === selector)
     if (!found) return undefined
-    return property ? getPath(found, property) : found
+    if (!property) return found
+    // 兼容冒号写法（如 extData:max / ext:max），统一转为点路径
+    const path = property.replace(/:/g, '.')
+    // text/value：优先取组件快照（含数据绑定解析后的结果），
+    // 元件上的 text 只是静态回退值，绑定值不在其上。
+    // 两者互相兜底：value 缺失时用 text（反之亦然），以兼容
+    // 仅映射到 series_0 / 仅有 text 展示的接口绑定。
+    if (path === 'text' || path === 'value') {
+      const comps = components as Record<string, unknown>
+      const snap = comps[selector] ?? comps[found.name ?? ''] ?? comps[found.id]
+      if (snap) {
+        const primary = getPath(snap, path)
+        if (primary !== undefined && primary !== null && primary !== '') return resolveNested(primary, found)
+        const alt = getPath(snap, path === 'value' ? 'text' : 'value')
+        if (alt !== undefined && alt !== null && alt !== '') return resolveNested(alt, found)
+      }
+    }
+    // 其它路径（尤其是 extData.*）：值可能是嵌套表达式，递归求值后返回
+    return resolveNested(getPath(found, path), found)
+  }
+  /** 取全局上下文值（点路径），如 G('components.温度计.value') */
+  const G = (path: string) => (path ? getPath(global, path) : global)
+  /** 取组件快照（名称或 id）；prop 可选，如 C('温度计', 'value') / C('温度计', 'ext.unit') */
+  const C = (selector: string, prop?: string) => {
+    const snap = (components as Record<string, unknown>)[selector]
+    if (snap === undefined) return undefined
+    return prop ? getPath(snap, prop) : snap
   }
 
   return {
-    params, point, obj, P, V, url, el,
+    params, point, obj, global, components, P, V, url, el, G, C,
     ctx: { scadaCode: scope.scadaCode ?? '' },
     ...buildTimeApi(),
     ...buildUtilApi(),
@@ -276,6 +336,10 @@ export const BUILTIN_EXPR_COMPLETIONS: ExprCompletion[] = [
   { label: 'P(key)', detail: '取全局参数值', type: 'function' },
   { label: 'V(path)', detail: '取点位数据（点分隔路径）', type: 'function' },
   { label: 'el(name, prop?)', detail: '读组件属性值', type: 'function' },
+  { label: 'global', detail: '全局上下文对象（与工作流一致）', type: 'variable' },
+  { label: 'components', detail: '所有组件快照映射（名称/id）', type: 'variable' },
+  { label: 'G(path)', detail: '取全局上下文值（点路径）', type: 'function' },
+  { label: 'C(name, prop?)', detail: '取组件快照（value/params/ext/chart）', type: 'function' },
   { label: 'url(name)', detail: '取 URL query 参数', type: 'function' },
   { label: 'now(pattern?)', detail: "当前时间；传 'x'/'X' 得时间戳", type: 'function' },
   { label: 'nowMs()', detail: '当前毫秒时间戳', type: 'function' },

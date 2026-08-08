@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect } from 'react'
 import type { CanvasElement, CustomFunctionDef, GlobalParam } from '@/types'
 import type { PointDataMap } from './useStompPointData'
 import { useStompPointData } from './useStompPointData'
@@ -6,6 +6,8 @@ import { useHttpPollingPointData } from './useHttpPollingPointData'
 import { useInterfaceBindingData } from './useInterfaceBindingData'
 import { useTableBindingData } from './useTableBindingData'
 import { resolveGlobalParams } from '@/runtime/expression'
+import { buildComponentsSnapshot } from '@/runtime/workflow/componentsSnapshot'
+import { getGlobalContext } from '@/runtime/workflow/globalContext'
 
 export interface CanvasBindingOptions {
   scadaCode: string
@@ -47,6 +49,13 @@ export function useCanvasBindingData({
     setPointData((prev) => ({ ...prev, ...data }))
   }, [])
 
+  // 组件快照 → 全局上下文（components.<名>.*），与工作流/表达式一致
+  const components = useMemo(() => buildComponentsSnapshot(elements, pointData), [elements, pointData])
+  useEffect(() => {
+    getGlobalContext().set('components', components)
+  }, [components])
+  const globalContext = getGlobalContext().getAll()
+
   useStompPointData({
     scadaCode,
     onData: mergeData,
@@ -69,6 +78,8 @@ export function useCanvasBindingData({
     shareToken,
     globalParams: resolvedGlobalParams,
     customFunctions,
+    globalContext,
+    components,
   })
 
   const tableLiveData = useTableBindingData({
@@ -77,5 +88,5 @@ export function useCanvasBindingData({
     shareToken,
   })
 
-  return { pointData, tableLiveData }
+  return { pointData, tableLiveData, components, globalContext }
 }

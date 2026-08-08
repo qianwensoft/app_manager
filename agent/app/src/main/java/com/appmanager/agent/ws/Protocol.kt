@@ -73,7 +73,11 @@ data class DeviceInfoData(
     /** X5 内核版本号（0 表示未安装） */
     @SerializedName("x5_kernel_version") val x5KernelVersion: Int = 0,
     /** X5 内核状态 */
-    @SerializedName("x5_kernel_state") val x5KernelState: String = ""
+    @SerializedName("x5_kernel_state") val x5KernelState: String = "",
+    /** MDM 模式是否已激活（服务端下发后 Agent 本地持久化） */
+    @SerializedName("mdm_enabled") val mdmEnabled: Boolean = false,
+    /** 关联的企业标识码，MDM 未激活时为空字符串 */
+    @SerializedName("enterprise_code") val enterpriseCode: String = ""
 )
 
 data class ScreenFrameMessage(
@@ -199,4 +203,44 @@ object CommandAction {
     const val LIST_BLUETOOTH_PRINTERS = "list_bluetooth_printers"
     /** 设置默认打印机：data { mac, name, protocol, transport } */
     const val SET_DEFAULT_PRINTER = "set_default_printer"
+
+    // MDM — 基础
+    const val GET_MDM_STATUS = "get_mdm_status"
+    const val GET_NTP_CONFIG = "get_ntp_config"
+    const val SET_NTP_CONFIG = "set_ntp_config"
+    const val SET_MDM_MODE   = "set_mdm_mode"
+
+    // MDM — Device Owner 策略
+    const val MDM_LOCK_NOW              = "mdm_lock_now"
+    const val MDM_WIPE_DEVICE           = "mdm_wipe_device"
+    const val MDM_REBOOT                = "mdm_reboot"
+    const val MDM_SET_CAMERA            = "mdm_set_camera"
+    const val MDM_SET_SCREEN_CAPTURE    = "mdm_set_screen_capture"
+    const val MDM_SET_PASSWORD_POLICY   = "mdm_set_password_policy"
+    const val MDM_SET_USER_RESTRICTION  = "mdm_set_user_restriction"
+    const val MDM_SET_APP_HIDDEN        = "mdm_set_app_hidden"
+    const val MDM_SET_UNINSTALL_BLOCKED = "mdm_set_uninstall_blocked"
+    const val MDM_SET_PERMISSION_GRANT  = "mdm_set_permission_grant"
+    const val MDM_SET_TIME              = "mdm_set_time"
+    const val MDM_SET_TIMEZONE          = "mdm_set_timezone"
+    const val MDM_SET_KIOSK             = "mdm_set_kiosk"
+    const val MDM_GET_POLICY_SNAPSHOT   = "mdm_get_policy_snapshot"
+    const val MDM_REVOKE_DEVICE_OWNER   = "mdm_revoke_device_owner"
+    const val MDM_CLEAR_ALL_POLICIES    = "mdm_clear_all_policies"
+
+    // MDM — Settings.Global/Secure（仅需 WRITE_SECURE_SETTINGS，无需 DO）
+    const val MDM_SET_ADB               = "mdm_set_adb"
+    const val MDM_SET_ANIMATION         = "mdm_set_animation"
+    const val MDM_SET_LOCATION_MODE     = "mdm_set_location_mode"
+    const val MDM_ENABLE_ACCESSIBILITY  = "mdm_enable_accessibility"
+    const val MDM_SET_AUTO_TIME         = "mdm_set_auto_time"
+    const val MDM_SET_WIFI              = "mdm_set_wifi"
+    const val MDM_SET_BLUETOOTH         = "mdm_set_bluetooth"
+    const val MDM_SET_AIRPLANE          = "mdm_set_airplane"
+    const val MDM_SET_STAY_ON           = "mdm_set_stay_on"
+    const val MDM_SET_UNKNOWN_SOURCES   = "mdm_set_unknown_sources"
+    const val MDM_SET_ZEN_MODE          = "mdm_set_zen_mode"
+    const val MDM_SET_GLOBAL_SETTING    = "mdm_set_global_setting"
+    const val MDM_SET_SECURE_SETTING    = "mdm_set_secure_setting"
+    const val MDM_GET_SYSTEM_SETTINGS   = "mdm_get_system_settings"
 }

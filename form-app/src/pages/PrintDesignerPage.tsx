@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
-  Button, Input, InputNumber, Select, Radio, Space, message, Spin, Alert, Tooltip, Divider,
+  Button, Input, InputNumber, Select, Radio, Space, message, Spin, Alert, Tooltip, Divider, Modal, AutoComplete,
 } from 'antd'
 import { authed } from '@/console/api'
 import type {
@@ -148,12 +148,30 @@ export default function PrintDesignerPage() {
         <Button onClick={() => navigate(-1)}>← 返回</Button>
         <span style={{ color: '#64748b', fontSize: 13 }}>页面：{pageTitle}</span>
         <Input style={{ width: 180 }} value={tpl.name} onChange={e => upd({ name: e.target.value })} placeholder="模板名称" />
-        <Select<PrintProtocol> style={{ width: 150 }} value={tpl.protocol} onChange={v => upd({ protocol: v })}
-          options={[
-            { value: 'escpos', label: 'ESC/POS（小票）' },
-            { value: 'cpcl', label: 'CPCL（标签）' },
-            { value: 'tspl', label: 'TSPL（标签机）' },
-          ]} />
+        <Tooltip title="协议与打印机硬件语言对应，CPCL/TSPL 字体渲染不同；坐标布局模式下切换协议会影响打印效果">
+          <Select<PrintProtocol>
+            style={{ width: 150 }}
+            value={tpl.protocol}
+            onChange={v => {
+              if (mode === 'canvas' && elements.length > 0 && v !== tpl.protocol) {
+                Modal.confirm({
+                  title: '切换打印协议',
+                  content: `当前已有 ${elements.length} 个坐标元素（按 ${tpl.protocol.toUpperCase()} 设计）。CPCL 与 TSPL 的字体大小、行高不同，切换后打印效果会变化。建议为不同打印机分别建立模板。`,
+                  okText: '仍然切换',
+                  cancelText: '取消',
+                  onOk: () => upd({ protocol: v }),
+                })
+              } else {
+                upd({ protocol: v })
+              }
+            }}
+            options={[
+              { value: 'escpos', label: 'ESC/POS（小票）' },
+              { value: 'cpcl', label: 'CPCL（标签）' },
+              { value: 'tspl', label: 'TSPL（标签机）' },
+            ]}
+          />
+        </Tooltip>
         <Radio.Group value={mode} onChange={e => upd({ layout_mode: e.target.value })} optionType="button" buttonStyle="solid">
           <Radio.Button value="flow">顺序流</Radio.Button>
           <Radio.Button value="canvas">坐标布局</Radio.Button>
@@ -197,6 +215,34 @@ export default function PrintDesignerPage() {
             { value: 600, label: '600 dpi' },
           ]}
         />
+        {tpl.protocol === 'tspl' && (
+          <>
+            <Divider type="vertical" />
+            <Tooltip title={'TSPL 文本字体。内置编号字体（0~8）无需字体文件，所有机型均可用；文字不打印通常是字体文件在打印机内存中不存在。\n简体中文机：CHNGB.BF2\n繁体中文机：TSS24.BF2\n英文机内置：0 / 1 / 2 / 4\n自定义 TTF：ROMAN.TTF 等'}>
+              <span style={{ fontSize: 12, color: '#64748b' }}>字体</span>
+            </Tooltip>
+            <AutoComplete
+              size="small"
+              style={{ width: 160 }}
+              allowClear
+              placeholder="CHNGB.BF2（默认）"
+              value={tpl.paper?.tspl_font || undefined}
+              onChange={v => updPaper({ tspl_font: v || undefined })}
+              filterOption={(input, opt) =>
+                (opt?.value as string ?? '').toLowerCase().includes(input.toLowerCase())
+              }
+              options={[
+                { label: '0 – 内置（英文，始终可用）', value: '0' },
+                { label: '1 – 内置（英文，始终可用）', value: '1' },
+                { label: '2 – 内置（英文，始终可用）', value: '2' },
+                { label: '4 – 内置（英文，始终可用）', value: '4' },
+                { label: 'CHNGB.BF2 – 简体中文', value: 'CHNGB.BF2' },
+                { label: 'TSS24.BF2 – 繁体中文', value: 'TSS24.BF2' },
+                { label: 'ROMAN.TTF – 英文 TTF', value: 'ROMAN.TTF' },
+              ]}
+            />
+          </>
+        )}
         <Tooltip title="整体原点偏移（mm）：当打印结果整体平移时，用它把内容推回正确位置。可为负值。仅作用于坐标布局。">
           <span style={{ fontSize: 12, color: '#64748b' }}>偏移</span>
         </Tooltip>

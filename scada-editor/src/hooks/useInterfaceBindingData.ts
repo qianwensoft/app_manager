@@ -18,6 +18,10 @@ interface Options {
   globalParams?: Record<string, unknown>
   /** 自定义函数定义（source=expression 使用） */
   customFunctions?: CustomFunctionDef[]
+  /** 全局上下文快照（表达式 global / G() 使用） */
+  globalContext?: Record<string, unknown>
+  /** 组件快照映射（表达式 components / C() 使用） */
+  components?: Record<string, unknown>
 }
 
 function applyTransform(raw: number, transform?: string): number {
@@ -179,11 +183,11 @@ function resolveStaticData(binding: PointBinding): PointDataMap {
  * Polls interface-mode bindings across all elements and calls onData with resolved PointDataMap.
  * Static-mode data is resolved synchronously on mount/update.
  */
-export function useInterfaceBindingData({ elements, onData, scadaCode = '', pointData = {}, objectContexts = {}, shareToken, globalParams = {}, customFunctions = [] }: Options) {
+export function useInterfaceBindingData({ elements, onData, scadaCode = '', pointData = {}, objectContexts = {}, shareToken, globalParams = {}, customFunctions = [], globalContext = {}, components = {} }: Options) {
   const onDataRef = useRef(onData)
   onDataRef.current = onData
-  const contextRef = useRef({ elements, scadaCode, pointData, objectContexts, shareToken, globalParams, customFunctions })
-  contextRef.current = { elements, scadaCode, pointData, objectContexts, shareToken, globalParams, customFunctions }
+  const contextRef = useRef({ elements, scadaCode, pointData, objectContexts, shareToken, globalParams, customFunctions, globalContext, components })
+  contextRef.current = { elements, scadaCode, pointData, objectContexts, shareToken, globalParams, customFunctions, globalContext, components }
   const timersRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map())
 
   const setupElement = useCallback((el: CanvasElement) => {
@@ -210,6 +214,8 @@ export function useInterfaceBindingData({ elements, onData, scadaCode = '', poin
           objectContext: current.objectContexts[el.id],
           globalParams: current.globalParams,
           customFunctions: current.customFunctions,
+          globalContext: current.globalContext,
+          components: current.components,
         }, el.id, current.shareToken)
         if (Object.keys(data).length) onDataRef.current(data)
       }

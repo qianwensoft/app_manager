@@ -9,11 +9,15 @@ import { pushHistory } from '@/hooks/useHistory'
 import type { CanvasElement, ChartConfig } from '@/types'
 import type { PointDataMap } from '@/hooks/useStompPointData'
 import { useStompPointData } from '@/hooks/useStompPointData'
-import { useInterfaceBindingData, resolveElementValue } from '@/hooks/useInterfaceBindingData'
+import { useInterfaceBindingData } from '@/hooks/useInterfaceBindingData'
 import { useHighFreqTextData } from '@/hooks/useHighFreqTextData'
-import { resolveExtDataReference } from '@/runtime/bindingData'
+import { resolveElementText } from '@/runtime/bindingResolver'
 import { useDateTimeTick } from '@/hooks/useDateTimeTick'
 import { useScadaInfo } from '@/hooks/useScada'
+import { resolveConditionalStyles } from '@/runtime/conditionalStyles'
+import { buildComponentsSnapshot } from '@/runtime/workflow/componentsSnapshot'
+import { getGlobalContext } from '@/runtime/workflow/globalContext'
+import GlobalContextViewer from './GlobalContextViewer'
 import ChartWidget from './ChartWidget'
 import TrendWidget from './TrendWidget'
 import UPlotTrendWidget from './UPlotTrendWidget'
@@ -96,6 +100,25 @@ export default function CanvasBoard() {
     () => resolveGlobalParams(store.project.globalParams),
     [store.project.globalParams],
   )
+
+  // 组件快照：把所有组件的当前参数/扩展属性/当前值归集，写入全局上下文，
+  // 使 components.<名>.* 与 $global.components.<名>.* 在表达式/接口参数中可用。
+  const componentsSnapshot = useMemo(
+    () => buildComponentsSnapshot(allElements, pointData),
+    [allElements, pointData],
+  )
+  useEffect(() => {
+    getGlobalContext().set('components', componentsSnapshot)
+  }, [componentsSnapshot])
+  // 手动写入全局上下文（查看器编辑）触发本组件重算快照
+  const [ctxVersion, setCtxVersion] = useState(0)
+  const handleContextWrite = useCallback((path: string, value: unknown) => {
+    getGlobalContext().set(path, value)
+    setCtxVersion((v) => v + 1)
+  }, [])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const globalContextSnapshot = useMemo(() => ({ ...getGlobalContext().getAll() }), [componentsSnapshot, ctxVersion])
+
   useInterfaceBindingData({
     elements: liveDataOn ? allElements : [],
     onData: handlePointData,
@@ -103,6 +126,8 @@ export default function CanvasBoard() {
     pointData,
     globalParams: resolvedGlobalParams,
     customFunctions: store.project.customFunctions,
+    globalContext: globalContextSnapshot,
+    components: componentsSnapshot,
   })
 
   // 当前时间日期元件的每秒刷新（编辑器画布直接渲染系统时间）
@@ -110,6 +135,17 @@ export default function CanvasBoard() {
 
   // High-frequency text data via binary stream (interval_ms < 1000)
   const highFreqData = useHighFreqTextData(allElements, scadaCode, !!scadaCode)
+
+  // 构建表达式作用域（用于条件样式解析）
+  const exprScope = useMemo(() => ({
+    elements: allElements,
+    pointData,
+    scadaCode,
+    globalParams: resolvedGlobalParams,
+    customFunctions: store.project.customFunctions,
+    global: globalContextSnapshot,
+    components: componentsSnapshot,
+  }), [allElements, pointData, scadaCode, resolvedGlobalParams, store.project.customFunctions, globalContextSnapshot, componentsSnapshot])
 
   // Clear non-simulation pointData when toggling off
   useEffect(() => {
@@ -492,9 +528,12 @@ export default function CanvasBoard() {
         {/* Text/button DOM overlays — ensure correct stacking above image-bg regardless of zIndex */}
         {textButtonElements.map((el) => {
           const mergedData = { ...pointData, ...highFreqData }
-          const rawText = el.pointBinding ? resolveElementValue(el, mergedData) : el.text ?? ''
-          // 解析扩展数据引用
-          const displayText = resolveExtDataReference(rawText, el, canvas.elements)
+          // 解析内容：绑定/静态文本 → 扩展数据引用 → ${表达式} 插值
+          const displayText = resolveElementText(el, mergedData, canvas.elements, exprScope)
+          
+          // 解析条件样式（仅在实时数据开启时）
+          const conditionalStyles = liveDataOn ? resolveConditionalStyles(el, mergedData, exprScope) : {}
+          
           return (
             <div
               key={`tb-${el.id}`}
@@ -511,7 +550,7 @@ export default function CanvasBoard() {
                   el.textAlign === 'left' ? 'flex-start'
                   : el.textAlign === 'right' ? 'flex-end'
                   : 'center',
-                color: el.fontColor || '#fff',
+                color: conditionalStyles.fontColor ?? el.fontColor ?? '#fff',
                 fontSize: (el.fontSize ?? 14) * zoom,
                 fontFamily: el.fontFamily || 'sans-serif',
                 fontWeight: el.fontWeight === 'bold' ? 'bold' : 'normal',
@@ -519,9 +558,9 @@ export default function CanvasBoard() {
                 pointerEvents: 'none',
                 userSelect: 'none',
                 transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
-                background: el.type === 'button' ? (el.fill || 'transparent') : 'transparent',
+                background: el.type === 'button' ? (conditionalStyles.fill ?? el.fill ?? 'transparent') : 'transparent',
                 borderRadius: el.type === 'button' ? ((el.borderRadius ?? 4) * zoom) : undefined,
-                border: el.type === 'button' && el.stroke ? `${(el.strokeWidth ?? 1) * zoom}px solid ${el.stroke}` : undefined,
+                border: el.type === 'button' && (conditionalStyles.stroke ?? el.stroke) ? `${(el.strokeWidth ?? 1) * zoom}px solid ${conditionalStyles.stroke ?? el.stroke}` : undefined,
               }}
             >
               {displayText}
@@ -643,6 +682,17 @@ export default function CanvasBoard() {
       {/* ── Data binding drawer ── */}
       {bindingId && (
         <BindingDrawer elementId={bindingId} scadaCode={scadaCode} pointData={pointData} onClose={() => setBindingId(null)} />
+      )}
+
+      {/* ── Global context viewer（仅加载数据时可见，开关由头部按钮控制）── */}
+      {liveDataOn && (
+        <GlobalContextViewer
+          global={globalContextSnapshot}
+          components={componentsSnapshot}
+          onWrite={handleContextWrite}
+          open={store.globalContextOpen}
+          onOpenChange={store.setGlobalContextOpen}
+        />
       )}
     </div>
   )

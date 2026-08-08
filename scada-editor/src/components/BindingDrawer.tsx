@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useEditorStore } from '@/store/editorStore'
-import type { PointBinding, DataBindingMode, InterfaceFieldMapping, InterfaceSourceType, InterfaceParamSourceType, ValueFormatter, ElementType, ParamSpec, CanvasElement } from '@/types'
+import type { PointBinding, DataBindingMode, InterfaceFieldMapping, InterfaceSourceType, InterfaceParamSourceType, ValueFormatter, ElementType, ParamSpec, CanvasElement, ChartKeySource } from '@/types'
 import { getChartSchema, type BindingFieldDef } from '@/schema/chartSchema'
 import { dataBindingApi, type DataInterfaceItem, type OutboundAppItem, type OutboundWebhookItem, type OutboundEndpointItem, type ScadaSimPointItem } from '@/api/dataBinding'
 import type { PointDataMap } from '@/hooks/useStompPointData'
@@ -273,36 +273,266 @@ function ModeTabs({ mode, onChange, elType }: { mode: DataBindingMode; onChange:
 
 // ── Chart binding fields (point mode) ─────────────────────────────────────────
 
+type ChartKeySourceType = 'key' | 'component' | 'global'
+
 interface ChartBindingState {
   seriesInputs: string[]
   categoryInput: string
+  // 与 seriesInputs 平行：每个系列的数据来源；分类单独存
+  seriesSources: ChartKeySourceType[]
+  categorySource: ChartKeySourceType
+  // 与 seriesInputs 平行：每个系列的名称（动态系列图表用；空串=用默认「系列N」）
+  seriesNames: string[]
+  // 与 seriesInputs 平行：每个系列的颜色（空串=按样式面板 seriesColors 回退）
+  seriesColors: string[]
 }
 
-function initChartState(pb: PointBinding, fieldCount: number): ChartBindingState {
+function initChartState(pb: PointBinding, fieldCount: number, dynamic = false): ChartBindingState {
   const seriesInputs: string[] = []
-  for (let i = 0; i < fieldCount; i++) {
-    seriesInputs.push((pb.chartSeriesKeys?.[i] ?? []).join(', '))
+  const seriesSources: ChartKeySourceType[] = []
+  const seriesNames: string[] = []
+  const seriesColors: string[] = []
+  // 动态系列：以已保存的系列数为准（最少 1 个）；固定系列：以 schema 字段数为准
+  const count = dynamic
+    ? Math.max(1, pb.chartSeriesKeys?.length ?? pb.chartSeriesSources?.length ?? 0)
+    : fieldCount
+  for (let i = 0; i < count; i++) {
+    const src = pb.chartSeriesSources?.[i]
+    if (src && src.type !== 'key') {
+      seriesInputs.push(src.ref ?? '')
+      seriesSources.push(src.type)
+    } else {
+      seriesInputs.push((pb.chartSeriesKeys?.[i] ?? []).join(', '))
+      seriesSources.push('key')
+    }
+    seriesNames.push(pb.chartSeriesNames?.[i] ?? '')
+    seriesColors.push(pb.chartSeriesColors?.[i] ?? '')
   }
-  return { seriesInputs, categoryInput: pb.chartCategoryKey ?? '' }
+  const catSrc = pb.chartCategorySource
+  const categoryFromSrc = catSrc && catSrc.type !== 'key'
+  return {
+    seriesInputs,
+    seriesSources,
+    seriesNames,
+    seriesColors,
+    categoryInput: categoryFromSrc ? (catSrc!.ref ?? '') : (pb.chartCategoryKey ?? ''),
+    categorySource: categoryFromSrc ? catSrc!.type : 'key',
+  }
 }
 
-function ChartBindingFields({ fields, state, onChange }: {
+const SOURCE_OPTIONS: { id: ChartKeySourceType; label: string }[] = [
+  { id: 'key', label: '数据键' },
+  { id: 'component', label: '组件属性' },
+  { id: 'global', label: '全局上下文' },
+]
+
+function sourcePlaceholder(type: ChartKeySourceType, fallback?: string): string {
+  if (type === 'component') return '组件名.ext.flow 或 .value / .params.max'
+  if (type === 'global') return 'line1.temp 或任意点分路径'
+  return fallback ?? ''
+}
+
+function sourceHint(type: ChartKeySourceType): string | undefined {
+  if (type === 'component') return '从其他组件快照取值：<组件名或id>.ext.键 / .value / .params.键 / .chart.键；数组作为整段系列'
+  if (type === 'global') return '从全局上下文取值（点分路径）；数组作为整段系列'
+  return undefined
+}
+
+function SourceSelect({ value, onChange }: { value: ChartKeySourceType; onChange: (v: ChartKeySourceType) => void }) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value as ChartKeySourceType)}
+      style={{
+        fontSize: 11, padding: '2px 4px', borderRadius: 'var(--radius-sm)',
+        border: '1px solid var(--border)', background: 'var(--bg-surface)',
+        color: 'var(--text-secondary)', marginBottom: 4, width: '100%',
+      }}
+    >
+      {SOURCE_OPTIONS.map((o) => <option key={o.id} value={o.id}>{`来源：${o.label}`}</option>)}
+    </select>
+  )
+}
+
+// 系列颜色输入：色块选择器 + 清除按钮（空串=按样式面板 seriesColors 回退）
+function SeriesColorInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const hasColor = !!value.trim()
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+      <input
+        type="color"
+        value={hasColor ? value : '#4a9eff'}
+        onChange={(e) => onChange(e.target.value)}
+        title={hasColor ? value : '未设置（回退样式面板颜色）'}
+        style={{
+          width: 28, height: 24, padding: 0, cursor: 'pointer',
+          border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+          background: 'var(--bg-base)', opacity: hasColor ? 1 : 0.45,
+        }}
+      />
+      {hasColor && (
+        <button
+          type="button"
+          onClick={() => onChange('')}
+          title="清除（回退样式面板颜色）"
+          style={{
+            fontSize: 11, lineHeight: 1, padding: '3px 5px', borderRadius: 'var(--radius-sm)',
+            border: '1px solid var(--border)', background: 'var(--bg-surface)',
+            color: 'var(--text-secondary)', cursor: 'pointer',
+          }}
+        >×</button>
+      )}
+    </div>
+  )
+}
+
+function ChartBindingFields({ fields, state, onChange, componentNames, dynamic }: {
   fields: BindingFieldDef[]; state: ChartBindingState; onChange: (s: ChartBindingState) => void
+  componentNames: string[]
+  /** 动态系列：系列可增删、名称就地配置（横向柱等） */
+  dynamic?: boolean
 }) {
+  const categoryField = fields.find((f) => f.kind === 'category')
+  const seriesFields = fields.filter((f) => f.kind !== 'category')
+  const seriesTemplate = seriesFields[0]
+
+  const renderCategory = () => {
+    if (!categoryField) return null
+    const type = state.categorySource
+    return (
+      <Field key={categoryField.key} label={categoryField.label} optional={categoryField.optional}>
+        <SourceSelect value={type} onChange={(v) => onChange({ ...state, categorySource: v })} />
+        {type === 'component' && (
+          <ComponentRefHelper names={componentNames} onPick={(nm) => onChange({ ...state, categoryInput: `${nm}.ext.` })} />
+        )}
+        <Inp val={state.categoryInput} onChange={(v) => onChange({ ...state, categoryInput: v })} placeholder={sourcePlaceholder(type, categoryField.placeholder)} />
+        {(sourceHint(type) ?? categoryField.hint) && <Hint>{sourceHint(type) ?? categoryField.hint}</Hint>}
+      </Field>
+    )
+  }
+
+  // ── 动态系列：增删 + 名称就地配置 ──
+  if (dynamic && seriesTemplate) {
+    const count = state.seriesInputs.length
+    const setSeriesAt = (idx: number, patch: { input?: string; source?: ChartKeySourceType; name?: string; color?: string }) => {
+      const inputs = [...state.seriesInputs]
+      const sources = [...state.seriesSources]
+      const names = [...state.seriesNames]
+      const cols = [...state.seriesColors]
+      if (patch.input !== undefined) inputs[idx] = patch.input
+      if (patch.source !== undefined) sources[idx] = patch.source
+      if (patch.name !== undefined) names[idx] = patch.name
+      if (patch.color !== undefined) cols[idx] = patch.color
+      onChange({ ...state, seriesInputs: inputs, seriesSources: sources, seriesNames: names, seriesColors: cols })
+    }
+    const addSeries = () => onChange({
+      ...state,
+      seriesInputs: [...state.seriesInputs, ''],
+      seriesSources: [...state.seriesSources, 'key'],
+      seriesNames: [...state.seriesNames, ''],
+      seriesColors: [...state.seriesColors, ''],
+    })
+    const removeSeries = (idx: number) => {
+      if (count <= 1) return // 最少保留 1 个系列
+      onChange({
+        ...state,
+        seriesInputs: state.seriesInputs.filter((_, i) => i !== idx),
+        seriesSources: state.seriesSources.filter((_, i) => i !== idx),
+        seriesNames: state.seriesNames.filter((_, i) => i !== idx),
+        seriesColors: state.seriesColors.filter((_, i) => i !== idx),
+      })
+    }
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        {Array.from({ length: count }).map((_, idx) => {
+          const type = state.seriesSources[idx] ?? 'key'
+          return (
+            <div key={idx} style={{
+              border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+              padding: '8px 10px', marginBottom: 8, position: 'relative',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent)' }}>系列 {idx + 1}</span>
+                <button
+                  type="button"
+                  onClick={() => removeSeries(idx)}
+                  disabled={count <= 1}
+                  title={count <= 1 ? '至少保留一个系列' : '删除该系列'}
+                  style={{
+                    fontSize: 11, lineHeight: 1, padding: '2px 6px', borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--border)', cursor: count <= 1 ? 'not-allowed' : 'pointer',
+                    background: 'var(--bg-surface)', color: count <= 1 ? 'var(--text-muted)' : 'var(--danger)',
+                    opacity: count <= 1 ? 0.5 : 1,
+                  }}
+                >删除</button>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>系列名称</div>
+                  <Inp
+                    val={state.seriesNames[idx] ?? ''}
+                    onChange={(v) => setSeriesAt(idx, { name: v })}
+                    placeholder={`系列${idx + 1}（图例/提示显示）`}
+                  />
+                </div>
+                <div style={{ width: 92 }}>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>颜色</div>
+                  <SeriesColorInput
+                    value={state.seriesColors[idx] ?? ''}
+                    onChange={(v) => setSeriesAt(idx, { color: v })}
+                  />
+                </div>
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', margin: '6px 0 2px' }}>数据</div>
+              <SourceSelect value={type} onChange={(v) => setSeriesAt(idx, { source: v })} />
+              {type === 'component' && (
+                <ComponentRefHelper names={componentNames} onPick={(nm) => setSeriesAt(idx, { input: `${nm}.ext.` })} />
+              )}
+              <Inp
+                val={state.seriesInputs[idx] ?? ''}
+                onChange={(v) => setSeriesAt(idx, { input: v })}
+                placeholder={sourcePlaceholder(type, seriesTemplate.placeholder)}
+              />
+              {(sourceHint(type) ?? seriesTemplate.hint) && <Hint>{sourceHint(type) ?? seriesTemplate.hint}</Hint>}
+            </div>
+          )
+        })}
+        <button
+          type="button"
+          onClick={addSeries}
+          style={{
+            alignSelf: 'flex-start', fontSize: 11, padding: '4px 10px', marginBottom: 8,
+            borderRadius: 'var(--radius-sm)', border: '1px dashed var(--border-accent)',
+            background: 'var(--accent-muted)', color: 'var(--accent)', cursor: 'pointer',
+          }}
+        >+ 添加系列</button>
+        {renderCategory()}
+      </div>
+    )
+  }
+
+  // ── 固定系列（原逻辑）──
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
       {fields.map((f) => {
-        if (f.kind === 'category') {
-          return (
-            <Field key={f.key} label={f.label} optional={f.optional}>
-              <Inp val={state.categoryInput} onChange={(v) => onChange({ ...state, categoryInput: v })} placeholder={f.placeholder} />
-              {f.hint && <Hint>{f.hint}</Hint>}
-            </Field>
-          )
-        }
+        if (f.kind === 'category') return renderCategory()
         const idx = f.seriesIndex ?? 0
+        const type = state.seriesSources[idx] ?? 'key'
         return (
           <Field key={f.key} label={f.label} optional={f.optional}>
+            <SourceSelect value={type} onChange={(v) => {
+              const next = [...state.seriesSources]
+              next[idx] = v
+              onChange({ ...state, seriesSources: next })
+            }} />
+            {type === 'component' && (
+              <ComponentRefHelper names={componentNames} onPick={(nm) => {
+                const next = [...state.seriesInputs]
+                next[idx] = `${nm}.ext.`
+                onChange({ ...state, seriesInputs: next })
+              }} />
+            )}
             <Inp
               val={state.seriesInputs[idx] ?? ''}
               onChange={(v) => {
@@ -310,13 +540,31 @@ function ChartBindingFields({ fields, state, onChange }: {
                 next[idx] = v
                 onChange({ ...state, seriesInputs: next })
               }}
-              placeholder={f.placeholder}
+              placeholder={sourcePlaceholder(type, f.placeholder)}
             />
-            {f.hint && <Hint>{f.hint}</Hint>}
+            {(sourceHint(type) ?? f.hint) && <Hint>{sourceHint(type) ?? f.hint}</Hint>}
           </Field>
         )
       })}
     </div>
+  )
+}
+
+function ComponentRefHelper({ names, onPick }: { names: string[]; onPick: (name: string) => void }) {
+  if (names.length === 0) return null
+  return (
+    <select
+      value=""
+      onChange={(e) => { if (e.target.value) onPick(e.target.value) }}
+      style={{
+        fontSize: 11, padding: '2px 4px', borderRadius: 'var(--radius-sm)',
+        border: '1px solid var(--border)', background: 'var(--bg-surface)',
+        color: 'var(--text-secondary)', marginBottom: 4, width: '100%',
+      }}
+    >
+      <option value="">选择组件填入引用…</option>
+      {names.map((n) => <option key={n} value={n}>{n}</option>)}
+    </select>
   )
 }
 
@@ -485,13 +733,14 @@ function FormatterPanel({ fmt, onChange }: {
 
 // ── Point mode panel ───────────────────────────────────────────────────────────
 
-function PointModePanel({ draft, setDraft, isChart, schema, chartState, setChartState }: {
+function PointModePanel({ draft, setDraft, isChart, schema, chartState, setChartState, componentNames }: {
   draft: PointBinding
   setDraft: (fn: (prev: PointBinding) => PointBinding) => void
   isChart: boolean
   schema: ReturnType<typeof getChartSchema>
   chartState: ChartBindingState
   setChartState: (s: ChartBindingState) => void
+  componentNames: string[]
 }) {
   const update = (patch: Partial<PointBinding>) => setDraft((prev) => ({ ...prev, ...patch }))
 
@@ -521,7 +770,7 @@ function PointModePanel({ draft, setDraft, isChart, schema, chartState, setChart
             <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent)', marginBottom: 12, paddingBottom: 6, borderBottom: '1px solid var(--border)' }}>
               {schema.label} 数据绑定
             </div>
-            <ChartBindingFields fields={schema.bindingFields} state={chartState} onChange={setChartState} />
+            <ChartBindingFields fields={schema.bindingFields} state={chartState} onChange={setChartState} componentNames={componentNames} dynamic={schema.seriesDynamic} />
           </div>
         )}
       </div>
@@ -533,6 +782,131 @@ function PointModePanel({ draft, setDraft, isChart, schema, chartState, setChart
 }
 
 // ── Static mode panel ──────────────────────────────────────────────────────────
+
+// 静态数据 · 动态系列编辑器：系列可增删，逐系列配置名称/颜色/静态值。
+// 存储：staticData.series{N}=值；chartSeriesNames/chartSeriesColors 为平行数组；staticData.category=分类。
+function StaticChartSeriesEditor({ draft, setDraft }: {
+  draft: PointBinding
+  setDraft: (fn: (prev: PointBinding) => PointBinding) => void
+}) {
+  const sd = (draft.staticData ?? {}) as Record<string, string>
+  const seriesIdxs = Object.keys(sd).filter((k) => /^series\d+$/.test(k)).map((k) => Number(k.slice(6)))
+  const count = Math.max(
+    1,
+    seriesIdxs.length ? Math.max(...seriesIdxs) + 1 : 0,
+    draft.chartSeriesNames?.length ?? 0,
+    draft.chartSeriesColors?.length ?? 0,
+  )
+  const values = Array.from({ length: count }, (_, i) => String(sd[`series${i}`] ?? ''))
+  const names = Array.from({ length: count }, (_, i) => draft.chartSeriesNames?.[i] ?? '')
+  const colors = Array.from({ length: count }, (_, i) => draft.chartSeriesColors?.[i] ?? '')
+  const category = String(sd['category'] ?? '')
+
+  const commit = (vals: string[], nms: string[], cols: string[], cat: string) => {
+    setDraft((prev) => {
+      const nextStatic: Record<string, unknown> = {}
+      // 保留非系列/非分类的自定义键
+      for (const [k, v] of Object.entries(prev.staticData ?? {})) {
+        if (!/^series\d+$/.test(k) && k !== 'category') nextStatic[k] = v
+      }
+      vals.forEach((v, i) => { nextStatic[`series${i}`] = v })
+      if (cat.trim()) nextStatic['category'] = cat
+      return {
+        ...prev,
+        staticData: nextStatic,
+        chartSeriesNames: nms.some((n) => n.trim()) ? nms : undefined,
+        chartSeriesColors: cols.some((c) => c.trim()) ? cols : undefined,
+      }
+    })
+  }
+
+  const setAt = (idx: number, patch: { value?: string; name?: string; color?: string }) => {
+    const vals = [...values], nms = [...names], cols = [...colors]
+    if (patch.value !== undefined) vals[idx] = patch.value
+    if (patch.name !== undefined) nms[idx] = patch.name
+    if (patch.color !== undefined) cols[idx] = patch.color
+    commit(vals, nms, cols, category)
+  }
+  const addSeries = () => commit([...values, ''], [...names, ''], [...colors, ''], category)
+  const removeSeries = (idx: number) => commit(
+    values.filter((_, i) => i !== idx),
+    names.filter((_, i) => i !== idx),
+    colors.filter((_, i) => i !== idx),
+    category,
+  )
+
+  return (
+    <div>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 12 }}>
+        每个系列直接填写静态值（JSON 数组如 <code>[42, 68, 35]</code>，或单值），并可配置名称/颜色
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        {values.map((val, idx) => (
+          <div key={idx} style={{
+            border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+            padding: '8px 10px', marginBottom: 8, position: 'relative',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent)' }}>系列 {idx + 1}</span>
+              <button
+                type="button"
+                onClick={() => removeSeries(idx)}
+                disabled={count <= 1}
+                title={count <= 1 ? '至少保留一个系列' : '删除该系列'}
+                style={{
+                  fontSize: 11, lineHeight: 1, padding: '2px 6px', borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--border)', cursor: count <= 1 ? 'not-allowed' : 'pointer',
+                  background: 'var(--bg-surface)', color: count <= 1 ? 'var(--text-muted)' : 'var(--danger)',
+                  opacity: count <= 1 ? 0.5 : 1,
+                }}
+              >删除</button>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>系列名称</div>
+                <Inp
+                  val={names[idx] ?? ''}
+                  onChange={(v) => setAt(idx, { name: v })}
+                  placeholder={`系列${idx + 1}（图例/提示显示）`}
+                />
+              </div>
+              <div style={{ width: 92 }}>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 2 }}>颜色</div>
+                <SeriesColorInput
+                  value={colors[idx] ?? ''}
+                  onChange={(v) => setAt(idx, { color: v })}
+                />
+              </div>
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', margin: '6px 0 2px' }}>静态值</div>
+            <Inp
+              val={val}
+              onChange={(v) => setAt(idx, { value: v })}
+              placeholder="[42, 68, 35] 或 42"
+            />
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={addSeries}
+          style={{
+            alignSelf: 'flex-start', fontSize: 11, padding: '4px 10px', marginBottom: 8,
+            borderRadius: 'var(--radius-sm)', border: '1px dashed var(--border-accent)',
+            background: 'var(--accent-muted)', color: 'var(--accent)', cursor: 'pointer',
+          }}
+        >+ 添加系列</button>
+        <Field label="分类轴" optional>
+          <Inp
+            val={category}
+            onChange={(v) => commit(values, names, colors, v)}
+            placeholder="A, B, C 或 [&quot;A&quot;,&quot;B&quot;]"
+          />
+          <Hint>分类标签，逗号分隔或 JSON 数组；与每个系列的值按序对应</Hint>
+        </Field>
+      </div>
+    </div>
+  )
+}
 
 function StaticModePanel({ draft, setDraft, isChart, schema }: {
   draft: PointBinding
@@ -550,6 +924,10 @@ function StaticModePanel({ draft, setDraft, isChart, schema }: {
   }
 
   if (isChart && schema) {
+    // 动态系列图表（如横向柱）：静态模式也支持系列增删 + 逐系列名称/颜色
+    if (schema.seriesDynamic) {
+      return <StaticChartSeriesEditor draft={draft} setDraft={setDraft} />
+    }
     return (
       <div>
         <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 12 }}>
@@ -1864,7 +2242,12 @@ function BindingDrawerInner({ el, elementId, scadaCode, pointData, onClose }: Pr
     }
     return { ...pb }
   })
-  const [chartState, setChartState] = useState<ChartBindingState>(() => initChartState(pb, maxSeriesIdx + 1))
+  const [chartState, setChartState] = useState<ChartBindingState>(() => initChartState(pb, maxSeriesIdx + 1, schema?.seriesDynamic))
+
+  // 其他组件名称（供「来源=组件属性」下拉引用；排除自身）
+  const componentNames = (store.activeCanvas()?.elements ?? [])
+    .filter((e) => e.id !== elementId && e.type !== 'group' && (e.name?.trim()))
+    .map((e) => e.name!.trim())
 
   const handleModeChange = (m: DataBindingMode) => {
     setMode(m)
@@ -1879,14 +2262,59 @@ function BindingDrawerInner({ el, elementId, scadaCode, pointData, onClose }: Pr
       deviceCode: draft.deviceCode?.trim() ?? '',
     }
     if (mode === 'point' && isChart && schema) {
-      binding.chartSeriesKeys = chartState.seriesInputs.map((s) =>
-        s.split(',').map((k) => k.trim()).filter(Boolean)
-      )
-      binding.chartCategoryKey = chartState.categoryInput.trim() || undefined
+      // 系列：来源=key 存 chartSeriesKeys；来源=component/global 存 chartSeriesSources.ref
+      const seriesKeys: string[][] = []
+      const seriesSources: ChartKeySource[] = []
+      let hasNonKey = false
+      chartState.seriesInputs.forEach((s, i) => {
+        const type = chartState.seriesSources[i] ?? 'key'
+        if (type === 'key') {
+          seriesKeys.push(s.split(',').map((k) => k.trim()).filter(Boolean))
+          seriesSources.push({ type: 'key' })
+        } else {
+          seriesKeys.push([])
+          seriesSources.push({ type, ref: s.trim() || undefined })
+          hasNonKey = true
+        }
+      })
+      binding.chartSeriesKeys = seriesKeys
+      binding.chartSeriesSources = hasNonKey ? seriesSources : undefined
+
+      // 动态系列名称/颜色：有任一非空则保存（与 seriesKeys 对齐长度）
+      if (schema.seriesDynamic) {
+        const names = chartState.seriesNames.map((n) => n.trim())
+        binding.chartSeriesNames = names.some(Boolean) ? names : undefined
+        const cols = chartState.seriesColors.map((c) => c.trim())
+        binding.chartSeriesColors = cols.some(Boolean) ? cols : undefined
+      } else {
+        binding.chartSeriesNames = undefined
+        binding.chartSeriesColors = undefined
+      }
+
+      const catType = chartState.categorySource
+      if (catType === 'key') {
+        binding.chartCategoryKey = chartState.categoryInput.trim() || undefined
+        binding.chartCategorySource = undefined
+      } else {
+        binding.chartCategoryKey = undefined
+        binding.chartCategorySource = { type: catType, ref: chartState.categoryInput.trim() || undefined }
+      }
     } else if (mode !== 'point') {
-      // Clear point-mode chart fields to avoid stale keys bleeding into other modes
+      // Clear point-mode chart key fields to avoid stale keys bleeding into other modes
       binding.chartSeriesKeys = undefined
       binding.chartCategoryKey = undefined
+      binding.chartSeriesSources = undefined
+      binding.chartCategorySource = undefined
+      // 静态模式动态系列图表：保留编辑器写入的逐系列名称/颜色；其余模式清空
+      if (mode === 'static' && isChart && schema?.seriesDynamic) {
+        const names = (draft.chartSeriesNames ?? []).map((n) => (n ?? '').trim())
+        binding.chartSeriesNames = names.some(Boolean) ? names : undefined
+        const cols = (draft.chartSeriesColors ?? []).map((c) => (c ?? '').trim())
+        binding.chartSeriesColors = cols.some(Boolean) ? cols : undefined
+      } else {
+        binding.chartSeriesNames = undefined
+        binding.chartSeriesColors = undefined
+      }
     }
 
     // Save table columns to element (not in binding)
@@ -2085,6 +2513,7 @@ function BindingDrawerInner({ el, elementId, scadaCode, pointData, onClose }: Pr
             schema={schema}
             chartState={chartState}
             setChartState={setChartState}
+            componentNames={componentNames}
           />
         )}
         {mode === 'static' && (

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"app-manager/config"
 	"app-manager/database"
 	"app-manager/models"
 	"encoding/json"
@@ -19,7 +20,24 @@ import (
 func ListThirdPartyProviders(c *gin.Context) {
 	var list []models.ThirdPartyProvider
 	database.DB.Find(&list)
-	c.JSON(http.StatusOK, list)
+	type providerView struct {
+		models.ThirdPartyProvider
+		HMACConfigured           bool     `json:"hmac_configured"`
+		HMACKeySource            string   `json:"hmac_key_source"`
+		HMACClockSkewSec         int      `json:"hmac_clock_skew_sec"`
+		EffectiveRedirectAllowed []string `json:"effective_redirect_allowlist"`
+	}
+	out := make([]providerView, 0, len(list))
+	for _, p := range list {
+		out = append(out, providerView{
+			ThirdPartyProvider:       p,
+			HMACConfigured:           (p.HMACSecret != "" && strings.TrimSpace(p.HMACSecret) != "") || (config.C != nil && strings.TrimSpace(config.C.SSO.HMACSecret) != ""),
+			HMACKeySource:            hmacKeySource(&p),
+			HMACClockSkewSec:         hmacClockSkew(&p),
+			EffectiveRedirectAllowed: resolveRedirectAllowlist(&p),
+		})
+	}
+	c.JSON(http.StatusOK, out)
 }
 
 func GetThirdPartyProvider(c *gin.Context) {
@@ -28,7 +46,54 @@ func GetThirdPartyProvider(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		return
 	}
-	c.JSON(http.StatusOK, p)
+	c.JSON(http.StatusOK, gin.H{
+		"id":                        p.ID,
+		"name":                      p.Name,
+		"type":                      p.Type,
+		"description":               p.Description,
+		"open_api_origin":           p.OpenApiOrigin,
+		"corp_id":                   p.CorpID,
+		"app_key":                   p.AppKey,
+		"component_app_id":          p.ComponentAppID,
+		"callback_url":              p.CallbackURL,
+		"outbound_app_id":           p.OutboundAppID,
+		"user_sync_enabled":         p.UserSyncEnabled,
+		"user_info_endpoint":        p.UserInfoEndpoint,
+		"user_list_endpoint":        p.UserListEndpoint,
+		"default_role":              p.DefaultRole,
+		"redirect_allowlist_json":   p.RedirectAllowlistJSON,
+		"redirect_allow_enabled":    p.RedirectAllowEnabled,
+		"hmac_configured":           strings.TrimSpace(p.HMACSecret) != "" || (config.C != nil && strings.TrimSpace(config.C.SSO.HMACSecret) != ""),
+		"hmac_key_source":           hmacKeySource(&p),
+		"hmac_clock_skew_sec":       hmacClockSkew(&p),
+		"effective_redirect_allowlist": resolveRedirectAllowlist(&p),
+		"enabled":                   p.Enabled,
+		"created_by":                p.CreatedBy,
+		"created_at":                p.CreatedAt,
+		"updated_at":                p.UpdatedAt,
+	})
+}
+
+// hmacKeySource 标识当前 Provider 实际使用的密钥来源："provider:<id>" 或 "global"。
+func hmacKeySource(p *models.ThirdPartyProvider) string {
+	if p != nil && strings.TrimSpace(p.HMACSecret) != "" {
+		return fmt.Sprintf("provider:%d", p.ID)
+	}
+	if config.C != nil && strings.TrimSpace(config.C.SSO.HMACSecret) != "" {
+		return "global"
+	}
+	return ""
+}
+
+// hmacClockSkew 取 Provider 配置（>0）或系统默认。
+func hmacClockSkew(p *models.ThirdPartyProvider) int {
+	if p != nil && p.HMACClockSkewSec > 0 {
+		return p.HMACClockSkewSec
+	}
+	if config.C != nil {
+		return config.C.SSO.ClockSkewOrDefault()
+	}
+	return 300
 }
 
 type thirdPartyProviderReq struct {
@@ -44,6 +109,13 @@ type thirdPartyProviderReq struct {
 	CallbackURL        string `json:"callback_url"`
 	OutboundAppID      *uint  `json:"outbound_app_id"`
 	Enabled            *bool  `json:"enabled"`
+
+	// SSO 跳转安全（P0）：redirect_to 白名单 + HMAC 签名密钥
+	RedirectAllowlistJSON string `json:"redirect_allowlist_json"`
+	RedirectAllowEnabled  *bool  `json:"redirect_allow_enabled"`
+	HMACSecret            string `json:"hmac_secret"`         // 留空字符串表示不修改（清空需传 null）
+	ClearHMACSecret       bool   `json:"clear_hmac_secret"`   // 显式传 true 时把 Provider 密钥置空（回退到系统密钥）
+	HMACClockSkewSec      *int   `json:"hmac_clock_skew_sec"`
 }
 
 func CreateThirdPartyProvider(c *gin.Context) {
@@ -71,6 +143,21 @@ func CreateThirdPartyProvider(c *gin.Context) {
 	}
 	if req.Enabled != nil {
 		p.Enabled = *req.Enabled
+	}
+	// SSO 安全字段
+	if req.RedirectAllowlistJSON != "" {
+		p.RedirectAllowlistJSON = req.RedirectAllowlistJSON
+	}
+	if req.RedirectAllowEnabled != nil {
+		p.RedirectAllowEnabled = *req.RedirectAllowEnabled
+	} else {
+		p.RedirectAllowEnabled = true
+	}
+	if req.HMACSecret != "" {
+		p.HMACSecret = req.HMACSecret
+	}
+	if req.HMACClockSkewSec != nil && *req.HMACClockSkewSec > 0 {
+		p.HMACClockSkewSec = *req.HMACClockSkewSec
 	}
 	if err := database.DB.Create(&p).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -118,6 +205,21 @@ func UpdateThirdPartyProvider(c *gin.Context) {
 	}
 	if req.Enabled != nil {
 		updates["enabled"] = *req.Enabled
+	}
+	// SSO 安全字段更新
+	if req.RedirectAllowlistJSON != "" {
+		updates["redirect_allowlist_json"] = req.RedirectAllowlistJSON
+	}
+	if req.RedirectAllowEnabled != nil {
+		updates["redirect_allow_enabled"] = *req.RedirectAllowEnabled
+	}
+	if req.ClearHMACSecret {
+		updates["hmac_secret"] = ""
+	} else if req.HMACSecret != "" {
+		updates["hmac_secret"] = req.HMACSecret
+	}
+	if req.HMACClockSkewSec != nil && *req.HMACClockSkewSec > 0 {
+		updates["hmac_clock_skew_sec"] = *req.HMACClockSkewSec
 	}
 	database.DB.Model(&p).Updates(updates)
 	database.DB.First(&p, p.ID)

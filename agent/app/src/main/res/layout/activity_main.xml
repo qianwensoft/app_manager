@@ -102,7 +102,213 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- 设备注册入口：无摄像头端（电视/盒子）无法扫码时改用反向注册；
+            <!-- MDM 状态卡片：仅在 MDM 模式激活时显示（代码控制 visibility） -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/card_mdm_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:visibility="gone"
+                app:cardCornerRadius="12dp"
+                app:cardElevation="2dp"
+                app:strokeWidth="1dp"
+                app:strokeColor="#FF6B35">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <!-- 标题行：图标 + "MDM 托管中" + 企业标识 -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="🔒 MDM 托管中"
+                            android:textColor="#FF6B35"
+                            android:textSize="14sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/tvMdmEnterprise"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:background="#1AFF6B35"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="8dp"
+                            android:paddingTop="3dp"
+                            android:paddingBottom="3dp"
+                            android:textColor="#FF6B35"
+                            android:textSize="12sp"
+                            tools:text="企业: prod-corp" />
+                    </LinearLayout>
+
+                    <!-- Device Owner 徽章 -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginTop="8dp"
+                        android:gravity="center_vertical">
+
+                        <TextView
+                            android:id="@+id/tvMdmOwnerBadge"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="8dp"
+                            android:paddingTop="3dp"
+                            android:paddingBottom="3dp"
+                            android:textSize="12sp"
+                            tools:text="Device Owner ✓" />
+
+                        <TextView
+                            android:id="@+id/tvMdmWriteSecure"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="8dp"
+                            android:paddingTop="3dp"
+                            android:paddingBottom="3dp"
+                            android:textSize="12sp"
+                            tools:text="WRITE_SECURE ✓" />
+                    </LinearLayout>
+
+                    <!-- 活跃策略列表 -->
+                    <TextView
+                        android:id="@+id/tvMdmPolicies"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:textColor="@color/agent_text_primary"
+                        android:textSize="13sp"
+                        android:lineSpacingExtra="3dp"
+                        android:visibility="gone"
+                        tools:text="• 相机已禁用\n• 禁止截屏\n• 密码强度: 字母+数字，最短6位" />
+
+                    <!-- 分割线 -->
+                    <View
+                        android:id="@+id/dividerMdmAction"
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginTop="10dp"
+                        android:layout_marginBottom="4dp"
+                        android:background="#15000000"
+                        android:visibility="gone" />
+
+                    <!-- 步骤一：设备管理员未激活时显示激活按钮 -->
+                    <LinearLayout
+                        android:id="@+id/layout_activate_da"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:text="第一步：激活设备管理员（允许接收策略指令）"
+                            android:textColor="#E65100"
+                            android:textSize="12sp"
+                            android:textStyle="bold" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btn_activate_da"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="立即激活设备管理员"
+                            android:textSize="14sp"
+                            app:backgroundTint="#FF6B35"
+                            style="@style/Widget.MaterialComponents.Button" />
+                    </LinearLayout>
+
+                    <!-- 步骤二：已激活 DA，引导 DO 激活（显示 ADB 命令） -->
+                    <LinearLayout
+                        android:id="@+id/layout_activate_do"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:text="第二步：激活 Device Owner（高级策略，需 USB ADB）"
+                            android:textColor="#1565C0"
+                            android:textSize="12sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:text="在电脑上执行（设备通过USB连接，确保无Google账号）："
+                            android:textColor="@color/agent_text_primary"
+                            android:textSize="12sp" />
+
+                        <TextView
+                            android:id="@+id/tvDoAdbCommand"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:background="#F0F4FF"
+                            android:padding="10dp"
+                            android:textColor="#1A237E"
+                            android:textSize="11sp"
+                            android:fontFamily="monospace"
+                            android:textIsSelectable="true" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:layout_marginTop="8dp"
+                            android:gravity="end">
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btn_copy_do_command"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="复制命令"
+                                android:textSize="13sp"
+                                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                                app:strokeColor="#1565C0" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btn_scan_do_qr"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="8dp"
+                                android:text="📷 扫码激活"
+                                android:textSize="13sp"
+                                app:backgroundTint="#4CAF50"
+                                style="@style/Widget.MaterialComponents.Button" />
+
+                            <com.google.android.material.button.MaterialButton
+                                android:id="@+id/btn_do_refresh"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginStart="8dp"
+                                android:text="已激活，刷新状态"
+                                android:textSize="13sp"
+                                app:backgroundTint="#1565C0"
+                                style="@style/Widget.MaterialComponents.Button" />
+                        </LinearLayout>
+                    </LinearLayout>
+
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
                  手机/平板也可随时用（换服务器、重新归属）。focusable 便于遥控器聚焦。 -->
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnReverseRegister"

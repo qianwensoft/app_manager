@@ -109,6 +109,7 @@
     <application
         android:name=".App"
         android:allowBackup="false"
+        android:testOnly="${testOnly}"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:banner="@drawable/tv_banner"
@@ -327,6 +328,23 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!--
+          Device Admin / Device Owner receiver.
+          激活命令（设备上无账号时执行）：
+            adb shell dpm set-device-owner com.appmanager.agent/.admin.DeviceAdminReceiver
+        -->
+        <receiver
+            android:name=".admin.DeviceAdminReceiver"
+            android:exported="true"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
             </intent-filter>
         </receiver>
 

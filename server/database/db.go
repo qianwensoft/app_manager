@@ -110,6 +110,7 @@ var migrateGroups = [][]interface{}{
 		&models.AgentMenuAssignment{},
 		&models.ApiCallMetric{},
 		&models.AgentOnlineSample{},
+		&models.RefreshToken{},
 	},
 	// Group 2 — device activity
 	{
@@ -216,6 +217,24 @@ var migrateGroups = [][]interface{}{
 		&models.ResourceRole{},
 		&models.ResourceRoleNode{},
 		&models.ResourceRoleUser{},
+		&models.ResourceRoleDevice{},
+		&models.ResourceRoleDeviceGroup{},
+		&models.ResourceRoleWorkOrderType{},
+	},
+	// Group 13 — document management (文档管理)
+	{
+		&models.DocumentNode{},
+		&models.DocumentVersion{},
+		&models.DocumentRole{},
+		&models.DocumentRoleNode{},
+		&models.DocumentRoleUser{},
+		&models.DocumentProject{},
+		&models.DocumentProjectCategory{},
+	},
+	// Group 14 — MDM
+	{
+		&models.MDMEnterprise{},
+		&models.DeviceMDMConfig{},
 	},
 }
 
@@ -275,6 +294,7 @@ func initSchema(db *gorm.DB) error {
 		MigrateLowCode,
 		MigrateUserThirdParty,
 		MigrateThirdPartyOutbound,
+		MigrateThirdPartySSOSecurity,
 		migrations.MigrateDeviceX5Fields,
 		func(db *gorm.DB) { migrations.AddWorkflowInterfaceFields(db) },
 		MigrateWorkOrderSettledAt,

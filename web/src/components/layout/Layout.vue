@@ -1,6 +1,7 @@
 <template>
-  <el-container class="layout">
-    <el-aside width="200px">
+  <el-container class="layout" :class="{ 'mobile-menu-open': mobileMenuOpen }">
+    <div v-if="mobileMenuOpen" class="layout-aside-mask" @click="mobileMenuOpen = false" />
+    <el-aside width="200px" class="layout-aside">
       <div class="logo">
         <img src="@/assets/bedrock-icon.svg" alt="磐石" class="logo-mark" />
         <div class="logo-text">
@@ -8,7 +9,7 @@
           <span class="logo-en">BEDROCK</span>
         </div>
       </div>
-      <el-menu :router="true" :default-active="menuActive" background-color="#1d2935" text-color="#aaa" active-text-color="#fff">
+      <el-menu :router="true" :default-active="menuActive" background-color="#1d2935" text-color="#aaa" active-text-color="#fff" @select="mobileMenuOpen = false">
         <template v-if="!auth.isViewer">
           <el-menu-item index="/dashboard">
             <el-icon><Monitor /></el-icon><span>总览</span>
@@ -40,11 +41,14 @@
           <el-menu-item index="/outbound">
             <el-icon><Share /></el-icon><span>连接器</span>
           </el-menu-item>
-          <div class="menu-item-external menu-item-flat" @click="openScadaEditor">
+          <div class="menu-item-external menu-item-flat" @click="mobileMenuOpen = false; openScadaEditor()">
             <el-icon><Histogram /></el-icon><span>组态编辑器 ↗</span>
           </div>
-          <div class="menu-item-external menu-item-flat" @click="openFormApp">
+          <div class="menu-item-external menu-item-flat" @click="mobileMenuOpen = false; openFormApp()">
             <el-icon><EditPen /></el-icon><span>表单设计器 ↗</span>
+          </div>
+          <div class="menu-item-external menu-item-flat" @click="mobileMenuOpen = false; openDocsApp()">
+            <el-icon><Document /></el-icon><span>文档管理 ↗</span>
           </div>
           <el-menu-item index="/agent-menus">
             <el-icon><Menu /></el-icon><span>Agent 菜单</span>
@@ -86,7 +90,10 @@
     </el-aside>
     <el-container class="layout-right">
       <el-header height="56px">
-        <span class="route-title">{{ pageTitle }}</span>
+        <div class="header-left">
+          <el-icon class="mobile-menu-btn" @click="mobileMenuOpen = !mobileMenuOpen"><Expand /></el-icon>
+          <span class="route-title">{{ pageTitle }}</span>
+        </div>
         <div class="header-right">
           <QuickSearch />
           <el-button link @click="openPortal" class="resource-center-btn">
@@ -109,15 +116,18 @@
 </template>
 
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useRoute, useRouter } from 'vue-router'
-import { Monitor, Phone, VideoCamera, Document, Box, List, Key, Notebook, Connection, Cpu, Bell, Setting, Share, Link, Tools, UserFilled, User, Histogram, Menu, EditPen, Tickets, Loading, Warning, Grid } from '@element-plus/icons-vue'
+import { Monitor, Phone, VideoCamera, Document, Box, List, Key, Notebook, Connection, Cpu, Bell, Setting, Share, Link, Tools, UserFilled, User, Histogram, Menu, EditPen, Tickets, Loading, Warning, Grid, Expand } from '@element-plus/icons-vue'
 import QuickSearch from './QuickSearch.vue'
 
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
+
+const mobileMenuOpen = ref(false)
+watch(() => route.path, () => { mobileMenuOpen.value = false })
 
 const openScadaEditor = () => {
   const token = localStorage.getItem('token')
@@ -129,6 +139,13 @@ const openScadaEditor = () => {
 const openFormApp = () => {
   const token = localStorage.getItem('token')
   const base = `${window.location.origin}/form-app/forms`
+  const url = `${base}${token ? `?_token=${encodeURIComponent(token)}` : ''}`
+  window.open(url, '_blank')
+}
+
+const openDocsApp = () => {
+  const token = localStorage.getItem('token')
+  const base = `${window.location.origin}/docs-app/`
   const url = `${base}${token ? `?_token=${encodeURIComponent(token)}` : ''}`
   window.open(url, '_blank')
 }
@@ -210,6 +227,8 @@ onMounted(() => {
 .logo-en { color: #3BE0C8; font-size: 10px; font-weight: 600; letter-spacing: 3px; }
 .el-aside { background: #1d2935; overflow-x: hidden; }
 .el-header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #eee; flex-shrink: 0; }
+.header-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.mobile-menu-btn { display: none; font-size: 22px; cursor: pointer; color: #303133; flex-shrink: 0; }
 .route-title { font-size: 16px; font-weight: bold; }
 .header-right { display: flex; align-items: center; gap: 12px; }
 .username { display: flex; align-items: center; gap: 4px; color: #606266; font-size: 14px; }
@@ -239,5 +258,37 @@ onMounted(() => {
 }
 .resource-center-btn:hover {
   color: var(--el-color-primary);
+}
+
+/* ── 移动端适配 ─────────────────────────────────────────────── */
+.layout-aside-mask { display: none; }
+@media (max-width: 768px) {
+  .layout { position: relative; }
+  .mobile-menu-btn { display: inline-flex; }
+  /* 侧栏改为抽屉式覆盖，默认移出屏幕，点击汉堡按钮滑入 */
+  .layout-aside {
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    width: 220px !important;
+    z-index: 1500;
+    transform: translateX(-100%);
+    transition: transform 0.28s ease;
+    box-shadow: 2px 0 12px rgba(0, 0, 0, .25);
+  }
+  .mobile-menu-open .layout-aside { transform: translateX(0); }
+  .layout-aside-mask {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, .35);
+    z-index: 1400;
+  }
+  .layout-right { width: 100%; }
+  .el-header { padding: 0 10px; }
+  .route-title { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .header-right { gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .header-right .username { display: none; }
+  .resource-center-btn span { display: none; }
+  .layout-main { padding: 10px; }
 }
 </style>

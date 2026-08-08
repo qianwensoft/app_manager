@@ -33,6 +33,9 @@ export interface ChartSchemaDef {
   label: string
   bindingFields: BindingFieldDef[]
   styleFields: StyleFieldDef[]
+  /** 系列可动态增删（数据定义里直接配置系列名称，最少 1 个系列）。
+   *  开启后 point 模式的系列绑定从 bindingFields 中首个 series 字段派生为可增删列表。 */
+  seriesDynamic?: boolean
 }
 
 // ── 共用 style fields ──────────────────────────────────────────────────────────
@@ -56,6 +59,18 @@ const gridStyleFields: StyleFieldDef[] = [
   { key: 'gridBottom', label: '下边距', type: 'number', default: 30, group: '边距' },
   { key: 'gridLeft',   label: '左边距', type: 'number', default: 40, group: '边距' },
   { key: 'gridRight',  label: '右边距', type: 'number', default: 10, group: '边距' },
+]
+
+// 双数值轴（多轴）通用配置：直角坐标系图表共用（纵向数值轴=Y，横向柱数值轴=X）
+const multiAxisStyleFields: StyleFieldDef[] = [
+  { key: 'dualValueAxis', label: '启用双数值轴', type: 'boolean', default: false, group: '多轴',
+    hint: '为不同系列配置左右（或上下）两条数值轴，适合量纲不同的双柱/组合图' },
+  { key: 'axis2FromSeries', label: '第二轴起始系列', type: 'number', default: 1, group: '多轴',
+    hint: '从第几个系列起使用第二轴（0 基），如 1 表示系列 2 起' },
+  { key: 'axis1Name', label: '主数值轴名称', type: 'text', default: '', group: '多轴' },
+  { key: 'axis2Name', label: '第二数值轴名称', type: 'text', default: '', group: '多轴' },
+  { key: 'axis1Max', label: '主数值轴最大值', type: 'text', default: '', group: '多轴', hint: '留空自适应' },
+  { key: 'axis2Max', label: '第二数值轴最大值', type: 'text', default: '', group: '多轴', hint: '留空自适应' },
 ]
 
 // ── Schema 定义 ────────────────────────────────────────────────────────────────
@@ -90,8 +105,13 @@ export const chartSchema: Record<string, ChartSchemaDef> = {
       ...commonStyleFields,
       { key: 'seriesColors', label: '系列颜色', type: 'text', default: '#4a9eff,#27ae60,#e67e22',
         group: '系列', hint: '多系列用逗号分隔，如 #4a9eff,#27ae60' },
+      { key: 'seriesNames', label: '系列名称', type: 'text', default: '', group: '系列',
+        hint: '逗号分隔，用于图例/多轴标注，如 产量,能耗' },
       { key: 'barBorderRadius', label: '柱子圆角', type: 'number', default: 2, group: '系列' },
       { key: 'barMaxWidth', label: '柱子最大宽', type: 'number', default: 40, group: '系列' },
+      { key: 'barGap', label: '柱间距', type: 'text', default: '30%', group: '系列',
+        hint: '同类不同系列的柱间距，如 30% 或 -100%（重叠）' },
+      ...multiAxisStyleFields,
       ...axisStyleFields,
       ...gridStyleFields,
     ],
@@ -121,10 +141,13 @@ export const chartSchema: Record<string, ChartSchemaDef> = {
       ...commonStyleFields,
       { key: 'seriesColors', label: '系列颜色', type: 'text', default: '#4a9eff,#27ae60',
         group: '系列', hint: '多系列用逗号分隔' },
+      { key: 'seriesNames', label: '系列名称', type: 'text', default: '', group: '系列',
+        hint: '逗号分隔，用于图例/多轴标注' },
       { key: 'smooth',    label: '平滑曲线', type: 'boolean', default: true,  group: '系列' },
       { key: 'areaStyle', label: '面积填充', type: 'boolean', default: true,  group: '系列' },
       { key: 'lineWidth', label: '线宽',     type: 'number',  default: 2,     group: '系列' },
       { key: 'showSymbol', label: '显示节点', type: 'boolean', default: false, group: '系列' },
+      ...multiAxisStyleFields,
       ...axisStyleFields,
       ...gridStyleFields,
     ],
@@ -203,6 +226,10 @@ export const chartSchema: Record<string, ChartSchemaDef> = {
       { key: 'dotSize',  label: '点大小', type: 'number', default: 8,         group: '样式' },
       { key: 'dotOpacity', label: '点透明度', type: 'number', default: 0.8,   group: '样式',
         hint: '0~1' },
+      { key: 'xAxisName', label: 'X 轴名称', type: 'text', default: '', group: '坐标轴' },
+      { key: 'yAxisName', label: 'Y 轴名称', type: 'text', default: '', group: '坐标轴' },
+      { key: 'xAxisMax', label: 'X 轴最大值', type: 'text', default: '', group: '坐标轴', hint: '留空自适应' },
+      { key: 'yAxisMax', label: 'Y 轴最大值', type: 'text', default: '', group: '坐标轴', hint: '留空自适应' },
       ...axisStyleFields,
       ...gridStyleFields,
     ],
@@ -242,11 +269,14 @@ export const chartSchema: Record<string, ChartSchemaDef> = {
     bindingFields: [
       { key: 'series0', kind: 'series', seriesIndex: 0, multi: true, label: '系列 1', placeholder: 'val_a, val_b' },
       { key: 'series1', kind: 'series', seriesIndex: 1, multi: true, label: '系列 2（可选）', placeholder: 'val_c, val_d', optional: true },
+      { key: 'series2', kind: 'series', seriesIndex: 2, multi: true, label: '系列 3（可选）', placeholder: 'val_e, val_f', optional: true },
       { key: 'category', kind: 'category', label: '分类轴', placeholder: 'categories_key', optional: true },
     ],
     styleFields: [
       ...commonStyleFields,
       { key: 'seriesColors', label: '系列颜色', type: 'text', default: '#4a9eff,#27ae60,#e67e22', group: '系列' },
+      { key: 'seriesNames', label: '系列名称', type: 'text', default: '', group: '系列', hint: '逗号分隔' },
+      ...multiAxisStyleFields,
       ...axisStyleFields,
       ...gridStyleFields,
     ],
@@ -254,13 +284,38 @@ export const chartSchema: Record<string, ChartSchemaDef> = {
 
   'echarts-horizontal-bar': {
     label: '横向柱状图',
+    seriesDynamic: true,
     bindingFields: [
-      { key: 'series0', kind: 'series', seriesIndex: 0, multi: true, label: '数据键', placeholder: 'val_a, val_b, val_c' },
+      {
+        key: 'series0', kind: 'series', seriesIndex: 0, multi: true,
+        label: '系列 1 数据键', placeholder: 'val_a, val_b, val_c',
+        hint: '多个 key 逗号分隔，每个 key 对应一根柱子的值',
+      },
+      {
+        key: 'series1', kind: 'series', seriesIndex: 1, multi: true,
+        label: '系列 2 数据键（双柱，可选）', placeholder: 'val_d, val_e, val_f',
+        optional: true,
+      },
+      {
+        key: 'series2', kind: 'series', seriesIndex: 2, multi: true,
+        label: '系列 3 数据键（可选）', placeholder: 'val_g, val_h',
+        optional: true,
+      },
       { key: 'category', kind: 'category', label: '分类轴', placeholder: 'categories_key', optional: true },
     ],
     styleFields: [
       ...commonStyleFields,
-      { key: 'seriesColors', label: '柱子颜色', type: 'text', default: '#4a9eff', group: '系列' },
+      { key: 'seriesColors', label: '系列颜色', type: 'text', default: '#4a9eff,#27ae60,#e67e22',
+        group: '系列', hint: '多系列（双柱）用逗号分隔，如 #4a9eff,#27ae60' },
+      { key: 'seriesNames', label: '系列名称（回退）', type: 'text', default: '', group: '系列',
+        hint: '优先在「数据定义」里为每个系列直接配置名称；此处为逗号分隔回退值' },
+      { key: 'barBorderRadius', label: '柱子圆角', type: 'number', default: 2, group: '系列' },
+      { key: 'barMaxWidth', label: '柱子最大宽', type: 'number', default: 20, group: '系列' },
+      { key: 'barGap', label: '柱间距', type: 'text', default: '30%', group: '系列',
+        hint: '同类不同系列的柱间距，如 30% 或 -100%（重叠）' },
+      { key: 'stack', label: '堆叠显示', type: 'boolean', default: false, group: '系列',
+        hint: '开启后多系列在同一根柱上堆叠' },
+      ...multiAxisStyleFields,
       ...axisStyleFields,
       ...gridStyleFields,
     ],
@@ -271,13 +326,16 @@ export const chartSchema: Record<string, ChartSchemaDef> = {
     bindingFields: [
       { key: 'series0', kind: 'series', seriesIndex: 0, multi: true, label: '系列 1', placeholder: 'val_a, val_b' },
       { key: 'series1', kind: 'series', seriesIndex: 1, multi: true, label: '系列 2（可选）', placeholder: 'val_c, val_d', optional: true },
+      { key: 'series2', kind: 'series', seriesIndex: 2, multi: true, label: '系列 3（可选）', placeholder: 'val_e, val_f', optional: true },
       { key: 'category', kind: 'category', label: '分类轴', placeholder: 'time_labels_key', optional: true },
     ],
     styleFields: [
       ...commonStyleFields,
       { key: 'seriesColors', label: '系列颜色', type: 'text', default: '#4a9eff,#27ae60', group: '系列' },
+      { key: 'seriesNames', label: '系列名称', type: 'text', default: '', group: '系列', hint: '逗号分隔' },
       { key: 'smooth', label: '平滑曲线', type: 'boolean', default: true, group: '系列' },
       { key: 'lineWidth', label: '线宽', type: 'number', default: 2, group: '系列' },
+      ...multiAxisStyleFields,
       ...axisStyleFields,
       ...gridStyleFields,
     ],

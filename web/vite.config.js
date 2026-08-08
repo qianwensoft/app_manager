@@ -28,9 +28,10 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   // 与 Go 后端一致；局域网调试可设 VITE_PROXY_TARGET=http://本机IP:8080
   const backend = env.VITE_PROXY_TARGET || 'http://127.0.0.1:8080'
-  // scada-editor dev server；生产不走此代理（build 产物直接由后端静态托管）
+  // 独立子应用 dev server；生产不走这些代理（build 产物直接由后端静态托管）
   const scadaDev = env.VITE_SCADA_DEV || 'http://127.0.0.1:5174'
   const formAppDev = env.VITE_FORM_APP_DEV || 'http://127.0.0.1:5175'
+  const docsAppDev = env.VITE_DOCS_APP_DEV || 'http://127.0.0.1:5176'
 
   return {
     customLogger: createFilteredLogger(),
@@ -62,6 +63,13 @@ export default defineConfig(({ mode }) => {
         },
         '/form-app': {
           target: formAppDev,
+          changeOrigin: true,
+          secure: false,
+          ws: true,
+        },
+        // 开发模式下将 docs-app 子路径代理到独立 dev server（不 rewrite，保留 /docs-app 前缀）
+        '/docs-app': {
+          target: docsAppDev,
           changeOrigin: true,
           secure: false,
           ws: true,

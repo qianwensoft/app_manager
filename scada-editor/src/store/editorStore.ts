@@ -235,6 +235,11 @@ interface EditorStore {
   toggleLiveData: () => void
   layerCollapsed: boolean
   toggleLayerCollapsed: () => void
+
+  // 全局上下文查看器开关（非持久化，由 EditorHeader 按钮控制、CanvasBoard 渲染）
+  globalContextOpen: boolean
+  setGlobalContextOpen: (open: boolean) => void
+  toggleGlobalContext: () => void
 }
 
 const initialProject: CanvasProject = {
@@ -263,6 +268,7 @@ export const useEditorStore = create<EditorStore>()(
     _renderVersion: 0,
     liveDataOn: localStorage.getItem('scada:liveDataOn') === 'true',
     layerCollapsed: localStorage.getItem('scada:layerCollapsed') === 'true',
+    globalContextOpen: false,
     registerCanvasEl: (el) => set(() => ({ _canvasEl: el })),
     bumpRender: () => set((s) => { s._renderVersion++ }),
     getSnapshot: (maxWidth = 480) => {
@@ -719,5 +725,7 @@ export const useEditorStore = create<EditorStore>()(
       s.layerCollapsed = next
       localStorage.setItem('scada:layerCollapsed', String(next))
     }),
+    setGlobalContextOpen: (open) => set((s) => { s.globalContextOpen = open }),
+    toggleGlobalContext: () => set((s) => { s.globalContextOpen = !s.globalContextOpen }),
   }))
 )

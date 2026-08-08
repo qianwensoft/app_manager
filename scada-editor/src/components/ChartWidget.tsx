@@ -5,7 +5,10 @@ import type { PointDataMap } from '@/hooks/useStompPointData'
 import { mergeAnimStyle } from '@/runtime/animationExecutor'
 import { getStyleValue, type StyleFieldDef, chartSchema } from '@/schema/chartSchema'
 import { applyFormatter } from '@/hooks/useInterfaceBindingData'
-import { parseBindingValue, toNumber } from '@/runtime/bindingData'
+import { parseBindingValue, toNumber, getPath, type BindingValue } from '@/runtime/bindingData'
+import { getGlobalContext } from '@/runtime/workflow/globalContext'
+import { interpolateExpression, type ExpressionScope } from '@/runtime/expression'
+import type { ChartKeySource } from '@/types'
 
 interface Props {
   el: CanvasElement
@@ -35,12 +38,192 @@ function parseColors(s: string): string[] {
   return s.split(',').map((c) => c.trim()).filter(Boolean)
 }
 
+/** 解析可选最大值：空串或非数字返回 undefined（ECharts 自适应） */
+function parseAxisMax(s: string): number | undefined {
+  const n = Number(s)
+  return s.trim() && Number.isFinite(n) ? n : undefined
+}
+
+interface DualAxisCfg {
+  enabled: boolean
+  axis2From: number
+  axis1Name: string
+  axis2Name: string
+  axis1Max: number | undefined
+  axis2Max: number | undefined
+}
+
+/** 从 chartConfig 读取双数值轴配置 */
+function readDualAxis(cfg: Record<string, unknown>): DualAxisCfg {
+  return {
+    enabled: sv(cfg, 'dualValueAxis', false),
+    axis2From: Math.max(0, Math.floor(sv(cfg, 'axis2FromSeries', 1))),
+    axis1Name: sv(cfg, 'axis1Name', ''),
+    axis2Name: sv(cfg, 'axis2Name', ''),
+    axis1Max: parseAxisMax(sv(cfg, 'axis1Max', '')),
+    axis2Max: parseAxisMax(sv(cfg, 'axis2Max', '')),
+  }
+}
+
+/** 构建纵向直角坐标系图表的数值 Y 轴（单轴或左右双轴） */
+function buildValueYAxis(
+  da: DualAxisCfg,
+  yAxisColor: string,
+  splitLineColor: string,
+  axis2Color: string,
+): echarts.EChartsOption['yAxis'] {
+  const primary = {
+    type: 'value' as const,
+    name: da.axis1Name || undefined,
+    max: da.axis1Max,
+    axisLine: { lineStyle: { color: yAxisColor } },
+    splitLine: { lineStyle: { color: splitLineColor } },
+  }
+  if (!da.enabled) return primary
+  return [primary, {
+    type: 'value' as const,
+    name: da.axis2Name || undefined,
+    max: da.axis2Max,
+    position: 'right' as const,
+    axisLine: { show: true, lineStyle: { color: axis2Color } },
+    splitLine: { show: false },
+  }]
+}
+
 /** 解析仪表盘颜色段 "0.3:#27ae60,0.7:#e67e22,1:#c0392b" */
 function parseGaugeColors(s: string): [number, string][] {
   return s.split(',').map((seg) => {
     const [ratio, color] = seg.trim().split(':')
     return [parseFloat(ratio), color?.trim() ?? '#ccc'] as [number, string]
   }).filter(([r]) => !isNaN(r))
+}
+
+/**
+ * 解析 ChartKeySource（组件属性 / 全局上下文）为具体值。
+ * - component：ref 形如 `<组件名或id>.ext.flow` / `.value` / `.params.max`；
+ *   在 global.components 快照中按第一段定位组件，其余路径 getPath。
+ * - global：ref 为全局上下文中的点分路径。
+ */
+function resolveKeySourceValue(src: ChartKeySource): unknown {
+  const ref = src.ref?.trim()
+  if (!ref) return undefined
+  const ctx = getGlobalContext().getAll() as Record<string, unknown>
+  if (src.type === 'global') return getPath(ctx, ref)
+  if (src.type === 'component') {
+    const components = (ctx.components ?? {}) as Record<string, unknown>
+    const dot = ref.indexOf('.')
+    const compKey = dot === -1 ? ref : ref.slice(0, dot)
+    const rest = dot === -1 ? '' : ref.slice(dot + 1)
+    const comp = components[compKey]
+    if (comp === undefined) return undefined
+    return rest ? getPath(comp, rest) : comp
+  }
+  return undefined
+}
+
+/**
+ * 把一个「非 key 来源」的系列/分类解析并注入合成键。
+ * 返回该系列对应的合成 key 数组（写进 seriesKeys），值写入 syntheticData。
+ */
+function injectSourceSeries(
+  src: ChartKeySource,
+  slot: string,
+  syntheticData: PointDataMap,
+): string[] {
+  const value = resolveKeySourceValue(src)
+  if (Array.isArray(value)) {
+    const keys: string[] = []
+    value.forEach((item, i) => {
+      const k = `__src_${slot}_${i}`
+      syntheticData[k] = item as never
+      keys.push(k)
+    })
+    return keys
+  }
+  const k = `__src_${slot}`
+  syntheticData[k] = (value ?? 0) as never
+  return [k]
+}
+
+/**
+ * 构建静态数据表达式作用域：从全局上下文取 global / components 快照，
+ * 并把组件快照还原成 elements（含 extData），支持 el('名','extData:max')。
+ */
+function buildStaticExprScope(rawPointData: PointDataMap): ExpressionScope {
+  const global = getGlobalContext().getAll() as Record<string, unknown>
+  const components = (global.components ?? {}) as Record<string, Record<string, unknown>>
+  // 还原伪元素：把快照字段对齐真实 CanvasElement，并添加常用别名
+  // - extData / ext 均可访问扩展数据（el('名','extData:max') / el('名','ext:max')）
+  // - text / 内容 / content 均指向 value（绑定显示值），优于静态文本
+  const elements = Object.values(components).reduce<Record<string, unknown>[]>((acc, snap) => {
+    if (snap && !acc.some((e) => e.id === snap.id)) {
+      const displayValue = snap.value ?? snap.text
+      acc.push({
+        ...snap,
+        extData: snap.ext,
+        properties: snap.params,
+        value: displayValue,
+        text: displayValue,
+        内容: displayValue,
+        content: displayValue,
+      })
+    }
+    return acc
+  }, [])
+  return {
+    point: rawPointData,
+    global,
+    components,
+    elements: elements as never,
+  }
+}
+
+/**
+ * 把 `{{组件名:属性}}` 快捷写法标准化为 `{{el('组件名', '属性')}}` 函数调用形式。
+ * 仅当占位符内不含括号（非函数调用）时才做转换，避免影响正常 JS 表达式。
+ * 支持含汉字/连字符的组件名，如 `{{库存-过检:text}}`、`{{过检-配置:extData:max}}`。
+ */
+function normalizeTemplateShorthand(text: string): string {
+  return text.replace(/\{\{\s*([^{}()]+?)\s*\}\}/g, (_m, inner: string) => {
+    const trimmed = inner.trim()
+    // 已包含 ( 的视为函数调用，直接放行
+    if (trimmed.includes('(')) return `{{${trimmed}}}`
+    // 含 : 的解析为 组件名:属性[:子属性]，转为 el('名', '属性[:子属性]')
+    const colon = trimmed.indexOf(':')
+    if (colon > 0) {
+      const name = trimmed.slice(0, colon).trim()
+      const prop = trimmed.slice(colon + 1).trim()
+      return `{{el('${name}', '${prop}')}}`
+    }
+    return `{{${trimmed}}}`
+  })
+}
+
+/**
+ * 解析静态值：支持扩展参数 / 全局上下文表达式。
+ * - 含 `{{...}}`：先把 `{{name:prop}}` 快捷写法转为 `{{el('name','prop')}}`，
+ *   再按模板插值（内部可用 el()/C()/G() 等），替换后按 JSON/标量解析。
+ * - 纯标量/JSON：直接 parseBindingValue。
+ */
+function resolveStaticValue(raw: unknown, scope: ExpressionScope): BindingValue | undefined {
+  if (typeof raw !== 'string') return parseBindingValue(raw)
+  const text = raw.trim()
+  if (!text) return ''
+  // 模板插值：{{ 表达式 }} → 求值结果（数字/字符串），再解析整串
+  if (text.includes('{{')) {
+    const normalized = normalizeTemplateShorthand(text)
+    const filled = normalized.replace(/\{\{\s*([\s\S]+?)\s*\}\}/g, (_m, expr: string) => {
+      const v = interpolateExpression(`\${${expr}}`, scope)
+      return v === undefined || v === null ? '' : String(v)
+    })
+    return parseBindingValue(filled)
+  }
+  // 数组/对象字面量内可能直接含表达式（如 [el('库存','extData:max'),1,2,3]）
+  if ((text.startsWith('[') || text.startsWith('{')) && /\b(el|C|G|P|V|url)\s*\(/.test(text)) {
+    const evaluated = interpolateExpression(`\${${text}}`, scope)
+    if (evaluated !== undefined) return evaluated as BindingValue
+  }
+  return parseBindingValue(raw)
 }
 
 /**
@@ -63,15 +246,18 @@ function resolveChartData(pb: PointBinding | undefined, rawPointData: PointDataM
     const syntheticData: PointDataMap = {}
     const seriesKeys: string[][] = []
     let categoryKey: string | undefined
+    const scope = buildStaticExprScope(rawPointData)
 
-    for (const [key, raw] of Object.entries(sd)) {
-      const value = parseBindingValue(raw)
-      if (value === undefined) continue
-      if (key === 'category' && Array.isArray(value)) {
-        categoryKey = '__static_category'
-        syntheticData[categoryKey] = value.map(String)
-        continue
-      }
+    // 系列键按数字后缀（series0/series1…）升序，保证与 chartSeriesNames/Colors 下标对齐；
+    // 其余非系列、非分类键保持原有顺序追加（兼容单值等旧数据）。
+    const seriesEntries = Object.keys(sd)
+      .filter((k) => /^series\d+$/.test(k))
+      .sort((a, b) => Number(a.slice(6)) - Number(b.slice(6)))
+    const otherEntries = Object.keys(sd).filter((k) => k !== 'category' && !/^series\d+$/.test(k))
+
+    const pushValue = (key: string, raw: unknown) => {
+      const value = resolveStaticValue(raw, scope)
+      if (value === undefined) { seriesKeys.push([]); return }
       if (Array.isArray(value)) {
         const keys: string[] = []
         value.forEach((item, index) => {
@@ -80,10 +266,30 @@ function resolveChartData(pb: PointBinding | undefined, rawPointData: PointDataM
           keys.push(dataKey)
         })
         seriesKeys.push(keys)
+      } else if (value === '') {
+        // 空系列：保留占位以维持后续系列的下标对齐
+        seriesKeys.push([])
       } else {
         const dataKey = `__static_${key}`
         syntheticData[dataKey] = value
         seriesKeys.push([dataKey])
+      }
+    }
+
+    seriesEntries.forEach((key) => pushValue(key, sd[key]))
+    otherEntries.forEach((key) => pushValue(key, sd[key]))
+
+    const catRaw = sd['category']
+    if (catRaw !== undefined) {
+      const value = resolveStaticValue(catRaw, scope)
+      if (value !== undefined) {
+        const arr = Array.isArray(value)
+          ? value
+          : typeof value === 'string'
+            ? value.split(',').map((s) => s.trim()).filter(Boolean)
+            : [String(value)]
+        categoryKey = '__static_category'
+        syntheticData[categoryKey] = arr.map(String)
       }
     }
     return { seriesKeys, categoryKey, pointData: { ...rawPointData, ...syntheticData } }
@@ -144,11 +350,35 @@ function resolveChartData(pb: PointBinding | undefined, rawPointData: PointDataM
   }
 
   // point mode (default)
-  return {
-    seriesKeys: pb.chartSeriesKeys ?? [],
-    categoryKey: pb.chartCategoryKey,
-    pointData: rawPointData,
+  const baseSeriesKeys = pb.chartSeriesKeys ?? []
+  const sources = pb.chartSeriesSources
+  const catSource = pb.chartCategorySource
+  const hasSources = (sources?.some((s) => s && s.type !== 'key')) || (catSource && catSource.type !== 'key')
+
+  if (!hasSources) {
+    return {
+      seriesKeys: baseSeriesKeys,
+      categoryKey: pb.chartCategoryKey,
+      pointData: rawPointData,
+    }
   }
+
+  // 混合来源：为「组件/全局」来源生成合成键，其余保留原数据键
+  const syntheticData: PointDataMap = {}
+  const seriesKeys: string[][] = baseSeriesKeys.map((keys, i) => {
+    const src = sources?.[i]
+    if (src && src.type !== 'key') return injectSourceSeries(src, `s${i}`, syntheticData)
+    return keys
+  })
+  let categoryKey = pb.chartCategoryKey
+  if (catSource && catSource.type !== 'key') {
+    const value = resolveKeySourceValue(catSource)
+    if (Array.isArray(value)) {
+      categoryKey = '__src_category'
+      syntheticData[categoryKey] = value.map(String) as never
+    }
+  }
+  return { seriesKeys, categoryKey, pointData: { ...rawPointData, ...syntheticData } }
 }
 
 function buildOption(el: CanvasElement, rawPointData: PointDataMap): echarts.EChartsOption {
@@ -178,17 +408,20 @@ function buildOption(el: CanvasElement, rawPointData: PointDataMap): echarts.ECh
 
     case 'echarts-bar': {
       const colors = parseColors(sv(cfg, 'seriesColors', '#4a9eff,#27ae60,#e67e22'))
+      const names = parseColors(sv(cfg, 'seriesNames', ''))
       const borderRadius = sv(cfg, 'barBorderRadius', 2)
       const maxWidth = sv(cfg, 'barMaxWidth', 40)
+      const barGap = sv(cfg, 'barGap', '30%')
       const showLegend = sv(cfg, 'showLegend', false)
       const xAxisColor = sv(cfg, 'xAxisColor', '#444')
       const yAxisColor = sv(cfg, 'yAxisColor', '#444')
       const splitLineColor = sv(cfg, 'splitLineColor', '#2a2a3e')
+      const da = readDualAxis(cfg)
       const grid = {
         top: sv(cfg, 'gridTop', 30),
         bottom: sv(cfg, 'gridBottom', 30),
         left: sv(cfg, 'gridLeft', 40),
-        right: sv(cfg, 'gridRight', 10),
+        right: sv(cfg, 'gridRight', da.enabled ? 40 : 10),
       }
 
       const categories = categoryKey
@@ -197,9 +430,12 @@ function buildOption(el: CanvasElement, rawPointData: PointDataMap): echarts.ECh
 
       const series: echarts.SeriesOption[] = (seriesKeys.length > 0 ? seriesKeys : [[]]).map((keys, i) => ({
         type: 'bar',
+        name: names[i] ?? `系列${i + 1}`,
+        yAxisIndex: da.enabled && i >= da.axis2From ? 1 : 0,
         data: keys.length
           ? keys.map((k) => applyTransform(pointData[k] ?? 0, transform))
           : [42, 68, 35, 80, 55],
+        barGap,
         itemStyle: {
           color: colors[i % colors.length],
           borderRadius,
@@ -212,13 +448,14 @@ function buildOption(el: CanvasElement, rawPointData: PointDataMap): echarts.ECh
         grid,
         legend: showLegend ? {} : undefined,
         xAxis: { type: 'category', data: categories, axisLine: { lineStyle: { color: xAxisColor } } },
-        yAxis: { type: 'value', axisLine: { lineStyle: { color: yAxisColor } }, splitLine: { lineStyle: { color: splitLineColor } } },
+        yAxis: buildValueYAxis(da, yAxisColor, splitLineColor, colors[da.axis2From % colors.length]),
         series,
       }
     }
 
     case 'echarts-line': {
       const colors = parseColors(sv(cfg, 'seriesColors', '#4a9eff,#27ae60'))
+      const names = parseColors(sv(cfg, 'seriesNames', ''))
       const smooth = sv(cfg, 'smooth', true)
       const areaStyle = sv(cfg, 'areaStyle', true)
       const lineWidth = sv(cfg, 'lineWidth', 2)
@@ -227,11 +464,12 @@ function buildOption(el: CanvasElement, rawPointData: PointDataMap): echarts.ECh
       const xAxisColor = sv(cfg, 'xAxisColor', '#444')
       const yAxisColor = sv(cfg, 'yAxisColor', '#444')
       const splitLineColor = sv(cfg, 'splitLineColor', '#2a2a3e')
+      const da = readDualAxis(cfg)
       const grid = {
         top: sv(cfg, 'gridTop', 30),
         bottom: sv(cfg, 'gridBottom', 30),
         left: sv(cfg, 'gridLeft', 40),
-        right: sv(cfg, 'gridRight', 10),
+        right: sv(cfg, 'gridRight', da.enabled ? 40 : 10),
       }
 
       const categories = categoryKey
@@ -242,6 +480,8 @@ function buildOption(el: CanvasElement, rawPointData: PointDataMap): echarts.ECh
         const color = colors[i % colors.length]
         return {
           type: 'line',
+          name: names[i] ?? `系列${i + 1}`,
+          yAxisIndex: da.enabled && i >= da.axis2From ? 1 : 0,
           data: keys.length
             ? keys.map((k) => applyTransform(pointData[k] ?? 0, transform))
             : [30, 55, 40, 70, 50, 80],
@@ -258,7 +498,7 @@ function buildOption(el: CanvasElement, rawPointData: PointDataMap): echarts.ECh
         grid,
         legend: showLegend ? {} : undefined,
         xAxis: { type: 'category', data: categories, axisLine: { lineStyle: { color: xAxisColor } } },
-        yAxis: { type: 'value', axisLine: { lineStyle: { color: yAxisColor } }, splitLine: { lineStyle: { color: splitLineColor } } },
+        yAxis: buildValueYAxis(da, yAxisColor, splitLineColor, colors[da.axis2From % colors.length]),
         series,
       }
     }
@@ -370,8 +610,8 @@ function buildOption(el: CanvasElement, rawPointData: PointDataMap): echarts.ECh
       return {
         ...base,
         grid,
-        xAxis: { type: 'value', axisLine: { lineStyle: { color: xAxisColor } }, splitLine: { lineStyle: { color: splitLineColor } } },
-        yAxis: { type: 'value', axisLine: { lineStyle: { color: yAxisColor } }, splitLine: { lineStyle: { color: splitLineColor } } },
+        xAxis: { type: 'value', name: sv(cfg, 'xAxisName', '') || undefined, max: parseAxisMax(sv(cfg, 'xAxisMax', '')), axisLine: { lineStyle: { color: xAxisColor } }, splitLine: { lineStyle: { color: splitLineColor } } },
+        yAxis: { type: 'value', name: sv(cfg, 'yAxisName', '') || undefined, max: parseAxisMax(sv(cfg, 'yAxisMax', '')), axisLine: { lineStyle: { color: yAxisColor } }, splitLine: { lineStyle: { color: splitLineColor } } },
         series: [{
           type: 'scatter',
           data,
@@ -383,47 +623,124 @@ function buildOption(el: CanvasElement, rawPointData: PointDataMap): echarts.ECh
 
     case 'echarts-stacked-bar': {
       const colors = parseColors(sv(cfg, 'seriesColors', '#4a9eff,#27ae60,#e67e22'))
+      const names = parseColors(sv(cfg, 'seriesNames', ''))
+      const showLegend = sv(cfg, 'showLegend', false)
+      const yAxisColor = sv(cfg, 'yAxisColor', '#444')
+      const splitLineColor = sv(cfg, 'splitLineColor', '#2a2a3e')
+      const da = readDualAxis(cfg)
       const categories = categoryKey
         ? (pointData[categoryKey] as unknown as string[] | undefined) ?? ['A', 'B', 'C', 'D']
         : ['A', 'B', 'C', 'D']
-      const series: echarts.SeriesOption[] = (seriesKeys.length > 0 ? seriesKeys : [[]]).map((keys, i) => ({
-        type: 'bar',
-        stack: 'total',
-        data: keys.length ? keys.map((k) => applyTransform(pointData[k] ?? 0, transform)) : [20, 30, 25, 15],
-        itemStyle: { color: colors[i % colors.length] },
-      }))
+      // 双轴时：主轴系列堆叠为 stackA，第二轴系列堆叠为 stackB，避免跨轴堆叠错乱
+      const series: echarts.SeriesOption[] = (seriesKeys.length > 0 ? seriesKeys : [[]]).map((keys, i) => {
+        const onAxis2 = da.enabled && i >= da.axis2From
+        return {
+          type: 'bar',
+          name: names[i] ?? `系列${i + 1}`,
+          stack: da.enabled ? (onAxis2 ? 'stackB' : 'stackA') : 'total',
+          yAxisIndex: onAxis2 ? 1 : 0,
+          data: keys.length ? keys.map((k) => applyTransform(pointData[k] ?? 0, transform)) : [20, 30, 25, 15],
+          itemStyle: { color: colors[i % colors.length] },
+        }
+      })
       return {
         ...base,
-        grid: { top: sv(cfg, 'gridTop', 30), bottom: sv(cfg, 'gridBottom', 30), left: sv(cfg, 'gridLeft', 40), right: sv(cfg, 'gridRight', 10) },
+        grid: { top: sv(cfg, 'gridTop', 30), bottom: sv(cfg, 'gridBottom', 30), left: sv(cfg, 'gridLeft', 40), right: sv(cfg, 'gridRight', da.enabled ? 40 : 10) },
+        legend: showLegend ? {} : undefined,
         xAxis: { type: 'category', data: categories },
-        yAxis: { type: 'value' },
+        yAxis: buildValueYAxis(da, yAxisColor, splitLineColor, colors[da.axis2From % colors.length]),
         series,
       }
     }
 
     case 'echarts-horizontal-bar': {
-      const colors = parseColors(sv(cfg, 'seriesColors', '#4a9eff'))
+      const fallbackColors = parseColors(sv(cfg, 'seriesColors', '#4a9eff,#27ae60,#e67e22'))
+      // 系列颜色：优先数据定义里逐系列配置的 chartSeriesColors（空串回退样式面板按序取色）
+      const seriesColorAt = (i: number): string => {
+        const c = pb?.chartSeriesColors?.[i]?.trim()
+        return c || fallbackColors[i % fallbackColors.length]
+      }
+      // 系列名称：优先数据定义里配置的 chartSeriesNames，回退到样式字段 seriesNames
+      const names = (pb?.chartSeriesNames && pb.chartSeriesNames.length > 0)
+        ? pb.chartSeriesNames
+        : parseColors(sv(cfg, 'seriesNames', ''))
+      const borderRadius = sv(cfg, 'barBorderRadius', 2)
+      const maxWidth = sv(cfg, 'barMaxWidth', 20)
+      const barGap = sv(cfg, 'barGap', '30%')
+      const stacked = sv(cfg, 'stack', false)
+      const showLegend = sv(cfg, 'showLegend', false)
+      const xAxisColor = sv(cfg, 'xAxisColor', '#444')
+      const yAxisColor = sv(cfg, 'yAxisColor', '#444')
+      const splitLineColor = sv(cfg, 'splitLineColor', '#2a2a3e')
       const categories = categoryKey
         ? (pointData[categoryKey] as unknown as string[] | undefined) ?? ['A', 'B', 'C', 'D']
         : ['A', 'B', 'C', 'D']
-      const keys = seriesKeys[0] ?? []
+
+      // 多轴（双数值轴）：横向柱的数值轴是 xAxis
+      const da = readDualAxis(cfg)
+
+      // 过滤空系列：先剔除未配置数据键的系列；再在运行时（至少一个系列有实际数据）
+      // 剔除所有键在 pointData 中均缺失的系列。保留原始下标以正确取名称/颜色。
+      // 没有任何绑定时（seriesKeys=[]）保留一个占位系列用于编辑器预览。
+      const hasData = (keys: string[]) => keys.some((k) => pointData[k] != null)
+      const keyed = seriesKeys.length > 0
+        ? seriesKeys.map((k, i) => ({ keys: k, idx: i })).filter(({ keys }) => keys.length > 0)
+        : [{ keys: [] as string[], idx: 0 }]
+      // 只要有任一系列已收到数据，就隐藏其余无数据的系列；否则（设计态无数据）全部保留预览。
+      const anyData = keyed.some(({ keys }) => hasData(keys))
+      const keyEntries = anyData ? keyed.filter(({ keys }) => hasData(keys)) : keyed
+
+      const series: echarts.SeriesOption[] = keyEntries.map(({ keys, idx }) => {
+        const useAxis2 = da.enabled && idx >= da.axis2From
+        return {
+          type: 'bar',
+          name: names[idx]?.trim() ? names[idx] : `系列${idx + 1}`,
+          stack: stacked ? 'total' : undefined,
+          xAxisIndex: useAxis2 ? 1 : 0,
+          data: keys.length ? keys.map((k) => applyTransform(pointData[k] ?? 0, transform)) : [42, 68, 35, 80],
+          barGap,
+          barMaxWidth: maxWidth,
+          itemStyle: { color: seriesColorAt(idx), borderRadius },
+        }
+      })
+
+      const baseXAxis = {
+        type: 'value' as const,
+        name: da.axis1Name || undefined,
+        max: da.axis1Max,
+        axisLine: { lineStyle: { color: xAxisColor } },
+        splitLine: { lineStyle: { color: splitLineColor } },
+      }
+      const xAxis: echarts.EChartsOption['xAxis'] = da.enabled
+        ? [baseXAxis, {
+            type: 'value' as const,
+            name: da.axis2Name || undefined,
+            max: da.axis2Max,
+            position: 'top' as const,
+            axisLine: { show: true, lineStyle: { color: seriesColorAt(da.axis2From) } },
+            splitLine: { show: false },
+          }]
+        : baseXAxis
+
       return {
         ...base,
-        grid: { top: sv(cfg, 'gridTop', 30), bottom: sv(cfg, 'gridBottom', 30), left: sv(cfg, 'gridLeft', 50), right: sv(cfg, 'gridRight', 10) },
-        xAxis: { type: 'value' },
-        yAxis: { type: 'category', data: categories },
-        series: [{
-          type: 'bar',
-          data: keys.length ? keys.map((k) => applyTransform(pointData[k] ?? 0, transform)) : [42, 68, 35, 80],
-          itemStyle: { color: colors[0] },
-        }],
+        grid: { top: sv(cfg, 'gridTop', da.enabled ? 40 : 30), bottom: sv(cfg, 'gridBottom', 30), left: sv(cfg, 'gridLeft', 50), right: sv(cfg, 'gridRight', 10) },
+        legend: showLegend ? {} : undefined,
+        xAxis,
+        yAxis: { type: 'category', data: categories, axisLine: { lineStyle: { color: yAxisColor } } },
+        series,
       }
     }
 
     case 'echarts-area': {
       const colors = parseColors(sv(cfg, 'seriesColors', '#4a9eff,#27ae60'))
+      const names = parseColors(sv(cfg, 'seriesNames', ''))
       const smooth = sv(cfg, 'smooth', true)
       const lineWidth = sv(cfg, 'lineWidth', 2)
+      const showLegend = sv(cfg, 'showLegend', false)
+      const yAxisColor = sv(cfg, 'yAxisColor', '#444')
+      const splitLineColor = sv(cfg, 'splitLineColor', '#2a2a3e')
+      const da = readDualAxis(cfg)
       const categories = categoryKey
         ? (pointData[categoryKey] as unknown as string[] | undefined) ?? ['1', '2', '3', '4', '5']
         : ['1', '2', '3', '4', '5']
@@ -431,6 +748,8 @@ function buildOption(el: CanvasElement, rawPointData: PointDataMap): echarts.ECh
         const color = colors[i % colors.length]
         return {
           type: 'line',
+          name: names[i] ?? `系列${i + 1}`,
+          yAxisIndex: da.enabled && i >= da.axis2From ? 1 : 0,
           data: keys.length ? keys.map((k) => applyTransform(pointData[k] ?? 0, transform)) : [30, 55, 40, 70, 50],
           smooth,
           lineStyle: { width: lineWidth, color },
@@ -440,9 +759,10 @@ function buildOption(el: CanvasElement, rawPointData: PointDataMap): echarts.ECh
       })
       return {
         ...base,
-        grid: { top: sv(cfg, 'gridTop', 30), bottom: sv(cfg, 'gridBottom', 30), left: sv(cfg, 'gridLeft', 40), right: sv(cfg, 'gridRight', 10) },
+        grid: { top: sv(cfg, 'gridTop', 30), bottom: sv(cfg, 'gridBottom', 30), left: sv(cfg, 'gridLeft', 40), right: sv(cfg, 'gridRight', da.enabled ? 40 : 10) },
+        legend: showLegend ? {} : undefined,
         xAxis: { type: 'category', data: categories },
-        yAxis: { type: 'value' },
+        yAxis: buildValueYAxis(da, yAxisColor, splitLineColor, colors[da.axis2From % colors.length]),
         series,
       }
     }
