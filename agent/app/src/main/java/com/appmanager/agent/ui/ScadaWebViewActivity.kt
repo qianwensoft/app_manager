@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.os.Build
 import android.os.Bundle
@@ -161,10 +160,7 @@ class ScadaWebViewActivity : AppCompatActivity() {
 
     /** 注册硬件扫码枪广播监听 */
     private fun registerHardwareScanReceiver() {
-        val filter = IntentFilter()
-        ScanBroadcastHelper.SCAN_ACTION_WHITELIST.forEach { action ->
-            filter.addAction(action)
-        }
+        val filter = ScanBroadcastHelper.createScanIntentFilter(this)
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 registerReceiver(hardwareScanReceiver, filter, RECEIVER_NOT_EXPORTED)

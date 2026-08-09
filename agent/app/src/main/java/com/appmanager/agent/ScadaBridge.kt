@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import android.webkit.JavascriptInterface
 import com.appmanager.agent.config.AgentConfig
+import com.appmanager.agent.ui.ScadaWebViewActivity
 import org.json.JSONObject
 
 /**
