@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel } from '@/components/ui/dropdown-menu'
 import AccessPoliciesModal from '@/components/AccessPoliciesModal'
 import SimPointsModal from '@/components/SimPointsModal'
+import SerialScannerButton from '@/components/SerialScannerButton'
 
 const Icon = ({ d, size = 14 }: { d: string; size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -385,6 +386,9 @@ export default function EditorHeader({ scadaName, scadaCode, publishStatus, onPr
           <Icon d={Icons.Points} size={13} />
         </Button>
       </Tooltip>
+
+      {/* Serial Scanner */}
+      <SerialScannerButton variant="icon-only" />
 
       <Div />
 

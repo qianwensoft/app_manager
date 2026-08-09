@@ -17,6 +17,8 @@ import {
   disconnectGlobalScanner,
   isSerialSupported,
   isSerialConnected,
+  getAuthorizedPorts,
+  connectWithAuthorizedPort,
 } from '@/runtime/serialScanner'
 
 const BAUD_RATES = [9600, 19200, 38400, 57600, 115200] as const
@@ -29,6 +31,8 @@ export default function SerialScannerPanel() {
   const [error, setError] = useState<string | null>(null)
   const [baudRate, setBaudRate] = useState<number>(9600)
   const [lastScan, setLastScan] = useState<string>('')
+  const [authorizedPorts, setAuthorizedPorts] = useState<SerialPort[]>([])
+  const [selectedPortIndex, setSelectedPortIndex] = useState<number>(-1)
 
   // 轮询连接状态（可能被外部代码断开）
   useEffect(() => {
@@ -37,18 +41,50 @@ export default function SerialScannerPanel() {
     return () => clearInterval(timer)
   }, [supported])
 
+  // 加载已授权的串口列表
+  useEffect(() => {
+    if (!supported || !open) return
+    
+    const loadPorts = async () => {
+      try {
+        const ports = await getAuthorizedPorts()
+        setAuthorizedPorts(ports)
+        if (ports.length > 0 && selectedPortIndex === -1) {
+          setSelectedPortIndex(0)
+        }
+      } catch (e) {
+        console.error('Failed to load authorized ports:', e)
+      }
+    }
+    
+    loadPorts()
+  }, [supported, open, selectedPortIndex])
+
   const handleConnect = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      await initGlobalScanner({ baudRate }, (data) => setLastScan(data))
+      if (selectedPortIndex >= 0 && authorizedPorts[selectedPortIndex]) {
+        // 使用已选择的授权串口
+        await connectWithAuthorizedPort(
+          authorizedPorts[selectedPortIndex],
+          { baudRate },
+          (data) => setLastScan(data)
+        )
+      } else {
+        // 请求新串口
+        await initGlobalScanner({ baudRate }, (data) => setLastScan(data))
+        // 重新加载串口列表
+        const ports = await getAuthorizedPorts()
+        setAuthorizedPorts(ports)
+      }
       setConnected(true)
     } catch (e) {
       setError(e instanceof Error ? e.message : '连接失败')
     } finally {
       setLoading(false)
     }
-  }, [baudRate])
+  }, [baudRate, selectedPortIndex, authorizedPorts])
 
   const handleDisconnect = useCallback(async () => {
     setLoading(true)
@@ -78,7 +114,7 @@ export default function SerialScannerPanel() {
         <div
           style={{
             marginBottom: 8,
-            width: 240,
+            width: 280,
             background: 'var(--bg-panel, #1e1e2e)',
             border: '1px solid var(--border, #3a3a4a)',
             borderRadius: 8,
@@ -88,6 +124,43 @@ export default function SerialScannerPanel() {
           }}
         >
           <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>串口扫码枪</div>
+
+          {/* 已授权串口选择 */}
+          {authorizedPorts.length > 0 && (
+            <>
+              <label style={{ display: 'block', fontSize: 11, color: 'var(--text-muted, #999)', marginBottom: 4 }}>
+                已授权串口
+              </label>
+              <select
+                value={selectedPortIndex}
+                onChange={(e) => setSelectedPortIndex(Number(e.target.value))}
+                disabled={connected || loading}
+                style={{
+                  width: '100%',
+                  padding: '4px 6px',
+                  fontSize: 11,
+                  marginBottom: 8,
+                  background: 'var(--bg-surface, #2a2a3a)',
+                  color: 'var(--text-primary, #e0e0e0)',
+                  border: '1px solid var(--border, #3a3a4a)',
+                  borderRadius: 4,
+                }}
+              >
+                <option value={-1}>+ 添加新串口</option>
+                {authorizedPorts.map((port, idx) => {
+                  const info = port.getInfo()
+                  const label = info.usbVendorId 
+                    ? `USB (${info.usbVendorId?.toString(16)}:${info.usbProductId?.toString(16)})`
+                    : `串口 ${idx + 1}`
+                  return (
+                    <option key={idx} value={idx}>
+                      {label}
+                    </option>
+                  )
+                })}
+              </select>
+            </>
+          )}
 
           <label style={{ display: 'block', fontSize: 11, color: 'var(--text-muted, #999)', marginBottom: 4 }}>
             波特率
@@ -128,7 +201,7 @@ export default function SerialScannerPanel() {
               color: connected ? '#4ade80' : '#fff',
             }}
           >
-            {loading ? '处理中…' : connected ? '断开连接' : '连接扫码枪'}
+            {loading ? '处理中…' : connected ? '断开连接' : (selectedPortIndex === -1 ? '添加串口' : '连接扫码枪')}
           </button>
 
           {error && (

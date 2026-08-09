@@ -100,6 +100,32 @@ export class SerialScanner {
   }
 
   /**
+   * 使用已授权的串口设备连接（不弹出选择器）
+   */
+  async connectWithPort(port: SerialPort): Promise<void> {
+    if (!SerialScanner.isSupported()) {
+      throw new Error('Web Serial API 不支持，请使用 Chrome 89+ 或 Edge 89+')
+    }
+
+    try {
+      this.port = port
+
+      // 打开串口
+      await this.port.open({
+        baudRate: this.config.baudRate,
+        dataBits: this.config.dataBits,
+        stopBits: this.config.stopBits,
+        parity: this.config.parity,
+      })
+
+      // 开始读取数据
+      this.startReading()
+    } catch (error) {
+      throw error
+    }
+  }
+
+  /**
    * 断开串口连接
    */
   async disconnect(): Promise<void> {
@@ -264,6 +290,50 @@ export function isSerialSupported(): boolean {
  */
 export function isSerialConnected(): boolean {
   return globalScanner?.isConnected() || false
+}
+
+/**
+ * 获取已授权的串口设备列表
+ */
+export async function getAuthorizedPorts(): Promise<SerialPort[]> {
+  if (!isSerialSupported()) {
+    return []
+  }
+  return navigator.serial.getPorts()
+}
+
+/**
+ * 使用已授权的串口连接（不弹出选择器）
+ */
+export async function connectWithAuthorizedPort(
+  port: SerialPort,
+  config?: SerialScannerConfig,
+  onScan?: (data: string, scanType: string) => void
+): Promise<SerialScanner> {
+  // 如果已存在，先断开
+  if (globalScanner) {
+    await globalScanner.disconnect()
+  }
+
+  // 创建新实例
+  const scanner = new SerialScanner(config || {}, (data, scanType) => {
+    // 默认注入到事件总线
+    if (typeof window !== 'undefined' && (window as any).scadaEventBus) {
+      ;(window as any).scadaEventBus.emit('agent_scan', {
+        value: data,
+        event_type: scanType,
+        device_id: 'web-serial', // 浏览器串口标识
+      })
+    }
+
+    // 如果有自定义回调，也调用
+    onScan?.(data, scanType)
+  })
+
+  await scanner.connectWithPort(port)
+  globalScanner = scanner
+
+  return scanner
 }
 
 /**
