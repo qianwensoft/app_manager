@@ -9,6 +9,7 @@ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuIte
 import AccessPoliciesModal from '@/components/AccessPoliciesModal'
 import SimPointsModal from '@/components/SimPointsModal'
 import SerialScannerButton from '@/components/SerialScannerButton'
+import { scadaApi } from '@/api/scada'
 
 const Icon = ({ d, size = 14 }: { d: string; size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -36,6 +37,8 @@ const Icons = {
   Unpublish: 'M12 15V2M12 15l-5-5M12 15l5-5M5 16v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3',
   Workflow: 'M6 3v12M6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM18 9v3a3 3 0 0 1-3 3H9',
   Globe: 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20ZM2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20',
+  Download: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3',
+  Upload: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12',
 }
 
 /* ── Divider ── */
@@ -63,6 +66,7 @@ export default function EditorHeader({ scadaName, scadaCode, publishStatus, onPr
   const [isEditingTitle, setIsEditingTitle] = useState(false)
   const [editingTitle, setEditingTitle] = useState('')
   const titleInputRef = useRef<HTMLInputElement>(null)
+  const importInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (isEditingTitle && titleInputRef.current) {
@@ -120,6 +124,41 @@ export default function EditorHeader({ scadaName, scadaCode, publishStatus, onPr
   const cancelEditTitle = () => {
     setIsEditingTitle(false)
     setEditingTitle('')
+  }
+
+  const handleExport = async () => {
+    if (!scadaId || !scadaName) return
+    try {
+      const blob = await scadaApi.exportScada(scadaId)
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${scadaName}.json`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error('导出失败:', err)
+      alert('导出失败，请重试')
+    }
+  }
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    try {
+      await scadaApi.importScada(file)
+      alert('导入成功，请返回列表查看')
+    } catch (err: any) {
+      console.error('导入失败:', err)
+      alert(err?.response?.data?.error || '导入失败，请检查文件格式')
+    }
+  }
+
+  const triggerImport = () => {
+    importInputRef.current?.click()
   }
 
   return (
@@ -408,6 +447,14 @@ export default function EditorHeader({ scadaName, scadaCode, publishStatus, onPr
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          <DropdownMenuLabel>导入 / 导出</DropdownMenuLabel>
+          <DropdownMenuItem onClick={handleExport}>
+            <Icon d={Icons.Download} size={13} /> 导出配置
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={triggerImport}>
+            <Icon d={Icons.Upload} size={13} /> 导入配置
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
           <DropdownMenuLabel>文档</DropdownMenuLabel>
           <DropdownMenuItem onClick={() => openInNewTab('/scada-editor/schema')}>
             <Icon d={Icons.Schema} size={13} /> Schema 说明
@@ -429,6 +476,14 @@ export default function EditorHeader({ scadaName, scadaCode, publishStatus, onPr
         </DropdownMenuContent>
       </DropdownMenu>
     </div>
+
+    <input
+      ref={importInputRef}
+      type="file"
+      accept="application/json"
+      style={{ display: 'none' }}
+      onChange={handleImportFile}
+    />
 
     {showPolicies && scadaId && (
       <AccessPoliciesModal scadaId={scadaId} onClose={() => setShowPolicies(false)} />

@@ -64,6 +64,17 @@ export const scadaApi = {
   unpublish: (id: number): Promise<{ data: ScadaInfo }> =>
     http.post(`/scada/infos/${id}/unpublish`),
 
+  exportScada: (id: number): Promise<Blob> =>
+    http.get(`/scada/infos/${id}/export`, { responseType: 'blob' }),
+
+  importScada: (file: File): Promise<{ data: ScadaInfo }> => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return http.post('/scada/infos/import', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+
   getByShareToken: (token: string): Promise<{ data: ScadaInfo }> =>
     http.get(`/scada/info/share/${token}`),
 

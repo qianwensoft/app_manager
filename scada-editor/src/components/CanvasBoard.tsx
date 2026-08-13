@@ -33,6 +33,29 @@ import { WIDGET_DRAG_TYPE, buildWidgetElement } from './WidgetPanel'
 import type { WidgetDef } from './WidgetPanel'
 import BindingDrawer from './BindingDrawer'
 
+// 收集某个组合的所有后代元素 id（含嵌套层级）
+function collectDescendantIds(elements: CanvasElement[], groupId: string, acc: Set<string>): void {
+  const group = elements.find((e) => e.id === groupId)
+  if (group?.type !== 'group' || !group.children) return
+  for (const cid of group.children) {
+    if (acc.has(cid)) continue
+    acc.add(cid)
+    collectDescendantIds(elements, cid, acc)
+  }
+}
+
+// 拖拽时只移动“顶层”被选中的元素：剔除那些已作为其它被选组合后代的元素，
+// 避免组合级联移动与自身移动叠加导致内部层级偏移。
+function topLevelDragIds(elements: CanvasElement[], selectedIds: string[]): string[] {
+  const selected = new Set(selectedIds)
+  const covered = new Set<string>()
+  for (const id of selectedIds) {
+    const el = elements.find((e) => e.id === id)
+    if (el?.type === 'group') collectDescendantIds(elements, id, covered)
+  }
+  return selectedIds.filter((id) => !(covered.has(id) && selected.has(id)))
+}
+
 const HANDLE_EDGES: [boolean, boolean, boolean, boolean][] = [
   [true,  true,  false, false],
   [false, true,  false, false],
@@ -284,7 +307,9 @@ export default function CanvasBoard() {
           if (!targetEl?.locked) {
             pushHistory(store.project)
             const currentIds = selectedIds.includes(targetId) ? selectedIds : [targetId]
-            const origins = currentIds
+            // 只保留顶层被选元素：被选组合的后代由组合级联移动，避免叠加偏移
+            const dragIds = topLevelDragIds(canvas.elements, currentIds)
+            const origins = dragIds
               .map((id) => {
                 const el = canvas.elements.find((e) => e.id === id)
                 return el ? { id, x: el.x, y: el.y } : null

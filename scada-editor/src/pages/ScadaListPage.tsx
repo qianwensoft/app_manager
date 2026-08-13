@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useScadaGroups, useScadaInfos, useCreateInfo, useDeleteInfo, useCopyInfo, usePublish, useUnpublish } from '@/hooks/useScada'
+import { useScadaGroups, useScadaInfos, useCreateInfo, useDeleteInfo, useCopyInfo, usePublish, useUnpublish, useUpdateInfo } from '@/hooks/useScada'
 import { useStompScadaEvents } from '@/hooks/useStompScadaEvents'
+import { scadaApi } from '@/api/scada'
 import type { ScadaGroup } from '@/types'
 
 /* ── Shared button styles ── */
@@ -48,6 +49,8 @@ const Icons = {
   link:     ['M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71', 'M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71'],
   copy:     ['M20 9H11a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2z', 'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'],
   check:    ['M20 6L9 17l-5-5'],
+  download: ['M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4', 'M7 10l5 5 5-5', 'M12 15V3'],
+  upload:   ['M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4', 'M17 8l-5-5-5 5', 'M12 3v12'],
 }
 
 /** 构建已发布组态的免登录正式访问地址 */
@@ -65,6 +68,15 @@ function buildTree(groups: ScadaGroup[]): ScadaGroup[] {
     else roots.push(g)
   })
   return roots
+}
+
+/** 将分组树展平为带层级缩进的下拉选项 */
+function flattenGroups(nodes: ScadaGroup[], depth = 0, acc: { id: number; label: string }[] = []): { id: number; label: string }[] {
+  nodes.forEach((g) => {
+    acc.push({ id: g.id, label: `${'\u00A0\u00A0'.repeat(depth)}${g.name}` })
+    if (g.children?.length) flattenGroups(g.children, depth + 1, acc)
+  })
+  return acc
 }
 
 /* ── Empty state ────────────────────────────────────── */
@@ -108,24 +120,29 @@ interface CardInfo {
 function ScadaCard({
   info,
   onEdit,
+  onEditMeta,
   onPreview,
   onDelete,
   onCopy,
+  onExport,
   onTogglePublish,
   publishBusy,
   copyBusy,
 }: {
   info: CardInfo
   onEdit: () => void
+  onEditMeta: () => void
   onPreview: () => void
   onDelete: () => void
   onCopy: () => void
+  onExport: () => void
   onTogglePublish: () => void
   publishBusy: boolean
   copyBusy: boolean
 }) {
   const [hover, setHover] = useState(false)
   const [copied, setCopied] = useState(false)
+  const published = info.publish_status === 1
 
   const shareUrl = info.publish_status === 1 && info.share_token
     ? buildShareUrl(info.share_token)
@@ -296,8 +313,9 @@ function ScadaCard({
 
         <div style={{ display: 'flex', gap: 6 }}>
           <button
-            onClick={onEdit}
+            onClick={published ? onEditMeta : onEdit}
             className="icon-btn focus-accent"
+            title={published ? '已发布：仅可修改名称与分组' : '打开编辑器'}
             style={{
               flex: 1, height: 30, borderRadius: 'var(--radius-sm)',
               background: 'var(--accent-muted)', border: '1px solid var(--border-accent)',
@@ -335,18 +353,33 @@ function ScadaCard({
             <Svg d={Icons.copy} size={12} />
           </button>
           <button
-            onClick={onDelete}
+            onClick={(e) => { e.stopPropagation(); onExport() }}
             className="icon-btn focus-accent"
             style={{
               width: 30, height: 30, borderRadius: 'var(--radius-sm)',
-              background: 'var(--danger-muted)', border: '1px solid rgba(239,68,68,0.2)',
-              color: 'var(--danger)', display: 'flex',
+              background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+              color: 'var(--text-secondary)', display: 'flex',
               alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
             }}
-            title="删除"
+            title="导出组态"
           >
-            <Svg d={Icons.trash} size={12} />
+            <Svg d={Icons.download} size={12} />
           </button>
+          {!published && (
+            <button
+              onClick={onDelete}
+              className="icon-btn focus-accent"
+              style={{
+                width: 30, height: 30, borderRadius: 'var(--radius-sm)',
+                background: 'var(--danger-muted)', border: '1px solid rgba(239,68,68,0.2)',
+                color: 'var(--danger)', display: 'flex',
+                alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+              }}
+              title="删除"
+            >
+              <Svg d={Icons.trash} size={12} />
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -398,10 +431,13 @@ export default function ScadaListPage() {
   const [newCode, setNewCode] = useState('')
   const [showCreate, setShowCreate] = useState(false)
   const [search, setSearch] = useState('')
+  // 编辑元信息（名称 / 分组）弹窗：已发布组态仅允许修改这两项
+  const [editMeta, setEditMeta] = useState<{ id: number; name: string; groupId?: number } | null>(null)
 
   const { data: groups = [] } = useScadaGroups()
   const { data: infos = [], isLoading, refetch } = useScadaInfos(selectedGroupId)
   const createInfo = useCreateInfo()
+  const updateInfo = useUpdateInfo()
   const deleteInfo = useDeleteInfo()
   const copyInfo = useCopyInfo()
   const publish = usePublish()
@@ -451,6 +487,57 @@ export default function ScadaListPage() {
         },
       },
     )
+  }
+
+  const handleUpdateMeta = async () => {
+    if (!editMeta || !editMeta.name.trim()) return
+    // 后端 UpdateScadaInfo 用 map Updates 全量覆盖，未带的字段会被清零
+    //（含 publish_status / share_token / scada_code 等）。先拉完整记录再合并，
+    // 仅改动名称与分组，避免误清空发布态与分享 token。
+    const full = await scadaApi.getInfo(editMeta.id).then((r) => r.data)
+    updateInfo.mutate(
+      {
+        id: editMeta.id,
+        body: {
+          ...full,
+          canvas_data: undefined, // 不回传画布，避免大 payload 覆盖
+          scada_name: editMeta.name.trim(),
+          group_id: editMeta.groupId,
+        },
+      },
+      { onSuccess: () => setEditMeta(null) },
+    )
+  }
+
+  const handleExport = async (id: number, name: string) => {
+    try {
+      const blob = await scadaApi.exportScada(id)
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${name}.json`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error('导出失败:', err)
+      alert('导出失败，请重试')
+    }
+  }
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    try {
+      await scadaApi.importScada(file)
+      alert('导入成功')
+      refetch()
+    } catch (err: any) {
+      console.error('导入失败:', err)
+      alert(err?.response?.data?.error || '导入失败，请检查文件格式')
+    }
   }
 
   const renderGroup = (g: ScadaGroup, depth = 0): React.ReactNode => (
@@ -580,6 +667,22 @@ export default function ScadaListPage() {
           </button>
 
           <button
+            style={btnOutline}
+            onClick={() => document.getElementById('import-file-input')?.click()}
+            title="导入组态 JSON 文件"
+          >
+            <Svg d={Icons.upload} size={13} />
+            导入
+          </button>
+          <input
+            id="import-file-input"
+            type="file"
+            accept=".json"
+            style={{ display: 'none' }}
+            onChange={handleImportFile}
+          />
+
+          <button
             style={btnPrimary}
             onClick={() => setShowCreate(true)}
             onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--accent-dim)' }}
@@ -620,11 +723,17 @@ export default function ScadaListPage() {
                   publishBusy={publishBusy}
                   copyBusy={copyInfo.isPending}
                   onEdit={() => navigate(`/editor/${info.id}`)}
+                  onEditMeta={() => setEditMeta({ id: info.id, name: info.scada_name, groupId: info.group_id })}
                   onPreview={() => navigate(`/preview/${info.id}`)}
-                  onTogglePublish={() =>
-                    info.publish_status === 1 ? unpublish.mutate(info.id) : publish.mutate(info.id)
-                  }
+                  onTogglePublish={() => {
+                    if (info.publish_status === 1) {
+                      if (confirm('确认取消发布？取消后免登录访问链接将失效')) unpublish.mutate(info.id)
+                    } else {
+                      publish.mutate(info.id)
+                    }
+                  }}
                   onCopy={() => copyInfo.mutate(info)}
+                  onExport={() => handleExport(info.id, info.scada_name)}
                   onDelete={() => { if (confirm('确认删除？此操作不可恢复')) deleteInfo.mutate(info.id) }}
                 />
               ))}
@@ -632,6 +741,97 @@ export default function ScadaListPage() {
           )}
         </main>
       </div>
+
+      {/* ── Edit metadata dialog (name + group) ── */}
+      {editMeta && (
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) setEditMeta(null) }}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 50,
+            background: 'rgba(0,0,0,0.6)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          <div style={{
+            width: 400, background: 'var(--bg-panel)',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-lg)',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              padding: '14px 16px', borderBottom: '1px solid var(--border)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>编辑组态信息</span>
+              <button
+                onClick={() => setEditMeta(null)}
+                className="icon-btn"
+                style={{ width: 26, height: 26, color: 'var(--text-muted)' }}
+              >
+                <Svg d="M18 6 6 18M6 6l12 12" size={14} />
+              </button>
+            </div>
+
+            <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <label style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', marginBottom: 5 }}>名称</label>
+                <input
+                  value={editMeta.name}
+                  onChange={(e) => setEditMeta({ ...editMeta, name: e.target.value })}
+                  placeholder="组态显示名称"
+                  onKeyDown={(e) => { if (e.key === 'Enter' && editMeta.name.trim()) handleUpdateMeta() }}
+                  style={inputStyle}
+                  onFocus={(e) => { e.target.style.borderColor = 'var(--accent)' }}
+                  onBlur={(e) => { e.target.style.borderColor = 'var(--border)' }}
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', marginBottom: 5 }}>分组</label>
+                <select
+                  value={editMeta.groupId ?? ''}
+                  onChange={(e) => setEditMeta({ ...editMeta, groupId: e.target.value ? Number(e.target.value) : undefined })}
+                  style={{ ...inputStyle, cursor: 'pointer' }}
+                  onFocus={(e) => { e.target.style.borderColor = 'var(--accent)' }}
+                  onBlur={(e) => { e.target.style.borderColor = 'var(--border)' }}
+                >
+                  <option value="">未分组</option>
+                  {flattenGroups(tree).map((g) => (
+                    <option key={g.id} value={g.id}>{g.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div style={{
+              padding: '12px 16px', borderTop: '1px solid var(--border)',
+              display: 'flex', justifyContent: 'flex-end', gap: 8,
+            }}>
+              <button
+                style={btnOutline}
+                onClick={() => setEditMeta(null)}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-overlay)' }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+              >
+                取消
+              </button>
+              <button
+                style={{
+                  ...btnPrimary,
+                  opacity: (updateInfo.isPending || !editMeta.name.trim()) ? 0.4 : 1,
+                  pointerEvents: (updateInfo.isPending || !editMeta.name.trim()) ? 'none' : 'auto',
+                }}
+                onClick={handleUpdateMeta}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--accent-dim)' }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--accent)' }}
+              >
+                {updateInfo.isPending ? '保存中…' : '保存'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Create dialog ── */}
       {showCreate && (

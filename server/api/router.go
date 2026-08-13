@@ -447,6 +447,8 @@ func SetupRouter() *gin.Engine {
 		sca.POST("/infos/:scada_id/save-canvas", auth.RequireRole("admin", "operator"), SaveScadaCanvasByID)
 		sca.POST("/infos/:scada_id/publish", auth.RequireRole("admin", "operator"), PublishScada)
 		sca.POST("/infos/:scada_id/unpublish", auth.RequireRole("admin", "operator"), UnpublishScada)
+		sca.GET("/infos/:scada_id/export", auth.RequireRole("admin", "operator"), ExportScada)
+		sca.POST("/infos/import", auth.RequireRole("admin", "operator"), ImportScada)
 		sca.POST("/resource/upload/:category", auth.RequireRole("admin", "operator"), UploadScadaResource)
 		sca.GET("/customize/components", ListScadaCustomizeComponents)
 		sca.POST("/customize/component/create", auth.RequireRole("admin", "operator"), CreateScadaCustomizeComponent)

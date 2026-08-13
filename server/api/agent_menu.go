@@ -451,6 +451,9 @@ func buildMenuPayloadForDevice(deviceID uint) []map[string]interface{} {
 					// 避免服务端推导的 host 与 Agent 实际访问地址不符（如内网穿透场景）
 					// 指向独立 React SCADA 应用的免登分享路由（旧 /share/scada Vue 页已随迁移删除）
 					previewPath = "/scada-editor/share/" + scada.ShareToken
+				} else {
+					// 组态未正确发布（缺少 share_token），跳过该菜单以避免 Agent 无法打开
+					continue
 				}
 			}
 		}

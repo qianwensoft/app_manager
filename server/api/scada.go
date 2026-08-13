@@ -330,6 +330,92 @@ func saveScadaResourceFile(file *multipart.FileHeader, category string) (string,
 	return "/api/scada/resource/" + filepath.ToSlash(rel), nil
 }
 
+// ExportScada 导出组态为 JSON 文件
+func ExportScada(c *gin.Context) {
+	id, _ := strconv.ParseUint(c.Param("scada_id"), 10, 64)
+	var row models.ScadaInfo
+	if err := database.DB.First(&row, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+	// 导出完整的组态数据（排除 ID、时间戳等数据库特有字段）
+	exported := map[string]interface{}{
+		"scada_name":    row.ScadaName,
+		"scada_code":    row.ScadaCode,
+		"description":   row.Description,
+		"preview_image": row.PreviewImage,
+		"canvas_data":   row.CanvasData,
+		"group_id":      row.GroupID,
+	}
+	filename := strings.ReplaceAll(row.ScadaName, " ", "_") + ".json"
+	c.Header("Content-Disposition", "attachment; filename="+filename)
+	c.JSON(http.StatusOK, exported)
+}
+
+// ImportScada 导入组态 JSON 文件
+func ImportScada(c *gin.Context) {
+	file, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "file required"})
+		return
+	}
+	f, err := file.Open()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "cannot open file"})
+		return
+	}
+	defer f.Close()
+
+	var imported struct {
+		ScadaName    string `json:"scada_name"`
+		ScadaCode    string `json:"scada_code"`
+		Description  string `json:"description"`
+		PreviewImage string `json:"preview_image"`
+		CanvasData   string `json:"canvas_data"`
+		GroupID      *uint  `json:"group_id"`
+	}
+	if err := json.NewDecoder(f).Decode(&imported); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+
+	if imported.ScadaName == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "scada_name required"})
+		return
+	}
+	if imported.ScadaCode == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "scada_code required"})
+		return
+	}
+
+	// 检查 scada_code 是否已存在，如果存在则自动追加后缀
+	originalCode := imported.ScadaCode
+	suffix := 1
+	for {
+		var exist models.ScadaInfo
+		if err := database.DB.Where("scada_code = ?", imported.ScadaCode).First(&exist).Error; err != nil {
+			break
+		}
+		imported.ScadaCode = originalCode + "_" + strconv.Itoa(suffix)
+		suffix++
+	}
+
+	row := models.ScadaInfo{
+		ScadaName:     imported.ScadaName,
+		ScadaCode:     imported.ScadaCode,
+		Description:   imported.Description,
+		PreviewImage:  imported.PreviewImage,
+		CanvasData:    imported.CanvasData,
+		GroupID:       imported.GroupID,
+		PublishStatus: 0,
+	}
+	if err := database.DB.Create(&row).Error; err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": row})
+}
+
 // publishScadaEvent 发布组态事件到 STOMP topic
 func publishScadaEvent(event string, scada models.ScadaInfo) {
 	payload := map[string]interface{}{

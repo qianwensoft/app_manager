@@ -101,23 +101,28 @@ function collectAllDescendantIds(elements: CanvasElement[], groupId: string): st
   return descendants
 }
 
-// 递归移动组合及其所有嵌套子元素
+// 递归移动组合及其所有嵌套子元素。
+// visited 保证每个元素只被平移一次——即使历史数据里存在“子元素同时挂在父组合与子组合下”
+// 的畸形层级（会导致内部元素按 2×dx 偏移），也不会重复移动。
 function moveGroupAndDescendants(
   elements: CanvasElement[],
   groupId: string,
   dx: number,
-  dy: number
+  dy: number,
+  visited: Set<string> = new Set()
 ): void {
   const group = elements.find((e) => e.id === groupId)
   if (!group?.children) return
 
   for (const childId of group.children) {
+    if (visited.has(childId)) continue
+    visited.add(childId)
     const child = elements.find((e) => e.id === childId)
     if (child) {
       child.x += dx
       child.y += dy
       if (child.type === 'group') {
-        moveGroupAndDescendants(elements, childId, dx, dy)
+        moveGroupAndDescendants(elements, childId, dx, dy, visited)
       }
     }
   }
@@ -498,7 +503,17 @@ export const useEditorStore = create<EditorStore>()(
       set((s) => {
         const c = s.project.canvases[s.project.activeCanvasId]
         if (!c || s.selectedIds.length < 2) return
-        const children = c.elements.filter((e) => s.selectedIds.includes(e.id))
+        // 只保留“顶层”被选元素作为组合的直接子级：剔除那些已是其它被选组合后代的元素，
+        // 否则同一元素会同时挂在父组合与子组合下，移动时被平移两次而偏移。
+        const covered = new Set<string>()
+        s.selectedIds.forEach((id) => {
+          const el = c.elements.find((e) => e.id === id)
+          if (el?.type === 'group') {
+            collectAllDescendantIds(c.elements, id).forEach((d) => covered.add(d))
+          }
+        })
+        const topLevelIds = s.selectedIds.filter((id) => !covered.has(id))
+        const children = c.elements.filter((e) => topLevelIds.includes(e.id))
         if (children.length < 2) return
         const minX = Math.min(...children.map((e) => e.x))
         const minY = Math.min(...children.map((e) => e.y))

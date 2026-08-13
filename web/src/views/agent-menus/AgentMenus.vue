@@ -203,7 +203,7 @@ const load = async () => {
     const devRes = await http.get('/devices')
     devices.value = devRes.data || []
     const scadaRes = await http.get('/scada/infos')
-    publishedScadas.value = (scadaRes.data || []).filter(s => s.publish_status === 1)
+    publishedScadas.value = (scadaRes.data || []).filter(s => s.publish_status === 1 && s.share_token)
     const formRes = await http.get('/form-app/infos')
     publishedForms.value = (formRes.data || []).filter(f => f.publish_status === 1)
   } finally {
