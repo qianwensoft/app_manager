@@ -929,6 +929,97 @@ func AgentNavKey(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "ok"})
 }
 
+// AgentKeyboardInput 通过 Agent WebSocket 走无障碍通道向设备注入文本或特殊按键。
+// 复用现成 CommandAction.KEYBOARD_INPUT（KeyboardInputHelper：文本走一次性 ACTION_SET_TEXT，
+// 特殊键走 performGlobalAction / 焦点操作），无需 ADB；适用于纯 Agent 设备并避免 IME 联想。
+//
+// 请求体（与 Agent 端 CommandAction.KEYBOARD_INPUT.data 一致）：
+//
+//	{ "input_method": "text"|"keys"|"mixed",
+//	  "text": "...",
+//	  "keys": ["ENTER","TAB","BACK",...],
+//	  "delay_ms": 50,
+//	  "target_app": "com.example.app" }
+//
+// 无 Agent 在线返回 503，便于前端回退到 ADB 路径。
+func AgentKeyboardInput(c *gin.Context) {
+	var req struct {
+		InputMethod string   `json:"input_method"`
+		Text        string   `json:"text"`
+		Keys        []string `json:"keys"`
+		DelayMs     int      `json:"delay_ms"`
+		TargetApp   string   `json:"target_app"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if getDeviceByID(c) == nil {
+		return
+	}
+	inputMethod := strings.TrimSpace(req.InputMethod)
+	if inputMethod == "" {
+		inputMethod = "text"
+	}
+	if inputMethod != "text" && inputMethod != "keys" && inputMethod != "mixed" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "input_method 必须为 text | keys | mixed"})
+		return
+	}
+	// 清洗 keys：去空白、去空串
+	cleanKeys := make([]string, 0, len(req.Keys))
+	for _, k := range req.Keys {
+		k = strings.TrimSpace(k)
+		if k != "" {
+			cleanKeys = append(cleanKeys, k)
+		}
+	}
+	// 至少要有文本或键之一
+	if inputMethod == "text" && req.Text == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "text 为空"})
+		return
+	}
+	if inputMethod == "keys" && len(cleanKeys) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "keys 为空"})
+		return
+	}
+	if inputMethod == "mixed" && req.Text == "" && len(cleanKeys) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "text 与 keys 同时为空"})
+		return
+	}
+	delayMs := req.DelayMs
+	if delayMs < 0 {
+		delayMs = 0
+	}
+
+	routeKey, err := agent.AgentConnectionKey(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if !agent.AgentHub.IsConnected(routeKey) {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Agent 未在线"})
+		return
+	}
+	// 唯一 commandId，便于服务端后续关联 command_result（如未来需要做异步回执）
+	commandID := randomAgentRequestID()
+	if sendErr := agent.AgentHub.Send(routeKey, map[string]interface{}{
+		"type":      "command",
+		"action":    "keyboard_input",
+		"commandId": commandID,
+		"data": map[string]interface{}{
+			"input_method": inputMethod,
+			"text":         req.Text,
+			"keys":         cleanKeys,
+			"delay_ms":     delayMs,
+			"target_app":   strings.TrimSpace(req.TargetApp),
+		},
+	}); sendErr != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "下发失败: " + sendErr.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "ok", "command_id": commandID})
+}
+
 func AdbInputText(c *gin.Context) {
 	var req struct {
 		Text string `json:"text" binding:"required"`

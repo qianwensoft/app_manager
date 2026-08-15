@@ -106,6 +106,27 @@
               菜单
             </el-button>
           </el-button-group>
+          <el-button-group>
+            <el-tooltip
+              :content="enableRemoteKeyboard ? '远程键盘：已启用（在此页输入的字符将发送到设备；点击关闭）' : '远程键盘：关闭（点击开启，将浏览器按键发送到设备）'"
+              placement="bottom"
+            >
+              <el-button
+                size="small"
+                :type="enableRemoteKeyboard ? 'primary' : 'default'"
+                :disabled="!deviceId || status !== 'connected' || !screenDevice?.agent_connected || (shareMode && !shareHas('screen:keyboard'))"
+                @click="enableRemoteKeyboard = !enableRemoteKeyboard; onRemoteKeyboardEnabledChange()"
+              >
+                ⌨ 远程键盘
+              </el-button>
+            </el-tooltip>
+          </el-button-group>
+          <span
+            v-if="enableRemoteKeyboard && remoteKeyboardStatus"
+            style="font-size:11px;color:#67c23a;margin-left:4px"
+          >
+            {{ remoteKeyboardStatus }}
+          </span>
         </div>
 
         <!-- 第三行：连接状态 + Agent 状态 -->
@@ -517,6 +538,7 @@
             <el-tag type="info" size="small">查看画面（始终包含）</el-tag>
           </div>
           <el-checkbox v-model="shareForm.touch">远程触摸 / 滑动 / 滚轮</el-checkbox>
+          <el-checkbox v-model="shareForm.keyboard">远程键盘输入（将浏览器按键直接输入到设备）</el-checkbox>
           <el-checkbox v-model="shareForm.stop">停止投屏（释放手机录屏授权）</el-checkbox>
         </div>
         <div>
@@ -1201,7 +1223,7 @@ const shareToken = computed(() => String(route.query.share || '').trim())
 const shareMode = computed(() => route.path.startsWith('/share/') || !!shareToken.value)
 const shareClaims = ref(null)
 const shareDialogVisible = ref(false)
-const shareForm = ref({ touch: true, stop: false, expires_at: null })
+const shareForm = ref({ touch: true, keyboard: true, stop: false, expires_at: null })
 const shareLinks = ref([])
 const creatingShare = ref(false)
 const lastCreatedShareUrl = ref('')
@@ -1792,7 +1814,7 @@ async function loadShareClaims() {
 async function openShareDialog() {
   if (!deviceId.value) return
   lastCreatedShareUrl.value = ''
-  shareForm.value = { touch: true, stop: false, expires_at: null }
+  shareForm.value = { touch: true, keyboard: true, stop: false, expires_at: null }
   shareDialogVisible.value = true
   try {
     const res = await deviceApi.listScreenShares(deviceId.value)
@@ -1806,6 +1828,7 @@ async function submitCreateShare() {
   if (!deviceId.value) return
   const scopes = ['screen:view']
   if (shareForm.value.touch) scopes.push('screen:touch')
+  if (shareForm.value.keyboard) scopes.push('screen:keyboard')
   if (shareForm.value.stop) scopes.push('screen:stop')
   creatingShare.value = true
   try {
@@ -1834,6 +1857,7 @@ function copyShareUrl() {
 const shareScopeLabels = {
   'screen:view': '查看',
   'screen:touch': '触摸',
+  'screen:keyboard': '键盘',
   'screen:stop': '停止'
 }
 
@@ -2477,6 +2501,7 @@ async function initShareFromRoute() {
   }
   executeTouch.value = shareHas('screen:touch')
   wheelScrollRemote.value = shareHas('screen:touch')
+  enableRemoteKeyboard.value = shareHas('screen:keyboard')
   connect()
 }
 
@@ -2513,6 +2538,7 @@ let sidebarResizeObserver = null
 onMounted(async () => {
   document.addEventListener('fullscreenchange', syncNativeFullscreenState)
   document.addEventListener('webkitfullscreenchange', syncNativeFullscreenState)
+  document.addEventListener('keydown', handleRemoteKeyboardKeydown, { capture: true })
   sidebarResizeObserver = new ResizeObserver(() => updateCameraSidebarStyle())
   if (videoWrap.value) sidebarResizeObserver.observe(videoWrap.value)
   if (shareMode.value) {
@@ -2526,6 +2552,143 @@ onMounted(async () => {
     loadRecordings()
   }
 })
+
+// 远程键盘输入（Web 键盘事件 → Agent 无障碍通道）
+const enableRemoteKeyboard = ref(false)
+const remoteKeyboardStatus = ref('') // 最近一次提交的简报
+let remoteKeyboardBuffer = ''
+let remoteKeyboardFlushTimer = null
+const REMOTE_KEYBOARD_FLUSH_MS = 220
+
+function remoteKeyboardEnabled() {
+  if (!enableRemoteKeyboard.value) return false
+  if (!deviceId.value) return false
+  if (status.value !== 'connected' || !receivedFrame.value) return false
+  if (shareMode.value && !shareHas('screen:keyboard')) return false
+  if (!screenDevice.value?.agent_connected) return false
+  return true
+}
+
+/**
+ * 将浏览器 KeyEvent 映射为 Agent keyboard_input 通道支持的输入。
+ * 返回 null 表示「忽略」；否则返回 { method: 'text'|'keys', text, keys }。
+ */
+function mapBrowserKeyToDeviceInput(e) {
+  // 2) 特殊键 — 仅下发 Agent 端 KeyboardInputHelper 已支持的键，避免静默失败
+  //    (KeyboardInputHelper.performKeyAction: ENTER, TAB, BACK, BACKSPACE, DELETE, HOME, RECENT, CLEAR, SPACE)
+  switch (e.key) {
+    case 'Enter': return { method: 'keys', keys: ['ENTER'] }
+    case 'Tab': return { method: 'keys', keys: ['TAB'] }
+    case 'Backspace': return { method: 'keys', keys: ['BACK'] }
+    case 'Delete': return { method: 'keys', keys: ['DELETE'] }
+    case 'Home': return { method: 'keys', keys: ['HOME'] }
+    case ' ':
+    case 'Spacebar': return { method: 'keys', keys: ['SPACE'] }
+  }
+
+  // 3) 可打印字符：取 e.key（已应用 Shift/CapsLock/IMEv2 转换）。修饰键已在上层放行
+  if (e.key && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    return { method: 'text', text: e.key }
+  }
+  return null
+}
+
+async function flushRemoteKeyboard({ immediateKey } = {}) {
+  if (remoteKeyboardFlushTimer) {
+    clearTimeout(remoteKeyboardFlushTimer)
+    remoteKeyboardFlushTimer = null
+  }
+  if (!deviceId.value) return
+
+  const text = remoteKeyboardBuffer
+  remoteKeyboardBuffer = ''
+  const keys = []
+  if (immediateKey) keys.push(immediateKey)
+
+  if (!text && keys.length === 0) return
+
+  try {
+    await deviceApi.agentKeyboardInput(deviceId.value, {
+      input_method: text && keys.length ? 'mixed' : (text ? 'text' : 'keys'),
+      text,
+      keys,
+      delay_ms: 0,
+    })
+    const summary = text
+      ? `已输入 ${text.length} 字`
+      : `按键 ${keys.join('+')}`
+    remoteKeyboardStatus.value = summary
+  } catch (err) {
+    remoteKeyboardStatus.value = ''
+    const msg = err?.response?.data?.error || err?.message || '远程键盘输入失败'
+    ElMessage.warning(msg)
+  }
+}
+
+function scheduleRemoteKeyboardFlush(immediateKey) {
+  if (immediateKey) {
+    flushRemoteKeyboard({ immediateKey })
+    return
+  }
+  if (remoteKeyboardFlushTimer) clearTimeout(remoteKeyboardFlushTimer)
+  remoteKeyboardFlushTimer = setTimeout(() => flushRemoteKeyboard(), REMOTE_KEYBOARD_FLUSH_MS)
+}
+
+function handleRemoteKeyboardKeydown(e) {
+  if (!remoteKeyboardEnabled()) return
+  // 拦截浏览器原生快捷键（保留 F5/Ctrl+R/Ctrl+W 等不被劫持）
+  if (e.ctrlKey || e.metaKey || e.altKey) {
+    // 仅当组合键是「输入类」时才下发；其它（如 Ctrl+R 刷新）放行
+    const printable = e.key && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey
+    if (!printable) return
+  }
+  // F1-F12、系统键一律不拦截
+  if (e.key && /^F\d{1,2}$/.test(e.key)) return
+  if (e.key === 'PrintScreen' || e.key === 'ScrollLock' || e.key === 'Pause') return
+
+  const mapped = mapBrowserKeyToDeviceInput(e)
+  if (!mapped) return
+
+  // 必须 preventDefault，避免元素自身行为（如 Backspace 返回上一页、Enter 触发 button click）
+  e.preventDefault()
+  e.stopPropagation()
+
+  if (mapped.method === 'text') {
+    remoteKeyboardBuffer += mapped.text
+    scheduleRemoteKeyboardFlush() // 停顿后批量
+  } else {
+    // 特殊键立即下发（顺序敏感）
+    scheduleRemoteKeyboardFlush(mapped.keys[0])
+  }
+}
+
+function onRemoteKeyboardEnabledChange() {
+  if (enableRemoteKeyboard.value && !remoteKeyboardEnabled()) {
+    // 开启但前置条件不满足——提示一下
+    if (shareMode.value && !shareHas('screen:keyboard')) {
+      ElMessage.warning('当前分享链接未授权「远程键盘输入」')
+    } else if (!screenDevice.value?.agent_connected) {
+      ElMessage.warning('Agent 未在线，无法启用远程键盘输入')
+    } else {
+      ElMessage.warning('画面未连接，无法启用远程键盘输入')
+    }
+    enableRemoteKeyboard.value = false
+    return
+  }
+  if (enableRemoteKeyboard.value) {
+    remoteKeyboardStatus.value = '已启用：在此页面输入的字符将发送到设备'
+    // 清空 buffer
+    remoteKeyboardBuffer = ''
+    if (remoteKeyboardFlushTimer) {
+      clearTimeout(remoteKeyboardFlushTimer)
+      remoteKeyboardFlushTimer = null
+    }
+  } else {
+    remoteKeyboardStatus.value = ''
+    // 关闭时把残留 buffer 一次性 flush
+    if (remoteKeyboardBuffer) flushRemoteKeyboard()
+  }
+}
 
 // 发送虚拟按键
 // keycode → Agent 无障碍导航键映射（仅这三类可用 performGlobalAction，无需 ADB）
@@ -2734,6 +2897,11 @@ const formatDate = (date) => {
 onUnmounted(() => {
   document.removeEventListener('fullscreenchange', syncNativeFullscreenState)
   document.removeEventListener('webkitfullscreenchange', syncNativeFullscreenState)
+  document.removeEventListener('keydown', handleRemoteKeyboardKeydown, { capture: true })
+  if (remoteKeyboardFlushTimer) {
+    clearTimeout(remoteKeyboardFlushTimer)
+    remoteKeyboardFlushTimer = null
+  }
   sidebarResizeObserver?.disconnect()
   if (profileListenerId) {
     eventListeners.revoke(profileListenerId)

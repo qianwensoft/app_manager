@@ -23,9 +23,10 @@ const (
 
 // 屏幕分享链接授权范围
 const (
-	ScreenView  = "screen:view"
-	ScreenTouch = "screen:touch"
-	ScreenStop  = "screen:stop"
+	ScreenView     = "screen:view"
+	ScreenTouch    = "screen:touch"
+	ScreenStop     = "screen:stop"
+	ScreenKeyboard = "screen:keyboard"
 )
 
 // OpenScopeDescriptions 用于前端展示
@@ -55,6 +56,7 @@ var ScreenShareScopeDescriptions = []struct {
 	{ScreenView, "查看画面（必选）"},
 	{ScreenTouch, "远程触摸 / 滑动 / 滚轮"},
 	{ScreenStop, "停止投屏（释放手机录屏授权）"},
+	{ScreenKeyboard, "远程键盘输入（将浏览器按键直接输入到设备）"},
 }
 
 // ParseScopeSet 解析 JSON 数组 ["a","b"]；空串或仅空白表示「未配置」——对 API Key 视为兼容旧版全部权限。

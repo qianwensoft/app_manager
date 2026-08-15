@@ -142,6 +142,9 @@ export const captureScreenshot = async (id) => {
 export const keyEvent = (id, keycode) => http.post(`/devices/${id}/adb/keyevent`, { keycode })
 // 虚拟导航键（经 Agent 无障碍 performGlobalAction）：key = back | home | recents | notifications | quick_settings | power_dialog | lock_screen
 export const agentNavKey = (id, key) => http.post(`/devices/${id}/agent/nav-key`, { key })
+// 远程键盘输入（经 Agent 无障碍 ACTION_SET_TEXT / 焦点操作，无需 ADB）
+// body: { input_method?: 'text'|'keys'|'mixed', text?: string, keys?: string[], delay_ms?: number, target_app?: string }
+export const agentKeyboardInput = (id, body) => http.post(`/devices/${id}/agent/keyboard-input`, body)
 export const inputText = (id, text) => http.post(`/devices/${id}/adb/input/text`, { text })
 export const startApp = (id, pkg) => http.post(`/devices/${id}/adb/app/start`, { package: pkg })
 export const stopApp = (id, pkg) => http.post(`/devices/${id}/adb/app/stop`, { package: pkg })

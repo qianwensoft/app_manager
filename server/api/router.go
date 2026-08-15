@@ -169,6 +169,7 @@ func SetupRouter() *gin.Engine {
 		d.POST("/:id/agent/trigger-menu", auth.RequireResourcePermission("device", "trigger_menu"), TriggerAgentMenuOnAgent)
 		d.POST("/:id/agent/push-update", auth.RequireResourcePermission("device", "push_update"), PushAgentUpdate)
 		d.POST("/:id/agent/nav-key", auth.RequireResourcePermission("device", "adb"), AgentNavKey)
+		d.POST("/:id/agent/keyboard-input", auth.RequireResourcePermission("device", "adb"), AgentKeyboardInput)
 		d.POST("/:id/speed-test", auth.RequireResourcePermission("device", "speed_test"), DeviceSpeedTest)
 		d.GET("/:id/file-hub", ListDeviceFileHub)
 		d.POST("/:id/audio-recording/start", auth.RequireResourcePermission("device", "record"), StartAudioRecording)
