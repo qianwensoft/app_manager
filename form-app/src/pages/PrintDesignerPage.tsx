@@ -251,6 +251,17 @@ export default function PrintDesignerPage() {
         <span style={{ fontSize: 12 }}>Y</span>
         <InputNumber size="small" step={0.5} style={{ width: 64 }} value={tpl.paper?.offset_y_mm ?? 0} onChange={v => updPaper({ offset_y_mm: Number(v) || 0 })} />
         <span style={{ fontSize: 12 }}>mm</span>
+        <Divider type="vertical" />
+        <Tooltip title="纸张整体旋转角度。90° 时宽高互换（如 50×40→40×50），打印内容同步旋转。仅作用于坐标布局。">
+          <span style={{ fontSize: 12, color: '#64748b' }}>旋转</span>
+        </Tooltip>
+        <Select<0 | 90 | 180 | 270>
+          size="small"
+          style={{ width: 80 }}
+          value={tpl.paper?.rotate ?? 0}
+          onChange={v => updPaper({ rotate: v })}
+          options={([0, 90, 180, 270] as const).map(r => ({ value: r, label: `${r}°` }))}
+        />
       </div>
 
       {/* 主体：左编辑 + 右属性/调试 */}
@@ -328,8 +339,12 @@ function CanvasEditor({
   onDuplicate: (id: string) => void
   onReorder: (id: string, dir: 'front' | 'back') => void
 }) {
-  const wMm = tpl.paper?.type === 'label' ? (tpl.paper?.width_mm || 40) : 60
-  const hMm = tpl.paper?.type === 'label' ? (tpl.paper?.height_mm || 30) : 80
+  const rawW = tpl.paper?.type === 'label' ? (tpl.paper?.width_mm || 40) : 60
+  const rawH = tpl.paper?.type === 'label' ? (tpl.paper?.height_mm || 30) : 80
+  const rotate = (tpl.paper?.rotate ?? 0) as 0 | 90 | 180 | 270
+  const isSwapped = rotate === 90 || rotate === 270
+  const wMm = isSwapped ? rawH : rawW
+  const hMm = isSwapped ? rawW : rawH
   const [zoom, setZoom] = useState(1)
   const pxPerMm = PX_PER_MM * zoom
   const scrollRef = useRef<HTMLDivElement | null>(null)
@@ -497,23 +512,40 @@ function CanvasEditor({
         <Button size="small" onClick={zoomIn} disabled={zoom >= MAX_ZOOM}>＋</Button>
         <Button size="small" type="link" onClick={() => setZoom(1)} disabled={zoom === 1}>复位</Button>
       </Space>
-      <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 8 }}>
-        画布按 {wMm}×{hMm} mm 示意（1mm={PX_PER_MM}px×{Math.round(zoom * 100)}%）。左键拖动定位，拖右下角蓝点缩放，触控板双指或 Ctrl+滚轮缩放画布，右键菜单可删除/复制/调层，选中后按 Delete 删除。
+        <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 8 }}>
+        {rotate !== 0
+          ? <span>纸张已旋转 <strong>{rotate}°</strong>（显示尺寸 {wMm}×{hMm} mm）；实际打印宽高为 {rawW}×{rawH} mm。{wMm}×{hMm} mm 示意（1mm={PX_PER_MM}px×{Math.round(zoom * 100)}%）。</span>
+          : <span>画布按 {wMm}×{hMm} mm 示意（1mm={PX_PER_MM}px×{Math.round(zoom * 100)}%）。</span>
+        }
+        左键拖动定位，拖右下角蓝点缩放，触控板双指或 Ctrl+滚轮缩放画布，右键菜单可删除/复制/调层，选中后按 Delete 删除。
       </div>
       <div ref={scrollRef} style={{ overflow: 'auto', maxHeight: 'calc(100vh - 220px)', padding: 8, background: '#f8fafc', borderRadius: 6 }}>
-        <div
-          onClick={() => onSelect(null)}
-          style={{
-            position: 'relative',
-            width: wMm * pxPerMm,
-            height: hMm * pxPerMm,
-            background: '#fff',
-            border: '1px dashed #94a3b8',
-            boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
-            backgroundImage: 'linear-gradient(#f1f5f9 1px, transparent 1px), linear-gradient(90deg, #f1f5f9 1px, transparent 1px)',
-            backgroundSize: `${pxPerMm * 5}px ${pxPerMm * 5}px`,
-          }}
-        >
+        <div style={{ display: 'inline-block', position: 'relative' }}>
+          {rotate !== 0 && (
+            <div style={{
+              position: 'absolute', left: -28, top: '50%', transform: 'translateY(-50%)',
+              background: '#f59e0b', color: '#fff', borderRadius: 4, padding: '2px 6px',
+              fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap', zIndex: 10,
+            }}>
+              ↻ {rotate}°
+            </div>
+          )}
+          <div
+            onClick={() => onSelect(null)}
+            style={{
+              position: 'relative',
+              width: wMm * pxPerMm,
+              height: hMm * pxPerMm,
+              background: '#fff',
+              border: '1px dashed #94a3b8',
+              boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
+              backgroundImage: 'linear-gradient(#f1f5f9 1px, transparent 1px), linear-gradient(90deg, #f1f5f9 1px, transparent 1px)',
+              backgroundSize: `${pxPerMm * 5}px ${pxPerMm * 5}px`,
+              transform: `rotate(${rotate}deg)`,
+              transformOrigin: 'center center',
+              transition: 'transform 0.2s ease',
+            }}
+          >
           {elements.map(el => (
             <div
               key={el.id}
@@ -563,6 +595,7 @@ function CanvasEditor({
               )}
             </div>
           ))}
+        </div>
         </div>
       </div>
 

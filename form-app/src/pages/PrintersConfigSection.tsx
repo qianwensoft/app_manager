@@ -7,7 +7,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, Input, InputNumber, Select, Switch, Collapse, Space, Tooltip, Modal } from 'antd'
 import type { FieldDef } from '@/runtime/types'
-import type { PrinterTemplate, PrintOp, PrintProtocol, PrintGenSide, PaperType } from '@/runtime/printerTypes'
+import type { PrinterTemplate, PrintOp, PrintProtocol, PrintGenSide, PaperType, PrintElement } from '@/runtime/printerTypes'
 import PrintDebugModal from './PrintDebugModal'
 
 let _seq = 0
@@ -189,6 +189,15 @@ export default function PrintersConfigSection({
                           <InputNumber size="small" min={0} max={20} style={{ width: 80 }}
                             value={tpl.paper?.gap_mm ?? 2}
                             onChange={v => updTemplate(idx, { paper: { ...tpl.paper!, gap_mm: Number(v) || 0 } })} />
+                        </div>
+                        <div>
+                          <label style={{ ...labelStyle, marginBottom: 2 }}>旋转</label>
+                          <Select<0 | 90 | 180 | 270>
+                            size="small" style={{ width: 80 }}
+                            value={tpl.paper?.rotate ?? 0}
+                            onChange={v => updTemplate(idx, { paper: { ...tpl.paper!, rotate: v } })}
+                            options={([0, 90, 180, 270] as const).map(r => ({ value: r, label: `${r}°` }))}
+                          />
                         </div>
                       </>
                     )}

@@ -98,4 +98,6 @@ export interface PaperSpec {
    * 不同机型内置字体名不同，如繁体机用 TSS24.BF2，英文机用 0/4/ROMAN.TTF 等。
    */
   tspl_font?: string
+  /** 纸张旋转角度：90° 时宽高互换（如 50×40→40×50），同时所有坐标元素的内容也旋转。默认 0（不旋转） */
+  rotate?: 0 | 90 | 180 | 270
 }

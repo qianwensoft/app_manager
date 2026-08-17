@@ -42,7 +42,7 @@ PBC40_SERVICE := app-manager
 	bridge bridge-linux-amd64 bridge-linux-arm64 bridge-darwin-amd64 bridge-darwin-arm64 bridge-windows-amd64 bridge-all \
 	release release-linux release-darwin release-windows release-all release-zip release-tar \
 	check test fmt schema-check \
-	deploy-pbc40 deploy-pbc40-server deploy-pbc40-web deploy-pbc40-agent deploy-pbc40-restart deploy-pbc40-quick deploy-pbc40-quick pbc40-install-service
+	deploy-pbc40 deploy-pbc40-server deploy-pbc40-web deploy-pbc40-form-app deploy-pbc40-agent deploy-pbc40-restart deploy-pbc40-quick deploy-pbc40-quick pbc40-install-service
 
 help:
 	@echo "App Manager — 常用目标"
@@ -62,6 +62,7 @@ help:
 	@echo "  make deploy-pbc40-quick    跳过重新构建，直接同步已有产物"
 	@echo "  make deploy-pbc40-server   仅重新编译 server 并同步"
 	@echo "  make deploy-pbc40-web      仅重新构建前端（web+scada+form-app）并同步"
+	@echo "  make deploy-pbc40-form-app 仅重新构建 form-app 并同步"
 	@echo "  make deploy-pbc40-agent    仅构建并上传 release APK"
 	@echo "  make deploy-pbc40-restart  仅在远程重启服务"
 	@echo "    PBC40_HOST=pbc40           SSH 主机名（默认 pbc40，需配置 ~/.ssh/config）"
@@ -380,6 +381,11 @@ deploy-pbc40-server: server-only-linux-amd64
 deploy-pbc40-web: web
 	rsync -avz --delete --progress $(WEB)/dist/ $(PBC40_HOST):$(PBC40_DIR)/web/dist/
 	@echo ">>> 前端部署完成（web + scada-editor + form-app）"
+
+# 仅重新构建 form-app 并部署（不重建 web/scada-editor）
+deploy-pbc40-form-app: form-app-build
+	rsync -avz --delete --progress $(FORM_APP)/dist/ $(PBC40_HOST):$(PBC40_DIR)/web/dist/form-app/
+	@echo ">>> form-app 部署完成"
 
 # 仅构建并上传 APK
 deploy-pbc40-agent: agent-release-build
