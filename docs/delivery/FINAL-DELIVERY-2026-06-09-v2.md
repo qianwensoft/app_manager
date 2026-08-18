@@ -53,7 +53,7 @@
 | `monaco-editor-verification.md` | 验证清单 | 2 页 |
 | `dataset-form-monaco-integration.md` | 数据集表单集成（v1） | 3 页 |
 | `dataset-form-full-monaco-integration.md` | **全面集成文档（v2）** | 5 页 |
-| `DELIVERY-2026-06-09-dynamic-sql.md` | 完整交付文档 | 6 页 |
+| `docs/delivery/DELIVERY-2026-06-09-dynamic-sql.md` | 完整交付文档 | 6 页 |
 | `FINAL-SUMMARY-2026-06-09.md` | 最终总结（v1） | 4 页 |
 
 **总计**: 11 份文档，42 页

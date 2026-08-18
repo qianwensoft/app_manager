@@ -94,6 +94,11 @@ export interface PaperSpec {
   offset_x_mm?: number
   offset_y_mm?: number
   /**
+   * CPCL 文本字体名，缺省 GBUNSG24.CPF（简体中文）。
+   * ZR138 需安装对应中文字体；不同字体包可在打印机上确认后覆盖。
+   */
+  cpcl_font?: string
+  /**
    * TSPL 文本字体名，缺省 CHNGB.BF2（简体中文 GBK）。
    * 不同机型内置字体名不同，如繁体机用 TSS24.BF2，英文机用 0/4/ROMAN.TTF 等。
    */

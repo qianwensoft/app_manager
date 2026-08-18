@@ -197,7 +197,7 @@ chmod +x test_work_order_share_auth.sh
 
 - 详细文档: `docs/WORK_ORDER_SHARE_AUTH.md`
 - 快速开始: `QUICK_START_WORK_ORDER_SHARE_AUTH.md`
-- 实现总结: `WORK_ORDER_SHARE_AUTH_IMPLEMENTATION.md`
+- 实现总结: `docs/work-orders/WORK_ORDER_SHARE_AUTH_IMPLEMENTATION.md`
 - API 测试: `server/test_work_order_share_auth.sh`
 
 ## 贡献者

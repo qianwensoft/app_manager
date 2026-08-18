@@ -283,7 +283,7 @@ npm install monaco-editor
 
 - **Monaco Editor 使用指南**: `docs/monaco-sql-editor-guide.md`
 - **动态 SQL 功能指南**: `docs/dynamic-sql-guide.md`
-- **完整交付文档**: `DELIVERY-2026-06-09-dynamic-sql.md`
+- **完整交付文档**: `docs/delivery/DELIVERY-2026-06-09-dynamic-sql.md`
 
 ---
 

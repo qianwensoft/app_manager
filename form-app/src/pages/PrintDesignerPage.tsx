@@ -215,6 +215,30 @@ export default function PrintDesignerPage() {
             { value: 600, label: '600 dpi' },
           ]}
         />
+        {tpl.protocol === 'cpcl' && (
+          <>
+            <Divider type="vertical" />
+            <Tooltip title="ZR138 简体中文通常使用 GBUNSG24.CPF；字体必须已安装在打印机中。CPCL 文本会自动使用 GB18030 编码并声明 ENCODING GB18030。">
+              <span style={{ fontSize: 12, color: '#64748b' }}>CPCL 字体</span>
+            </Tooltip>
+            <AutoComplete
+              size="small"
+              style={{ width: 180 }}
+              allowClear
+              placeholder="GBUNSG24.CPF（默认）"
+              value={tpl.paper?.cpcl_font || undefined}
+              onChange={v => updPaper({ cpcl_font: v || undefined })}
+              filterOption={(input, opt) =>
+                (opt?.value as string ?? '').toLowerCase().includes(input.toLowerCase())
+              }
+              options={[
+                { label: 'GBUNSG24.CPF – 简体中文 24×24', value: 'GBUNSG24.CPF' },
+                { label: 'GBUNSG16.CPF – 简体中文 16×16', value: 'GBUNSG16.CPF' },
+                { label: 'CTUNMK24.CPF – 繁体中文', value: 'CTUNMK24.CPF' },
+              ]}
+            />
+          </>
+        )}
         {tpl.protocol === 'tspl' && (
           <>
             <Divider type="vertical" />

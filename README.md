@@ -273,7 +273,18 @@ schema/          三端共享 TypeScript Schema 定义（入参 Schema、返回�
   ├── form-app/         Form App 页面 Schema（组件配置、事件定义、运行时契约）
   └── reconcile/        Schema 校对工具（检查前后端 Schema 一致性）
 scripts/         辅助脚本（如 APK 同步）
-docs/            文档与界面截图（README 引用）；整体规划见 docs/plan.md
+docs/            文档与界面截图（按 changelog、delivery、connectors、workflows、work-orders、agent、scada 等主题分类）
+  ├── changelog/    版本更新日志与专项修复记录
+  ├── delivery/     交付报告、开发总结与实施清单
+  ├── connectors/   连接器与外部系统集成文档
+  ├── workflows/    工作流设计、实施与验证文档
+  ├── work-orders/  工单、分享与权限相关文档
+  ├── agent/        Android Agent 与设备能力文档
+  ├── scada/        SCADA、串口与扫描相关文档
+  ├── form-app/     Form App 文档
+  ├── security/     安全修复文档
+  ├── architecture/架构与平台设计文档
+  └── platform/     平台能力与通知总结
 Makefile         构建 server / web / scada-editor / form-app / agent 与 release 打包
 ```
 

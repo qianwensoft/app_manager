@@ -59,7 +59,7 @@
 - `server/test_work_order_share_auth.sh` - API 测试脚本
 - `docs/WORK_ORDER_SHARE_AUTH.md` - 功能文档
 - `QUICK_START_WORK_ORDER_SHARE_AUTH.md` - 快速开始
-- `WORK_ORDER_SHARE_AUTH_IMPLEMENTATION.md` - 实现总结
+- `docs/work-orders/WORK_ORDER_SHARE_AUTH_IMPLEMENTATION.md` - 实现总结
 - `CHANGELOG_WORK_ORDER_SHARE_AUTH.md` - 变更日志
 - `IMPLEMENTATION_CHECKLIST.md` - 检查清单
 

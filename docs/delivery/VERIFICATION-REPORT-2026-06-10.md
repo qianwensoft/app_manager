@@ -153,7 +153,7 @@ if app.TokenCacheJSON != "" {
 1. `docs/connector-interface-usage.md` - 完整使用指南（新增）
 2. `docs/connector-interface-context-mapping.md` - Context 映射说明（新增）
 3. `docs/connector-interface-frontend-summary.md` - 前端实现总结（新增）
-4. `CHANGELOG-CONNECTOR-INTERFACE-2026-06-09.md` - 更新日志（新增）
+4. `docs/changelog/CHANGELOG-CONNECTOR-INTERFACE-2026-06-09.md` - 更新日志（新增）
 5. `FINAL-IMPLEMENTATION-CONNECTOR-INTERFACE-2026-06-09.md` - 最终总结（新增）
 
 ---

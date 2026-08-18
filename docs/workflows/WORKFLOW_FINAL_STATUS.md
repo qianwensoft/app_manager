@@ -269,7 +269,7 @@ cd server && go build
 ### 文档文件
 1. `WORKFLOW_STAGE2_PROGRESS.md` - 阶段2进度
 2. `WORKFLOW_INTEGRATION_COMPLETE.md` - 完成报告
-3. `ANDROID_AGENT_COMMAND_STATUS.md` - Android 命令状态
+3. `docs/agent/ANDROID_AGENT_COMMAND_STATUS.md` - Android 命令状态
 
 ---
 

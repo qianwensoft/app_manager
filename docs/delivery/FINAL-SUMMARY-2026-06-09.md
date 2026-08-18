@@ -41,7 +41,7 @@
 | `docs/monaco-sql-editor-guide.md` | 编辑器使用指南 |
 | `docs/monaco-sql-editor-summary.md` | 编辑器功能总结 |
 | `docs/dataset-form-monaco-integration.md` | 数据集表单集成说明 |
-| `DELIVERY-2026-06-09-dynamic-sql.md` | 完整交付文档 |
+| `docs/delivery/DELIVERY-2026-06-09-dynamic-sql.md` | 完整交付文档 |
 
 ---
 

@@ -240,7 +240,7 @@ if (prop.examples && prop.examples.length > 0) {
 ### 文档文件
 - `docs/connector-interface-usage.md` - 完整使用指南
 - `docs/connector-interface-context-mapping.md` - Context 映射说明
-- `CHANGELOG-CONNECTOR-INTERFACE-2026-06-09.md` - 更新日志
+- `docs/changelog/CHANGELOG-CONNECTOR-INTERFACE-2026-06-09.md` - 更新日志
 
 ## 测试建议
 

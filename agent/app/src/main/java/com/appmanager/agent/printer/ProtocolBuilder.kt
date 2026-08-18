@@ -206,6 +206,8 @@ object ProtocolBuilder {
     // paper.type=label 且给定 height_mm 时，按实际 dpi 换算标签高度，覆盖自动估算。
     private fun buildCpcl(content: JSONArray, paper: JSONObject?, dpi: Int): ByteArray {
         val sb = StringBuilder()
+        // ZR138 按 CPCL 编码声明解析中文；GBUNSG24.CPF 是简体中文字体。
+        val cpclFont = cpclFont(paper)
         // 估算高度：每个可见元素给固定行高，最终再补余量
         val lineH = 40
         var y = 10
@@ -215,13 +217,12 @@ object ProtocolBuilder {
             when (op.optString("op")) {
                 "text" -> {
                     val size = op.optInt("size", 1).coerceIn(1, 3)
-                    val font = when (size) { 2 -> 4; 3 -> 5; else -> 0 }
                     val text = op.optString("text", "")
                     val align = op.optString("align", "left")
                     when (align) {
-                        "center" -> { body.append("CENTER\r\n"); body.append("TEXT $font 0 0 $y $text\r\n"); body.append("LEFT\r\n") }
-                        "right" -> { body.append("RIGHT\r\n"); body.append("TEXT $font 0 0 $y $text\r\n"); body.append("LEFT\r\n") }
-                        else -> body.append("TEXT $font 0 30 $y $text\r\n")
+                        "center" -> { body.append("CENTER\r\n"); body.append("TEXT $cpclFont 0 0 $y $text\r\n"); body.append("LEFT\r\n") }
+                        "right" -> { body.append("RIGHT\r\n"); body.append("TEXT $cpclFont 0 0 $y $text\r\n"); body.append("LEFT\r\n") }
+                        else -> body.append("TEXT $cpclFont 0 30 $y $text\r\n")
                     }
                     y += lineH + size * 10
                 }
@@ -234,9 +235,10 @@ object ProtocolBuilder {
                 }
                 "qrcode" -> {
                     val data = op.optString("data", "")
+                    val dataBytes = data.toByteArray(charset("GB18030"))
                     val size = op.optInt("size", 6).coerceIn(1, 32)
-                    body.append("BARCODE QR 30 $y M 2 U $size\r\n")
-                    body.append("MA,$data\r\n")
+                    body.append("B QR 30 $y M 2 U $size\r\n")
+                    body.append("MM,B${dataBytes.size.toString().padStart(4, '0')}$data\r\n")
                     body.append("ENDQR\r\n")
                     y += size * 25 + 30
                 }
@@ -254,11 +256,16 @@ object ProtocolBuilder {
             mmToDots(paper.optDouble("height_mm"), dpi)
         } else autoHeight
         sb.append("! 0 $dpi $dpi $height 1\r\n")
+        sb.append("ENCODING GB18030\r\n")
         sb.append(body)
         sb.append("FORM\r\n")
         sb.append("PRINT\r\n")
-        // CPCL 打印机通常需要 GB2312/GBK 编码才能正确打印中文
-        return sb.toString().toByteArray(charset("GBK"))
+        return sb.toString().toByteArray(charset("GB18030"))
+    }
+
+    private fun cpclFont(paper: JSONObject?): String {
+        val font = paper?.optString("cpcl_font", "")
+        return if (!font.isNullOrBlank()) font else "GBUNSG24.CPF"
     }
 
     private fun cpclBarcodeType(fmt: String): String = when (fmt) {
@@ -406,6 +413,7 @@ object ProtocolBuilder {
             mmToDots(paper.optDouble("height_mm"), dpi)
         } else 480
         sb.append("! 0 $dpi $dpi $height 1\r\n")
+        sb.append("ENCODING GB18030\r\n")
         val offX = offsetXmm(paper)
         val offY = offsetYmm(paper)
         for (i in 0 until elements.length()) {
@@ -420,10 +428,10 @@ object ProtocolBuilder {
                     val text = el.optString("text", "")
                     if (mag > 1) {
                         sb.append("SETMAG $mag $mag\r\n")
-                        sb.append("TEXT 0 0 $x $y $text\r\n")
+                        sb.append("TEXT ${cpclFont(paper)} 0 $x $y $text\r\n")
                         sb.append("SETMAG 0 0\r\n") // 复位，避免影响后续元素
                     } else {
-                        sb.append("TEXT 0 0 $x $y $text\r\n")
+                        sb.append("TEXT ${cpclFont(paper)} 0 $x $y $text\r\n")
                     }
                 }
                 "barcode" -> {
@@ -434,9 +442,10 @@ object ProtocolBuilder {
                 }
                 "qrcode" -> {
                     val data = el.optString("data", "")
+                    val dataBytes = data.toByteArray(charset("GB18030"))
                     val cell = el.optInt("cell", 4).coerceIn(1, 32)
-                    sb.append("BARCODE QR $x $y M 2 U $cell\r\n")
-                    sb.append("MA,$data\r\n")
+                    sb.append("B QR $x $y M 2 U $cell\r\n")
+                    sb.append("MM,B${dataBytes.size.toString().padStart(4, '0')}$data\r\n")
                     sb.append("ENDQR\r\n")
                 }
                 "line" -> {
@@ -454,8 +463,7 @@ object ProtocolBuilder {
         }
         sb.append("FORM\r\n")
         sb.append("PRINT\r\n")
-        // CPCL 打印机通常需要 GB2312/GBK 编码才能正确打印中文
-        return sb.toString().toByteArray(charset("GBK"))
+        return sb.toString().toByteArray(charset("GB18030"))
     }
 
     // 数值格式化：整数去掉 .0（40.0→"40"），否则保留（49.5→"49.5"）

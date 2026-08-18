@@ -252,7 +252,7 @@ export const callConnectorInterfaceByCode = (code, method, params) => {
 
 ### 3.4 更新日志
 
-**文件：** `CHANGELOG-CONNECTOR-INTERFACE-2026-06-09.md`
+**文件：** `docs/changelog/CHANGELOG-CONNECTOR-INTERFACE-2026-06-09.md`
 
 **内容：**
 - 功能概述
@@ -385,7 +385,7 @@ curl -X POST "http://localhost:8080/api/outbound/connector-interfaces/check_empl
 - ✅ `docs/connector-interface-usage.md` - 完整使用指南（新增）
 - ✅ `docs/connector-interface-context-mapping.md` - Context 映射说明（新增）
 - ✅ `docs/connector-interface-frontend-summary.md` - 前端实现总结（新增）
-- ✅ `CHANGELOG-CONNECTOR-INTERFACE-2026-06-09.md` - 更新日志（新增）
+- ✅ `docs/changelog/CHANGELOG-CONNECTOR-INTERFACE-2026-06-09.md` - 更新日志（新增）
 
 ---
 

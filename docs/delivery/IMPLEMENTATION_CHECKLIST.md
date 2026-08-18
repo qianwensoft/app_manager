@@ -37,7 +37,7 @@
 ### 文档
 - [x] 创建功能文档 (`docs/WORK_ORDER_SHARE_AUTH.md`)
 - [x] 创建快速开始指南 (`QUICK_START_WORK_ORDER_SHARE_AUTH.md`)
-- [x] 创建实现总结 (`WORK_ORDER_SHARE_AUTH_IMPLEMENTATION.md`)
+- [x] 创建实现总结 (`docs/work-orders/WORK_ORDER_SHARE_AUTH_IMPLEMENTATION.md`)
 - [x] 创建变更日志 (`CHANGELOG_WORK_ORDER_SHARE_AUTH.md`)
 - [x] 创建测试脚本 (`server/test_work_order_share_auth.sh`)
 

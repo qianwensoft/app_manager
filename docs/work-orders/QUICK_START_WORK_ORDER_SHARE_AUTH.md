@@ -209,5 +209,5 @@ A: 在"工单设置" → "分享管理"页面，点击浏览次数可以查看�
 
 如有问题，请参考：
 - 详细文档：`docs/WORK_ORDER_SHARE_AUTH.md`
-- 实现总结：`WORK_ORDER_SHARE_AUTH_IMPLEMENTATION.md`
+- 实现总结：`docs/work-orders/WORK_ORDER_SHARE_AUTH_IMPLEMENTATION.md`
 - API 测试脚本：`server/test_work_order_share_auth.sh`
