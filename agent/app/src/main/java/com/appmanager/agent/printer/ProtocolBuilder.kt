@@ -409,10 +409,26 @@ object ProtocolBuilder {
     // ── CPCL 坐标布局 ──────────────────────────────────────────────
     private fun buildCpclCanvas(elements: JSONArray, paper: JSONObject?, dpi: Int, values: JSONObject?): ByteArray {
         val sb = StringBuilder()
-        val height = if (paper?.optString("type") == "label" && paper.optDouble("height_mm", 0.0) > 0) {
-            mmToDots(paper.optDouble("height_mm"), dpi)
+        // 解析纸张旋转与尺寸，旋转 90/270° 时宽高互换
+        val rotate = paper?.optInt("rotate", 0) ?: 0
+        val rawW = if (paper?.optString("type") == "label") paper.optDouble("width_mm", 0.0) else 0.0
+        val rawH = if (paper?.optString("type") == "label") paper.optDouble("height_mm", 0.0) else 0.0
+        val (effectiveW, effectiveH) = when (rotate) {
+            90, 270 -> Pair(rawH, rawW)  // swap
+            else -> Pair(rawW, rawH)      // no swap
+        }
+
+        val height = if (effectiveH > 0) {
+            mmToDots(effectiveH, dpi)
         } else 480
         sb.append("! 0 $dpi $dpi $height 1\r\n")
+
+        // 指定页宽以消除左右留白（标签纸模式且配置了宽度时）
+        if (effectiveW > 0) {
+            val width = mmToDots(effectiveW, dpi)
+            sb.append("PAGE-WIDTH $width\r\n")
+        }
+
         sb.append("ENCODING GB18030\r\n")
         val offX = offsetXmm(paper)
         val offY = offsetYmm(paper)
