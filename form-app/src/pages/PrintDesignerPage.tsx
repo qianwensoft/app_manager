@@ -148,30 +148,28 @@ export default function PrintDesignerPage() {
         <Button onClick={() => navigate(-1)}>← 返回</Button>
         <span style={{ color: '#64748b', fontSize: 13 }}>页面：{pageTitle}</span>
         <Input style={{ width: 180 }} value={tpl.name} onChange={e => upd({ name: e.target.value })} placeholder="模板名称" />
-        <Tooltip title="协议与打印机硬件语言对应，CPCL/TSPL 字体渲染不同；坐标布局模式下切换协议会影响打印效果">
-          <Select<PrintProtocol>
-            style={{ width: 150 }}
-            value={tpl.protocol}
-            onChange={v => {
-              if (mode === 'canvas' && elements.length > 0 && v !== tpl.protocol) {
-                Modal.confirm({
-                  title: '切换打印协议',
-                  content: `当前已有 ${elements.length} 个坐标元素（按 ${tpl.protocol.toUpperCase()} 设计）。CPCL 与 TSPL 的字体大小、行高不同，切换后打印效果会变化。建议为不同打印机分别建立模板。`,
-                  okText: '仍然切换',
-                  cancelText: '取消',
-                  onOk: () => upd({ protocol: v }),
-                })
-              } else {
-                upd({ protocol: v })
-              }
-            }}
-            options={[
-              { value: 'escpos', label: 'ESC/POS（小票）' },
-              { value: 'cpcl', label: 'CPCL（标签）' },
-              { value: 'tspl', label: 'TSPL（标签机）' },
-            ]}
-          />
-        </Tooltip>
+        <Select<PrintProtocol>
+          style={{ width: 150 }}
+          value={tpl.protocol}
+          onChange={v => {
+            if (mode === 'canvas' && elements.length > 0 && v !== tpl.protocol) {
+              Modal.confirm({
+                title: '切换打印协议',
+                content: `当前已有 ${elements.length} 个坐标元素（按 ${tpl.protocol.toUpperCase()} 设计）。CPCL 与 TSPL 的字体大小、行高不同，切换后打印效果会变化。建议为不同打印机分别建立模板。`,
+                okText: '仍然切换',
+                cancelText: '取消',
+                onOk: () => upd({ protocol: v }),
+              })
+            } else {
+              upd({ protocol: v })
+            }
+          }}
+          options={[
+            { value: 'escpos', label: 'ESC/POS（小票）' },
+            { value: 'cpcl', label: 'CPCL（标签）' },
+            { value: 'tspl', label: 'TSPL（标签机）' },
+          ]}
+        />
         <Radio.Group value={mode} onChange={e => upd({ layout_mode: e.target.value })} optionType="button" buttonStyle="solid">
           <Radio.Button value="flow">顺序流</Radio.Button>
           <Radio.Button value="canvas">坐标布局</Radio.Button>
