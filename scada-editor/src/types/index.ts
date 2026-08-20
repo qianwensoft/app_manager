@@ -157,19 +157,121 @@ export interface CanvasElement {
   formBeforeScript?: string      // async (data) => data | false | void — runs before submit; throw to abort
 }
 
+/**
+ * 对象模板（Group 间重复渲染“对象”）配置。
+ *
+ * - 传统 fixed-cell 布局（layout/columns/gapX/gapY）仍保留，向后兼容；
+ * - 新的虚拟 div 布局（virtualLayout = flex | grid | flow）将所有展开实例放入一个
+ *   CSS 容器，由 display:flex / display:grid 控制排列方式；同时支持
+ *   wrap / justify / align / 自动列数 等。
+ * - params / overrideParams 允许把组内文本/扩展/extData 上出现的任意
+ *   {{}} 占位符（不限类别）抽取为对象参数，再在渲染时通过 `${item.xxx}` 注入
+ *   表达式作用域完成替换。
+ */
+export interface GroupParamSpec {
+  /** 参数名（与 item.xxx 中 xxx 一致） */
+  name: string
+  /** 参数类型（从实例样本推导或用户指定） */
+  type?: 'string' | 'number' | 'integer' | 'boolean' | 'object' | 'array' | 'any'
+  /** 描述（用户可填） */
+  description?: string
+  /** 是否必填（默认为 false） */
+  required?: boolean
+  /** 默认值（当真实 item 中缺字段时使用） */
+  default?: unknown
+  /** 原始样本值（用于辅助 UI 展示） */
+  sample?: unknown
+  /** 该参数在哪些位置被引用（text / textTemplate / extData / expression） */
+  usedIn?: Array<'text' | 'textTemplate' | 'extData' | 'expression' | 'bindingValue' | 'pointBinding'>
+}
+
+/** 虚拟 div 容器布局配置 */
+export interface VirtualLayoutConfig {
+  /**
+   * 布局方式：
+   * - flex   横向或纵向 flex（direction 决定）
+   * - grid   CSS Grid（columns / columnsAutoFit 决定）
+   * - flow   多行/多列自动换行（columns 决定每行最大项数）
+   */
+  display: 'flex' | 'grid' | 'flow'
+  flexDirection?: 'row' | 'row-reverse' | 'column' | 'column-reverse'
+  flexWrap?: 'nowrap' | 'wrap' | 'wrap-reverse'
+  justifyContent?: 'flex-start' | 'flex-end' | 'center' | 'space-between' | 'space-around' | 'space-evenly'
+  alignItems?: 'flex-start' | 'flex-end' | 'center' | 'baseline' | 'stretch'
+  alignContent?: 'flex-start' | 'flex-end' | 'center' | 'space-between' | 'space-around' | 'stretch'
+  /** grid / flow 列数；grid 模式下 1 表示按容器宽度均分 */
+  columns?: number
+  /** grid 模式下 auto-fit/auto-fill 配置 */
+  columnsAutoFit?: { minWidth: number; maxColumns?: number }
+  /** 行高/列宽（CSS grid/flex 具体值，例如 '120px' / '1fr'） */
+  columnWidth?: string
+  rowHeight?: string
+  /** 行间距 / 列间距 px */
+  gap?: number
+  rowGap?: number
+  columnGap?: number
+  /** 容器内边距 px */
+  padding?: number
+  /** 容器大小：'auto' = 使用组自身 width/height；'hug' = 收缩到内容；'fill' = 铺满父 */
+  widthMode?: 'auto' | 'hug' | 'fill' | string
+  heightMode?: 'auto' | 'hug' | 'fill' | string
+  /** 自定义 width/height CSS 值（与 widthMode 配合） */
+  customWidth?: string
+  customHeight?: string
+  /** 容器背景色（可选） */
+  background?: string
+  /** 容器边框（可选） */
+  border?: string
+  /** 容器圆角（可选） */
+  borderRadius?: number
+  /** 是否显示滚动条 */
+  overflow?: 'visible' | 'hidden' | 'auto' | 'scroll'
+}
+
 export interface GroupBinding {
   enabled?: boolean
   source?: 'static' | 'point' | 'interface'
+  /**
+   * 绑定的原始数据：
+   * - source=static 时支持 JSON 对象（单实例）或 JSONArray（按布局展开）；
+   * - source=point/interface 时指向 pointData 中的路径；允许解析为对象数组或单对象。
+   */
   value?: unknown
   path?: string
   itemAlias?: string
   keyPath?: string
   maxInstances?: number
+
+  /** 旧版固定 cell 布局（保留，向后兼容） */
   layout?: 'horizontal' | 'vertical' | 'grid'
   columns?: number
   gapX?: number
   gapY?: number
   emptyBehavior?: 'hide' | 'template'
+
+  /** 新版虚拟 div 布局（启用后将替代上述 layout/columns/gapX/gapY） */
+  virtualLayout?: VirtualLayoutConfig
+
+  /**
+   * 参数契约：从组合内子元素的 {{}} 占位符与 ${...} 表达式中自动提取的
+   * 字段列表（与 item.xxx 路径一致）。用户在属性面板中可勾选/编辑。
+   */
+  params?: GroupParamSpec[]
+
+  /**
+   * 参数在源对象中的覆盖映射：
+   * - key   = GroupParamSpec.name（即 item.xxx 中的 xxx）
+   * - value = 源对象中的实际字段路径（默认就是 name）
+   * 例如：源数据中叫 `deviceName` 而模板里写 `{{item.name}}`，
+   * 可配置 { name: 'deviceName' } 把字段名映射过去。
+   */
+  paramFieldMap?: Record<string, string>
+
+  /**
+   * paramsFieldMap 的运行期合并结果：用户键入的 sourceValue 优先级更高。
+   * （供运行时 / 预览读取；不应当反向写回 GroupBinding.paramFieldMap。）
+   */
+  paramOverrides?: Record<string, unknown>
 }
 
 export type ElementType =

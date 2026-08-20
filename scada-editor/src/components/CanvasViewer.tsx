@@ -28,7 +28,8 @@ import LayoutModalWidget from './LayoutModalWidget'
 import LayoutTabsWidget from './LayoutTabsWidget'
 import LayoutCollapseWidget from './LayoutCollapseWidget'
 import AlarmLightWidget from './AlarmLightWidget'
-import { expandGroupInstances } from '@/runtime/groupInstances'
+import { expandGroupInstancesDetailed } from '@/runtime/groupInstances'
+import VirtualGroupContainer from './VirtualGroupContainer'
 
 interface Props {
   canvas: CanvasData
@@ -76,7 +77,7 @@ export default function CanvasViewer({
   // 工作流运行时：先用原始 pointData 展开一份基础运行时元素供选择器解析，
   // 再拿回合成后的 pointData（叠加绑定覆盖）与属性覆盖层。
   const baseRuntimeElements = useMemo<CanvasElement[]>(() => {
-    const instances = expandGroupInstances(canvas.elements, rawPointData)
+    const expanded = expandGroupInstancesDetailed(canvas.elements, rawPointData)
     const tplChildIds = new Set(
       canvas.elements
         .filter((el) => el.type === 'group' && el.groupBinding?.enabled)
@@ -84,7 +85,7 @@ export default function CanvasViewer({
     )
     return [
       ...canvas.elements.filter((el) => !tplChildIds.has(el.id)),
-      ...instances.map((i) => i.element),
+      ...expanded.instances.map((i) => i.element),
     ]
   }, [canvas.elements, rawPointData])
 
@@ -146,13 +147,46 @@ export default function CanvasViewer({
 
   const z = resolvedZoom
 
+  // 先做模板展开拿到所有运行时元素（含 group 展开实例），
+  // 然后再决定是否需要动画帧；这样虚拟容器里展开实例的动画也会被 tick。
+  const expanded = useMemo(
+    () => expandGroupInstancesDetailed(canvas.elements, pointData),
+    [canvas.elements, pointData]
+  )
+  const groupInstances = expanded.instances
+  const virtualContainers = expanded.virtualContainers
+  const templateChildIds = new Set(
+    canvas.elements
+      .filter((el) => el.type === 'group' && el.groupBinding?.enabled)
+      .flatMap((el) => el.children ?? []),
+  )
+  /** 所有虚拟容器所属的 groupId —— 用于从 per-instance 渲染中过滤掉 */
+  const virtualGroupIds = useMemo(
+    () => new Set(virtualContainers.map((vc) => vc.groupId)),
+    [virtualContainers]
+  )
+  /** 全部参与 Canvas2D 绘制的元素（含虚拟容器里的展开实例） */
+  const allCanvasElements = useMemo<CanvasElement[]>(
+    () => [
+      ...canvas.elements.filter((el) => !templateChildIds.has(el.id)),
+      ...groupInstances.map((i) => i.element),
+    ],
+    [canvas.elements, groupInstances, templateChildIds]
+  )
   const needsAnimLoop = useMemo(
-    () => canvasNeedsAnimationLoop(canvas.elements, pointData),
-    [canvas.elements, pointData],
+    () => canvasNeedsAnimationLoop(allCanvasElements, pointData),
+    [allCanvasElements, pointData],
   )
   const animNow = useAnimationTick(needsAnimLoop)
-  const dateTimeTick = useDateTimeTick(canvas.elements)
+  const dateTimeTick = useDateTimeTick(allCanvasElements)
+  const runtimeElements = [
+    ...canvas.elements.filter((el) => !templateChildIds.has(el.id)),
+    ...groupInstances
+      .filter((i) => !virtualGroupIds.has(i.groupId))
+      .map((instance) => instance.element),
+  ].map(applyOverride)
 
+  // 重绘 Canvas2D 背景层（grid + 几何/图片/动态管/边框）
   useEffect(() => {
     const el = canvasRef.current
     if (!el) return
@@ -167,24 +201,14 @@ export default function CanvasViewer({
 
     drawGrid(ctx, canvas, z)
 
-    const sorted = [...canvas.elements].sort((a, b) => a.zIndex - b.zIndex)
+    const sorted = [...allCanvasElements].sort((a, b) => a.zIndex - b.zIndex)
     for (const element of sorted) {
       const animState = getCanvasAnimState(element, pointData, animNow)
       drawElement(ctx, element, z, animState)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canvas, z, pointData, animNow, dateTimeTick])
+  }, [canvas, z, pointData, animNow, dateTimeTick, allCanvasElements])
 
-  const groupInstances = useMemo(() => expandGroupInstances(canvas.elements, pointData), [canvas.elements, pointData])
-  const templateChildIds = new Set(
-    canvas.elements
-      .filter((el) => el.type === 'group' && el.groupBinding?.enabled)
-      .flatMap((el) => el.children ?? []),
-  )
-  const runtimeElements = [
-    ...canvas.elements.filter((el) => !templateChildIds.has(el.id)),
-    ...groupInstances.map((instance) => instance.element),
-  ].map(applyOverride)
   const domElements = runtimeElements.filter(
     (el) => el.visible && (el.type === 'text' || el.type === 'button'),
   )
@@ -371,6 +395,30 @@ export default function CanvasViewer({
           pointData={pointData}
           ctx={eventCtx}
         />
+        {virtualContainers.map((container) => (
+          <VirtualGroupContainer
+            key={container.groupId}
+            canvas={canvas}
+            instances={groupInstances.filter((i) => i.groupId === container.groupId)}
+            container={container}
+            zoom={z}
+            pointData={pointData}
+            scadaCode={scadaCode}
+            tableLiveData={tableLiveData}
+            onSwitchCanvas={onSwitchCanvas}
+            workflows={workflows}
+            workflowLibs={workflowLibs}
+            enableWorkflows={enableWorkflows}
+            onToast={onToast}
+            shareToken={shareToken}
+            elementOverrides={elementOverrides}
+            componentSourceIds={componentSourceIds}
+            triggerWorkflowById={wf.runWorkflowById}
+            triggerComponent={wf.triggerComponent}
+            exprScope={exprScope}
+            eventCtx={eventCtx}
+          />
+        ))}
       </div>
     </div>
   )

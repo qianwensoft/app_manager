@@ -80,6 +80,7 @@ const NAV_ITEMS = [
   { id: 'canvas',     label: 'CanvasData' },
   { id: 'element',    label: 'CanvasElement' },
   { id: 'binding',    label: '数据绑定' },
+  { id: 'object-tpl', label: '对象模板' },
   { id: 'animation',  label: '动画' },
   { id: 'event',      label: '事件' },
   { id: 'types',      label: '元素类型' },
@@ -296,6 +297,161 @@ type PointDataMap = Record<string, number>
               ['deviceCode', 'string', '所属设备编码', '"DEV_001"'],
               ['linkName', 'string?', '订阅别名，可与 pointKey 相同', '"temperature"'],
               ['transform', 'string?', 'JS 表达式，value 为原始数值', '"Math.round(value * 100) / 100"'],
+            ]}
+          />
+        </Section>
+
+        {/* 对象模板 */}
+        <Section id="object-tpl" title="GroupBinding — 对象模板（带虚拟 div 与参数绑定）">
+          <p style={{ color: 'var(--text-secondary)', marginBottom: 16, lineHeight: 1.8 }}>
+            当 <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent)' }}>{`{ type: 'group', groupBinding.enabled: true }`}</code> 时，
+            该组合会按 <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent)' }}>groupBinding</code> 渲染为多份实例。
+            新版本支持 <strong style={{ color: 'var(--accent)' }}>JSON/JSONArray 绑定</strong>、
+            <strong style={{ color: 'var(--accent)' }}>虚拟 div 容器布局</strong>、
+            <strong style={{ color: 'var(--accent)' }}>自动从 <code>{'{{}}'}</code> 占位符提取对象参数</strong>，
+            以及 <strong style={{ color: 'var(--accent)' }}>参数映射 / 运行时覆盖</strong>。
+          </p>
+
+          <h3 style={{ fontSize: 14, fontWeight: 700, margin: '16px 0 10px', color: 'var(--text-primary)' }}>完整字段</h3>
+          <Code>{`interface GroupBinding {
+  enabled?: boolean                    // 总开关
+  source?: 'static' | 'point' | 'interface'  // 数据来源
+  value?: unknown                      // source=static 时的对象或对象数组（JSON）
+  path?: string                        // source=point/interface 时点位/接口数据中的点分路径
+  itemAlias?: string                   // 实例上下文别名，默认 'item'
+
+  /* —— 旧版固定 cell 布局（保留，向后兼容）—— */
+  layout?: 'horizontal' | 'vertical' | 'grid'
+  columns?: number
+  gapX?: number
+  gapY?: number
+  maxInstances?: number
+  emptyBehavior?: 'hide' | 'template'
+
+  /* —— 新版虚拟 div 容器布局（启用后替代上述 layout/columns/gapX/gapY）—— */
+  virtualLayout?: VirtualLayoutConfig
+
+  /* —— 对象参数契约 —— */
+  params?: GroupParamSpec[]            // 自动提取的模板参数
+  paramFieldMap?: Record<string, string>  // 字段映射：name -> 源对象字段名
+  paramOverrides?: Record<string, unknown>  // 运行时强制值（测试/默认值）
+}
+
+interface VirtualLayoutConfig {
+  display: 'flex' | 'grid' | 'flow'    // 容器布局
+  flexDirection?: 'row' | 'row-reverse' | 'column' | 'column-reverse'
+  flexWrap?: 'nowrap' | 'wrap' | 'wrap-reverse'
+  justifyContent?: 'flex-start' | 'flex-end' | 'center' | 'space-between' | 'space-around' | 'space-evenly'
+  alignItems?: 'flex-start' | 'flex-end' | 'center' | 'baseline' | 'stretch'
+  alignContent?: 'flex-start' | 'flex-end' | 'center' | 'space-between' | 'space-around' | 'stretch'
+  columns?: number                      // grid/flow 列数
+  columnsAutoFit?: { minWidth: number; maxColumns?: number }
+  columnWidth?: string                  // grid 列宽，如 '1fr' / '120px'
+  rowHeight?: string
+  gap?: number                          // 默认间距（行/列）
+  rowGap?: number
+  columnGap?: number
+  padding?: number
+  widthMode?: 'auto' | 'hug' | 'fill' | 'custom'
+  heightMode?: 'auto' | 'hug' | 'fill' | 'custom'
+  customWidth?: string
+  customHeight?: string
+  background?: string
+  border?: string
+  borderRadius?: number
+  overflow?: 'visible' | 'hidden' | 'auto' | 'scroll'
+}
+
+interface GroupParamSpec {
+  name: string                          // 参数名（即 {{item.xxx}} 中的 xxx）
+  type?: 'string' | 'number' | 'integer' | 'boolean' | 'object' | 'array' | 'any'
+  required?: boolean
+  default?: unknown
+  description?: string
+  sample?: unknown                      // 扫描时取到的样本值（用于类型推断）
+  usedIn?: Array<'text' | 'textTemplate' | 'extData' | 'expression' | 'bindingValue' | 'pointBinding'>
+}`}
+          </Code>
+
+          <h3 style={{ fontSize: 14, fontWeight: 700, margin: '20px 0 10px', color: 'var(--text-primary)' }}>工作流</h3>
+          <ol style={{ color: 'var(--text-secondary)', lineHeight: 1.9, paddingLeft: 20 }}>
+            <li>把多个子元素放入一个组合（<code>{`{ type: 'group', children: [...] }`}</code>）。</li>
+            <li>在子元素的 <code>text</code> / <code>{`pointBinding.textTemplate`}</code> / <code>extData</code> / <code>{'$' + '{...}'}</code> 表达式中写 <code>{'{{item.xxx}}'}</code>。</li>
+            <li>为组合启用"对象模板"，选择 <code>source=static</code> 输入 JSON 对象或数组，或选择 <code>source=point/interface</code> 指定数据路径。</li>
+            <li>可选：点击"虚拟 div 容器"启用 CSS flex/grid 布局以控制实例排列方式。</li>
+            <li>点击"扫描并应用"——程序会从所有子元素中提取 <code>{'{{item.xxx}}'}</code> 与 <code>{'${item.xxx}'}</code> 出现的字段，写入 <code>params</code>。</li>
+            <li>运行时，<code>expandGroupInstances</code> 会按 <code>paramFieldMap</code> 把模板中 xxx 映射到源对象字段，再交给 <code>resolveTemplateValue</code> / <code>interpolateExpression</code> 完成替换。</li>
+            <li>如需对所有实例强制参数值（例如默认值/测试），在 <code>paramOverrides</code> 中按 JSON 字符串录入。</li>
+          </ol>
+
+          <h3 style={{ fontSize: 14, fontWeight: 700, margin: '20px 0 10px', color: 'var(--text-primary)' }}>示例：虚拟 div + 参数提取</h3>
+          <Code>{`// 子元素内嵌文本
+{
+  id: 'title', type: 'text',
+  text: '{{item.deviceName}} — {{item.status}}',
+  pointBinding: {
+    mode: 'point',
+    textTemplate: '{{item.location}} / {{item.value}}℃',
+    transform: 'item.value > 80 ? "高" : "正常"'
+  },
+  conditionalStyles: {
+    fontColor: [{ condition: 'item.status === "alarm"', color: '#ef4444' }]
+  }
+}
+
+// 组合启用对象模板 + 虚拟 div
+{
+  id: 'cardGroup', type: 'group',
+  children: ['title', ...],
+  width: 240, height: 80,
+  groupBinding: {
+    enabled: true,
+    source: 'static',
+    value: [
+      { deviceName: 'P-1', status: 'normal', value: 30, location: '车间A' },
+      { deviceName: 'P-2', status: 'alarm',  value: 95, location: '车间B' }
+    ],
+    itemAlias: 'item',
+    virtualLayout: {
+      display: 'flex',
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 12,
+      padding: 8
+    },
+    params: [
+      { name: 'deviceName', type: 'string' },
+      { name: 'status',     type: 'string' },
+      { name: 'value',      type: 'number' },
+      { name: 'location',   type: 'string' }
+    ],
+    paramFieldMap: {},            // 不映射，直接按字段名
+    paramOverrides: { location: '默认车间' }   // 覆盖所有实例
+  }
+}`}
+          </Code>
+
+          <h3 style={{ fontSize: 14, fontWeight: 700, margin: '20px 0 10px', color: 'var(--text-primary)' }}>字段映射示例：模板中字段名 ≠ 源数据字段名</h3>
+          <Code>{`// 模板中使用 {{item.name}}，但源数据叫 deviceName
+groupBinding: {
+  ...
+  params: [{ name: 'name', type: 'string' }],
+  paramFieldMap: { name: 'deviceName' },   // 渲染时把 name 改写为 deviceName
+}`}
+          </Code>
+          <p style={{ color: 'var(--text-secondary)', marginTop: 8, lineHeight: 1.8 }}>
+            运行时：<code>{'{{item.name}}'}</code> → <code>{'{{item.deviceName}}'}</code> →
+            <code>resolveTemplateValue</code> 命中 <code>context.item.deviceName</code> → 替换完成。
+          </p>
+
+          <h3 style={{ fontSize: 14, fontWeight: 700, margin: '20px 0 10px', color: 'var(--text-primary)' }}>运行时 API</h3>
+          <Table
+            headers={['API', '说明']}
+            rows={[
+              ['expandGroupInstances(elements, pointData)', '旧入口，仅返回扁平实例数组（向后兼容）'],
+              ['expandGroupInstancesDetailed(elements, pointData)', '返回 { instances, virtualContainers }；虚拟容器供 CanvasViewer 渲染'],
+              ['buildVirtualContainerStyle(layout, group)', '把 VirtualLayoutConfig 翻译为 React.CSSProperties 容器/单元样式'],
+              ['scanElementsForTemplateParams(elements, itemAlias, sample?)', '从子元素中提取所有 item.xxx 占位符，返回 GroupParamSpec[]'],
             ]}
           />
         </Section>
