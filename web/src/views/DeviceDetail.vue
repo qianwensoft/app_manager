@@ -102,9 +102,6 @@
         </el-card>
 
         <el-divider content-position="left">快捷操作</el-divider>
-        <el-checkbox v-model="apkInstallAndLaunch" style="margin-bottom:10px;display:block">
-          安装完成后启动应用
-        </el-checkbox>
         <el-space wrap style="margin-bottom:16px">
           <el-button @click="$router.push(`/screen?device=${device.id}`)">查看屏幕</el-button>
           <el-button @click="$router.push(`/shell?device=${device.id}`)">Shell</el-button>
@@ -112,16 +109,20 @@
           <el-button @click="screenshot" :loading="screenshotting">截图</el-button>
           <el-button @click="runSpeedTest" :loading="speedTesting">测速</el-button>
           <el-button @click="reboot" type="warning">重启设备</el-button>
-          <el-upload
-            :show-file-list="false"
-            accept=".apk"
-            :disabled="apkInstalling"
-            :http-request="installApkToCurrentDevice"
-          >
-            <el-button type="primary" :loading="apkInstalling">安装 APK</el-button>
-          </el-upload>
         </el-space>
-        <div style="font-size:12px;color:#909399;margin:-8px 0 16px;max-width:720px">
+        <div v-if="canMutate">
+          <ApkUploader
+            :device-id="device.id"
+            :disabled="!canMutate"
+            @installed="onApkInstalled"
+            @uploaded="onApkUploaded"
+            @error="onApkError"
+          />
+        </div>
+        <div v-else style="font-size:12px;color:#909399;margin-bottom:16px;max-width:720px">
+          当前账号无安装权限（需管理员/运维）。
+        </div>
+        <div style="font-size:12px;color:#909399;margin-top:12px;max-width:720px">
           「安装 APK」会先上传到服务器再下发安装任务；纯 Agent 设备由手机端完成系统安装界面。需账号为管理员/运维。
         </div>
 
@@ -1248,6 +1249,7 @@ import * as mdmApi from '@/api/mdm'
 import { createEventAnalysisStomp } from '@/utils/eventAnalysisStomp'
 import QRCode from 'qrcode'
 import WirelessAdbPanel from '@/components/WirelessAdbPanel.vue'
+import ApkUploader from '@/components/ApkUploader.vue'
 import { useWirelessAdb } from '@/composables/useWirelessAdb'
 import { usePortalContext } from '@/composables/usePortalContext'
 import { useIsMobile } from '@/composables/useIsMobile'
@@ -1283,8 +1285,6 @@ const speedResult = ref(null)
 const keycode = ref(3)
 const inputText = ref('')
 const editForm = ref({ name: '', server_alias: '', group_name: '', agent_token: '' })
-const apkInstalling = ref(false)
-const apkInstallAndLaunch = ref(true)
 const appsRefreshing = ref(false)
 const pullApkPkg = ref('')
 
@@ -2373,38 +2373,10 @@ const runSpeedTest = async () => {
   }
 }
 
-/** 快捷操作：上传 APK 到服务器并提交安装到当前设备（与「应用管理」相同任务队列） */
-const installApkToCurrentDevice = async (opt) => {
-  const devId = Number(route.params.id)
-  if (!devId) {
-    opt.onError?.(new Error('无效设备'))
-    return
-  }
-  apkInstalling.value = true
-  const n = ElNotification({
-    title: '正在上传并安装 APK',
-    message: '上传与任务下发可能耗时较久，请勿重复点击。',
-    type: 'info',
-    duration: 0
-  })
-  try {
-    const fd = new FormData()
-    fd.append('file', opt.file)
-    const res = await appApi.uploadApp(fd)
-    const app = res?.data
-    if (!app?.id) throw new Error('上传返回数据异常')
-    await appApi.installApp(app.id, [devId], { start_after_install: apkInstallAndLaunch.value })
-    ElMessage.success('已上传并提交安装任务，可在「应用管理」或任务列表查看进度')
-    opt.onSuccess?.(res)
-  } catch (e) {
-    opt.onError?.(e)
-    const msg = e.response?.data?.error || e.message || '安装失败'
-    if (!e.response) ElMessage.error(msg)
-  } finally {
-    n.close()
-    apkInstalling.value = false
-  }
-}
+/** 由 ApkUploader 触发的轻量回调，保留在此以便后续扩展（例如刷新已安装应用列表）。 */
+const onApkUploaded = () => {}
+const onApkInstalled = () => {}
+const onApkError = () => {}
 
 const screenshot = async () => {
   screenshotting.value = true

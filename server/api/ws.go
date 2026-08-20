@@ -12,12 +12,14 @@ import (
 	appoutbound "app-manager/outbound"
 	"app-manager/screen"
 	"app-manager/shell"
+	"app-manager/stomp"
 	wrtc "app-manager/webrtc"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -647,6 +649,9 @@ func init() {
 				}
 				agent.DeliverInstallTaskResult(cid, out, errStr)
 			}
+			publishInstallTaskProgressFromUplink(msg)
+		case "install_task_progress":
+			publishInstallTaskProgressFromUplink(msg)
 		case "command_result":
 			// 通用命令结果（如远程打印调试）。Agent 回传 commandId/success/output。
 			cid, _ := msg["commandId"].(string)
@@ -802,6 +807,95 @@ func parseInstalledAppsEntries(v interface{}) []agent.InstalledAppEntry {
 
 // cameraWsWriteMu guards concurrent writes to a single websocket.Conn.
 var cameraWsWriteMu sync.Map // viewerID → *sync.Mutex
+
+// publishInstallTaskProgressFromUplink 把 Agent 上行的 install_task_progress / install_task_result
+// 转换为 InstallTask 行字段并发布到 STOMP：/topic/install-tasks 与 /topic/install-tasks/{id}。
+// 进度映射规则：
+//   - phase="downloading" 0-100  → overall 51-90
+//   - phase="opening"      0-100  → overall 91-95
+//   - install_task_result success → overall 100；failed → overall 100 + error
+func publishInstallTaskProgressFromUplink(msg map[string]interface{}) {
+	cid, _ := msg["command_id"].(string)
+	if cid == "" {
+		cid, _ = msg["commandId"].(string)
+	}
+	if cid == "" {
+		return
+	}
+	taskID, err := strconv.ParseUint(strings.TrimPrefix(cid, "install_"), 10, 64)
+	if err != nil || taskID == 0 {
+		return
+	}
+	msgType, _ := msg["type"].(string)
+	phase, _ := msg["phase"].(string)
+	pct := wsMsgInt64(msg, "percent")
+	message, _ := msg["message"].(string)
+	isError := wsMsgBool(msg, "error")
+	if msgType == "install_task_result" {
+		isError = !wsMsgBool(msg, "success")
+		if isError {
+			phase = "failed"
+			if e, _ := msg["error"].(string); e != "" {
+				message = e
+			}
+		} else {
+			phase = "done"
+			if out, _ := msg["output"].(string); out != "" {
+				message = out
+			}
+		}
+		pct = 100
+	}
+	overall := mapInstallAgentPhaseToOverall(phase, int(pct))
+
+	updates := map[string]interface{}{
+		"progress": overall,
+		"phase":    phase,
+	}
+	if message != "" {
+		updates["output"] = message
+	}
+	database.DB.Model(&models.InstallTask{}).
+		Where("id = ?", taskID).
+		Updates(updates)
+
+	payload, _ := json.Marshal(map[string]interface{}{
+		"task_id":   taskID,
+		"phase":     phase,
+		"progress":  overall,
+		"message":   message,
+		"error":     isError,
+		"type":      msgType,
+		"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+	})
+	body := string(payload)
+	stomp.DefaultHub.PublishJSON("/topic/install-tasks", body)
+	stomp.DefaultHub.PublishJSON(fmt.Sprintf("/topic/install-tasks/%d", taskID), body)
+}
+
+func mapInstallAgentPhaseToOverall(phase string, pct int) int {
+	p := pct
+	if p < 0 {
+		p = 0
+	} else if p > 100 {
+		p = 100
+	}
+	switch phase {
+	case "downloading":
+		// 50 - 90 区间
+		return 50 + (p * 40 / 100)
+	case "opening":
+		// 90 - 95 区间
+		return 90 + (p * 5 / 100)
+	case "done":
+		return 100
+	case "failed":
+		return 100
+	default:
+		// 未知阶段：clamp 到 [overall, 95]
+		return p
+	}
+}
 
 func cameraWsWrite(viewerID string, conn *websocket.Conn, msg interface{}) {
 	raw, err := json.Marshal(msg)

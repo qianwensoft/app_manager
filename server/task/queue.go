@@ -7,6 +7,7 @@ import (
 	"app-manager/database"
 	"app-manager/models"
 	"app-manager/outbound"
+	"app-manager/stomp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -70,6 +71,7 @@ func execute(client *adb.Client, taskID uint) {
 	}
 
 	database.DB.Model(&t).Update("status", "running")
+	publishInstallTaskStatus(&t, "running", "任务已派发到 Worker")
 
 	var device models.Device
 	var app models.App
@@ -135,7 +137,10 @@ func execute(client *adb.Client, taskID uint) {
 		"status":      status,
 		"output":      output,
 		"finished_at": &now,
+		"progress":    100,
+		"phase":       status,
 	})
+	publishInstallTaskStatus(&t, status, output)
 
 	if status == "success" && t.Action == "install" {
 		payload, _ := json.Marshal(map[string]interface{}{
@@ -182,6 +187,24 @@ func sendAgentStartApp(device models.Device, pkg string) bool {
 		"data":   map[string]interface{}{"packageName": pkg},
 	})
 	return true
+}
+
+// publishInstallTaskStatus 发布安装任务状态/进度到 STOMP（前端 ApkUploader 实时订阅）。
+func publishInstallTaskStatus(t *models.InstallTask, phase, message string) {
+	if t == nil || t.ID == 0 {
+		return
+	}
+	payload, _ := json.Marshal(map[string]interface{}{
+		"task_id":   t.ID,
+		"phase":     phase,
+		"progress":  t.Progress,
+		"message":   message,
+		"status":    t.Status,
+		"timestamp": time.Now().UTC().Format(time.RFC3339Nano),
+	})
+	body := string(payload)
+	stomp.DefaultHub.PublishJSON("/topic/install-tasks", body)
+	stomp.DefaultHub.PublishJSON(fmt.Sprintf("/topic/install-tasks/%d", t.ID), body)
 }
 
 func installViaAgent(taskID uint, t *models.InstallTask, device models.Device, app models.App) (string, error) {
