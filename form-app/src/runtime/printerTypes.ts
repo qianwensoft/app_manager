@@ -32,6 +32,10 @@ export interface PrinterTemplate {
   elements?: PrintElement[]
   /** layout_mode=raw（或旧 gen_side=frontend）时的原始协议模板（支持 {{字段名}} 占位） */
   raw_template?: string
+  /** 调试用：上次选择的在线设备 ID。仅保存，不参与打印逻辑。 */
+  debug_device_id?: string
+  /** 调试用：样例数据（按占位名键值）。仅保存，再次打开时自动填入调试面板。 */
+  debug_sample?: Record<string, string>
 }
 
 /** 布局模式 */

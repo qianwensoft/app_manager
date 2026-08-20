@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useEditorStore } from '@/store/editorStore'
 import { pushHistory } from '@/hooks/useHistory'
@@ -7,12 +7,14 @@ import { getChartSchema, type StyleFieldDef } from '@/schema/chartSchema'
 import type {
   CanvasElement, TableColumn, ElementEvent, FormFieldRule, FormFieldReaction,
   ElementAnimation, PointBinding, DataBindingMode, DateTimeConfig,
+  GroupParamSpec, VirtualLayoutConfig,
 } from '@/types'
 import type { ScadaWorkflow } from '@/types/workflow'
 import { generateId } from '@/utils/canvas'
 import {
   DATETIME_PRESETS, DATETIME_TOKENS, formatDate, parseAnyToDate, defaultDateTimeConfig,
 } from '@/runtime/dateTimeFormat'
+import { scanElementsForTemplateParams } from '@/runtime/groupParamScan'
 
 /* ── Shared input ── */
 const Inp = ({ val, onChange, type = 'text', placeholder = '' }: {
@@ -2228,6 +2230,472 @@ function AnimationEditorSection({ el, onUpdate }: {
   )
 }
 
+/* ── Group binding section (对象模板) ── */
+function GroupBindingSection({
+  el, allElements, onUpdate, onUngroup,
+}: {
+  el: CanvasElement
+  allElements: CanvasElement[]
+  onUpdate: (key: string, value: unknown) => void
+  onUngroup: () => void
+}) {
+  const [autoScanResult, setAutoScanResult] = useState<{
+    params: import('@/types').GroupParamSpec[]
+    byElement: Record<string, Array<{ location: string; paramName: string }>>
+  } | null>(null)
+
+  const groupBinding = el.groupBinding ?? {}
+  const useVirtualLayout = !!groupBinding.virtualLayout
+  const itemAlias = groupBinding.itemAlias || 'item'
+
+  // 解析当前 value/path 以取得首个样本 item（用于参数类型推断）
+  const sampleItem: unknown = useMemo(() => {
+    if (groupBinding.source === 'static') {
+      const raw = groupBinding.value
+      let v: unknown = raw
+      if (typeof raw === 'string') {
+        try { v = JSON.parse(raw) } catch { v = raw }
+      }
+      if (Array.isArray(v)) return v[0]
+      return v
+    }
+    // point / interface 时无法静态获取样本，留空（类型推断留 any）
+    return undefined
+  }, [groupBinding.source, groupBinding.value])
+
+  const reExtract = () => {
+    const params = scanElementsForTemplateParams(allElements, itemAlias, sampleItem)
+    // 同时记录每个参数被哪些子元素 / 哪些位置使用
+    const byElement: Record<string, Array<{ location: string; paramName: string }>> = {}
+    for (const p of params) {
+      const locs: Array<{ location: string; paramName: string }> = []
+      for (const child of allElements) {
+        if (child.id === el.id) continue
+        if (child.text && child.text.includes(`{{${itemAlias}.${p.name}}}`)) {
+          locs.push({ location: `${child.name || child.id}.text`, paramName: p.name })
+        }
+        if (child.pointBinding?.textTemplate?.includes(`{{${itemAlias}.${p.name}}}`)) {
+          locs.push({ location: `${child.name || child.id}.textTemplate`, paramName: p.name })
+        }
+      }
+      byElement[p.name] = locs
+    }
+    setAutoScanResult({ params, byElement })
+  }
+
+  const applyAutoExtractedParams = () => {
+    if (!autoScanResult) reExtract()
+    const params = autoScanResult?.params ?? scanElementsForTemplateParams(allElements, itemAlias, sampleItem)
+    // 合并：保留用户已有但自动扫描未发现的；保留字段类型；保留 description
+    const existing = new Map((groupBinding.params ?? []).map((p) => [p.name, p]))
+    const merged = params.map((p) => {
+      const prev = existing.get(p.name)
+      return prev
+        ? { ...p, description: prev.description, required: prev.required, default: prev.default }
+        : p
+    })
+    onUpdate('groupBinding', { ...groupBinding, params: merged })
+  }
+
+  const updateParam = (idx: number, patch: Partial<import('@/types').GroupParamSpec>) => {
+    const next = [...(groupBinding.params ?? [])]
+    next[idx] = { ...next[idx], ...patch }
+    onUpdate('groupBinding', { ...groupBinding, params: next })
+  }
+
+  const removeParam = (idx: number) => {
+    const next = [...(groupBinding.params ?? [])]
+    next.splice(idx, 1)
+    onUpdate('groupBinding', { ...groupBinding, params: next })
+  }
+
+  const addParam = () => {
+    const next = [...(groupBinding.params ?? [])]
+    next.push({ name: '', type: 'string', usedIn: [] })
+    onUpdate('groupBinding', { ...groupBinding, params: next })
+  }
+
+  const updateVirtualLayout = (patch: Partial<import('@/types').VirtualLayoutConfig>) => {
+    const current = groupBinding.virtualLayout ?? { display: 'flex' as const }
+    const next: import('@/types').VirtualLayoutConfig = { ...current, ...patch }
+    onUpdate('groupBinding', { ...groupBinding, virtualLayout: next })
+  }
+
+  const clearVirtualLayout = () => {
+    const next = { ...groupBinding }
+    delete next.virtualLayout
+    onUpdate('groupBinding', next)
+  }
+
+  const enableVirtualLayout = () => {
+    onUpdate('groupBinding', {
+      ...groupBinding,
+      virtualLayout: { display: 'flex', gap: 8, padding: 0 },
+    })
+  }
+
+  return (
+    <Section title="组合" accent>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
+        包含 {el.children?.length ?? 0} 个子元素
+      </div>
+      <Row label="对象模板">
+        <Toggle
+          checked={groupBinding.enabled ?? false}
+          onChange={(enabled) => onUpdate('groupBinding', {
+            ...(groupBinding ?? {}),
+            enabled,
+            source: groupBinding.source ?? 'static',
+            layout: groupBinding.layout ?? 'grid',
+          })}
+          label={groupBinding.enabled ? '已启用' : '关闭'}
+        />
+      </Row>
+      {groupBinding.enabled && (
+        <>
+          <Row label="对象来源">
+            <select
+              value={groupBinding.source ?? 'static'}
+              onChange={(e) => onUpdate('groupBinding', { ...groupBinding, source: e.target.value as 'static' | 'point' | 'interface' })}
+            >
+              <option value="static">静态 JSON</option>
+              <option value="point">点位路径</option>
+              <option value="interface">接口结果</option>
+            </select>
+          </Row>
+          {groupBinding.source === 'static' ? (
+            <Row label="对象/数组 JSON">
+              <Inp
+                val={typeof groupBinding.value === 'string' ? groupBinding.value : JSON.stringify(groupBinding.value ?? [])}
+                onChange={(value) => onUpdate('groupBinding', { ...groupBinding, value })}
+                placeholder='[{"name":"设备 A"}]'
+              />
+            </Row>
+          ) : (
+            <Row label="数组路径">
+              <Inp
+                val={groupBinding.path ?? ''}
+                onChange={(path) => onUpdate('groupBinding', { ...groupBinding, path })}
+                placeholder="items"
+              />
+            </Row>
+          )}
+          <Row label="实例别名">
+            <Inp
+              val={groupBinding.itemAlias ?? 'item'}
+              onChange={(itemAlias) => onUpdate('groupBinding', { ...groupBinding, itemAlias })}
+            />
+          </Row>
+
+          {/* 虚拟 div 布局 */}
+          <div style={{ marginTop: 6, padding: '6px 8px', background: 'var(--bg-surface)', borderRadius: 4, border: '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: useVirtualLayout ? 6 : 0 }}>
+              <span style={{ fontSize: 11, color: 'var(--text-primary)' }}>虚拟 div 容器</span>
+              {useVirtualLayout ? (
+                <button
+                  onClick={clearVirtualLayout}
+                  style={{ fontSize: 10, padding: '2px 8px', cursor: 'pointer', background: 'transparent', color: 'var(--warning)', border: '1px solid var(--warning)', borderRadius: 3 }}
+                >关闭</button>
+              ) : (
+                <button
+                  onClick={enableVirtualLayout}
+                  style={{ fontSize: 10, padding: '2px 8px', cursor: 'pointer', background: 'var(--accent)', color: 'white', border: 'none', borderRadius: 3 }}
+                >启用</button>
+              )}
+            </div>
+            {useVirtualLayout && groupBinding.virtualLayout && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <Row label="布局">
+                  <select
+                    value={groupBinding.virtualLayout.display}
+                    onChange={(e) => updateVirtualLayout({ display: e.target.value as 'flex' | 'grid' | 'flow' })}
+                  >
+                    <option value="flex">Flex</option>
+                    <option value="grid">Grid</option>
+                    <option value="flow">Flow（多列换行）</option>
+                  </select>
+                </Row>
+                {groupBinding.virtualLayout.display === 'flex' && (
+                  <>
+                    <Row label="方向">
+                      <select
+                        value={groupBinding.virtualLayout.flexDirection ?? 'row'}
+                        onChange={(e) => updateVirtualLayout({ flexDirection: e.target.value as 'row' | 'row-reverse' | 'column' | 'column-reverse' })}
+                      >
+                        <option value="row">横向</option>
+                        <option value="row-reverse">横向反向</option>
+                        <option value="column">纵向</option>
+                        <option value="column-reverse">纵向反向</option>
+                      </select>
+                    </Row>
+                    <Row label="换行">
+                      <select
+                        value={groupBinding.virtualLayout.flexWrap ?? 'nowrap'}
+                        onChange={(e) => updateVirtualLayout({ flexWrap: e.target.value as 'nowrap' | 'wrap' | 'wrap-reverse' })}
+                      >
+                        <option value="nowrap">不换行</option>
+                        <option value="wrap">换行</option>
+                        <option value="wrap-reverse">反向换行</option>
+                      </select>
+                    </Row>
+                    <Row label="主轴对齐">
+                      <select
+                        value={groupBinding.virtualLayout.justifyContent ?? 'flex-start'}
+                        onChange={(e) => updateVirtualLayout({ justifyContent: e.target.value as 'flex-start' | 'flex-end' | 'center' | 'space-between' | 'space-around' | 'space-evenly' })}
+                      >
+                        <option value="flex-start">起始</option>
+                        <option value="flex-end">末端</option>
+                        <option value="center">居中</option>
+                        <option value="space-between">两端</option>
+                        <option value="space-around">环绕</option>
+                        <option value="space-evenly">均匀</option>
+                      </select>
+                    </Row>
+                    <Row label="交叉对齐">
+                      <select
+                        value={groupBinding.virtualLayout.alignItems ?? 'stretch'}
+                        onChange={(e) => updateVirtualLayout({ alignItems: e.target.value as 'flex-start' | 'flex-end' | 'center' | 'baseline' | 'stretch' })}
+                      >
+                        <option value="flex-start">起始</option>
+                        <option value="flex-end">末端</option>
+                        <option value="center">居中</option>
+                        <option value="baseline">基线</option>
+                        <option value="stretch">拉伸</option>
+                      </select>
+                    </Row>
+                  </>
+                )}
+                {(groupBinding.virtualLayout.display === 'grid' || groupBinding.virtualLayout.display === 'flow') && (
+                  <>
+                    <Row label="列数">
+                      <Inp
+                        val={groupBinding.virtualLayout.columns ?? 1}
+                        type="number"
+                        onChange={(v) => updateVirtualLayout({ columns: Math.max(1, Number(v)) })}
+                      />
+                    </Row>
+                    <Row label="列宽">
+                      <Inp
+                        val={groupBinding.virtualLayout.columnWidth ?? ''}
+                        onChange={(v) => updateVirtualLayout({ columnWidth: v || undefined })}
+                        placeholder="1fr"
+                      />
+                    </Row>
+                    <Row label="行高">
+                      <Inp
+                        val={groupBinding.virtualLayout.rowHeight ?? ''}
+                        onChange={(v) => updateVirtualLayout({ rowHeight: v || undefined })}
+                        placeholder="auto"
+                      />
+                    </Row>
+                  </>
+                )}
+                <Row label="间距">
+                  <Inp
+                    val={groupBinding.virtualLayout.gap ?? 0}
+                    type="number"
+                    onChange={(v) => updateVirtualLayout({ gap: Number(v) })}
+                  />
+                </Row>
+                <Row label="内边距">
+                  <Inp
+                    val={groupBinding.virtualLayout.padding ?? 0}
+                    type="number"
+                    onChange={(v) => updateVirtualLayout({ padding: Number(v) })}
+                  />
+                </Row>
+                <PairRow
+                  l1="容器宽" v1={typeof groupBinding.virtualLayout.customWidth === 'string' ? 1 : 1}
+                  l2="容器高" v2={1}
+                  on1={(v) => updateVirtualLayout({
+                    widthMode: v === '0' ? 'auto' : 'custom',
+                    customWidth: v === '0' ? undefined : String(v),
+                  })}
+                  on2={(v) => updateVirtualLayout({
+                    heightMode: v === '0' ? 'auto' : 'custom',
+                    customHeight: v === '0' ? undefined : String(v),
+                  })}
+                />
+              </div>
+            )}
+          </div>
+
+          {!useVirtualLayout && (
+            <>
+              <Row label="布局">
+                <select
+                  value={groupBinding.layout ?? 'grid'}
+                  onChange={(e) => onUpdate('groupBinding', { ...groupBinding, layout: e.target.value as 'grid' | 'horizontal' | 'vertical' })}
+                >
+                  <option value="grid">网格</option>
+                  <option value="horizontal">横向</option>
+                  <option value="vertical">纵向</option>
+                </select>
+              </Row>
+              <PairRow
+                l1="列数" v1={groupBinding.columns ?? 1}
+                l2="最大实例" v2={groupBinding.maxInstances ?? 100}
+                on1={(columns) => onUpdate('groupBinding', { ...groupBinding, columns: Math.max(1, Number(columns)) })}
+                on2={(maxInstances) => onUpdate('groupBinding', { ...groupBinding, maxInstances: Math.max(1, Number(maxInstances)) })}
+              />
+            </>
+          )}
+
+          {/* 参数提取 */}
+          <div style={{ marginTop: 6, padding: '6px 8px', background: 'var(--bg-surface)', borderRadius: 4, border: '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+              <span style={{ fontSize: 11, color: 'var(--text-primary)' }}>对象参数（自动提取）</span>
+              <button
+                onClick={() => {
+                  reExtract()
+                  applyAutoExtractedParams()
+                }}
+                style={{ fontSize: 10, padding: '2px 8px', cursor: 'pointer', background: 'var(--accent)', color: 'white', border: 'none', borderRadius: 3 }}
+              >扫描并应用</button>
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 6, lineHeight: 1.5 }}>
+              扫描组合内子元素的 <code>{'{{item.xxx}}'}</code> 占位符与 <code>{'${...}'}</code> 表达式，
+              自动列出可作为对象参数的字段。可手动调整字段映射（paramFieldMap）让源对象字段名与模板占位符对齐。
+            </div>
+            {(groupBinding.params ?? []).length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {(groupBinding.params ?? []).map((p, idx) => (
+                  <div key={`${p.name}-${idx}`} style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                    <input
+                      value={p.name}
+                      onChange={(e) => updateParam(idx, { name: e.target.value })}
+                      placeholder="字段名"
+                      style={{ flex: 2, height: 24, padding: '0 6px', fontSize: 11, background: 'var(--bg-base)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: 3 }}
+                    />
+                    <select
+                      value={p.type ?? 'string'}
+                      onChange={(e) => updateParam(idx, { type: e.target.value as 'string' | 'number' | 'integer' | 'boolean' | 'object' | 'array' | 'any' })}
+                      style={{ flex: 1, height: 24, fontSize: 11, background: 'var(--bg-base)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: 3 }}
+                    >
+                      <option value="string">string</option>
+                      <option value="number">number</option>
+                      <option value="integer">integer</option>
+                      <option value="boolean">boolean</option>
+                      <option value="object">object</option>
+                      <option value="array">array</option>
+                      <option value="any">any</option>
+                    </select>
+                    <input
+                      value={p.description ?? ''}
+                      onChange={(e) => updateParam(idx, { description: e.target.value })}
+                      placeholder="描述"
+                      style={{ flex: 2, height: 24, padding: '0 6px', fontSize: 10, background: 'var(--bg-base)', border: '1px solid var(--border)', color: 'var(--text-secondary)', borderRadius: 3 }}
+                    />
+                    <button
+                      onClick={() => removeParam(idx)}
+                      style={{ height: 24, padding: '0 6px', cursor: 'pointer', background: 'transparent', color: 'var(--danger)', border: '1px solid var(--danger)', borderRadius: 3, fontSize: 10 }}
+                    >×</button>
+                  </div>
+                ))}
+                <button
+                  onClick={addParam}
+                  style={{ fontSize: 10, padding: '3px 0', cursor: 'pointer', background: 'transparent', color: 'var(--accent)', border: '1px dashed var(--accent)', borderRadius: 3 }}
+                >+ 添加参数</button>
+              </div>
+            )}
+
+            {/* 字段映射 */}
+            {(groupBinding.params ?? []).length > 0 && (
+              <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px dashed var(--border)' }}>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>字段映射（paramFieldMap）</div>
+                <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 4, lineHeight: 1.4 }}>
+                  模板中的 <code>{'{{item.xxx}}'}</code> 与源数据字段名不一致时，在这里把 xxx 映射到真实字段。
+                </div>
+                {(groupBinding.params ?? []).map((p) => {
+                  const mapped = groupBinding.paramFieldMap?.[p.name] ?? p.name
+                  return (
+                    <div key={`map-${p.name}`} style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 3 }}>
+                      <span style={{ flex: 1, fontSize: 10, color: 'var(--text-muted)' }}>{`{{item.${p.name}}}`}</span>
+                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>→</span>
+                      <input
+                        value={mapped}
+                        onChange={(e) => {
+                          const next = { ...(groupBinding.paramFieldMap ?? {}) }
+                          if (!e.target.value || e.target.value === p.name) {
+                            delete next[p.name]
+                          } else {
+                            next[p.name] = e.target.value
+                          }
+                          onUpdate('groupBinding', { ...groupBinding, paramFieldMap: Object.keys(next).length ? next : undefined })
+                        }}
+                        placeholder={p.name}
+                        style={{ flex: 2, height: 22, padding: '0 6px', fontSize: 10, background: 'var(--bg-base)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: 3, fontFamily: 'var(--font-mono)' }}
+                      />
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* 运行时参数覆盖 */}
+            {(groupBinding.params ?? []).length > 0 && (
+              <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px dashed var(--border)' }}>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>参数覆盖（paramOverrides）</div>
+                <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 4, lineHeight: 1.4 }}>
+                  对所有实例统一设置参数值（可用于默认值或测试）。运行时按 JSON 字符串解析。
+                </div>
+                {(groupBinding.params ?? []).map((p) => {
+                  const v = groupBinding.paramOverrides?.[p.name]
+                  const vStr = v === undefined ? '' : JSON.stringify(v)
+                  return (
+                    <div key={`ov-${p.name}`} style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 3 }}>
+                      <span style={{ flex: 1, fontSize: 10, color: 'var(--text-muted)' }}>{p.name}</span>
+                      <input
+                        value={vStr}
+                        onChange={(e) => {
+                          const next = { ...(groupBinding.paramOverrides ?? {}) }
+                          if (!e.target.value) {
+                            delete next[p.name]
+                          } else {
+                            try { next[p.name] = JSON.parse(e.target.value) }
+                            catch { next[p.name] = e.target.value }
+                          }
+                          onUpdate('groupBinding', { ...groupBinding, paramOverrides: Object.keys(next).length ? next : undefined })
+                        }}
+                        placeholder="默认空"
+                        style={{ flex: 3, height: 22, padding: '0 6px', fontSize: 10, background: 'var(--bg-base)', border: '1px solid var(--border)', color: 'var(--text-primary)', borderRadius: 3, fontFamily: 'var(--font-mono)' }}
+                      />
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* 扫描结果预览（仅本次会话） */}
+          {autoScanResult && autoScanResult.params.length > 0 && (
+            <div style={{ marginTop: 6, padding: '6px 8px', background: 'rgba(99,102,241,0.08)', borderRadius: 4, border: '1px solid rgba(99,102,241,0.3)' }}>
+              <div style={{ fontSize: 10, color: 'var(--accent)', marginBottom: 4 }}>本次扫描到 {autoScanResult.params.length} 个可参数化字段</div>
+              {autoScanResult.params.map((p) => (
+                <div key={p.name} style={{ fontSize: 9, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                  <code>{`{{${itemAlias}.${p.name}}}`}</code> ({p.type}) — {(autoScanResult.byElement[p.name] ?? []).map((l) => l.location).join(' / ') || '未引用'}
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+      <button
+        onClick={onUngroup}
+        style={{
+          width: '100%', padding: '5px 0', cursor: 'pointer',
+          background: 'var(--warning-muted)', color: 'var(--warning)',
+          border: '1px solid rgba(245,158,11,0.3)',
+          borderRadius: 'var(--radius-sm)', fontSize: 11,
+          marginTop: 6,
+        }}
+      >
+        解组 (Ctrl+Shift+G)
+      </button>
+    </Section>
+  )
+}
+
 function ElementBasicTabContent({ el, onUpdate, onUngroup, canvas }: {
   el: CanvasElement
   onUpdate: (key: string, value: unknown) => void
@@ -2243,54 +2711,12 @@ function ElementBasicTabContent({ el, onUpdate, onUngroup, canvas }: {
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
       {el.type === 'group' && (
-        <Section title="组合" accent>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
-            包含 {el.children?.length ?? 0} 个子元素
-          </div>
-          <Row label="对象模板">
-            <Toggle
-              checked={el.groupBinding?.enabled ?? false}
-              onChange={(enabled) => onUpdate('groupBinding', { ...(el.groupBinding ?? {}), enabled, source: el.groupBinding?.source ?? 'static', layout: el.groupBinding?.layout ?? 'grid' })}
-              label={el.groupBinding?.enabled ? '已启用' : '关闭'}
-            />
-          </Row>
-          {el.groupBinding?.enabled && (
-            <>
-              <Row label="对象来源">
-                <select value={el.groupBinding.source ?? 'static'} onChange={(e) => onUpdate('groupBinding', { ...el.groupBinding, source: e.target.value })}>
-                  <option value="static">静态 JSON</option>
-                  <option value="point">点位路径</option>
-                  <option value="interface">接口结果</option>
-                </select>
-              </Row>
-              {el.groupBinding.source === 'static' ? (
-                <Row label="对象/数组 JSON"><Inp val={typeof el.groupBinding.value === 'string' ? el.groupBinding.value : JSON.stringify(el.groupBinding.value ?? [])} onChange={(value) => onUpdate('groupBinding', { ...el.groupBinding, value })} placeholder='[{"name":"设备 A"}]' /></Row>
-              ) : (
-                <Row label="数组路径"><Inp val={el.groupBinding.path ?? ''} onChange={(path) => onUpdate('groupBinding', { ...el.groupBinding, path })} placeholder="items" /></Row>
-              )}
-              <Row label="实例别名"><Inp val={el.groupBinding.itemAlias ?? 'item'} onChange={(itemAlias) => onUpdate('groupBinding', { ...el.groupBinding, itemAlias })} /></Row>
-              <Row label="布局">
-                <select value={el.groupBinding.layout ?? 'grid'} onChange={(e) => onUpdate('groupBinding', { ...el.groupBinding, layout: e.target.value })}>
-                  <option value="grid">网格</option><option value="horizontal">横向</option><option value="vertical">纵向</option>
-                </select>
-              </Row>
-              <PairRow l1="列数" v1={el.groupBinding.columns ?? 1} l2="最大实例" v2={el.groupBinding.maxInstances ?? 100}
-                on1={(columns) => onUpdate('groupBinding', { ...el.groupBinding, columns: Math.max(1, Number(columns)) })}
-                on2={(maxInstances) => onUpdate('groupBinding', { ...el.groupBinding, maxInstances: Math.max(1, Number(maxInstances)) })} />
-            </>
-          )}
-          <button
-            onClick={onUngroup}
-            style={{
-              width: '100%', padding: '5px 0', cursor: 'pointer',
-              background: 'var(--warning-muted)', color: 'var(--warning)',
-              border: '1px solid rgba(245,158,11,0.3)',
-              borderRadius: 'var(--radius-sm)', fontSize: 11,
-            }}
-          >
-            解组 (Ctrl+Shift+G)
-          </button>
-        </Section>
+        <GroupBindingSection
+          el={el}
+          allElements={canvas?.elements ?? []}
+          onUpdate={onUpdate}
+          onUngroup={onUngroup}
+        />
       )}
 
       <Section title="位置 / 尺寸">

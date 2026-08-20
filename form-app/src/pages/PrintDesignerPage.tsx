@@ -853,12 +853,27 @@ function PrintConditionEditor({ cond, fields, onChange }: { cond?: PrintConditio
 function DebugPanel({ tpl, fields }: { tpl: PrinterTemplate; fields: any[] }) {
   const [devices, setDevices] = useState<DeviceOpt[]>([])
   const [loadingDev, setLoadingDev] = useState(false)
-  const [deviceId, setDeviceId] = useState('')
-  const [sample, setSample] = useState<Record<string, string>>({})
+  const [deviceId, setDeviceIdLocal] = useState<string>(tpl.debug_device_id || '')
+  const [sample, setSampleLocal] = useState<Record<string, string>>(tpl.debug_sample || {})
   const [printing, setPrinting] = useState(false)
   const [result, setResult] = useState<{ ok: boolean; msg: string } | null>(null)
 
   const placeholders = useMemo(() => collectPlaceholders(tpl), [tpl])
+
+  // 选择变更时回写到模板对象，让保存动作一并持久化
+  const setDeviceId = (id: string) => {
+    setDeviceIdLocal(id)
+    if (id !== (tpl.debug_device_id || '')) {
+      ;(tpl as any).debug_device_id = id || undefined
+    }
+  }
+  const setSample = (next: Record<string, string> | ((prev: Record<string, string>) => Record<string, string>)) => {
+    setSampleLocal(prev => {
+      const val = typeof next === 'function' ? (next as any)(prev) : next
+      ;(tpl as any).debug_sample = val
+      return val
+    })
+  }
 
   const loadDevices = () => {
     setLoadingDev(true)
@@ -867,22 +882,38 @@ function DebugPanel({ tpl, fields }: { tpl: PrinterTemplate; fields: any[] }) {
         const list: any[] = Array.isArray(res?.data) ? res.data : []
         const online = list.filter(d => d.agent_connected).map(d => ({ id: String(d.id), name: `${d.name || d.serial || d.id}` }))
         setDevices(online)
-        if (online.length && !deviceId) setDeviceId(online[0].id)
+        // 优先恢复模板保存的目标设备；只有在模板未记录或设备已不在线时，才退回到列表第一项
+        const savedId = tpl.debug_device_id
+        if (savedId && online.some(d => d.id === savedId)) {
+          setDeviceId(savedId)
+        } else if (online.length && !deviceId) {
+          setDeviceId(online[0].id)
+        }
       })
       .catch(() => setDevices([]))
       .finally(() => setLoadingDev(false))
   }
-  useEffect(loadDevices, [])
+  useEffect(loadDevices, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 占位符或字段变化时，补全样例数据初始化；优先保留用户已填值与模板已保存值
   useEffect(() => {
-    const init: Record<string, string> = {}
-    placeholders.forEach(ph => {
-      const f = fields.find((x: any) => x.field === ph)
-      init[ph] = sample[ph] ?? (f?.label ? `示例-${f.label}` : ph)
+    setSample(prev => {
+      let changed = false
+      const next: Record<string, string> = {}
+      placeholders.forEach(ph => {
+        if (prev[ph] != null && prev[ph] !== '') {
+          next[ph] = prev[ph]
+        } else {
+          const f = fields.find((x: any) => x.field === ph)
+          next[ph] = f?.label ? `示例-${f.label}` : ph
+          changed = true
+        }
+      })
+      // 同步到模板对象，使保存时一并持久化
+      ;(tpl as any).debug_sample = next
+      return changed ? next : prev
     })
-    setSample(init)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [placeholders.join(',')])
+  }, [placeholders.join(',')]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const doPrint = async () => {
     if (!deviceId) { message.warning('请选择目标设备'); return }
