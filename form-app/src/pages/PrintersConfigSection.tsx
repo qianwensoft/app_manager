@@ -5,7 +5,7 @@
  */
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Input, InputNumber, Select, Switch, Collapse, Space, Tooltip, Modal } from 'antd'
+import { Button, Input, InputNumber, Select, Switch, Collapse, Space, Tooltip, Modal, Radio } from 'antd'
 import type { FieldDef } from '@/runtime/types'
 import type { PrinterTemplate, PrintOp, PrintProtocol, PrintGenSide, PaperType, PrintElement } from '@/runtime/printerTypes'
 import PrintDebugModal from './PrintDebugModal'
@@ -213,7 +213,7 @@ export default function PrintersConfigSection({
                     <Radio.Group
                       size="small"
                       value={!!tpl.paper?.cpcl_qr_with_length}
-                      onChange={e => updTemplate(idx, {
+                      onChange={(e: any) => updTemplate(idx, {
                         paper: { ...(tpl.paper || { type: 'continuous' }), cpcl_qr_with_length: e.target.value }
                       })}
                       optionType="button"
