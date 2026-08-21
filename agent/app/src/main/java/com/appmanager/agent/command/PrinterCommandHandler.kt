@@ -52,7 +52,7 @@ object PrinterCommandHandler {
 
         thread(name = "bt-print") {
             try {
-                val bytes = ProtocolBuilder.build(payload)
+                val bytes = ProtocolBuilder.build(payload, cfg.cpclQrWithLength)
                 when (val r = PrinterManager.print(ctx, mac, transport, bytes)) {
                     is PrinterManager.PrintResult.Success ->
                         CommandDispatcher.sendResult(service, commandId, true, "printed ${bytes.size} bytes")

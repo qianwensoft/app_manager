@@ -21,6 +21,8 @@ data class AgentConfig(
     val defaultPrinterProtocol: String = "escpos",
     /** 传输方式：spp（经典蓝牙）/ ble */
     val defaultPrinterTransport: String = "spp",
+    /** CPCL 二维码是否携带字符长度前缀（MA,长度格式），默认 false（使用 MM,数据格式） */
+    val cpclQrWithLength: Boolean = false,
     /**
      * 表单运行时基址覆盖（仅调试用，空=用 serverUrl）。
      * 指向开发机的 `vite preview`（如 http://192.168.1.x:4175），
@@ -83,6 +85,7 @@ data class AgentConfig(
                 defaultPrinterName = prefs.getString("default_printer_name", "") ?: "",
                 defaultPrinterProtocol = prefs.getString("default_printer_protocol", "escpos") ?: "escpos",
                 defaultPrinterTransport = prefs.getString("default_printer_transport", "spp") ?: "spp",
+                cpclQrWithLength = prefs.getBoolean("cpcl_qr_with_length", false),
                 formAppBaseUrl = prefs.getString("form_app_base_url", "") ?: "",
                 // 未设置过时按品牌给默认值（消费手机→摄像头，PDA→硬件）
                 scanMode = prefs.getString("scan_mode", null) ?: defaultScanMode(),
@@ -110,6 +113,7 @@ data class AgentConfig(
                 putString("default_printer_name", config.defaultPrinterName)
                 putString("default_printer_protocol", config.defaultPrinterProtocol)
                 putString("default_printer_transport", config.defaultPrinterTransport)
+                putBoolean("cpcl_qr_with_length", config.cpclQrWithLength)
                 putString("form_app_base_url", config.formAppBaseUrl)
                 putString("scan_mode", config.scanMode)
                 putString("user_token", config.userToken)

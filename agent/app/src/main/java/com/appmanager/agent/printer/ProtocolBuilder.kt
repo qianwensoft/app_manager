@@ -26,7 +26,7 @@ import java.io.ByteArrayOutputStream
 object ProtocolBuilder {
 
     /** 由 payload 生成最终字节；优先 raw_base64 透传，否则按 protocol 生成。 */
-    fun build(payload: JSONObject): ByteArray {
+    fun build(payload: JSONObject, agentCpclQrWithLength: Boolean? = null): ByteArray {
         // 原始指令透传（前端生成 / 高级用户手写）
         val rawB64 = payload.optString("raw_base64", "")
         if (rawB64.isNotEmpty()) {
@@ -49,14 +49,14 @@ object ProtocolBuilder {
             // print_when 条件判定所需的原始字段值；缺省时视为无条件（不过滤）。
             val values = payload.optJSONObject("values")
             return when (protocol) {
-                "cpcl" -> buildCpclCanvas(elements, paper, dpi, values)
+                "cpcl" -> buildCpclCanvas(elements, paper, dpi, values, agentCpclQrWithLength)
                 "tspl" -> buildTsplCanvas(elements, paper, dpi, values)
                 else -> buildEscPos(content)
             }
         }
 
         return when (protocol) {
-            "cpcl" -> buildCpcl(content, paper, dpi)
+            "cpcl" -> buildCpcl(content, paper, dpi, agentCpclQrWithLength)
             "tspl" -> buildTspl(content, paper)
             else -> buildEscPos(content)
         }
@@ -204,7 +204,7 @@ object ProtocolBuilder {
 
     // ── CPCL（便携/标签机，如 Zebra/部分热敏） ─────────────────────
     // paper.type=label 且给定 height_mm 时，按实际 dpi 换算标签高度，覆盖自动估算。
-    private fun buildCpcl(content: JSONArray, paper: JSONObject?, dpi: Int): ByteArray {
+    private fun buildCpcl(content: JSONArray, paper: JSONObject?, dpi: Int, agentCpclQrWithLength: Boolean? = null): ByteArray {
         val sb = StringBuilder()
         // ZR138 按 CPCL 编码声明解析中文；GBUNSG24.CPF 是简体中文字体。
         val cpclFont = cpclFont(paper)
@@ -237,8 +237,9 @@ object ProtocolBuilder {
                     val data = op.optString("data", "")
                     val size = op.optInt("size", 6).coerceIn(1, 32)
                     body.append("B QR 30 $y M 2 U $size\r\n")
-                    // 根据配置决定是否使用长度前缀
-                    if (paper?.optBoolean("cpcl_qr_with_length", false) == true) {
+                    // 优先使用 Agent 端配置，未设置时使用模板配置
+                    val useLength = agentCpclQrWithLength ?: paper?.optBoolean("cpcl_qr_with_length", false) ?: false
+                    if (useLength) {
                         val dataBytes = data.toByteArray(charset("GB18030"))
                         body.append("MA,${dataBytes.size}\r\n")
                         body.append(data)
@@ -414,7 +415,7 @@ object ProtocolBuilder {
     }
 
     // ── CPCL 坐标布局 ──────────────────────────────────────────────
-    private fun buildCpclCanvas(elements: JSONArray, paper: JSONObject?, dpi: Int, values: JSONObject?): ByteArray {
+    private fun buildCpclCanvas(elements: JSONArray, paper: JSONObject?, dpi: Int, values: JSONObject?, agentCpclQrWithLength: Boolean? = null): ByteArray {
         val sb = StringBuilder()
         val height = if (paper?.optString("type") == "label" && paper.optDouble("height_mm", 0.0) > 0) {
             mmToDots(paper.optDouble("height_mm"), dpi)
@@ -451,8 +452,9 @@ object ProtocolBuilder {
                     val data = el.optString("data", "")
                     val cell = el.optInt("cell", 4).coerceIn(1, 32)
                     sb.append("B QR $x $y M 2 U $cell\r\n")
-                    // 根据配置决定是否使用长度前缀
-                    if (paper?.optBoolean("cpcl_qr_with_length", false) == true) {
+                    // 优先使用 Agent 端配置，未设置时使用模板配置
+                    val useLength = agentCpclQrWithLength ?: paper?.optBoolean("cpcl_qr_with_length", false) ?: false
+                    if (useLength) {
                         val dataBytes = data.toByteArray(charset("GB18030"))
                         sb.append("MA,${dataBytes.size}\r\n")
                         sb.append(data)

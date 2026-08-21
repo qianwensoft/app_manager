@@ -114,6 +114,8 @@
     <string name="settings_printer_none">未配置默认打印机</string>
     <string name="settings_printer_protocol">打印协议</string>
     <string name="settings_printer_transport">传输方式</string>
+    <string name="settings_cpcl_qr_with_length">CPCL 二维码格式</string>
+    <string name="settings_cpcl_qr_with_length_hint">携带字符长度前缀（部分斑马打印机需要）</string>
     <string name="settings_printer_select">选择打印机</string>
     <string name="settings_printer_test">测试打印</string>
     <string name="printer_settings_title">打印配置</string>

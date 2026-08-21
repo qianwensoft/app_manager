@@ -37,6 +37,7 @@ class PrinterSettingsActivity : AppCompatActivity() {
     private lateinit var tvConnStatus: TextView
     private lateinit var spProtocol: Spinner
     private lateinit var spTransport: Spinner
+    private lateinit var switchCpclQrWithLength: com.google.android.material.switchmaterial.SwitchMaterial
     private lateinit var btnDiscover: Button
     private lateinit var discoverProgress: ProgressBar
     private lateinit var tvDiscoverStatus: TextView
@@ -104,6 +105,7 @@ class PrinterSettingsActivity : AppCompatActivity() {
         tvConnStatus = findViewById(R.id.tvPrinterConnStatus)
         spProtocol = findViewById(R.id.spPrinterProtocol)
         spTransport = findViewById(R.id.spPrinterTransport)
+        switchCpclQrWithLength = findViewById(R.id.switchCpclQrWithLength)
         btnDiscover = findViewById(R.id.btnDiscover)
         discoverProgress = findViewById(R.id.discoverProgress)
         tvDiscoverStatus = findViewById(R.id.tvDiscoverStatus)
@@ -123,6 +125,7 @@ class PrinterSettingsActivity : AppCompatActivity() {
         selectedPrinterName = config.defaultPrinterName
         spProtocol.setSelection(protocolValues.indexOf(config.defaultPrinterProtocol).coerceAtLeast(0))
         spTransport.setSelection(transportValues.indexOf(config.defaultPrinterTransport).coerceAtLeast(0))
+        switchCpclQrWithLength.isChecked = config.cpclQrWithLength
         refreshPrinterLabel()
 
         findViewById<Button>(R.id.btnSelectPrinter).setOnClickListener {
@@ -208,7 +211,8 @@ class PrinterSettingsActivity : AppCompatActivity() {
                 defaultPrinterMac = selectedPrinterMac,
                 defaultPrinterName = selectedPrinterName,
                 defaultPrinterProtocol = protocolValues[spProtocol.selectedItemPosition.coerceIn(0, protocolValues.size - 1)],
-                defaultPrinterTransport = transportValues[spTransport.selectedItemPosition.coerceIn(0, transportValues.size - 1)]
+                defaultPrinterTransport = transportValues[spTransport.selectedItemPosition.coerceIn(0, transportValues.size - 1)],
+                cpclQrWithLength = switchCpclQrWithLength.isChecked
             )
         )
         Toast.makeText(this, R.string.printer_settings_saved, Toast.LENGTH_SHORT).show()
