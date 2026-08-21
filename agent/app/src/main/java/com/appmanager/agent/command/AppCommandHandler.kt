@@ -81,8 +81,13 @@ object AppCommandHandler {
 
         val apkFile = File(service.cacheDir, "install_${System.currentTimeMillis()}.apk")
         try {
+            // 上报开始下载，APK 大小未知时 percent=0，让前端进入「下载中」阶段
+            AgentService.sendInstallTaskProgress(commandId, "downloading", 0, "开始下载 APK")
             client.newCall(req).execute().use { response ->
                 if (!response.isSuccessful) {
+                    AgentService.sendInstallTaskProgress(
+                        commandId, "downloading", 0, "下载失败 HTTP ${response.code}", error = true
+                    )
                     AgentService.sendInstallTaskResult(
                         commandId,
                         false,
@@ -95,10 +100,36 @@ object AppCommandHandler {
                     AgentService.sendInstallTaskResult(commandId, false, "", "空响应体")
                     return
                 }
+                val total = body.contentLength().takeIf { it > 0 } ?: -1L
                 apkFile.outputStream().use { out ->
-                    body.byteStream().copyTo(out)
+                    val source = body.byteStream()
+                    val buffer = ByteArray(8 * 1024)
+                    var readSum = 0L
+                    var lastReportPct = -1
+                    var lastReportTs = 0L
+                    while (true) {
+                        val n = source.read(buffer)
+                        if (n <= 0) break
+                        out.write(buffer, 0, n)
+                        readSum += n
+                        if (total > 0) {
+                            val pct = ((readSum * 100L) / total).toInt().coerceIn(0, 100)
+                            val now = System.currentTimeMillis()
+                            // 每 1% 或每 200ms 上报一次，避免刷屏
+                            if (pct != lastReportPct && (now - lastReportTs) >= 200) {
+                                AgentService.sendInstallTaskProgress(
+                                    commandId, "downloading", pct,
+                                    "下载 APK $pct%"
+                                )
+                                lastReportPct = pct
+                                lastReportTs = now
+                            }
+                        }
+                    }
                 }
             }
+            // 下载完成阶段
+            AgentService.sendInstallTaskProgress(commandId, "downloading", 100, "APK 下载完成")
 
             val intent = Intent(Intent.ACTION_VIEW)
             intent.setDataAndType(
@@ -111,6 +142,8 @@ object AppCommandHandler {
             )
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            // 通知前端进入「系统安装界面」阶段
+            AgentService.sendInstallTaskProgress(commandId, "opening", 0, "正在拉起系统安装界面")
             service.startActivity(intent)
             AgentService.sendInstallTaskResult(commandId, true, "已打开安装界面", "")
         } catch (e: Exception) {

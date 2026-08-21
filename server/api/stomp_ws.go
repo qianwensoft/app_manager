@@ -35,6 +35,10 @@ const stompDestWorkOrders = "/topic/work-orders"
 // 单工单事件流：/topic/work-orders/{id}
 var stompDestWorkOrderByID = regexp.MustCompile(`^/topic/work-orders/(\d+)$`)
 
+// 安装任务事件流：全局 /topic/install-tasks 与单任务 /topic/install-tasks/{id}
+var stompDestInstallTaskByID = regexp.MustCompile(`^/topic/install-tasks/(\d+)$`)
+const stompDestInstallTasks = "/topic/install-tasks"
+
 // StompWS STOMP 1.2 over WebSocket（需先经 StompWSAuth；浏览器用 query token=JWT）。订阅录屏进度：/topic/device/{id}/recording
 func StompWS(c *gin.Context) {
 	conn, err := stompWsUpgrader.Upgrade(c.Writer, c.Request, nil)
@@ -117,11 +121,25 @@ func StompWS(c *gin.Context) {
 			}
 
 			switch dest {
-			case stompDestDevices, stompDestEvents, stompDestOutboundWebhookList, stompDestWorkOrders:
+			case stompDestDevices, stompDestEvents, stompDestOutboundWebhookList, stompDestWorkOrders, stompDestInstallTasks:
 				unsubs[subID] = stomp.DefaultHub.Subscribe(dest, subID, send)
 				log.Printf("STOMP SUBSCRIBE user=%d dest=%s sub=%s", c.GetUint("user_id"), dest, subID)
 			default:
 				if stompDestWorkOrderByID.MatchString(dest) {
+					unsubs[subID] = stomp.DefaultHub.Subscribe(dest, subID, send)
+					log.Printf("STOMP SUBSCRIBE user=%d dest=%s sub=%s", c.GetUint("user_id"), dest, subID)
+					continue
+				}
+				if stompDestInstallTaskByID.MatchString(dest) {
+					mIt := stompDestInstallTaskByID.FindStringSubmatch(dest)
+					if mIt == nil {
+						send(stomp.EncodeFrame("ERROR", map[string]string{"message": "invalid task id"}, ""))
+						continue
+					}
+					if _, err := strconv.ParseUint(mIt[1], 10, 64); err != nil {
+						send(stomp.EncodeFrame("ERROR", map[string]string{"message": "invalid task id"}, ""))
+						continue
+					}
 					unsubs[subID] = stomp.DefaultHub.Subscribe(dest, subID, send)
 					log.Printf("STOMP SUBSCRIBE user=%d dest=%s sub=%s", c.GetUint("user_id"), dest, subID)
 					continue

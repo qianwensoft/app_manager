@@ -128,6 +128,34 @@ class AgentService : LifecycleService() {
                 )
             )
         }
+
+        /**
+         * 安装任务中间进度上报（APK 下载 / 拉起系统安装界面等阶段）。
+         * phase: "downloading" | "opening" | 其它自定义阶段
+         * percent: 阶段内 0-100
+         * message: 人类可读中文提示
+         */
+        fun sendInstallTaskProgress(
+            commandId: String,
+            phase: String,
+            percent: Int,
+            message: String,
+            error: Boolean = false
+        ) {
+            val s = installCallbackRef?.get() ?: return
+            if (!s::webSocket.isInitialized) return
+            val pct = percent.coerceIn(0, 100)
+            s.webSocket.send(
+                mapOf(
+                    "type" to "install_task_progress",
+                    "command_id" to commandId,
+                    "phase" to phase,
+                    "percent" to pct,
+                    "message" to message,
+                    "error" to error
+                )
+            )
+        }
     }
 
     private val TAG = "AgentService"

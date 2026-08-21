@@ -147,6 +147,10 @@ type InstallTask struct {
 	CreatedBy         uint       `json:"created_by"`
 	CreatedAt         time.Time  `json:"created_at"`
 	FinishedAt        *time.Time `json:"finished_at"`
+	// 实时进度（由 Agent install_task_progress 上行更新）。
+	// Progress 为 0-100 的总体百分比；Phase 为人类可读的阶段描述。
+	Progress int    `gorm:"default:0" json:"progress"`
+	Phase    string `gorm:"size:32;default:''" json:"phase"`
 }
 
 type AuditLog struct {
