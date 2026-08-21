@@ -20,10 +20,10 @@ import (
 const agentReadTimeout = 75 * time.Second
 
 type Connection struct {
-	DeviceID      string
-	Conn          *websocket.Conn
-	send          chan []byte
-	ConnectedAt   time.Time
+	DeviceID    string
+	Conn        *websocket.Conn
+	send        chan []byte
+	ConnectedAt time.Time
 }
 
 type Hub struct {

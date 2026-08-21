@@ -298,6 +298,7 @@ func initSchema(db *gorm.DB) error {
 		migrations.MigrateDeviceX5Fields,
 		func(db *gorm.DB) { migrations.AddWorkflowInterfaceFields(db) },
 		MigrateWorkOrderSettledAt,
+		MigrateAuditLogUserAgent,
 	}
 	if strings.ToLower(strings.TrimSpace(db.Dialector.Name())) == "mysql" {
 		// MySQL 支持并发写，并行执行加速启动。

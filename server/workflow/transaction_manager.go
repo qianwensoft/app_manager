@@ -10,8 +10,8 @@ import (
 
 // TransactionManager manages transactions for workflow execution
 type TransactionManager struct {
-	transactions map[string]*sql.Tx        // transactionGroup -> *sql.Tx
-	datasources  map[string]*sql.DB        // transactionGroup -> datasource connection
+	transactions map[string]*sql.Tx            // transactionGroup -> *sql.Tx
+	datasources  map[string]*sql.DB            // transactionGroup -> datasource connection
 	isolation    map[string]sql.IsolationLevel // transactionGroup -> isolation level
 }
 

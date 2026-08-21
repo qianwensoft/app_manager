@@ -47,30 +47,30 @@ func GetThirdPartyProvider(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"id":                        p.ID,
-		"name":                      p.Name,
-		"type":                      p.Type,
-		"description":               p.Description,
-		"open_api_origin":           p.OpenApiOrigin,
-		"corp_id":                   p.CorpID,
-		"app_key":                   p.AppKey,
-		"component_app_id":          p.ComponentAppID,
-		"callback_url":              p.CallbackURL,
-		"outbound_app_id":           p.OutboundAppID,
-		"user_sync_enabled":         p.UserSyncEnabled,
-		"user_info_endpoint":        p.UserInfoEndpoint,
-		"user_list_endpoint":        p.UserListEndpoint,
-		"default_role":              p.DefaultRole,
-		"redirect_allowlist_json":   p.RedirectAllowlistJSON,
-		"redirect_allow_enabled":    p.RedirectAllowEnabled,
-		"hmac_configured":           strings.TrimSpace(p.HMACSecret) != "" || (config.C != nil && strings.TrimSpace(config.C.SSO.HMACSecret) != ""),
-		"hmac_key_source":           hmacKeySource(&p),
-		"hmac_clock_skew_sec":       hmacClockSkew(&p),
+		"id":                           p.ID,
+		"name":                         p.Name,
+		"type":                         p.Type,
+		"description":                  p.Description,
+		"open_api_origin":              p.OpenApiOrigin,
+		"corp_id":                      p.CorpID,
+		"app_key":                      p.AppKey,
+		"component_app_id":             p.ComponentAppID,
+		"callback_url":                 p.CallbackURL,
+		"outbound_app_id":              p.OutboundAppID,
+		"user_sync_enabled":            p.UserSyncEnabled,
+		"user_info_endpoint":           p.UserInfoEndpoint,
+		"user_list_endpoint":           p.UserListEndpoint,
+		"default_role":                 p.DefaultRole,
+		"redirect_allowlist_json":      p.RedirectAllowlistJSON,
+		"redirect_allow_enabled":       p.RedirectAllowEnabled,
+		"hmac_configured":              strings.TrimSpace(p.HMACSecret) != "" || (config.C != nil && strings.TrimSpace(config.C.SSO.HMACSecret) != ""),
+		"hmac_key_source":              hmacKeySource(&p),
+		"hmac_clock_skew_sec":          hmacClockSkew(&p),
 		"effective_redirect_allowlist": resolveRedirectAllowlist(&p),
-		"enabled":                   p.Enabled,
-		"created_by":                p.CreatedBy,
-		"created_at":                p.CreatedAt,
-		"updated_at":                p.UpdatedAt,
+		"enabled":                      p.Enabled,
+		"created_by":                   p.CreatedBy,
+		"created_at":                   p.CreatedAt,
+		"updated_at":                   p.UpdatedAt,
 	})
 }
 
@@ -113,8 +113,8 @@ type thirdPartyProviderReq struct {
 	// SSO 跳转安全（P0）：redirect_to 白名单 + HMAC 签名密钥
 	RedirectAllowlistJSON string `json:"redirect_allowlist_json"`
 	RedirectAllowEnabled  *bool  `json:"redirect_allow_enabled"`
-	HMACSecret            string `json:"hmac_secret"`         // 留空字符串表示不修改（清空需传 null）
-	ClearHMACSecret       bool   `json:"clear_hmac_secret"`   // 显式传 true 时把 Provider 密钥置空（回退到系统密钥）
+	HMACSecret            string `json:"hmac_secret"`       // 留空字符串表示不修改（清空需传 null）
+	ClearHMACSecret       bool   `json:"clear_hmac_secret"` // 显式传 true 时把 Provider 密钥置空（回退到系统密钥）
 	HMACClockSkewSec      *int   `json:"hmac_clock_skew_sec"`
 }
 

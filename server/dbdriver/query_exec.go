@@ -65,7 +65,6 @@ func inlineLimitOffsetParams(sqlStr string, params map[string]interface{}) (stri
 	return sqlStr, newParams
 }
 
-
 // RewriteNamedSQLParams 将 SQL 中的 {{name}} 转为方言占位符，并生成参数列表。
 // {{name}} 天生可选：参数存在则参数化绑定；缺失则自动剔除其所在条件子句（连接词边界推断），
 // INSERT 语句中缺失参数对应的列/值对自动移除。剔除后仍残留的 {{name}} 视为缺参错误。

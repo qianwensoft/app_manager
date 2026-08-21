@@ -52,11 +52,11 @@ func TestVerifyRedirect_AllowlistOnly(t *testing.T) {
 
 func TestVerifyRedirect_HMACSignature(t *testing.T) {
 	p := &models.ThirdPartyProvider{
-		ID:                   7,
-		RedirectAllowEnabled: true,
+		ID:                    7,
+		RedirectAllowEnabled:  true,
 		RedirectAllowlistJSON: `["/*"]`,
-		HMACSecret:           "test-secret-32-bytes-aaaaaaaaaaa",
-		HMACClockSkewSec:     300,
+		HMACSecret:            "test-secret-32-bytes-aaaaaaaaaaa",
+		HMACClockSkewSec:      300,
 	}
 	baseURL := "https://app.example.com/"
 	path := "/work-orders/123"
@@ -107,10 +107,10 @@ func TestVerifyRedirect_BackwardCompat(t *testing.T) {
 // 不依赖白名单与签名校验。
 func TestVerifyRedirect_EmptyRedirect_OK(t *testing.T) {
 	p := &models.ThirdPartyProvider{
-		ID:                   1,
-		RedirectAllowEnabled: true,
+		ID:                    1,
+		RedirectAllowEnabled:  true,
 		RedirectAllowlistJSON: `["/*"]`,
-		HMACSecret:           "secret",
+		HMACSecret:            "secret",
 	}
 	if err := VerifyRedirect(p, "", "", "", "https://app.example.com", time.Now()); err != nil {
 		t.Fatalf("empty redirect should bypass: %v", err)

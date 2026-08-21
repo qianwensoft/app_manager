@@ -250,13 +250,13 @@ func UpdateDocumentProject(c *gin.Context) {
 		return
 	}
 	updates := map[string]interface{}{
-		"name":        strings.TrimSpace(body.Name),
-		"code":        strings.TrimSpace(body.Code),
-		"description": body.Description,
-		"icon":        body.Icon,
-		"color":       body.Color,
-		"category_id": body.CategoryID,
-		"sort_order":  body.SortOrder,
+		"name":         strings.TrimSpace(body.Name),
+		"code":         strings.TrimSpace(body.Code),
+		"description":  body.Description,
+		"icon":         body.Icon,
+		"color":        body.Color,
+		"category_id":  body.CategoryID,
+		"sort_order":   body.SortOrder,
 		"root_node_id": body.RootNodeID,
 	}
 	if err := database.DB.Model(&project).Updates(updates).Error; err != nil {

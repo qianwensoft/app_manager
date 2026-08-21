@@ -51,7 +51,9 @@ func InvokeScadaShareInterface(c *gin.Context) {
 	res, err := Execute(InvokeRequest{Code: c.Param("id"), ParamValues: params, LimitOverride: body.Limit, EnabledOnly: false})
 	if err != nil || res.Kind == InvokeKindStaticCrud {
 		message := "interface execution failed"
-		if err != nil { message = err.Error() }
+		if err != nil {
+			message = err.Error()
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": message})
 		return
 	}
@@ -125,13 +127,21 @@ func shareCanvasReferencesInterface(canvasData string, interfaceID uint) bool {
 	var project struct {
 		Canvases map[string]struct {
 			Elements []struct {
-				PointBinding struct { IfaceID uint `json:"ifaceId"` } `json:"pointBinding"`
-				TableDataBinding struct { InterfaceID uint `json:"interfaceId"` } `json:"tableDataBinding"`
+				PointBinding struct {
+					IfaceID uint `json:"ifaceId"`
+				} `json:"pointBinding"`
+				TableDataBinding struct {
+					InterfaceID uint `json:"interfaceId"`
+				} `json:"tableDataBinding"`
 			} `json:"elements"`
 		} `json:"canvases"`
 	}
-	if interfaceID == 0 { return false }
-	if json.Unmarshal([]byte(canvasData), &project) != nil { return false }
+	if interfaceID == 0 {
+		return false
+	}
+	if json.Unmarshal([]byte(canvasData), &project) != nil {
+		return false
+	}
 	for _, canvas := range project.Canvases {
 		for _, element := range canvas.Elements {
 			if (element.PointBinding.IfaceID != 0 && element.PointBinding.IfaceID == interfaceID) ||

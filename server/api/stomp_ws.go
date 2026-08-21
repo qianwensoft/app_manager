@@ -37,6 +37,7 @@ var stompDestWorkOrderByID = regexp.MustCompile(`^/topic/work-orders/(\d+)$`)
 
 // 安装任务事件流：全局 /topic/install-tasks 与单任务 /topic/install-tasks/{id}
 var stompDestInstallTaskByID = regexp.MustCompile(`^/topic/install-tasks/(\d+)$`)
+
 const stompDestInstallTasks = "/topic/install-tasks"
 
 // StompWS STOMP 1.2 over WebSocket（需先经 StompWSAuth；浏览器用 query token=JWT）。订阅录屏进度：/topic/device/{id}/recording

@@ -7,11 +7,11 @@ import (
 
 // RetryPolicy 重试策略
 type RetryPolicy struct {
-	MaxRetries    int           `json:"max_retries"`     // 最大重试次数
-	RetryInterval []int         `json:"retry_interval"`  // 重试间隔（毫秒）
-	BackoffType   string        `json:"backoff_type"`    // 退避策略：fixed, linear, exponential
-	MaxInterval   int           `json:"max_interval"`    // 最大重试间隔（毫秒）
-	RetryOn       []string      `json:"retry_on"`        // 重试条件：timeout, network_error, server_error, all
+	MaxRetries    int      `json:"max_retries"`    // 最大重试次数
+	RetryInterval []int    `json:"retry_interval"` // 重试间隔（毫秒）
+	BackoffType   string   `json:"backoff_type"`   // 退避策略：fixed, linear, exponential
+	MaxInterval   int      `json:"max_interval"`   // 最大重试间隔（毫秒）
+	RetryOn       []string `json:"retry_on"`       // 重试条件：timeout, network_error, server_error, all
 }
 
 // RetryExecutor 重试执行器

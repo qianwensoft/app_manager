@@ -39,9 +39,9 @@ func newTestRouter() *gin.Engine {
 	return r
 }
 
-func boolPtr(b bool) *bool       { return &b }
-func intPtr(i int) *int          { return &i }
-func strPtr(s string) *string    { return &s }
+func boolPtr(b bool) *bool    { return &b }
+func intPtr(i int) *int       { return &i }
+func strPtr(s string) *string { return &s }
 
 // TestGetOnlyOfficeSettingsDefault 验证默认状态返回。
 func TestGetOnlyOfficeSettingsDefault(t *testing.T) {

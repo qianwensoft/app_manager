@@ -115,8 +115,8 @@ func buildDocumentNodeTree(all []models.DocumentNode, parent *uint) []models.Doc
 }
 
 type documentNodeBody struct {
-	ParentID   *uint  `json:"parent_id"`
-	Name       string `json:"name"`
+	ParentID *uint  `json:"parent_id"`
+	Name     string `json:"name"`
 	// Code：URL 编码；可空；空时由后端按 name 生成（同级下保证唯一，冲突自动追加 -2/-3…）。
 	Code       string `json:"code"`
 	NodeType   string `json:"node_type"`

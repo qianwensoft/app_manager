@@ -141,8 +141,8 @@ func GetOnlyOfficeConfig(c *gin.Context) {
 		customization["logo"] = logo
 	}
 	editorCfg := gin.H{
-		"mode":         "edit",
-		"lang":         config.C.OnlyOffice.LangOrDefault(),
+		"mode": "edit",
+		"lang": config.C.OnlyOffice.LangOrDefault(),
 		"user": gin.H{
 			"id":   strconv.FormatUint(uint64(userID), 10),
 			"name": username,

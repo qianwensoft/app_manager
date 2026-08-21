@@ -11,24 +11,24 @@ import (
 
 // AsyncExecutor 异步执行器
 type AsyncExecutor struct {
-	mu              sync.RWMutex
-	runningTasks    map[string]*AsyncTask
-	completedTasks  map[string]*AsyncTask
-	maxConcurrent   int
-	semaphore       chan struct{}
+	mu             sync.RWMutex
+	runningTasks   map[string]*AsyncTask
+	completedTasks map[string]*AsyncTask
+	maxConcurrent  int
+	semaphore      chan struct{}
 }
 
 // AsyncTask 异步任务
 type AsyncTask struct {
-	RequestID   string                 `json:"request_id"`
-	StepID      string                 `json:"step_id"`
-	Status      string                 `json:"status"` // pending, running, completed, failed
-	StartTime   time.Time              `json:"start_time"`
-	EndTime     *time.Time             `json:"end_time,omitempty"`
-	ElapsedMS   int64                  `json:"elapsed_ms"`
-	Result      *StepResult            `json:"result,omitempty"`
-	Error       string                 `json:"error,omitempty"`
-	Progress    int                    `json:"progress"` // 0-100
+	RequestID string      `json:"request_id"`
+	StepID    string      `json:"step_id"`
+	Status    string      `json:"status"` // pending, running, completed, failed
+	StartTime time.Time   `json:"start_time"`
+	EndTime   *time.Time  `json:"end_time,omitempty"`
+	ElapsedMS int64       `json:"elapsed_ms"`
+	Result    *StepResult `json:"result,omitempty"`
+	Error     string      `json:"error,omitempty"`
+	Progress  int         `json:"progress"` // 0-100
 }
 
 // NewAsyncExecutor 创建异步执行器
@@ -194,15 +194,15 @@ func (e *AsyncExecutor) GetStats() map[string]interface{} {
 
 // AsyncWorkflowResult 异步工作流执行结果
 type AsyncWorkflowResult struct {
-	RequestID      string                 `json:"request_id"`
-	Status         string                 `json:"status"` // running, completed, failed
-	TotalSteps     int                    `json:"total_steps"`
-	CompletedSteps int                    `json:"completed_steps"`
-	RunningSteps   []string               `json:"running_steps,omitempty"`
-	FailedSteps    []string               `json:"failed_steps,omitempty"`
-	ElapsedMS      int64                  `json:"elapsed_ms"`
-	Progress       int                    `json:"progress"` // 0-100
-	AsyncTasks     map[string]*AsyncTask  `json:"async_tasks,omitempty"`
+	RequestID      string                `json:"request_id"`
+	Status         string                `json:"status"` // running, completed, failed
+	TotalSteps     int                   `json:"total_steps"`
+	CompletedSteps int                   `json:"completed_steps"`
+	RunningSteps   []string              `json:"running_steps,omitempty"`
+	FailedSteps    []string              `json:"failed_steps,omitempty"`
+	ElapsedMS      int64                 `json:"elapsed_ms"`
+	Progress       int                   `json:"progress"` // 0-100
+	AsyncTasks     map[string]*AsyncTask `json:"async_tasks,omitempty"`
 }
 
 // ExecuteAsyncWorkflow 异步执行整个工作流

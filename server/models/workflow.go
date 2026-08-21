@@ -68,11 +68,11 @@ func (WorkflowExecution) TableName() string {
 
 // WorkflowExecutionLog 数据接口工作流执行日志
 type WorkflowExecutionLog struct {
-	ID            uint      `gorm:"primaryKey" json:"id"`
-	RequestID     string    `gorm:"size:64;uniqueIndex" json:"request_id"`
-	InterfaceID   uint      `gorm:"index" json:"interface_id"`
-	InterfaceCode string    `gorm:"size:120;index" json:"interface_code"`
-	UserID        *uint     `gorm:"index" json:"user_id"`
+	ID            uint   `gorm:"primaryKey" json:"id"`
+	RequestID     string `gorm:"size:64;uniqueIndex" json:"request_id"`
+	InterfaceID   uint   `gorm:"index" json:"interface_id"`
+	InterfaceCode string `gorm:"size:120;index" json:"interface_code"`
+	UserID        *uint  `gorm:"index" json:"user_id"`
 
 	// 请求信息
 	ParamValuesJSON string `gorm:"type:text" json:"param_values_json"`
@@ -102,14 +102,14 @@ type WorkflowExecutionLog struct {
 
 // CompensationDeadLetter 补偿死信记录
 type CompensationDeadLetter struct {
-	ID              uint      `gorm:"primaryKey" json:"id"`
-	RequestID       string    `gorm:"size:64;index" json:"request_id"`
-	InterfaceID     uint      `gorm:"index" json:"interface_id"`
-	InterfaceCode   string    `gorm:"size:120;index" json:"interface_code"`
-	FailedStepID    string    `gorm:"size:120" json:"failed_step_id"`
-	CompensationSQL string    `gorm:"type:text" json:"compensation_sql"`
-	Datasource      string    `gorm:"size:80" json:"datasource"`
-	ContextJSON     string    `gorm:"type:text" json:"context_json"` // 执行上下文快照
+	ID              uint   `gorm:"primaryKey" json:"id"`
+	RequestID       string `gorm:"size:64;index" json:"request_id"`
+	InterfaceID     uint   `gorm:"index" json:"interface_id"`
+	InterfaceCode   string `gorm:"size:120;index" json:"interface_code"`
+	FailedStepID    string `gorm:"size:120" json:"failed_step_id"`
+	CompensationSQL string `gorm:"type:text" json:"compensation_sql"`
+	Datasource      string `gorm:"size:80" json:"datasource"`
+	ContextJSON     string `gorm:"type:text" json:"context_json"` // 执行上下文快照
 
 	RetryCount  int       `gorm:"default:0" json:"retry_count"`
 	MaxRetries  int       `gorm:"default:3" json:"max_retries"`

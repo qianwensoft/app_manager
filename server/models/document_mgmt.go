@@ -12,8 +12,8 @@ import "time"
 //
 //	markdown | word | excel | ppt | pdf | image | video | other
 type DocumentNode struct {
-	ID       uint  `gorm:"primaryKey" json:"id"`
-	ParentID *uint `gorm:"uniqueIndex:idx_docnode_parent_code,priority:1" json:"parent_id"` // nil = 根；与 Code 组成 sibling 级唯一复合索引
+	ID       uint   `gorm:"primaryKey" json:"id"`
+	ParentID *uint  `gorm:"uniqueIndex:idx_docnode_parent_code,priority:1" json:"parent_id"` // nil = 根；与 Code 组成 sibling 级唯一复合索引
 	Name     string `gorm:"size:200;not null" json:"name"`
 	// Code 是节点的「URL 编码」：用于路由 /d/:code 直接定位节点（替代 /docs?id= 的 query 形式）。
 	// 默认为节点名，**同级唯一**（与 parent_id 组成复合 unique index；SQLite/MySQL 均允许 NULL 多值，
@@ -101,11 +101,11 @@ type DocumentProject struct {
 	Name        string    `gorm:"size:200;not null" json:"name"`
 	Code        string    `gorm:"size:100;uniqueIndex" json:"code"` // URL友好的唯一标识
 	Description string    `gorm:"size:1000" json:"description"`
-	Icon        string    `gorm:"size:200" json:"icon"`       // 项目图标
-	Color       string    `gorm:"size:50" json:"color"`       // 项目主题色
-	CategoryID  *uint     `gorm:"index" json:"category_id"`   // 所属分类
+	Icon        string    `gorm:"size:200" json:"icon"`        // 项目图标
+	Color       string    `gorm:"size:50" json:"color"`        // 项目主题色
+	CategoryID  *uint     `gorm:"index" json:"category_id"`    // 所属分类
 	SortOrder   int       `gorm:"default:0" json:"sort_order"` // 排序
-	RootNodeID  *uint     `gorm:"index" json:"root_node_id"`  // 关联的文档根节点
+	RootNodeID  *uint     `gorm:"index" json:"root_node_id"`   // 关联的文档根节点
 	CreatedBy   uint      `json:"created_by"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`

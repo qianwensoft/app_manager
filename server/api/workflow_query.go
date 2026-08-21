@@ -21,7 +21,7 @@ func GetWorkflowExecutionLog(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"ok": true,
+		"ok":   true,
 		"data": log,
 	})
 }
@@ -74,10 +74,10 @@ func ListWorkflowExecutionLogs(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"ok":    true,
-		"data":  logs,
-		"total": totalCount,
-		"limit": query.Limit,
+		"ok":     true,
+		"data":   logs,
+		"total":  totalCount,
+		"limit":  query.Limit,
 		"offset": query.Offset,
 	})
 }
@@ -87,13 +87,13 @@ func GetWorkflowExecutionStats(c *gin.Context) {
 	interfaceCode := c.Query("interface_code")
 
 	type Stats struct {
-		TotalExecutions    int64   `json:"total_executions"`
-		SuccessCount       int64   `json:"success_count"`
-		FailedCount        int64   `json:"failed_count"`
-		CompensatedCount   int64   `json:"compensated_count"`
-		SuccessRate        float64 `json:"success_rate"`
-		AvgElapsedMS       float64 `json:"avg_elapsed_ms"`
-		AvgCompletedSteps  float64 `json:"avg_completed_steps"`
+		TotalExecutions   int64   `json:"total_executions"`
+		SuccessCount      int64   `json:"success_count"`
+		FailedCount       int64   `json:"failed_count"`
+		CompensatedCount  int64   `json:"compensated_count"`
+		SuccessRate       float64 `json:"success_rate"`
+		AvgElapsedMS      float64 `json:"avg_elapsed_ms"`
+		AvgCompletedSteps float64 `json:"avg_completed_steps"`
 	}
 
 	stats := Stats{}
@@ -176,7 +176,7 @@ func RetryWorkflowExecution(c *gin.Context) {
 	// Parse original parameters (would need to be stored in execution log)
 	// For now, return error indicating parameters need to be provided
 	c.JSON(http.StatusBadRequest, gin.H{
-		"error": "Retry requires original parameters to be provided",
+		"error":   "Retry requires original parameters to be provided",
 		"message": "Please execute the workflow again with the same parameters",
 	})
 }

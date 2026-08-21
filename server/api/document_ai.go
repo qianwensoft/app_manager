@@ -150,4 +150,3 @@ func DocumentAITransform(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"result": strings.TrimSpace(result.String())})
 }
-

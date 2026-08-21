@@ -67,9 +67,9 @@ func ThirdPartyLogin(c *gin.Context) {
 	}
 	if err := VerifyRedirect(&provider, req.RedirectTo, req.Sig, req.Exp, baseURL, time.Now()); err != nil {
 		c.JSON(http.StatusForbidden, gin.H{
-			"error":   "redirect_to rejected",
-			"detail":  err.Error(),
-			"tip":     "redirect_to 必须在白名单内且需要有效 HMAC 签名；请在「第三方平台」配置中重新生成 SSO 链接",
+			"error":  "redirect_to rejected",
+			"detail": err.Error(),
+			"tip":    "redirect_to 必须在白名单内且需要有效 HMAC 签名；请在「第三方平台」配置中重新生成 SSO 链接",
 		})
 		return
 	}

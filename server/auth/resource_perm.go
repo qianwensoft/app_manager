@@ -87,7 +87,7 @@ func ResolveUserResourcePerms(userID uint) *ResourcePermSet {
 	for _, ru := range roleUsers {
 		roleIDs = append(roleIDs, ru.RoleID)
 	}
-	
+
 	// 收集角色级别的设备授权（全局生效，不依赖节点配置）
 	roleDeviceGroupIDs := map[uint]bool{}
 	roleDeviceIDs := map[uint]bool{}
@@ -269,7 +269,7 @@ func RequireResourcePermission(resourceKind, perm string) gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		
+
 		// 工单操作：优先检查 SSO 单工单授权 scope（wo:rw:<id>）
 		if resourceKind == "workorder" {
 			woID := strings.TrimSpace(c.Param("id"))
@@ -282,7 +282,7 @@ func RequireResourcePermission(resourceKind, perm string) gin.HandlerFunc {
 				}
 			}
 		}
-		
+
 		userID := c.GetUint("user_id")
 		if userID == 0 {
 			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
