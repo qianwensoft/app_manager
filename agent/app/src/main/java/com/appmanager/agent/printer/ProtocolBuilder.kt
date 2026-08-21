@@ -235,10 +235,9 @@ object ProtocolBuilder {
                 }
                 "qrcode" -> {
                     val data = op.optString("data", "")
-                    val dataBytes = data.toByteArray(charset("GB18030"))
                     val size = op.optInt("size", 6).coerceIn(1, 32)
                     body.append("B QR 30 $y M 2 U $size\r\n")
-                    body.append("MM,B${dataBytes.size.toString().padStart(4, '0')}$data\r\n")
+                    body.append("MM,$data\r\n")
                     body.append("ENDQR\r\n")
                     y += size * 25 + 30
                 }
@@ -442,10 +441,9 @@ object ProtocolBuilder {
                 }
                 "qrcode" -> {
                     val data = el.optString("data", "")
-                    val dataBytes = data.toByteArray(charset("GB18030"))
                     val cell = el.optInt("cell", 4).coerceIn(1, 32)
                     sb.append("B QR $x $y M 2 U $cell\r\n")
-                    sb.append("MM,B${dataBytes.size.toString().padStart(4, '0')}$data\r\n")
+                    sb.append("MM,$data\r\n")
                     sb.append("ENDQR\r\n")
                 }
                 "line" -> {
