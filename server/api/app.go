@@ -240,5 +240,64 @@ func CancelTask(c *gin.Context) {
 func ListAuditLogs(c *gin.Context) {
 	var logs []models.AuditLog
 	database.DB.Order("created_at desc").Limit(200).Find(&logs)
-	c.JSON(http.StatusOK, gin.H{"data": logs})
+
+	// 构建响应，包含用户名和设备信息
+	type AuditLogResponse struct {
+		ID         uint      `json:"id"`
+		UserID     uint      `json:"user_id"`
+		Username   string    `json:"username"`
+		DeviceID   *uint     `json:"device_id"`
+		DeviceName string    `json:"device_name"`
+		Action     string    `json:"action"`
+		Command    string    `json:"command"`
+		IPAddress  string    `json:"ip_address"`
+		UserAgent  string    `json:"user_agent"`
+		Result     string    `json:"result"`
+		CreatedAt  time.Time `json:"created_at"`
+	}
+
+	responses := make([]AuditLogResponse, 0, len(logs))
+	for _, log := range logs {
+		resp := AuditLogResponse{
+			ID:        log.ID,
+			UserID:    log.UserID,
+			DeviceID:  log.DeviceID,
+			Action:    log.Action,
+			Command:   log.Command,
+			IPAddress: log.IPAddress,
+			UserAgent: log.UserAgent,
+			Result:    log.Result,
+			CreatedAt: log.CreatedAt,
+		}
+
+		// 查询用户名
+		if log.UserID > 0 {
+			var user models.User
+			if err := database.DB.Select("username").First(&user, log.UserID).Error; err == nil {
+				resp.Username = user.Username
+			} else {
+				resp.Username = fmt.Sprintf("用户#%d", log.UserID)
+			}
+		} else {
+			resp.Username = "系统"
+		}
+
+		// 查询设备名
+		if log.DeviceID != nil && *log.DeviceID > 0 {
+			var device models.Device
+			if err := database.DB.Select("name, serial").First(&device, *log.DeviceID).Error; err == nil {
+				if device.Name != "" {
+					resp.DeviceName = device.Name
+				} else {
+					resp.DeviceName = device.Serial
+				}
+			} else {
+				resp.DeviceName = fmt.Sprintf("设备#%d", *log.DeviceID)
+			}
+		}
+
+		responses = append(responses, resp)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": responses})
 }
