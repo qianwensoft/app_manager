@@ -241,9 +241,8 @@ object ProtocolBuilder {
                     val useLength = agentCpclQrWithLength ?: paper?.optBoolean("cpcl_qr_with_length", false) ?: false
                     if (useLength) {
                         val dataBytes = data.toByteArray(charset("GB18030"))
-                        body.append("MA,${dataBytes.size}\r\n")
-                        body.append(data)
-                        body.append("\r\n")
+                        val lengthStr = dataBytes.size.toString().padStart(4, '0')
+                        body.append("MM,B$lengthStr$data\r\n")
                     } else {
                         body.append("MM,$data\r\n")
                     }
@@ -456,9 +455,8 @@ object ProtocolBuilder {
                     val useLength = agentCpclQrWithLength ?: paper?.optBoolean("cpcl_qr_with_length", false) ?: false
                     if (useLength) {
                         val dataBytes = data.toByteArray(charset("GB18030"))
-                        sb.append("MA,${dataBytes.size}\r\n")
-                        sb.append(data)
-                        sb.append("\r\n")
+                        val lengthStr = dataBytes.size.toString().padStart(4, '0')
+                        sb.append("MM,B$lengthStr$data\r\n")
                     } else {
                         sb.append("MM,$data\r\n")
                     }
