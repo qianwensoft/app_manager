@@ -70,8 +70,8 @@ type Device struct {
 	// 当前前台应用包名（Agent 心跳上报）
 	ForegroundPackage string `gorm:"column:foreground_package;size:200" json:"foreground_package"`
 	// X5 内核版本号（0 表示未安装）
-	X5KernelVersion int    `gorm:"column:x5_kernel_version;default:0" json:"x5_kernel_version"`
-	X5KernelState   string `gorm:"column:x5_kernel_state;size:50" json:"x5_kernel_state"`
+	X5KernelVersion int       `gorm:"column:x5_kernel_version;default:0" json:"x5_kernel_version"`
+	X5KernelState   string    `gorm:"column:x5_kernel_state;size:50" json:"x5_kernel_state"`
 	CreatedAt       time.Time `json:"created_at"`
 }
 
@@ -160,6 +160,7 @@ type AuditLog struct {
 	Action    string    `gorm:"size:100" json:"action"`
 	Command   string    `gorm:"type:text" json:"command"`
 	IPAddress string    `gorm:"size:50" json:"ip_address"`
+	UserAgent string    `gorm:"size:500" json:"user_agent"`
 	Result    string    `gorm:"type:text" json:"result"`
 	CreatedAt time.Time `json:"created_at"`
 }

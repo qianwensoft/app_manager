@@ -107,6 +107,11 @@ export interface PaperSpec {
    * 不同机型内置字体名不同，如繁体机用 TSS24.BF2，英文机用 0/4/ROMAN.TTF 等。
    */
   tspl_font?: string
+  /**
+   * CPCL 二维码是否携带字符长度前缀（MA,长度格式）。
+   * 默认 false（使用 MM,数据格式）；部分斑马打印机需要设为 true 避免缺位。
+   */
+  cpcl_qr_with_length?: boolean
   /** 纸张旋转角度：90° 时宽高互换（如 50×40→40×50），同时所有坐标元素的内容也旋转。默认 0（不旋转） */
   rotate?: 0 | 90 | 180 | 270
 }

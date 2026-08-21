@@ -126,20 +126,20 @@ func GetOnlyOfficeSettings(c *gin.Context) {
 //   - 字符串类：传 nil=不修改，传 *""=显式清空，传 *非空=覆盖；
 //   - bool/数值类：传 nil=不修改，传指针=覆盖（前端可传 false/0 表示关闭）。
 type OnlyOfficeUpdateReq struct {
-	Enabled           *bool   `json:"enabled"`
-	InternalURL       *string `json:"internal_url"`
-	PublicURL         *string `json:"public_url"`
-	JWTSecret         *string `json:"jwt_secret"`
-	Lang              *string `json:"lang"`
-	DefaultMode       *string `json:"default_mode"`
-	Autosave          *bool   `json:"autosave"`
-	Forcesave         *bool   `json:"forcesave"`
-	AllowPrint        *bool   `json:"allow_print"`
-	AllowComment      *bool   `json:"allow_comment"`
-	CustomLogoURL     *string `json:"custom_logo_url"`
-	CustomLogoImage   *string `json:"custom_logo_image"`
-	DownloadTimeoutSec *int   `json:"download_timeout_sec"`
-	FileTokenTTLSec   *int    `json:"file_token_ttl_sec"`
+	Enabled            *bool   `json:"enabled"`
+	InternalURL        *string `json:"internal_url"`
+	PublicURL          *string `json:"public_url"`
+	JWTSecret          *string `json:"jwt_secret"`
+	Lang               *string `json:"lang"`
+	DefaultMode        *string `json:"default_mode"`
+	Autosave           *bool   `json:"autosave"`
+	Forcesave          *bool   `json:"forcesave"`
+	AllowPrint         *bool   `json:"allow_print"`
+	AllowComment       *bool   `json:"allow_comment"`
+	CustomLogoURL      *string `json:"custom_logo_url"`
+	CustomLogoImage    *string `json:"custom_logo_image"`
+	DownloadTimeoutSec *int    `json:"download_timeout_sec"`
+	FileTokenTTLSec    *int    `json:"file_token_ttl_sec"`
 }
 
 // UpdateOnlyOfficeSettings 更新 OnlyOffice 配置并持久化到 YAML。
@@ -242,20 +242,20 @@ func UpdateOnlyOfficeSettings(c *gin.Context) {
 	}
 	// 返回更新后的状态（不回传明文密钥，且数值/语言字段走默认值助手便于前端回填）
 	c.JSON(http.StatusOK, gin.H{
-		"message":             "更新成功",
-		"enabled":             oc.Enabled,
-		"internal_url":        oc.InternalURL,
-		"public_url":          oc.PublicURL,
-		"jwt_secret_set":      oc.JWTSecret != "",
-		"lang":                oc.LangOrDefault(),
-		"default_mode":        oc.DefaultModeOrDefault(),
-		"autosave":            oc.Autosave,
-		"forcesave":           oc.Forcesave,
-		"allow_print":         oc.AllowPrint,
-		"allow_comment":       oc.AllowComment,
-		"custom_logo_url":     oc.CustomLogoURL,
-		"custom_logo_image":   oc.CustomLogoImage,
+		"message":              "更新成功",
+		"enabled":              oc.Enabled,
+		"internal_url":         oc.InternalURL,
+		"public_url":           oc.PublicURL,
+		"jwt_secret_set":       oc.JWTSecret != "",
+		"lang":                 oc.LangOrDefault(),
+		"default_mode":         oc.DefaultModeOrDefault(),
+		"autosave":             oc.Autosave,
+		"forcesave":            oc.Forcesave,
+		"allow_print":          oc.AllowPrint,
+		"allow_comment":        oc.AllowComment,
+		"custom_logo_url":      oc.CustomLogoURL,
+		"custom_logo_image":    oc.CustomLogoImage,
 		"download_timeout_sec": oc.DownloadTimeoutSecOrDefault(),
-		"file_token_ttl_sec":  oc.FileTokenTTLSecOrDefault(),
+		"file_token_ttl_sec":   oc.FileTokenTTLSecOrDefault(),
 	})
 }

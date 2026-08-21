@@ -759,10 +759,17 @@ func ClearAllMDMPolicies(c *gin.Context) {
 // GetSystemSettings POST /api/devices/:id/mdm/system-settings/snapshot
 func GetSystemSettings(c *gin.Context) {
 	device := getDeviceByID(c)
-	if device == nil { return }
+	if device == nil {
+		return
+	}
 	reply, ok := sendDpmCommand(c, device.ID, "mdm_get_system_settings", map[string]interface{}{}, 8*time.Second)
-	if !ok { return }
-	if !reply.Success { c.JSON(http.StatusUnprocessableEntity, gin.H{"error": reply.Output}); return }
+	if !ok {
+		return
+	}
+	if !reply.Success {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": reply.Output})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"snapshot": json.RawMessage(reply.Output)})
 }
 
@@ -770,13 +777,20 @@ func GetSystemSettings(c *gin.Context) {
 // body: { "action": "mdm_set_adb", "data": {...} }
 func ApplySystemSetting(c *gin.Context) {
 	device := getDeviceByID(c)
-	if device == nil { return }
+	if device == nil {
+		return
+	}
 	var req struct {
 		Action string                 `json:"action" binding:"required"`
 		Data   map[string]interface{} `json:"data"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil { c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()}); return }
-	if req.Data == nil { req.Data = map[string]interface{}{} }
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.Data == nil {
+		req.Data = map[string]interface{}{}
+	}
 
 	allowedActions := map[string]bool{
 		"mdm_set_adb": true, "mdm_set_animation": true, "mdm_set_location_mode": true,
@@ -791,7 +805,12 @@ func ApplySystemSetting(c *gin.Context) {
 	}
 
 	reply, ok := sendDpmCommand(c, device.ID, req.Action, req.Data, 8*time.Second)
-	if !ok { return }
-	if !reply.Success { c.JSON(http.StatusUnprocessableEntity, gin.H{"error": reply.Output}); return }
+	if !ok {
+		return
+	}
+	if !reply.Success {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": reply.Output})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"message": reply.Output})
 }

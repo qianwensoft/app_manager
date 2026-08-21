@@ -204,6 +204,27 @@ export default function PrintersConfigSection({
                   </div>
                 </div>
 
+                {/* CPCL 二维码长度前缀配置 */}
+                {tpl.protocol === 'cpcl' && (
+                  <div>
+                    <Tooltip title="CPCL 二维码指令格式：默认使用 MM,数据（不带长度）；部分斑马打印机需要 MA,长度 格式避免缺位，勾选此项启用">
+                      <label style={labelStyle}>CPCL 二维码带长度</label>
+                    </Tooltip>
+                    <Radio.Group
+                      size="small"
+                      value={!!tpl.paper?.cpcl_qr_with_length}
+                      onChange={e => updTemplate(idx, {
+                        paper: { ...(tpl.paper || { type: 'continuous' }), cpcl_qr_with_length: e.target.value }
+                      })}
+                      optionType="button"
+                      options={[
+                        { label: '否（默认）', value: false },
+                        { label: '是', value: true },
+                      ]}
+                    />
+                  </div>
+                )}
+
                 {(tpl.gen_side || 'agent') === 'frontend' ? (
                   <div>
                     <label style={labelStyle}>原始协议指令（支持 {'{{字段}}'} 占位）</label>

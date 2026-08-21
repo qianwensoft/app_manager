@@ -235,6 +235,20 @@ export default function PrintDesignerPage() {
                 { label: 'CTUNMK24.CPF – 繁体中文', value: 'CTUNMK24.CPF' },
               ]}
             />
+            <Divider type="vertical" />
+            <Tooltip title="CPCL 二维码指令格式：默认使用 MM,数据（不带长度）；部分斑马打印机需要 MA,长度 格式避免缺位，勾选此项启用。">
+              <span style={{ fontSize: 12, color: '#64748b' }}>二维码带长度</span>
+            </Tooltip>
+            <Radio.Group
+              size="small"
+              value={!!tpl.paper?.cpcl_qr_with_length}
+              onChange={e => updPaper({ cpcl_qr_with_length: e.target.value })}
+              optionType="button"
+              options={[
+                { label: '否', value: false },
+                { label: '是', value: true },
+              ]}
+            />
           </>
         )}
         {tpl.protocol === 'tspl' && (

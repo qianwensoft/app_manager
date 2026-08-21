@@ -25,13 +25,14 @@ var ErrSignatureInvalid = errors.New("signature invalid or expired")
 
 // SSOSignResult 签名结果，用于在 thirdparty_sso.go 透传到前端。
 type SSOSignResult struct {
-	Sig    string `json:"sig"`     // hex(HMAC-SHA256(secret, baseURL|path|exp|provider))
-	Exp    int64  `json:"exp"`     // unix 秒
-	KeyID  string `json:"key_id"`  // 标识使用哪把密钥（"global" 或 "provider:<id>"）
+	Sig   string `json:"sig"`    // hex(HMAC-SHA256(secret, baseURL|path|exp|provider))
+	Exp   int64  `json:"exp"`    // unix 秒
+	KeyID string `json:"key_id"` // 标识使用哪把密钥（"global" 或 "provider:<id>"）
 }
 
 // resolveRedirectAllowlist 计算最终生效的 redirect_to 白名单：
-//   Provider.RedirectAllowlistJSON（精确）> 系统 server.sso.redirect_to_whitelist > 内置兜底（仅 "/"）。
+//
+//	Provider.RedirectAllowlistJSON（精确）> 系统 server.sso.redirect_to_whitelist > 内置兜底（仅 "/"）。
 func resolveRedirectAllowlist(p *models.ThirdPartyProvider) []string {
 	if p != nil && p.RedirectAllowlistJSON != "" {
 		var list []string
@@ -117,8 +118,9 @@ func isRedirectAllowed(redirect string, allowlist []string) bool {
 }
 
 // signRedirect 为 redirect_to 签发 HMAC-SHA256。
-//   payload 形如：baseURL|path|exp|provider
-//   签名随同 exp 与 key_id 一起下发，前端拼接为 ?redirect_to=...&exp=...&sig=...&kid=...
+//
+//	payload 形如：baseURL|path|exp|provider
+//	签名随同 exp 与 key_id 一起下发，前端拼接为 ?redirect_to=...&exp=...&sig=...&kid=...
 func signRedirect(secret, baseURL, path string, exp int64, providerID uint) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte(baseURL))
@@ -193,8 +195,9 @@ func VerifyRedirect(p *models.ThirdPartyProvider, redirectTo, sig, expStr, baseU
 }
 
 // BuildSignedRedirect 在后端为前端构造带签名的 callback URL（用于「生成 SSO 链接」API）。
-//   返回完整的 callback URL 与签名要素。
-//   baseURL 为本系统浏览器可达的对外基址（如 https://app.example.com）。
+//
+//	返回完整的 callback URL 与签名要素。
+//	baseURL 为本系统浏览器可达的对外基址（如 https://app.example.com）。
 func BuildSignedRedirect(p *models.ThirdPartyProvider, baseURL, redirectTo string, ttl time.Duration) (callbackURL string, result SSOSignResult, err error) {
 	redirectTo = strings.TrimSpace(redirectTo)
 	if redirectTo == "" {

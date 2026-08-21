@@ -150,20 +150,20 @@ func CopyFormApp(c *gin.Context) {
 
 	// 复制应用基本信息
 	newApp := models.FormAppInfo{
-		Code:            newCode,
-		Name:            newName,
-		Description:     src.Description,
-		Mode:            src.Mode,
-		DataSourceID:    src.DataSourceID,
-		EntryPageKey:    src.EntryPageKey,
-		GlobalConfig:    src.GlobalConfig,
-		DesignSchema:    src.DesignSchema,
-		RuntimeSchema:   src.RuntimeSchema,
-		UISchema:        src.UISchema,
-		PublishStatus:   0, // 副本默认为草稿状态
-		ShareToken:      "",
-		ShareExpireAt:   nil,
-		ContentVersion:  1,
+		Code:           newCode,
+		Name:           newName,
+		Description:    src.Description,
+		Mode:           src.Mode,
+		DataSourceID:   src.DataSourceID,
+		EntryPageKey:   src.EntryPageKey,
+		GlobalConfig:   src.GlobalConfig,
+		DesignSchema:   src.DesignSchema,
+		RuntimeSchema:  src.RuntimeSchema,
+		UISchema:       src.UISchema,
+		PublishStatus:  0, // 副本默认为草稿状态
+		ShareToken:     "",
+		ShareExpireAt:  nil,
+		ContentVersion: 1,
 	}
 
 	tx := database.DB.Begin()

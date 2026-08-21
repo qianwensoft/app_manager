@@ -67,7 +67,7 @@ func TestNormalizeDocCode(t *testing.T) {
 		{"  Foo / Bar / Baz  ", "foo-bar-baz"},
 		{"--leading & trailing--", "leading-trailing"},
 		{"a/b\\c d e", "a-b-c-d-e"},
-		{"纯中文标题", ""},         // 非 ASCII 全部被剔除，结果为空字符串
+		{"纯中文标题", ""}, // 非 ASCII 全部被剔除，结果为空字符串
 		{"Report 2026 Q1", "report-2026-q1"},
 		{"foo___bar__baz", "foo_bar_baz"}, // 下划线保留，多个下划线合并折叠
 		{"", ""},
@@ -113,9 +113,9 @@ func TestCreateNodeExplicitCode(t *testing.T) {
 	r := newCodeRouter()
 
 	body, _ := json.Marshal(map[string]any{
-		"name":       "API Guide",
-		"code":       "Api Guide / Draft",
-		"node_type":  "doc",
+		"name":      "API Guide",
+		"code":      "Api Guide / Draft",
+		"node_type": "doc",
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/docs/nodes", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")

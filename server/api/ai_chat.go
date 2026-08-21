@@ -21,13 +21,13 @@ type aiChatMessage struct {
 }
 
 type aiChatReq struct {
-	Messages          []aiChatMessage   `json:"messages"`
-	SkillIDs          []uint            `json:"skill_ids"`
-	CurrentFields     []json.RawMessage `json:"current_fields"`
-	CurrentEvents     []json.RawMessage `json:"current_events"`      // 当前页面已有事件（PageEvent[]，可选）
-	CurrentPrinters   []json.RawMessage `json:"current_printers"`    // 当前页面已有打印模板（PrinterTemplate[]，可选）
-	CurrentDesignSchema json.RawMessage `json:"current_design_schema"` // 当前页面布局配置（design_schema，可选）
-	PageContext       json.RawMessage   `json:"page_context"`        // 应用/页面当前状态上下文（可选）
+	Messages            []aiChatMessage   `json:"messages"`
+	SkillIDs            []uint            `json:"skill_ids"`
+	CurrentFields       []json.RawMessage `json:"current_fields"`
+	CurrentEvents       []json.RawMessage `json:"current_events"`        // 当前页面已有事件（PageEvent[]，可选）
+	CurrentPrinters     []json.RawMessage `json:"current_printers"`      // 当前页面已有打印模板（PrinterTemplate[]，可选）
+	CurrentDesignSchema json.RawMessage   `json:"current_design_schema"` // 当前页面布局配置（design_schema，可选）
+	PageContext         json.RawMessage   `json:"page_context"`          // 应用/页面当前状态上下文（可选）
 }
 
 // FormAppAIChat 通过 SSE 流式调用 Claude，辅助生成/修改 FieldDef[] 表单字段。

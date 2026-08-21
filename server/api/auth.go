@@ -49,12 +49,30 @@ func Login(c *gin.Context) {
 	var user models.User
 	if err := database.DB.Where("username = ?", req.Username).First(&user).Error; err != nil {
 		log.Printf("User not found: %v", err)
+		// 审计日志：记录登录失败（用户不存在）
+		database.DB.Create(&models.AuditLog{
+			UserID:    0,
+			Action:    "login_failed",
+			Command:   req.Username,
+			IPAddress: c.ClientIP(),
+			UserAgent: c.GetHeader("User-Agent"),
+			Result:    "user not found",
+		})
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 		return
 	}
 	log.Printf("User found, checking password")
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(req.Password)); err != nil {
 		log.Printf("Password mismatch: %v", err)
+		// 审计日志：记录登录失败（密码错误）
+		database.DB.Create(&models.AuditLog{
+			UserID:    user.ID,
+			Action:    "login_failed",
+			Command:   req.Username,
+			IPAddress: c.ClientIP(),
+			UserAgent: c.GetHeader("User-Agent"),
+			Result:    "invalid password",
+		})
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
 		return
 	}
@@ -71,6 +89,16 @@ func Login(c *gin.Context) {
 			ExpiresAt: rtExp,
 		})
 	}
+
+	// 审计日志：记录登录操作
+	database.DB.Create(&models.AuditLog{
+		UserID:    user.ID,
+		Action:    "login",
+		Command:   req.Username,
+		IPAddress: c.ClientIP(),
+		UserAgent: c.GetHeader("User-Agent"),
+		Result:    "success",
+	})
 
 	c.JSON(http.StatusOK, gin.H{
 		"token":         token,
@@ -103,12 +131,30 @@ func RefreshAccessToken(c *gin.Context) {
 	if err := database.DB.
 		Where("token_hash = ? AND revoked = ? AND expires_at > ?", hash, false, time.Now()).
 		First(&rt).Error; err != nil {
+		// 审计日志：记录 refresh token 失败
+		database.DB.Create(&models.AuditLog{
+			UserID:    0,
+			Action:    "refresh_token_failed",
+			Command:   "invalid or expired token",
+			IPAddress: c.ClientIP(),
+			UserAgent: c.GetHeader("User-Agent"),
+			Result:    "unauthorized",
+		})
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "refresh token 无效或已过期，请重新登录"})
 		return
 	}
 
 	var user models.User
 	if err := database.DB.First(&user, rt.UserID).Error; err != nil {
+		// 审计日志：记录用户不存在
+		database.DB.Create(&models.AuditLog{
+			UserID:    rt.UserID,
+			Action:    "refresh_token_failed",
+			Command:   "user not found",
+			IPAddress: c.ClientIP(),
+			UserAgent: c.GetHeader("User-Agent"),
+			Result:    "user not found",
+		})
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "用户不存在"})
 		return
 	}
@@ -131,6 +177,16 @@ func RefreshAccessToken(c *gin.Context) {
 		UserID:    user.ID,
 		TokenHash: newHash,
 		ExpiresAt: rtExp,
+	})
+
+	// 审计日志：记录 token 刷新操作
+	database.DB.Create(&models.AuditLog{
+		UserID:    user.ID,
+		Action:    "refresh_token",
+		Command:   user.Username,
+		IPAddress: c.ClientIP(),
+		UserAgent: c.GetHeader("User-Agent"),
+		Result:    "success",
 	})
 
 	c.JSON(http.StatusOK, gin.H{

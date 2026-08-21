@@ -28,7 +28,8 @@ type X5FileInfo struct {
 
 // parseX5FileName 从文件名解析版本信息
 // 格式: tbs_core_048445_20251209121211_nolog_fs_obfs_arm64-v8a_release.tbs
-//       tbs_core_047850_20251219150641_nolog_fs_obfs_armeabi_release.tbs
+//
+//	tbs_core_047850_20251219150641_nolog_fs_obfs_armeabi_release.tbs
 func parseX5FileName(filename string) X5FileInfo {
 	info := X5FileInfo{}
 

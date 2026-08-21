@@ -268,16 +268,16 @@ type OnlyOfficeConfig struct {
 	JWTSecret   string `yaml:"jwt_secret"`   // JWT 签名密钥
 
 	// 编辑器 UI / 行为
-	Lang         string `yaml:"lang"`           // 编辑器界面语言，默认 zh-CN
-	DefaultMode  string `yaml:"default_mode"`   // 默认编辑器模式 edit | view，默认 edit
-	Autosave     bool   `yaml:"autosave"`       // 自动保存（编辑过程中定时上传快照）
-	Forcesave    bool   `yaml:"forcesave"`      // 强制保存（保存按钮触发后必写入新版本）
-	AllowPrint   bool   `yaml:"allow_print"`    // 是否允许打印/导出为 PDF
-	AllowComment bool   `yaml:"allow_comment"`  // 是否允许评论与协同批注
+	Lang         string `yaml:"lang"`          // 编辑器界面语言，默认 zh-CN
+	DefaultMode  string `yaml:"default_mode"`  // 默认编辑器模式 edit | view，默认 edit
+	Autosave     bool   `yaml:"autosave"`      // 自动保存（编辑过程中定时上传快照）
+	Forcesave    bool   `yaml:"forcesave"`     // 强制保存（保存按钮触发后必写入新版本）
+	AllowPrint   bool   `yaml:"allow_print"`   // 是否允许打印/导出为 PDF
+	AllowComment bool   `yaml:"allow_comment"` // 是否允许评论与协同批注
 
 	// 品牌定制（仅在 enabled 时生效）
-	CustomLogoURL    string `yaml:"custom_logo_url"`    // 点击 logo 跳转的链接
-	CustomLogoImage  string `yaml:"custom_logo_image"`  // logo 图片 URL（默认空，使用 DS 自带）
+	CustomLogoURL   string `yaml:"custom_logo_url"`   // 点击 logo 跳转的链接
+	CustomLogoImage string `yaml:"custom_logo_image"` // logo 图片 URL（默认空，使用 DS 自带）
 
 	// 网络 / 超时
 	DownloadTimeoutSec int `yaml:"download_timeout_sec"` // 拉取 OnlyOffice 回调结果文件超时（秒），默认 60

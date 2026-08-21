@@ -17,8 +17,8 @@ import (
 // BuildSignedCallbackRequest 生成签名 callback URL 的请求体。
 type BuildSignedCallbackRequest struct {
 	RedirectTo string `json:"redirect_to" binding:"required"`
-	BaseURL    string `json:"base_url"`     // 可选：浏览器可达的本系统基址；空时取 Referer/Origin
-	TTLSeconds int    `json:"ttl_seconds"`  // 可选：签名有效期（秒）；默认 300，最大 86400
+	BaseURL    string `json:"base_url"`    // 可选：浏览器可达的本系统基址；空时取 Referer/Origin
+	TTLSeconds int    `json:"ttl_seconds"` // 可选：签名有效期（秒）；默认 300，最大 86400
 }
 
 // BuildSignedCallback POST /api/thirdparty/:id/sso/sign
@@ -79,8 +79,8 @@ func BuildSignedCallback(c *gin.Context) {
 	callback, result, err := BuildSignedRedirect(&p, baseURL+"/", req.RedirectTo, ttl)
 	if err != nil {
 		c.JSON(http.StatusForbidden, gin.H{
-			"error":  err.Error(),
-			"tip":    "请检查第三方平台的 redirect_allowlist_json 配置，或使用前端可见的白名单内的目标路径",
+			"error":     err.Error(),
+			"tip":       "请检查第三方平台的 redirect_allowlist_json 配置，或使用前端可见的白名单内的目标路径",
 			"allowlist": resolveRedirectAllowlist(&p),
 		})
 		return

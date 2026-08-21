@@ -1067,7 +1067,7 @@ func UpdateDataInterface(c *gin.Context) {
 		"schema_json": body.SchemaJSON, "steps_json": body.StepsJSON,
 		"param_contract_json": body.ParamContractJSON, "field_mapping_json": body.FieldMappingJSON,
 		"extra_filters_json": body.ExtraFiltersJSON, "sort_json": body.SortJSON,
-		"pagination_json": body.PaginationJSON,
+		"pagination_json":         body.PaginationJSON,
 		"pinned_datasource_alias": body.PinnedDatasourceAlias,
 	}).Error; err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

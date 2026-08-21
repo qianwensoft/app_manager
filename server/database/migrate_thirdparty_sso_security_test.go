@@ -12,7 +12,7 @@ import (
 // TestMigrateThirdPartySSOSecurity_BackwardCompat 验证对老表（只有旧字段）执行迁移：
 // 1. 老行数据保留
 // 2. 新字段被加入
-// 3. 新字段默认值符合预期（老行 redirect_allow_enabled=true、hmac_secret=''、skew=300）
+// 3. 新字段默认值符合预期（老行 redirect_allow_enabled=true、hmac_secret=”、skew=300）
 func TestMigrateThirdPartySSOSecurity_BackwardCompat(t *testing.T) {
 	dir := t.TempDir()
 	dsn := filepath.Join(dir, "old.db")
