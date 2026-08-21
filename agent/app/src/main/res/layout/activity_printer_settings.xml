@@ -108,6 +108,22 @@
                         android:layout_marginTop="4dp"
                         android:minHeight="48dp" />
 
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:text="@string/settings_cpcl_qr_with_length"
+                        android:textColor="@color/agent_text_secondary"
+                        android:textSize="13sp" />
+
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/switchCpclQrWithLength"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:minHeight="48dp"
+                        android:text="@string/settings_cpcl_qr_with_length_hint" />
+
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnSelectPrinter"
                         android:layout_width="match_parent"
