@@ -65,8 +65,8 @@ export function drawElement(
       break
     }
     case 'rect':
-      if (el.fill) { ctx.fillRect(x, y, w, h) }
-      if (el.stroke) { ctx.strokeRect(x, y, w, h) }
+      if (el.fill && el.fill !== 'transparent') { ctx.fillRect(x, y, w, h) }
+      if (el.stroke && el.stroke !== 'transparent') { ctx.strokeRect(x, y, w, h) }
       if (anim?.flowPulse != null && anim.flowPulse > 0.2) {
         ctx.save()
         ctx.strokeStyle = `rgba(34,197,94,${0.25 + anim.flowPulse * 0.55})`
@@ -79,8 +79,8 @@ export function drawElement(
     case 'ellipse': {
       ctx.beginPath()
       ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2)
-      if (el.fill) ctx.fill()
-      if (el.stroke) ctx.stroke()
+      if (el.fill && el.fill !== 'transparent') ctx.fill()
+      if (el.stroke && el.stroke !== 'transparent') ctx.stroke()
       if (anim?.flowPulse != null && anim.flowPulse > 0.2) {
         ctx.save()
         ctx.strokeStyle = `rgba(34,197,94,${0.25 + anim.flowPulse * 0.55})`
@@ -100,9 +100,9 @@ export function drawElement(
       break
     case 'text':
     case 'button': {
-      if (el.fill && el.type === 'button') {
+      if (el.fill && el.fill !== 'transparent' && el.type === 'button') {
         ctx.fillRect(x, y, w, h)
-        if (el.stroke) ctx.strokeRect(x, y, w, h)
+        if (el.stroke && el.stroke !== 'transparent') ctx.strokeRect(x, y, w, h)
       }
       ctx.fillStyle = el.fontColor || '#fff'
       const weight = el.fontWeight === 'bold' ? 'bold ' : ''
@@ -121,7 +121,7 @@ export function drawElement(
       const mid = y + h / 2
       ctx.fillStyle = el.fill || '#7f8c8d'
       ctx.fillRect(x, y, w, h)
-      if (el.stroke) ctx.strokeRect(x, y, w, h)
+      if (el.stroke && el.stroke !== 'transparent') ctx.strokeRect(x, y, w, h)
       ctx.strokeStyle = el.stroke || '#95a5a6'
       ctx.lineWidth = 1 * zoom
       const arrowCount = Math.floor(w / (20 * zoom))
