@@ -43,6 +43,10 @@ func AuthMiddleware() gin.HandlerFunc {
 // 与 ?device_token=（设备令牌）查询参数。
 func FormRuntimeAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		hasJWT := false
+		hasDevice := false
+
+		// 尝试解析 JWT token
 		token := strings.TrimSpace(c.GetHeader("Authorization"))
 		if token == "" {
 			token = strings.TrimSpace(c.Query("token"))
@@ -54,29 +58,40 @@ func FormRuntimeAuthMiddleware() gin.HandlerFunc {
 				c.Set("username", claims.Username)
 				c.Set("role", claims.Role)
 				c.Set("wo_scopes", claims.WoScopes)
-				c.Set("auth_kind", "jwt")
-				c.Next()
-				return
+				hasJWT = true
 			}
 		}
+
+		// 尝试解析 device token（即使已有 JWT 也继续检查）
 		devTok := strings.TrimSpace(c.GetHeader("X-Device-Token"))
 		if devTok == "" {
 			devTok = strings.TrimSpace(c.Query("device_token"))
 		}
-		if devTok == "" {
+		if devTok != "" {
+			var dev models.Device
+			if err := database.DB.Where("agent_token = ?", devTok).First(&dev).Error; err == nil {
+				c.Set("device_id", dev.ID)
+				hasDevice = true
+			}
+		}
+
+		// 至少需要一种认证方式
+		if !hasJWT && !hasDevice {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 			c.Abort()
 			return
 		}
-		var dev models.Device
-		if err := database.DB.Where("agent_token = ?", devTok).First(&dev).Error; err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid device token"})
-			c.Abort()
-			return
+
+		// 设置 auth_kind 和默认 role
+		if hasJWT && hasDevice {
+			c.Set("auth_kind", "jwt+device")
+		} else if hasJWT {
+			c.Set("auth_kind", "jwt")
+		} else {
+			c.Set("auth_kind", "device")
+			c.Set("role", "viewer")
 		}
-		c.Set("device_id", dev.ID)
-		c.Set("auth_kind", "device")
-		c.Set("role", "viewer")
+
 		c.Next()
 	}
 }

@@ -65,8 +65,8 @@ export function drawElement(
       break
     }
     case 'rect':
-      if (el.fill && el.fill !== 'transparent') { ctx.fillRect(x, y, w, h) }
-      if (el.stroke && el.stroke !== 'transparent') { ctx.strokeRect(x, y, w, h) }
+      if (el.fill && el.fill !== 'transparent') ctx.fillRect(x, y, w, h)
+      if (el.stroke && el.stroke !== 'transparent') ctx.strokeRect(x, y, w, h)
       if (anim?.flowPulse != null && anim.flowPulse > 0.2) {
         ctx.save()
         ctx.strokeStyle = `rgba(34,197,94,${0.25 + anim.flowPulse * 0.55})`

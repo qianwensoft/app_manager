@@ -46,8 +46,16 @@ func SetupRouter() *gin.Engine {
 	r.Static("/assets", webDistPath+"/assets")
 	r.StaticFile("/", webDistPath+"/index.html")
 	r.StaticFile("/auth-eteams-callback.html", webDistPath+"/auth-eteams-callback.html")
-	// scada-editor
-	r.Static("/scada-editor", config.C.Server.ScadaEditorPath())
+	// scada-editor: 禁用缓存以避免浏览器加载旧版本的 JavaScript 文件
+	scadaEditorDir := config.C.Server.ScadaEditorPath()
+	scadaEditorGroup := r.Group("/scada-editor")
+	scadaEditorGroup.Use(func(c *gin.Context) {
+		c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+		c.Header("Pragma", "no-cache")
+		c.Header("Expires", "0")
+		c.Next()
+	})
+	scadaEditorGroup.StaticFS("", gin.Dir(scadaEditorDir, false))
 	// form-app: 禁用缓存以避免浏览器加载旧版本的 JavaScript 文件
 	formAppDir := config.C.Server.FormAppPath()
 	formAppGroup := r.Group("/form-app")

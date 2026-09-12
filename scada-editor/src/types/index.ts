@@ -66,6 +66,10 @@ export interface CanvasElement {
   strokeWidth?: number
   opacity?: number
   borderRadius?: number
+  // 路径数据（钢笔工具、铅笔工具）
+  pathData?: string  // SVG path d 属性
+  pathPoints?: Array<{ x: number; y: number; type?: 'line' | 'curve'; cp1?: { x: number; y: number }; cp2?: { x: number; y: number } }>  // 原始点数据（用于编辑）
+  pathClosed?: boolean  // 路径是否闭合
   // 文本
   text?: string
   fontSize?: number
@@ -276,6 +280,7 @@ export interface GroupBinding {
 
 export type ElementType =
   | 'rect' | 'circle' | 'ellipse' | 'line' | 'polyline' | 'polygon'
+  | 'path' | 'pencil'  // 新增：钢笔工具路径、铅笔自由线
   | 'text' | 'image' | 'button' | 'radio' | 'checkbox' | 'table'
   | 'form-input' | 'form-number' | 'form-select' | 'form-textarea' | 'form-date' | 'form-switch' | 'form-submit'
   | 'form-radio' | 'form-checkbox' | 'form-rate' | 'form-slider' | 'form-grid'
@@ -616,6 +621,7 @@ export interface ChartConfig {
 // 编辑器状态
 export type DrawingTool =
   | 'select' | 'rect' | 'circle' | 'ellipse' | 'line' | 'polyline'
+  | 'polygon' | 'path' | 'pencil'  // 新增：多边形、钢笔工具、铅笔工具
   | 'text' | 'image' | 'button' | 'radio' | 'checkbox' | 'table'
 
 export interface EditorState {

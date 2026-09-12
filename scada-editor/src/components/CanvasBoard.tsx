@@ -5,6 +5,7 @@ import {
   drawGrid, drawElement, drawSelectionHandles, drawMultiSelectBox, drawMarquee,
   hitTest, hitTestHandle, hitTestMarquee, snapToGrid, generateId,
 } from '@/utils/canvas'
+import { simplifyPath, smoothPath, pointsToPathData } from '@/utils/pathTools'
 import { pushHistory } from '@/hooks/useHistory'
 import type { CanvasElement, ChartConfig } from '@/types'
 import type { PointDataMap } from '@/hooks/useStompPointData'
@@ -29,6 +30,7 @@ import LayoutModalWidget from './LayoutModalWidget'
 import LayoutTabsWidget from './LayoutTabsWidget'
 import LayoutCollapseWidget from './LayoutCollapseWidget'
 import AlarmLightWidget from './AlarmLightWidget'
+import ShapeSvg from './ShapeSvg'
 import { WIDGET_DRAG_TYPE, buildWidgetElement } from './WidgetPanel'
 import type { WidgetDef } from './WidgetPanel'
 import BindingDrawer from './BindingDrawer'
@@ -92,6 +94,11 @@ export default function CanvasBoard() {
   const resizeRef = useRef<ResizeRef | null>(null)
   const drawingRef = useRef<{ startX: number; startY: number } | null>(null)
   const marqueeRef = useRef<MarqueeRef | null>(null)
+  // 路径绘制状态（钢笔/铅笔工具）
+  const pathDrawingRef = useRef<{
+    points: Array<{ x: number; y: number }>
+    tempElementId: string | null
+  } | null>(null)
 
   const store = useEditorStore()
   const canvas = store.activeCanvas()
@@ -195,9 +202,12 @@ export default function CanvasBoard() {
 
     drawGrid(ctx, canvas, zoom)
 
+    // 只在 Canvas 上绘制动态管道（dynamic-pipe），其他基础图形改用 SVG
     const sorted = [...canvas.elements].sort((a, b) => a.zIndex - b.zIndex)
     for (const element of sorted) {
-      drawElement(ctx, element, zoom)
+      if (element.type === 'dynamic-pipe') {
+        drawElement(ctx, element, zoom)
+      }
     }
 
     // Draw selection handles on overlay canvas
@@ -228,6 +238,36 @@ export default function CanvasBoard() {
           const m = marqueeRef.current
           drawMarquee(octx, m.startX, m.startY, m.curX, m.curY)
         }
+        // 绘制路径工具的临时预览（钢笔/多边形）
+        if (pathDrawingRef.current && pathDrawingRef.current.points.length > 0 && (activeTool === 'path' || activeTool === 'polygon')) {
+          octx.save()
+          octx.strokeStyle = '#4a9eff'
+          octx.fillStyle = activeTool === 'polygon' ? 'rgba(74,158,255,0.1)' : 'transparent'
+          octx.lineWidth = 2
+          octx.beginPath()
+          pathDrawingRef.current.points.forEach((p, i) => {
+            const px = p.x * zoom
+            const py = p.y * zoom
+            if (i === 0) {
+              octx.moveTo(px, py)
+            } else {
+              octx.lineTo(px, py)
+            }
+            // 绘制顶点圆点
+            octx.save()
+            octx.fillStyle = i === 0 ? '#22c55e' : '#4a9eff'
+            octx.beginPath()
+            octx.arc(px, py, 4, 0, Math.PI * 2)
+            octx.fill()
+            octx.restore()
+          })
+          if (activeTool === 'polygon' && pathDrawingRef.current.points.length >= 2) {
+            octx.closePath()
+            octx.fill()
+          }
+          octx.stroke()
+          octx.restore()
+        }
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -251,6 +291,29 @@ export default function CanvasBoard() {
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
   }, [])
+
+  // 键盘快捷键：Esc 取消绘制，Enter 完成绘制
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      // Esc: 取消当前路径绘制
+      if (e.key === 'Escape' && pathDrawingRef.current) {
+        pathDrawingRef.current = null
+        draw()
+        return
+      }
+      // Enter: 完成路径绘制（钢笔/多边形）
+      if (e.key === 'Enter' && pathDrawingRef.current && (activeTool === 'path' || activeTool === 'polygon')) {
+        const minPoints = activeTool === 'polygon' ? 3 : 2
+        if (pathDrawingRef.current.points.length >= minPoints) {
+          // 模拟双击事件
+          handleDoubleClick({} as React.MouseEvent)
+        }
+        return
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [activeTool, pathDrawingRef.current, canvas])
 
   const getCanvasPos = (e: React.MouseEvent) => {
     const rect = overlayCanvasRef.current!.getBoundingClientRect()
@@ -327,6 +390,44 @@ export default function CanvasBoard() {
       return
     }
 
+    // 钢笔工具：点击添加路径点
+    if (activeTool === 'path') {
+      if (!pathDrawingRef.current) {
+        // 开始新路径
+        pathDrawingRef.current = { points: [{ x: lx, y: ly }], tempElementId: null }
+      } else {
+        // 添加新点
+        pathDrawingRef.current.points.push({ x: lx, y: ly })
+      }
+      return
+    }
+
+    // 多边形工具：点击添加顶点
+    if (activeTool === 'polygon') {
+      if (!pathDrawingRef.current) {
+        // 开始新多边形
+        pathDrawingRef.current = { points: [{ x: lx, y: ly }], tempElementId: null }
+      } else {
+        // 检查是否点击了起点附近（闭合多边形）
+        const firstPoint = pathDrawingRef.current.points[0]
+        const dist = Math.sqrt(Math.pow(lx - firstPoint.x, 2) + Math.pow(ly - firstPoint.y, 2))
+        if (dist < 10 && pathDrawingRef.current.points.length >= 3) {
+          // 点击起点附近，完成多边形
+          handleDoubleClick(e)
+          return
+        }
+        // 添加新顶点
+        pathDrawingRef.current.points.push({ x: lx, y: ly })
+      }
+      return
+    }
+
+    // 铅笔工具：开始记录路径
+    if (activeTool === 'pencil') {
+      pathDrawingRef.current = { points: [{ x: lx, y: ly }], tempElementId: null }
+      return
+    }
+
     drawingRef.current = { startX: lx, startY: ly }
   }
 
@@ -366,6 +467,26 @@ export default function CanvasBoard() {
       marqueeRef.current.curX = mx
       marqueeRef.current.curY = my
       draw() // re-draw to show marquee live
+      return
+    }
+
+    // 铅笔工具：记录路径点
+    if (activeTool === 'pencil' && pathDrawingRef.current) {
+      const { x: lx, y: ly } = getCanvasPos(e)
+      pathDrawingRef.current.points.push({ x: lx, y: ly })
+      // 实时更新临时路径元素（如果已创建）
+      if (pathDrawingRef.current.tempElementId) {
+        const pathData = pathDrawingRef.current.points.map((p, i) =>
+          i === 0 ? `M ${p.x} ${p.y}` : `L ${p.x} ${p.y}`
+        ).join(' ')
+        store.updateElement(pathDrawingRef.current.tempElementId, { pathData })
+      }
+      return
+    }
+
+    // 钢笔/多边形工具：绘制时重绘以显示预览线
+    if ((activeTool === 'path' || activeTool === 'polygon') && pathDrawingRef.current) {
+      draw()
     }
   }
 
@@ -391,7 +512,46 @@ export default function CanvasBoard() {
       return
     }
 
-    if (drawingRef.current && activeTool !== 'select') {
+    // 铅笔工具：完成路径绘制
+    if (activeTool === 'pencil' && pathDrawingRef.current && pathDrawingRef.current.points.length > 1) {
+      pushHistory(store.project)
+      const simplified = simplifyPath(pathDrawingRef.current.points.map(p => ({ x: p.x, y: p.y })), 3)
+      const pathData = smoothPath(simplified, 0.5)
+
+      const bounds = {
+        minX: Math.min(...simplified.map(p => p.x)),
+        minY: Math.min(...simplified.map(p => p.y)),
+        maxX: Math.max(...simplified.map(p => p.x)),
+        maxY: Math.max(...simplified.map(p => p.y)),
+      }
+
+      const newEl: CanvasElement = {
+        id: generateId(),
+        type: 'pencil',
+        name: 'pencil',
+        x: bounds.minX,
+        y: bounds.minY,
+        width: bounds.maxX - bounds.minX || 50,
+        height: bounds.maxY - bounds.minY || 50,
+        rotation: 0,
+        visible: true,
+        locked: false,
+        zIndex: canvas.elements.length,
+        fill: 'transparent',
+        stroke: '#4a9eff',
+        strokeWidth: 2,
+        opacity: 1,
+        pathData,
+        pathPoints: simplified,
+        pathClosed: false,
+      }
+      store.addElement(newEl)
+      store.selectElements([newEl.id])
+      pathDrawingRef.current = null
+      return
+    }
+
+    if (drawingRef.current && activeTool !== 'select' && activeTool !== 'path' && activeTool !== 'pencil') {
       pushHistory(store.project)
       const rect = overlayCanvasRef.current!.getBoundingClientRect()
       const lx = (e.clientX - rect.left) / zoom
@@ -428,6 +588,58 @@ export default function CanvasBoard() {
       store.setTool('select')
       drawingRef.current = null
     }
+  }
+
+  // 双击完成钢笔路径或多边形
+  const handleDoubleClick = (e: React.MouseEvent) => {
+    if (!canvas || !pathDrawingRef.current) return
+    if (activeTool !== 'path' && activeTool !== 'polygon') return
+
+    const minPoints = activeTool === 'polygon' ? 3 : 2
+    if (pathDrawingRef.current.points.length < minPoints) {
+      pathDrawingRef.current = null
+      return
+    }
+
+    pushHistory(store.project)
+    const points = pathDrawingRef.current.points
+    const isClosed = activeTool === 'polygon'
+    const pathData = pointsToPathData(points.map(p => ({ x: p.x, y: p.y })), isClosed)
+
+    const bounds = {
+      minX: Math.min(...points.map(p => p.x)),
+      minY: Math.min(...points.map(p => p.y)),
+      maxX: Math.max(...points.map(p => p.x)),
+      maxY: Math.max(...points.map(p => p.y)),
+    }
+
+    const newEl: CanvasElement = {
+      id: generateId(),
+      type: activeTool,
+      name: activeTool,
+      x: bounds.minX,
+      y: bounds.minY,
+      width: bounds.maxX - bounds.minX || 50,
+      height: bounds.maxY - bounds.minY || 50,
+      rotation: 0,
+      visible: true,
+      locked: false,
+      zIndex: canvas.elements.length,
+      fill: 'transparent',
+      stroke: '#4a9eff',
+      strokeWidth: 2,
+      opacity: 1,
+      pathData,
+      pathPoints: points.map(p => ({ x: p.x, y: p.y })),
+      pathClosed: isClosed,
+    }
+    // 多边形默认有填充色
+    if (activeTool === 'polygon') {
+      newEl.fill = '#4a9eff33'
+    }
+    store.addElement(newEl)
+    store.selectElements([newEl.id])
+    pathDrawingRef.current = null
   }
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -508,6 +720,11 @@ export default function CanvasBoard() {
     el.visible && (el.type === 'text' || el.type === 'button')
   )
 
+  // 基础图形元素：改用 SVG 渲染
+  const shapeElements = canvas.elements.filter((el) =>
+    el.visible && ['rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'path', 'pencil'].includes(el.type)
+  )
+
   return (
     <div
       className="canvas-board scada-scroll"
@@ -550,6 +767,20 @@ export default function CanvasBoard() {
                       ? <FormFieldWidget key={el.id} el={el} zoom={zoom} isPreview={false} canvas={canvas} valuesRef={formValuesRef} />
                       : <ImageWidget key={el.id} el={el} zoom={zoom} />
         )}
+        {/* 基础图形 SVG overlays — 按 zIndex 排序 */}
+        {shapeElements.map((el) => {
+          const mergedData = { ...pointData, ...highFreqData }
+          const conditionalStyles = liveDataOn ? resolveConditionalStyles(el, mergedData, exprScope) : {}
+          return (
+            <ShapeSvg
+              key={`shape-${el.id}`}
+              el={el}
+              zoom={zoom}
+              isSelected={selectedIds.includes(el.id)}
+              conditionalStyles={conditionalStyles}
+            />
+          )
+        })}
         {/* Text/button DOM overlays — ensure correct stacking above image-bg regardless of zIndex */}
         {textButtonElements.map((el) => {
           const mergedData = { ...pointData, ...highFreqData }
@@ -603,6 +834,7 @@ export default function CanvasBoard() {
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
+          onDoubleClick={handleDoubleClick}
           onContextMenu={handleContextMenu}
         />
       </div>

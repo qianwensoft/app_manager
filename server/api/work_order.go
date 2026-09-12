@@ -759,9 +759,14 @@ func enrichWorkOrder(wo *models.WorkOrder) workOrderView {
 	return v
 }
 
-// ListMyWorkOrders Agent 进度/结果查询：按 device_id 返回（含设备名/提交人）。
+// ListMyWorkOrders Agent 进度/结果查询：按 device_id 和/或 user_id 返回（含设备名/提交人）。
+// 默认仅查询「当前设备 AND 当前登录账号」的工单（AND 逻辑：device_id 匹配且 created_by 匹配）。
+// 兼容：仅 JWT（无 device token）→ 退化为按 created_by 查询；仅 device token（无登录）→ 退化为按 device_id 查询。
 func ListMyWorkOrders(c *gin.Context) {
 	deviceID := c.GetUint("device_id")
+	userID := c.GetUint("user_id")
+
+	// 允许查询参数覆盖（主要用于测试或特殊场景）
 	if deviceID == 0 {
 		if d := c.Query("device_id"); d != "" {
 			if n, err := strconv.Atoi(d); err == nil {
@@ -769,14 +774,31 @@ func ListMyWorkOrders(c *gin.Context) {
 			}
 		}
 	}
-	if deviceID == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "device_id required"})
+
+	// 至少需要 device_id 或 user_id 其中之一
+	if deviceID == 0 && userID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "device_id or user_id required"})
 		return
 	}
+
+	q := database.DB.Model(&models.WorkOrder{}).
+		Where("archived = ? OR archived IS NULL", false)
+
+	// 构建过滤条件：同时具备 device_id 与 user_id 时使用 AND（仅查询「当前设备 & 当前账号」的工单）；
+	// 只有其中一个时退化为单条件查询，避免空结果。
+	if deviceID > 0 && userID > 0 {
+		q = q.Where("device_id = ? AND created_by = ?", deviceID, userID)
+	} else if deviceID > 0 {
+		// 仅设备token：查询设备的工单
+		q = q.Where("device_id = ?", deviceID)
+	} else if userID > 0 {
+		// 仅JWT用户：查询用户创建的工单
+		q = q.Where("created_by = ?", userID)
+	}
+
 	var rows []models.WorkOrder
-	database.DB.Where("device_id = ?", deviceID).
-		Where("archived = ? OR archived IS NULL", false).
-		Order("id DESC").Limit(100).Find(&rows)
+	q.Order("id DESC").Limit(100).Find(&rows)
+
 	out := make([]workOrderView, 0, len(rows))
 	for i := range rows {
 		out = append(out, enrichWorkOrder(&rows[i]))
@@ -784,34 +806,59 @@ func ListMyWorkOrders(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": out})
 }
 
-// GetMyWorkOrder device-token 查看自己设备提交的工单详情（含 items + activities）。
+// GetMyWorkOrder 查看自己设备或自己创建的工单详情（含 items + activities）。
+// 支持 device-token（查看本设备工单）或 JWT（查看自己创建的工单）。
 func GetMyWorkOrder(c *gin.Context) {
 	deviceID := c.GetUint("device_id")
+	userID := c.GetUint("user_id")
+
 	var wo models.WorkOrder
 	if err := database.DB.First(&wo, c.Param("id")).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		return
 	}
-	// device-token 仅可查看本设备工单；JWT 用户走管理端接口，这里不额外放行。
-	if deviceID > 0 && wo.DeviceID != deviceID {
+
+	// 权限检查：device-token 可查看本设备工单，JWT 用户可查看自己创建的工单
+	canView := false
+	if deviceID > 0 && wo.DeviceID == deviceID {
+		canView = true
+	}
+	if userID > 0 && wo.CreatedBy == userID {
+		canView = true
+	}
+
+	if !canView {
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 		return
 	}
+
 	database.DB.Where("work_order_id = ?", wo.ID).Order("id ASC").Find(&wo.Items)
 	database.DB.Where("work_order_id = ?", wo.ID).Order("id DESC").Find(&wo.Activities)
 	c.JSON(http.StatusOK, gin.H{"data": enrichWorkOrder(&wo)})
 }
 
-// UpdateMyWorkOrder device-token 修改本设备工单的标题、描述、其他编码等（仅未关闭的工单）。
+// UpdateMyWorkOrder 修改自己设备或自己创建的工单的标题、描述、其他编码等（仅未关闭的工单）。
+// 支持 device-token（修改本设备工单）或 JWT（修改自己创建的工单）。
 func UpdateMyWorkOrder(c *gin.Context) {
 	deviceID := c.GetUint("device_id")
+	userID := c.GetUint("user_id")
+
 	var wo models.WorkOrder
 	if err := database.DB.First(&wo, c.Param("id")).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		return
 	}
-	// device-token 仅可修改本设备工单
-	if deviceID > 0 && wo.DeviceID != deviceID {
+
+	// 权限检查：device-token 可修改本设备工单，JWT 用户可修改自己创建的工单
+	canEdit := false
+	if deviceID > 0 && wo.DeviceID == deviceID {
+		canEdit = true
+	}
+	if userID > 0 && wo.CreatedBy == userID {
+		canEdit = true
+	}
+
+	if !canEdit {
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 		return
 	}
@@ -902,15 +949,28 @@ var deviceWorkOrderStatuses = map[string]bool{
 	"in_progress": true, "resolved": true, "closed": true, "reopened": true,
 }
 
-// ChangeMyWorkOrderStatus device-token 对本设备工单做催单/重开/解决/关闭。
+// ChangeMyWorkOrderStatus 对自己设备或自己创建的工单做催单/重开/解决/关闭。
+// 支持 device-token（操作本设备工单）或 JWT（操作自己创建的工单）。
 func ChangeMyWorkOrderStatus(c *gin.Context) {
 	deviceID := c.GetUint("device_id")
+	userID := c.GetUint("user_id")
+
 	var wo models.WorkOrder
 	if err := database.DB.First(&wo, c.Param("id")).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
 		return
 	}
-	if deviceID > 0 && wo.DeviceID != deviceID {
+
+	// 权限检查：device-token 可操作本设备工单，JWT 用户可操作自己创建的工单
+	canOperate := false
+	if deviceID > 0 && wo.DeviceID == deviceID {
+		canOperate = true
+	}
+	if userID > 0 && wo.CreatedBy == userID {
+		canOperate = true
+	}
+
+	if !canOperate {
 		c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 		return
 	}
@@ -1150,7 +1210,8 @@ func AgentListWorkOrders(c *gin.Context) {
 	// 默认仅未归档
 	q = q.Where("archived = ? OR archived IS NULL", false)
 
-	// "我的工单"场景：按设备ID或创建者过滤
+	// "我的工单"场景：默认按设备ID AND 创建者同时过滤（仅查询「当前设备 & 当前账号」的工单）。
+	// 兼容：仅 JWT（无 device token）→ 按 created_by；仅 device token（无登录）→ 按 device_id。
 	if c.Query("my") == "1" {
 		deviceID := c.GetUint("device_id")
 		userID := c.GetUint("user_id")
@@ -1160,8 +1221,8 @@ func AgentListWorkOrders(c *gin.Context) {
 		if role == "admin" || role == "operator" {
 			// 不添加过滤条件，返回所有工单
 		} else if userID > 0 && deviceID > 0 {
-			// JWT用户 + 设备token：设备工单 OR 用户创建的工单
-			q = q.Where("device_id = ? OR created_by = ?", deviceID, userID)
+			// JWT用户 + 设备token：device_id 匹配且 created_by 匹配
+			q = q.Where("device_id = ? AND created_by = ?", deviceID, userID)
 		} else if userID > 0 {
 			// 仅JWT用户：用户创建的工单
 			q = q.Where("created_by = ?", userID)

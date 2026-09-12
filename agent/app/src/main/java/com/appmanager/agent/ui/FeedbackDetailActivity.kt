@@ -61,16 +61,17 @@ class FeedbackDetailActivity : AppCompatActivity() {
             try {
                 val cfg = AgentConfig.get(this)
                 val base = ServerUrlUtil.httpBaseFromWs(cfg.serverUrl)
-                val json = AgentCatalogApi.getJson(base, "/api/work-orders/mine/$woId", cfg.deviceToken.trim())
+                val json = AgentCatalogApi.getJsonWithAuth(base, "/api/work-orders/mine/$woId", cfg.userToken.trim(), cfg.deviceToken.trim())
                 val wo = JSONObject(json).optJSONObject("data") ?: JSONObject()
-                runOnUiThread { render(wo, base, cfg.deviceToken.trim()) }
+                runOnUiThread { render(wo, base, cfg) }
             } catch (e: Exception) {
                 runOnUiThread { Toast.makeText(this, "加载失败：${e.message}", Toast.LENGTH_SHORT).show() }
             }
         }
     }
 
-    private fun render(wo: JSONObject, base: String, token: String) {
+    private fun render(wo: JSONObject, base: String, cfg: AgentConfig) {
+        val token = cfg.deviceToken.trim()
         container.removeAllViews()
         currentStatus = wo.optString("status")
         currentPriority = wo.optString("priority", "normal")
@@ -185,7 +186,7 @@ class FeedbackDetailActivity : AppCompatActivity() {
                             val cfg = AgentConfig.get(this)
                             val base = ServerUrlUtil.httpBaseFromWs(cfg.serverUrl)
                             val body = JSONObject().put("priority", newPriority).toString()
-                            AgentCatalogApi.putJson(base, "/api/work-orders/mine/$woId", cfg.deviceToken.trim(), body)
+                            AgentCatalogApi.putJsonWithAuth(base, "/api/work-orders/mine/$woId", cfg.userToken.trim(), cfg.deviceToken.trim(), body)
                             runOnUiThread {
                                 Toast.makeText(this, "优先级已更新", Toast.LENGTH_SHORT).show()
                                 load()
@@ -207,7 +208,7 @@ class FeedbackDetailActivity : AppCompatActivity() {
             try {
                 val cfg = AgentConfig.get(this)
                 val base = ServerUrlUtil.httpBaseFromWs(cfg.serverUrl)
-                val json = AgentCatalogApi.getJson(base, "/api/work-orders/tags", cfg.deviceToken.trim())
+                val json = AgentCatalogApi.getJsonWithAuth(base, "/api/work-orders/tags", cfg.userToken.trim(), cfg.deviceToken.trim())
                 val arr = JSONObject(json).optJSONArray("data") ?: JSONArray()
                 val codes = ArrayList<String>(); val names = ArrayList<String>()
                 for (i in 0 until arr.length()) {
@@ -239,7 +240,7 @@ class FeedbackDetailActivity : AppCompatActivity() {
                 val cfg = AgentConfig.get(this)
                 val base = ServerUrlUtil.httpBaseFromWs(cfg.serverUrl)
                 val body = JSONObject().put("tags", JSONArray(tagCodes))
-                AgentCatalogApi.putJson(base, "/api/work-orders/$woId/tags", cfg.deviceToken.trim(), body.toString())
+                AgentCatalogApi.putJsonWithAuth(base, "/api/work-orders/$woId/tags", cfg.userToken.trim(), cfg.deviceToken.trim(), body.toString())
                 runOnUiThread { Toast.makeText(this, "标签已更新", Toast.LENGTH_SHORT).show(); load() }
             } catch (e: Exception) {
                 runOnUiThread { Toast.makeText(this, "保存失败：${e.message}", Toast.LENGTH_SHORT).show() }
@@ -276,7 +277,7 @@ class FeedbackDetailActivity : AppCompatActivity() {
                 val body = JSONObject()
                 if (status != null) body.put("status", status)
                 if (comment.isNotBlank()) body.put("comment", comment)
-                AgentCatalogApi.postJson(base, "/api/work-orders/mine/$woId/status", cfg.deviceToken.trim(), body.toString())
+                AgentCatalogApi.postJsonWithAuth(base, "/api/work-orders/mine/$woId/status", cfg.userToken.trim(), cfg.deviceToken.trim(), body.toString())
                 runOnUiThread { Toast.makeText(this, "已提交", Toast.LENGTH_SHORT).show(); load() }
             } catch (e: Exception) {
                 runOnUiThread { Toast.makeText(this, "操作失败：${e.message}", Toast.LENGTH_SHORT).show() }

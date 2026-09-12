@@ -2821,6 +2821,93 @@ function ElementBasicTabContent({ el, onUpdate, onUngroup, canvas }: {
         </div>
       </Section>
 
+      {(el.type === 'path' || el.type === 'pencil' || el.type === 'polygon') && (
+        <Section title="路径">
+          <Row label="闭合路径">
+            <Toggle
+              checked={!!el.pathClosed}
+              onChange={(v) => onUpdate('pathClosed', v)}
+              label={el.pathClosed ? '闭合' : '开放'}
+            />
+          </Row>
+          <Row label="路径点数">
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+              {el.pathPoints?.length ?? 0} 个点
+            </span>
+          </Row>
+          {el.type === 'polygon' && (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 4 }}>快捷创建正多边形：</div>
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                {[3, 4, 5, 6, 8].map((sides) => (
+                  <button
+                    key={sides}
+                    onClick={() => {
+                      const { generateRegularPolygon, pointsToPathData } = require('@/utils/pathTools')
+                      const cx = el.x + el.width / 2
+                      const cy = el.y + el.height / 2
+                      const radius = Math.min(el.width, el.height) / 2 * 0.9
+                      const points = generateRegularPolygon(cx, cy, radius, sides, -90)
+                      const pathData = pointsToPathData(points, true)
+                      onUpdate('pathPoints', points)
+                      onUpdate('pathData', pathData)
+                      onUpdate('pathClosed', true)
+                    }}
+                    style={{
+                      padding: '4px 8px',
+                      fontSize: 10,
+                      background: 'var(--bg-surface)',
+                      color: 'var(--text-primary)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 'var(--radius-sm)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {sides === 3 ? '△' : sides === 4 ? '◇' : sides === 5 ? '⬟' : sides === 6 ? '⬡' : `${sides}边`}
+                  </button>
+                ))}
+              </div>
+              <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 4 }}>星形：</div>
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                {[5, 6, 8].map((points) => (
+                  <button
+                    key={`star-${points}`}
+                    onClick={() => {
+                      const { generateStar, pointsToPathData } = require('@/utils/pathTools')
+                      const cx = el.x + el.width / 2
+                      const cy = el.y + el.height / 2
+                      const outerRadius = Math.min(el.width, el.height) / 2 * 0.9
+                      const innerRadius = outerRadius * 0.4
+                      const starPoints = generateStar(cx, cy, outerRadius, innerRadius, points)
+                      const pathData = pointsToPathData(starPoints, true)
+                      onUpdate('pathPoints', starPoints)
+                      onUpdate('pathData', pathData)
+                      onUpdate('pathClosed', true)
+                    }}
+                    style={{
+                      padding: '4px 8px',
+                      fontSize: 10,
+                      background: 'var(--bg-surface)',
+                      color: 'var(--text-primary)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 'var(--radius-sm)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ★{points}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div style={{ marginTop: 8, fontSize: 9, color: 'var(--text-muted)', lineHeight: 1.4, padding: 6, background: 'var(--bg-surface)', borderRadius: 3 }}>
+            {el.type === 'path' && '双击画布完成钢笔路径绘制'}
+            {el.type === 'pencil' && '松开鼠标自动平滑铅笔路径'}
+            {el.type === 'polygon' && '点击添加顶点，双击或点击起点完成多边形'}
+          </div>
+        </Section>
+      )}
+
       {el.type.startsWith('echarts-') && (
         <ChartConfigSection el={el} onUpdate={onUpdate} />
       )}

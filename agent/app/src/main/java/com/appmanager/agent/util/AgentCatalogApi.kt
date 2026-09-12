@@ -1,5 +1,7 @@
 package com.appmanager.agent.util
 
+import com.appmanager.agent.BuildConfig
+import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
@@ -12,7 +14,19 @@ import java.util.concurrent.TimeUnit
 
 object AgentCatalogApi {
 
+    /**
+     * 统一 UA：`app-manager-agent/<versionName>`，服务端可据此识别 Agent 端调用并解析版本。
+     * 通过 OkHttp 拦截器写入，覆盖该客户端下全部 GET / POST / PUT / DELETE / 文件上传接口。
+     */
+    private val userAgentInterceptor = Interceptor { chain ->
+        val req = chain.request().newBuilder()
+            .header("User-Agent", "app-manager-agent/${BuildConfig.VERSION_NAME}")
+            .build()
+        chain.proceed(req)
+    }
+
     private val client = OkHttpClient.Builder()
+        .addInterceptor(userAgentInterceptor)
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
@@ -37,8 +51,9 @@ object AgentCatalogApi {
     }
 
     /**
-     * GET 请求，优先使用 JWT token（如果提供），否则使用 device token
-     * 用于支持 FormRuntimeAuthMiddleware 的接口（工单相关）
+     * GET 请求，同时发送 JWT 与 device token（任一通过即可）。
+     * 用于支持 FormRuntimeAuthMiddleware 的接口（工单相关），
+     * 即便 JWT 已过期，device token 仍能保证请求不被 401 拒绝。
      */
     @Throws(IOException::class)
     fun getJsonWithAuth(httpBase: String, path: String, jwtToken: String, deviceToken: String): String {
@@ -47,10 +62,12 @@ object AgentCatalogApi {
         val url = base + p
         val reqBuilder = Request.Builder().url(url)
 
-        // 优先使用 JWT token
+        // 同时携带 JWT 和 device token，由服务端 FormRuntimeAuthMiddleware 各自独立校验。
+        // 这样当 JWT 过期、用户重新登录前，device token 仍可保证调用不被 401 拒绝。
         if (jwtToken.isNotBlank()) {
             reqBuilder.header("Authorization", "Bearer $jwtToken")
-        } else {
+        }
+        if (deviceToken.isNotBlank()) {
             reqBuilder.header("X-Device-Token", deviceToken)
         }
 
@@ -108,8 +125,8 @@ object AgentCatalogApi {
     }
 
     /**
-     * POST 请求，优先使用 JWT token（如果提供），否则使用 device token
-     * 用于支持 FormRuntimeAuthMiddleware 的接口（工单相关）
+     * POST 请求，同时发送 JWT 与 device token（任一通过即可）。
+     * 用于支持 FormRuntimeAuthMiddleware 的接口（工单相关）。
      */
     @Throws(IOException::class)
     fun postJsonWithAuth(httpBase: String, path: String, jwtToken: String, deviceToken: String, jsonBody: String = "{}"): String {
@@ -119,10 +136,11 @@ object AgentCatalogApi {
         val body = jsonBody.toRequestBody(jsonMedia)
         val reqBuilder = Request.Builder().url(url).post(body)
 
-        // 优先使用 JWT token
+        // 同时携带 JWT 和 device token，避免 JWT 过期后无 device token 兜底导致 401。
         if (jwtToken.isNotBlank()) {
             reqBuilder.header("Authorization", "Bearer $jwtToken")
-        } else {
+        }
+        if (deviceToken.isNotBlank()) {
             reqBuilder.header("X-Device-Token", deviceToken)
         }
 
@@ -147,6 +165,35 @@ object AgentCatalogApi {
             .put(body)
             .build()
         client.newCall(req).execute().use { resp ->
+            val respBody = resp.body?.string() ?: ""
+            if (!resp.isSuccessful) {
+                throw IOException("HTTP ${resp.code}: ${respBody.take(200)}")
+            }
+            return respBody
+        }
+    }
+
+    /**
+     * PUT 请求，同时发送 JWT 与 device token（任一通过即可）。
+     * 用于支持 FormRuntimeAuthMiddleware 的接口（工单相关）。
+     */
+    @Throws(IOException::class)
+    fun putJsonWithAuth(httpBase: String, path: String, jwtToken: String, deviceToken: String, jsonBody: String = "{}"): String {
+        val base = httpBase.trim().trimEnd('/')
+        val p = if (path.startsWith("/")) path else "/$path"
+        val url = base + p
+        val body = jsonBody.toRequestBody(jsonMedia)
+        val reqBuilder = Request.Builder().url(url).put(body)
+
+        // 同时携带 JWT 和 device token，避免 JWT 过期后无 device token 兜底导致 401。
+        if (jwtToken.isNotBlank()) {
+            reqBuilder.header("Authorization", "Bearer $jwtToken")
+        }
+        if (deviceToken.isNotBlank()) {
+            reqBuilder.header("X-Device-Token", deviceToken)
+        }
+
+        client.newCall(reqBuilder.build()).execute().use { resp ->
             val respBody = resp.body?.string() ?: ""
             if (!resp.isSuccessful) {
                 throw IOException("HTTP ${resp.code}: ${respBody.take(200)}")
@@ -244,7 +291,7 @@ object AgentCatalogApi {
     }
 
     /**
-     * 上传文件，优先使用 JWT token（如果提供），否则使用 device token
+     * 上传文件，同时发送 JWT 与 device token（任一通过即可）。
      */
     @Throws(IOException::class)
     fun uploadFileWithAuth(
@@ -265,10 +312,11 @@ object AgentCatalogApi {
 
         val reqBuilder = Request.Builder().url(url).post(builder.build())
 
-        // 优先使用 JWT token
+        // 同时携带 JWT 和 device token，避免 JWT 过期后无 device token 兜底导致 401。
         if (jwtToken.isNotBlank()) {
             reqBuilder.header("Authorization", "Bearer $jwtToken")
-        } else {
+        }
+        if (deviceToken.isNotBlank()) {
             reqBuilder.header("X-Device-Token", deviceToken)
         }
 
@@ -282,6 +330,7 @@ object AgentCatalogApi {
     }
 
     private val uploadClient = OkHttpClient.Builder()
+        .addInterceptor(userAgentInterceptor)
         .connectTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(300, TimeUnit.SECONDS)
         .readTimeout(120, TimeUnit.SECONDS)

@@ -17,6 +17,7 @@ import type { CanvasElement } from '@/types'
 import { resolveConditionalStyles } from '@/runtime/conditionalStyles'
 import AnimationStyleInjector from './AnimationStyleInjector'
 import ElementEventHitLayer from './ElementEventHitLayer'
+import ShapeSvg from './ShapeSvg'
 import ChartWidget from './ChartWidget'
 import TrendWidget from './TrendWidget'
 import UPlotTrendWidget from './UPlotTrendWidget'
@@ -201,16 +202,22 @@ export default function CanvasViewer({
 
     drawGrid(ctx, canvas, z)
 
+    // 只在 Canvas 上绘制动态管道，其他基础图形改用 SVG
     const sorted = [...allCanvasElements].sort((a, b) => a.zIndex - b.zIndex)
     for (const element of sorted) {
-      const animState = getCanvasAnimState(element, pointData, animNow)
-      drawElement(ctx, element, z, animState)
+      if (element.type === 'dynamic-pipe') {
+        const animState = getCanvasAnimState(element, pointData, animNow)
+        drawElement(ctx, element, z, animState)
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canvas, z, pointData, animNow, dateTimeTick, allCanvasElements])
 
   const domElements = runtimeElements.filter(
     (el) => el.visible && (el.type === 'text' || el.type === 'button'),
+  )
+  const shapeElements = runtimeElements.filter(
+    (el) => el.visible && ['rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'path', 'pencil'].includes(el.type),
   )
   // component 工作流触发源元素中，未被 text/button DOM 覆盖层处理的（组合/图形/图片等），
   // 需要单独渲染透明点击热区，否则点击不触发其 component 工作流。
@@ -321,6 +328,17 @@ export default function CanvasViewer({
         {formFieldElements.map((el) => (
           <FormFieldWidget key={el.id} el={el} zoom={z} isPreview={true} canvas={canvas} valuesRef={formValuesRef} pointData={pointData} />
         ))}
+        {shapeElements.map((el) => {
+          const conditionalStyles = resolveConditionalStyles(el, pointData, exprScope)
+          return (
+            <ShapeSvg
+              key={`shape-${el.id}`}
+              el={el}
+              zoom={z}
+              conditionalStyles={conditionalStyles}
+            />
+          )
+        })}
         {domElements.map((el) => {
           const displayText = resolveElementText(el, pointData, canvas.elements, exprScope)
           const isWfSource = componentSourceIds.has(el.id)

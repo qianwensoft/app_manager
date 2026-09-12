@@ -161,6 +161,9 @@ const groups: { name: string; icon: string; items: WidgetDef[] }[] = [
       { type: 'circle',  label: '圆形', iconPath: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z', defaults: { width: 80, height: 80, fill: '#4a9eff33', stroke: '#4a9eff' } },
       { type: 'ellipse', label: '椭圆', iconPath: 'M12 19c-4.97 0-9-3.13-9-7s4.03-7 9-7 9 3.13 9 7-4.03 7-9 7Z', defaults: { width: 120, height: 70, fill: '#4a9eff33', stroke: '#4a9eff' } },
       { type: 'line',    label: '直线', iconPath: 'M5 19L19 5', defaults: { width: 120, height: 2, stroke: '#4a9eff', strokeWidth: 2 } },
+      { type: 'polygon', label: '多边形', iconPath: 'M12 2L2 19h20L12 2zM12 2l7 12H5l7-12z', defaults: { width: 100, height: 100, fill: '#4a9eff33', stroke: '#4a9eff', strokeWidth: 2, pathPoints: [], pathClosed: true } },
+      { type: 'path',    label: '钢笔', iconPath: 'M12 19l7-7 3 3-7 7-3-3z M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z M2 2l7.586 7.586', defaults: { width: 150, height: 150, stroke: '#4a9eff', strokeWidth: 2, fill: 'transparent', pathData: 'M 20 20 Q 50 10 80 20 T 130 20', pathPoints: [], pathClosed: false } },
+      { type: 'pencil',  label: '铅笔', iconPath: 'M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z', defaults: { width: 150, height: 150, stroke: '#4a9eff', strokeWidth: 2, fill: 'transparent', pathData: '', pathPoints: [], pathClosed: false } },
     ],
   },
   {
