@@ -121,7 +121,79 @@ func MergeParamsJSONObjectIntoVars(vars map[string]string, rawJSON string) {
 	MergeStringStringMapIntoVars(vars, mm)
 }
 
-// MergeStepTemplateParamsFromConfigJSON 从步骤 config 的 template_params 对象合并进 vars（须在 MergeStepEventDataToContext 之后调用，以便覆盖 event_data 写入的 context）。
+// MergeStepParamMappingsFromConfigJSON 从步骤 config 的 param_mappings 数组解析并合并进 vars。
+// 这是通用的参数映射处理（HTTP、agent 步骤等都可用）。
+// 须在 MergeStepEventDataToContext 之后调用，以便引用 {{context.*}}。
+// ParamMapping 类型定义见 data_interface_step.go。
+func MergeStepParamMappingsFromConfigJSON(vars map[string]string, configJSON string) {
+	configJSON = strings.TrimSpace(configJSON)
+	if configJSON == "" || configJSON == "{}" {
+		return
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal([]byte(configJSON), &m); err != nil || m == nil {
+		return
+	}
+	raw, ok := m["param_mappings"]
+	if !ok || raw == nil {
+		return
+	}
+	rawJSON, err := json.Marshal(raw)
+	if err != nil {
+		return
+	}
+	var mappings []ParamMapping
+	if err := json.Unmarshal(rawJSON, &mappings); err != nil {
+		return
+	}
+	for _, mapping := range mappings {
+		param := strings.TrimSpace(mapping.Param)
+		if param == "" {
+			continue
+		}
+		// 确保参数名带 {{}} 包装
+		paramKey := param
+		if !strings.HasPrefix(paramKey, "{{") {
+			paramKey = "{{" + paramKey + "}}"
+		}
+
+		source := strings.ToLower(strings.TrimSpace(mapping.Source))
+		value := strings.TrimSpace(mapping.Value)
+
+		switch source {
+		case "context":
+			// value 可能是 "context.payload" 或已经是完整的 "{{context.payload}}"
+			var lookupKey string
+			if strings.HasPrefix(value, "{{") && strings.HasSuffix(value, "}}") {
+				lookupKey = value
+			} else if strings.HasPrefix(value, "context.") {
+				lookupKey = "{{" + value + "}}"
+			} else {
+				lookupKey = "{{context." + value + "}}"
+			}
+			if v, ok := vars[lookupKey]; ok {
+				vars[paramKey] = v
+			}
+		case "var":
+			// value 是完整的占位符或需要展开的模板
+			if v, ok := vars[value]; ok {
+				vars[paramKey] = v
+			} else {
+				vars[paramKey] = expandTemplate(value, vars)
+			}
+		case "fixed":
+			// 固定值，直接赋值
+			vars[paramKey] = value
+		default:
+			// 未知 source，尝试作为模板展开
+			vars[paramKey] = expandTemplate(value, vars)
+		}
+	}
+}
+
+// MergeStepTemplateParamsFromConfigJSON 从步骤 config 的 template_params 对象和 param_mappings 数组合并进 vars。
+// 须在 MergeStepEventDataToContext 之后调用，以便引用 {{context.*}} 或覆盖 event_data 写入的 context。
+// 优先级：param_mappings > template_params（param_mappings 是新版 UI 生成的配置）
 func MergeStepTemplateParamsFromConfigJSON(vars map[string]string, configJSON string) {
 	configJSON = strings.TrimSpace(configJSON)
 	if configJSON == "" || configJSON == "{}" {
@@ -131,21 +203,77 @@ func MergeStepTemplateParamsFromConfigJSON(vars map[string]string, configJSON st
 	if err := json.Unmarshal([]byte(configJSON), &m); err != nil || m == nil {
 		return
 	}
+
+	// 先处理 template_params（旧版，低优先级）
 	raw, ok := m["template_params"]
-	if !ok || raw == nil {
+	if ok && raw != nil {
+		if t, ok := raw.(map[string]interface{}); ok && t != nil {
+			mm := make(map[string]string, len(t))
+			for k, v := range t {
+				k = strings.TrimSpace(k)
+				if k == "" {
+					continue
+				}
+				mm[k] = strings.TrimSpace(fmt.Sprint(v))
+			}
+			MergeStringStringMapIntoVars(vars, mm)
+		}
+	}
+
+	// 再处理 param_mappings（新版 UI，高优先级，会覆盖同名 template_params）
+	rawMappings, ok := m["param_mappings"]
+	if !ok || rawMappings == nil {
 		return
 	}
-	t, ok := raw.(map[string]interface{})
-	if !ok || t == nil {
+	rawJSON, err := json.Marshal(rawMappings)
+	if err != nil {
 		return
 	}
-	mm := make(map[string]string, len(t))
-	for k, v := range t {
-		k = strings.TrimSpace(k)
-		if k == "" {
+	var mappings []ParamMapping
+	if err := json.Unmarshal(rawJSON, &mappings); err != nil {
+		return
+	}
+	for _, mapping := range mappings {
+		param := strings.TrimSpace(mapping.Param)
+		if param == "" {
 			continue
 		}
-		mm[k] = strings.TrimSpace(fmt.Sprint(v))
+		// 确保参数名带 {{}} 包装
+		paramKey := param
+		if !strings.HasPrefix(paramKey, "{{") {
+			paramKey = "{{" + paramKey + "}}"
+		}
+
+		source := strings.ToLower(strings.TrimSpace(mapping.Source))
+		value := strings.TrimSpace(mapping.Value)
+
+		switch source {
+		case "context":
+			// value 可能是 "context.payload" 或已经是完整的 "{{context.payload}}"
+			var lookupKey string
+			if strings.HasPrefix(value, "{{") && strings.HasSuffix(value, "}}") {
+				lookupKey = value
+			} else if strings.HasPrefix(value, "context.") {
+				lookupKey = "{{" + value + "}}"
+			} else {
+				lookupKey = "{{context." + value + "}}"
+			}
+			if v, ok := vars[lookupKey]; ok {
+				vars[paramKey] = v
+			}
+		case "var":
+			// value 是完整的占位符或需要展开的模板
+			if v, ok := vars[value]; ok {
+				vars[paramKey] = v
+			} else {
+				vars[paramKey] = expandTemplate(value, vars)
+			}
+		case "fixed":
+			// 固定值，直接赋值
+			vars[paramKey] = value
+		default:
+			// 未知 source，尝试作为模板展开
+			vars[paramKey] = expandTemplate(value, vars)
+		}
 	}
-	MergeStringStringMapIntoVars(vars, mm)
 }
