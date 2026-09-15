@@ -154,6 +154,7 @@ func UpdateDeviceMDMConfig(c *gin.Context) {
 	var cfg models.DeviceMDMConfig
 	database.DB.FirstOrInit(&cfg, models.DeviceMDMConfig{DeviceID: device.ID})
 	prevEnabled := cfg.MDMEnabled
+	prevEnterpriseID := cfg.EnterpriseID
 	cfg.DeviceID = device.ID
 	cfg.MDMEnabled = req.MDMEnabled
 	cfg.EnterpriseID = req.EnterpriseID
@@ -162,8 +163,8 @@ func UpdateDeviceMDMConfig(c *gin.Context) {
 		return
 	}
 
-	// Notify agent only when mdm_enabled changes.
-	if prevEnabled != req.MDMEnabled {
+	// Notify agent when mdm_enabled or enterprise_id changes.
+	if prevEnabled != req.MDMEnabled || prevEnterpriseID != req.EnterpriseID {
 		routeKey, rerr := agent.AgentConnectionKey(c.Param("id"))
 		if rerr == nil && agent.AgentHub.IsConnected(routeKey) {
 			enterpriseCode := ""

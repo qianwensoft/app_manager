@@ -13,7 +13,7 @@ func TestMergeStepTemplateParamsFromConfigJSON(t *testing.T) {
 
 func TestMergeStepParamMappingsFromConfigJSON(t *testing.T) {
 	v := map[string]string{
-		"{{context.payload}}": "test_payload_value",
+		"{{context.payload}}":    "test_payload_value",
 		"{{context.event_type}}": "新增",
 	}
 
