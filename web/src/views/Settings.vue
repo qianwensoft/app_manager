@@ -499,6 +499,91 @@
         </el-form>
       </el-tab-pane>
 
+      <!-- MinIO / S3 对象存储配置 -->
+      <el-tab-pane label="对象存储" name="minio">
+        <h3 style="margin: 0 0 16px">MinIO / S3 兼容对象存储</h3>
+        <el-alert
+          type="info"
+          :closable="false"
+          show-icon
+          title="启用后，文档/工单/录屏/资源中心的文件上传将自动切换到对象存储；未配置时回退本地磁盘。SecretKey 写入数据库加密保存。"
+          style="margin-bottom: 16px; max-width: 820px"
+        />
+
+        <el-form :model="minioForm" label-width="160px" style="max-width: 720px">
+          <el-form-item label="启用">
+            <el-switch v-model="minioForm.enabled" />
+          </el-form-item>
+          <el-form-item label="Endpoint">
+            <el-input v-model="minioForm.endpoint" placeholder="如 127.0.0.1:9000" clearable />
+          </el-form-item>
+          <el-form-item label="PublicHost">
+            <el-input v-model="minioForm.public_host" placeholder="浏览器侧访问的 host（CDN/反向代理），留空使用 Endpoint" clearable />
+          </el-form-item>
+          <el-form-item label="使用 HTTPS">
+            <el-switch v-model="minioForm.use_ssl" />
+          </el-form-item>
+          <el-form-item label="Region">
+            <el-input v-model="minioForm.region" placeholder="留空（MinIO 单节点无 region）" clearable />
+          </el-form-item>
+          <el-form-item label="Access Key">
+            <el-input v-model="minioForm.access_key" placeholder="管理员账户名" clearable />
+          </el-form-item>
+          <el-form-item label="Secret Key">
+            <el-input
+              v-model="minioForm.secret_key"
+              type="password"
+              show-password
+              :placeholder="minioSecretSet ? '已配置（留空则不修改）' : '管理员密码'"
+            />
+          </el-form-item>
+          <el-form-item label="默认 Bucket">
+            <el-input v-model="minioForm.default_bucket" placeholder="如 app-manager-uploads" clearable />
+            <span style="color: #909399; font-size: 12px; margin-left: 8px">首次启用时会自动 ensure 存在（幂等）。</span>
+          </el-form-item>
+          <el-form-item label="Bucket 前缀">
+            <el-input v-model="minioForm.bucket_prefix" placeholder="多租户前缀，如 am-" clearable />
+            <span style="color: #909399; font-size: 12px; margin-left: 8px">留空：每个 category 单独成 bucket。</span>
+          </el-form-item>
+          <el-form-item label="备注">
+            <el-input v-model="minioNote" type="textarea" :rows="2" placeholder="可选，便于运维识别" />
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" :loading="minioSaving" @click="saveMinIOConfig">保存</el-button>
+            <el-button @click="testMinIOConnection" :loading="minioTesting">测试连接</el-button>
+            <el-button @click="ensureDefaultBucket" :loading="minioEnsuring">确保默认 bucket</el-button>
+            <el-tag v-if="minioStatus === 'enabled'" type="success" style="margin-left: 12px">已启用 · 运行中</el-tag>
+            <el-tag v-else type="info" style="margin-left: 12px">未启用</el-tag>
+            <el-tag v-if="minioSecretSet" type="success" style="margin-left: 6px">Secret 已配置</el-tag>
+            <el-tag v-else type="warning" style="margin-left: 6px">尚未配置 Secret</el-tag>
+          </el-form-item>
+          <el-form-item v-if="minioBuckets.length" label="现存 Bucket">
+            <div style="display: flex; gap: 6px; flex-wrap: wrap">
+              <el-tag v-for="b in minioBuckets" :key="b" type="info" size="small">{{ b }}</el-tag>
+            </div>
+          </el-form-item>
+        </el-form>
+
+        <el-divider />
+
+        <h3 style="margin: 0 0 12px">预签名上传 / 下载测试</h3>
+        <p style="color: #909399; margin: 0 0 12px; font-size: 13px">
+          生成直传 / 直链 URL（15 分钟有效期），可用于浏览器端绕过服务器中转。
+        </p>
+        <el-form label-width="160px" style="max-width: 720px">
+          <el-form-item label="对象 Key">
+            <el-input v-model="presignKey" placeholder="如 uploads/2026/09/foo.pdf" clearable />
+          </el-form-item>
+          <el-form-item>
+            <el-button @click="genUploadUrl" :loading="presignLoading" :disabled="!minioStatus">生成 PUT URL</el-button>
+            <el-button @click="genDownloadUrl" :loading="presignLoading" :disabled="!minioStatus">生成 GET URL</el-button>
+          </el-form-item>
+          <el-form-item v-if="presignResult" label="URL">
+            <el-input v-model="presignResult" type="textarea" :rows="3" readonly />
+          </el-form-item>
+        </el-form>
+      </el-tab-pane>
+
       <el-tab-pane label="AI 配置" name="ai">
         <h3 style="margin: 0 0 16px">Claude（Anthropic）配置</h3>
         <el-form label-width="120px" style="max-width: 560px">
@@ -712,7 +797,7 @@ import { ref, onMounted, computed, watch, onBeforeUnmount, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowRight, Search } from '@element-plus/icons-vue'
-import { getHeartbeatSettings, updateHeartbeatSettings, getSystemInfo, updateEnvSettings, checkFFmpeg, installFFmpeg, getAgentConnections, getAgentOnlineTrend, getApiCallTrend, getApiCallDetails, getStompStats, getClaudeConfig, updateClaudeConfig, getOnlyOfficeConfig, updateOnlyOfficeConfig } from '@/api/settings'
+import { getHeartbeatSettings, updateHeartbeatSettings, getSystemInfo, updateEnvSettings, checkFFmpeg, installFFmpeg, getAgentConnections, getAgentOnlineTrend, getApiCallTrend, getApiCallDetails, getStompStats, getClaudeConfig, updateClaudeConfig, getOnlyOfficeConfig, updateOnlyOfficeConfig, listSystemSettings, getSystemSetting, upsertSystemSetting, deleteSystemSetting, getMinIOStatus, testMinIOConnection as testMinIOConnection_API, ensureMinIODefaultBucket, presignMinIOUpload, presignMinIODownload } from '@/api/settings'
 import { uploadAgentAPK, listAgentUpdates, downloadAgentAPK, deleteAgentUpdate } from '@/api/agentUpdate'
 import { getRegisterSetting, updateRegisterSetting } from '@/api/user'
 import { pushAgentUpdate } from '@/api/device'
@@ -874,6 +959,183 @@ const saveAiConfig = async () => {
     // http 拦截器已提示错误
   } finally {
     aiSaving.value = false
+  }
+}
+
+// ============================================================================
+// MinIO / S3 兼容对象存储配置
+// ============================================================================
+const minioForm = ref({
+  enabled: false,
+  endpoint: '',
+  public_host: '',
+  use_ssl: false,
+  region: '',
+  access_key: '',
+  secret_key: '',
+  default_bucket: '',
+  bucket_prefix: '',
+})
+const minioNote = ref('')
+const minioSaving = ref(false)
+const minioTesting = ref(false)
+const minioEnsuring = ref(false)
+const minioSecretSet = ref(false)
+const minioStatus = ref(false) // true = enabled & connected
+const minioBuckets = ref([])
+const presignKey = ref('')
+const presignResult = ref('')
+const presignLoading = ref(false)
+
+const loadMinIOConfig = async () => {
+  try {
+    const res = await getSystemSetting('minio')
+    const v = res.data?.value_json || '{}'
+    let cfg = {}
+    try {
+      cfg = typeof v === 'string' ? JSON.parse(v) : v
+    } catch (_) {
+      cfg = {}
+    }
+    minioForm.value = {
+      enabled: !!cfg.enabled,
+      endpoint: cfg.endpoint || '',
+      public_host: cfg.public_host || '',
+      use_ssl: !!cfg.use_ssl,
+      region: cfg.region || '',
+      access_key: cfg.access_key || '',
+      secret_key: '', // 不回填
+      default_bucket: cfg.default_bucket || '',
+      bucket_prefix: cfg.bucket_prefix || '',
+    }
+    minioNote.value = res.data?.note || ''
+    minioSecretSet.value = !!res.data?.secret_encrypted
+  } catch (e) {
+    // http 拦截器已提示
+  }
+  await refreshMinIOStatus()
+}
+
+const refreshMinIOStatus = async () => {
+  try {
+    const res = await getMinIOStatus()
+    minioStatus.value = !!res.enabled
+  } catch (_) {
+    minioStatus.value = false
+  }
+}
+
+const saveMinIOConfig = async () => {
+  const f = minioForm.value
+  if (f.enabled && (!f.endpoint || !f.access_key || !f.default_bucket)) {
+    ElMessage.error('启用时 endpoint / access_key / default_bucket 必填')
+    return
+  }
+  if (!f.enabled && (f.secret_key === '' || !f.secret_key)) {
+    // 关闭时也允许保存（只是不生效）
+  }
+  minioSaving.value = true
+  try {
+    const payload = {
+      value_json: JSON.stringify({
+        enabled: !!f.enabled,
+        endpoint: f.endpoint || '',
+        public_host: f.public_host || '',
+        use_ssl: !!f.use_ssl,
+        region: f.region || '',
+        access_key: f.access_key || '',
+        // secret_key 为空时由后端保留原值
+        secret_key: f.secret_key || '',
+        default_bucket: f.default_bucket || '',
+        bucket_prefix: f.bucket_prefix || '',
+      }),
+      note: minioNote.value,
+    }
+    const res = await upsertSystemSetting('minio', payload)
+    minioSecretSet.value = !!res.data?.secret_encrypted
+    minioForm.value.secret_key = ''
+    ElMessage.success('保存成功')
+    await refreshMinIOStatus()
+  } catch (e) {
+    // http 拦截器已提示
+  } finally {
+    minioSaving.value = false
+  }
+}
+
+const testMinIOConnection = async () => {
+  const f = minioForm.value
+  if (!f.endpoint || !f.access_key) {
+    ElMessage.warning('请先填写 endpoint 与 access_key')
+    return
+  }
+  minioTesting.value = true
+  try {
+    const res = await testMinIOConnection_API({
+      endpoint: f.endpoint,
+      access_key: f.access_key,
+      secret_key: f.secret_key || '', // 后端如为空字符串会使用已存值
+      use_ssl: !!f.use_ssl,
+      region: f.region || '',
+      default_bucket: f.default_bucket || '',
+    })
+    minioBuckets.value = res.buckets || []
+    ElMessage.success(`连接成功，共 ${minioBuckets.value.length} 个 bucket`)
+  } catch (e) {
+    minioBuckets.value = []
+  } finally {
+    minioTesting.value = false
+  }
+}
+
+const ensureDefaultBucket = async () => {
+  minioEnsuring.value = true
+  try {
+    const res = await ensureMinIODefaultBucket()
+    ElMessage.success(`默认 bucket 已就绪：${res.bucket}`)
+    await refreshMinIOStatus()
+  } catch (e) {
+    // http 拦截器已提示
+  } finally {
+    minioEnsuring.value = false
+  }
+}
+
+const genUploadUrl = async () => {
+  if (!presignKey.value) {
+    ElMessage.warning('请填写对象 Key')
+    return
+  }
+  presignLoading.value = true
+  try {
+    const res = await presignMinIOUpload({
+      key: presignKey.value,
+      expires_s: 900,
+    })
+    presignResult.value = res.data.url
+  } catch (e) {
+    presignResult.value = ''
+  } finally {
+    presignLoading.value = false
+  }
+}
+
+const genDownloadUrl = async () => {
+  if (!presignKey.value) {
+    ElMessage.warning('请填写对象 Key')
+    return
+  }
+  presignLoading.value = true
+  try {
+    const res = await presignMinIODownload({
+      key: presignKey.value,
+      expires_s: 900,
+    })
+    presignResult.value = res.data.url
+  } catch (e) {
+    presignResult.value = ''
+  } finally {
+    presignLoading.value = false
   }
 }
 
@@ -1179,6 +1441,7 @@ onMounted(async () => {
   loadSystemInfo()
   loadAiConfig()
   loadOnlyOfficeConfig()
+  loadMinIOConfig()
 
   // 如果初始标签是 monitor，加载监控数据并启动 STOMP
   if (activeTab.value === 'monitor') {

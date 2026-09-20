@@ -47,13 +47,17 @@ export function useYjsCollab(nodeId: number | null): YjsCollab {
     ;(async () => {
       try {
         const me = await fetchMe()
+        console.log('[useYjsCollab] fetchMe result:', me)
         const name = (me?.username || me?.display_name || `user-${me?.id ?? '?'}`).toString()
         const color = pickUserColor(me?.id ? `u:${me.id}` : name)
+        console.log('[useYjsCollab] Setting awareness user:', { name, color })
         // 防御性二次检查：连接已销毁则不再写入（避免给销毁中的 awareness 状态设置字段）。
         if (wsProvider.awareness && providerRef.current === wsProvider) {
           wsProvider.awareness.setLocalStateField('user', { name, color })
+          console.log('[useYjsCollab] Awareness local state:', wsProvider.awareness.getLocalState())
         }
-      } catch {
+      } catch (err) {
+        console.error('[useYjsCollab] fetchMe failed:', err)
         /* 静默：awareness 无 user 字段时远程光标会回退为默认（无标签） */
       }
     })()

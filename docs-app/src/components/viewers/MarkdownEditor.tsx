@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import ReactMarkdown from 'react-markdown'
 import { Users } from 'lucide-react'
 import ProseMirrorEditor from '../collab/ProseMirrorEditor'
 import { useYjsCollab } from '../../hooks/useYjsCollab'
-import { fetchContent, saveContent, initialsOf, fetchNodes } from '../../api/documents'
+import { fetchContent, saveContent, fetchSharedContent, initialsOf, fetchNodes } from '../../api/documents'
 
 // MarkdownEditor：文档 Markdown 协同编辑器。
 // 底座为 prosemirror-markdown + y-prosemirror 绑定 Y.XmlFragment，外加与后端的 Markdown 拉取/保存链路。
@@ -13,11 +14,20 @@ interface MarkdownEditorProps {
   nodeId: number
   canEdit: boolean
   onSelectionChange?: (text: string) => void
+  /** 免登录分享模式：跳过协同编辑，渲染只读 Markdown */
+  shareMode?: boolean
+  shareToken?: string
+  projectCode?: string
 }
 
 const DEFAULT_FRAGMENT_KEY = 'pm-primary'
 
-export default function MarkdownEditor({ nodeId, canEdit, onSelectionChange }: MarkdownEditorProps) {
+export default function MarkdownEditor({ nodeId, canEdit, onSelectionChange, shareMode, shareToken, projectCode }: MarkdownEditorProps) {
+  // 分享模式：跳过 Yjs 协同，直接渲染只读 Markdown。
+  if (shareMode && shareToken && projectCode) {
+    return <SharedMarkdownView nodeId={nodeId} projectCode={projectCode} shareToken={shareToken} />
+  }
+
   const { ydoc, provider, connected } = useYjsCollab(nodeId)
   const [saving, setSaving] = useState(false)
   const [participants, setParticipants] = useState<Array<{ id: number; name: string; color: string }>>([])
@@ -138,6 +148,29 @@ export default function MarkdownEditor({ nodeId, canEdit, onSelectionChange }: M
           }}
           onSelectionChange={onSelectionChange}
         />
+      </div>
+    </div>
+  )
+}
+
+// SharedMarkdownView：分享模式下的只读 Markdown 视图。
+// 不进入 Yjs 协同，直接拉取已发布的 Markdown 内容并渲染。
+function SharedMarkdownView({ nodeId, projectCode, shareToken }: { nodeId: number; projectCode: string; shareToken: string }) {
+  const { data: md = '', isLoading } = useQuery({
+    queryKey: ['doc-shared-content', nodeId, shareToken],
+    queryFn: () => fetchSharedContent(nodeId, projectCode, shareToken),
+  })
+
+  if (isLoading) return <div className="md-editor-loading">加载文档中…</div>
+
+  return (
+    <div className="md-editor md-editor-shared">
+      <div className="md-editor-body" style={{ padding: '16px 20px' }}>
+        {md.trim() ? (
+          <ReactMarkdown>{md}</ReactMarkdown>
+        ) : (
+          <div className="empty-hint">该文档暂无内容</div>
+        )}
       </div>
     </div>
   )

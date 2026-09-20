@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 // ============================================================================
@@ -250,20 +251,72 @@ func UpdateDocumentProject(c *gin.Context) {
 		return
 	}
 	updates := map[string]interface{}{
-		"name":         strings.TrimSpace(body.Name),
-		"code":         strings.TrimSpace(body.Code),
-		"description":  body.Description,
-		"icon":         body.Icon,
-		"color":        body.Color,
-		"category_id":  body.CategoryID,
-		"sort_order":   body.SortOrder,
-		"root_node_id": body.RootNodeID,
+		"name":        strings.TrimSpace(body.Name),
+		"code":        strings.TrimSpace(body.Code),
+		"description": body.Description,
+		"icon":        body.Icon,
+		"color":       body.Color,
+		"category_id": body.CategoryID,
+		"sort_order":  body.SortOrder,
+	}
+	// root_node_id 仅在请求显式携带时才更新，避免前端表单（编辑名称/颜色等）未带该字段时
+	// 被错误地清空为 NULL，导致项目丢失关联文档节点。
+	if body.RootNodeID != nil {
+		updates["root_node_id"] = body.RootNodeID
 	}
 	if err := database.DB.Model(&project).Updates(updates).Error; err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": project})
+}
+
+// PublishDocumentProject 发布项目（生成/刷新 ShareToken，供 Agent 菜单等场景免登录只读访问）。
+func PublishDocumentProject(c *gin.Context) {
+	id := c.Param("id")
+	var project models.DocumentProject
+	if err := database.DB.First(&project, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+	if strings.TrimSpace(project.Code) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "项目编码为空，无法发布"})
+		return
+	}
+	token := strings.ReplaceAll(uuid.New().String(), "-", "")
+	if err := database.DB.Model(&project).Updates(map[string]interface{}{
+		"publish_status": 1,
+		"share_token":    token,
+	}).Error; err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	database.DB.First(&project, id)
+	// 发布后立即把引用了该项目 code 的 Agent 菜单重新推送给对应设备：
+	// 在 publish 之前 buildMenuPayloadForDevice 会因 publish_status=0 跳过该菜单，
+	// 现在条件满足，必须 bump revision + WS push 才能让 Agent 端立刻出现。
+	bumpAgentMenuRevisionForDocProject(project.Code)
+	c.JSON(http.StatusOK, gin.H{"data": project})
+}
+
+// UnpublishDocumentProject 取消发布（清空 ShareToken，分享链接立即失效）。
+func UnpublishDocumentProject(c *gin.Context) {
+	id := c.Param("id")
+	var project models.DocumentProject
+	if err := database.DB.First(&project, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+	if err := database.DB.Model(&project).Updates(map[string]interface{}{
+		"publish_status": 0,
+		"share_token":    "",
+	}).Error; err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	// 取消发布同样需要重新推送：Agent 端该菜单会被 buildMenuPayloadForDevice 过滤掉。
+	bumpAgentMenuRevisionForDocProject(project.Code)
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 // DeleteDocumentProject 删除项目

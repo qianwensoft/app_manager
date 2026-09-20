@@ -78,6 +78,18 @@ class AgentService : LifecycleService() {
         const val STATE_DISCONNECTED = "disconnected"
         const val STATE_ERROR = "error"
 
+        // ── 单例引用（供 WorkflowBlocker 等模块访问 WebSocket） ────────────────────
+        @Volatile
+        private var instanceRef: AgentService? = null
+
+        /** 获取 AgentService 单例实例（可能为 null，如果服务未运行）。 */
+        val instance: AgentService?
+            get() = instanceRef
+
+        /** 暴露共享的 WebSocket（可能为未初始化或已断开）。与实例字段 [AgentService.webSocket] 同源但避免名称冲突。 */
+        val sharedWebSocket: AgentWebSocket?
+            get() = instanceRef?.takeIf { it::webSocket.isInitialized }?.webSocket
+
         /** 当前连接状态（进程内全局，供设置页直接读取初值）。 */
         @Volatile
         var connState: String = STATE_DISCONNECTED
@@ -213,6 +225,9 @@ class AgentService : LifecycleService() {
 
     override fun onCreate() {
         super.onCreate()
+        // 设置单例引用（供 WorkflowBlocker 等模块访问）
+        instanceRef = this
+
         createNotificationChannel()
         com.appmanager.agent.MenuIntentReceiver.reregister(this)
 
@@ -322,6 +337,9 @@ class AgentService : LifecycleService() {
                 heartbeatManager.start()
                 deviceInfoCollector.start()
 
+                // WebSocket 重新建立后，补发工作流阻塞状态，确保与服务器侧一致
+                com.appmanager.agent.WorkflowBlocker.flushIfNeeded()
+
                 // 启动前台应用监听器（实时上报前台应用变化）
                 if (foregroundAppMonitor == null) {
                     foregroundAppMonitor = ForegroundAppMonitor(this@AgentService) { packageName ->
@@ -392,6 +410,10 @@ class AgentService : LifecycleService() {
 
     override fun onDestroy() {
         detachInstallCallback(this)
+        // 清除单例引用
+        instanceRef = null
+        // 重置工作流阻塞状态
+        com.appmanager.agent.WorkflowBlocker.reset()
         super.onDestroy()
         serviceJob.cancel()
         if (::heartbeatManager.isInitialized) heartbeatManager.stop()

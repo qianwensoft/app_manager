@@ -97,18 +97,22 @@ type DocumentAnchor struct {
 
 // DocumentProject 文档项目（文档库首页的项目分组）
 type DocumentProject struct {
-	ID          uint      `gorm:"primaryKey" json:"id"`
-	Name        string    `gorm:"size:200;not null" json:"name"`
-	Code        string    `gorm:"size:100;uniqueIndex" json:"code"` // URL友好的唯一标识
-	Description string    `gorm:"size:1000" json:"description"`
-	Icon        string    `gorm:"size:200" json:"icon"`        // 项目图标
-	Color       string    `gorm:"size:50" json:"color"`        // 项目主题色
-	CategoryID  *uint     `gorm:"index" json:"category_id"`    // 所属分类
-	SortOrder   int       `gorm:"default:0" json:"sort_order"` // 排序
-	RootNodeID  *uint     `gorm:"index" json:"root_node_id"`   // 关联的文档根节点
-	CreatedBy   uint      `json:"created_by"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          uint   `gorm:"primaryKey" json:"id"`
+	Name        string `gorm:"size:200;not null" json:"name"`
+	Code        string `gorm:"size:100;uniqueIndex" json:"code"` // URL友好的唯一标识
+	Description string `gorm:"size:1000" json:"description"`
+	Icon        string `gorm:"size:200" json:"icon"`        // 项目图标
+	Color       string `gorm:"size:50" json:"color"`        // 项目主题色
+	CategoryID  *uint  `gorm:"index" json:"category_id"`    // 所属分类
+	SortOrder   int    `gorm:"default:0" json:"sort_order"` // 排序
+	RootNodeID  *uint  `gorm:"index" json:"root_node_id"`   // 关联的文档根节点
+	// 免登录分享（供 Agent App 菜单只读打开整棵项目文档树，无需 JWT）。
+	// 0 未发布 1 已发布；发布后生成 ShareToken，取消发布清空。
+	PublishStatus int    `gorm:"default:0" json:"publish_status"`
+	ShareToken    string `gorm:"size:64;index" json:"share_token,omitempty"`
+	CreatedBy     uint   `json:"created_by"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // DocumentProjectCategory 文档项目分类

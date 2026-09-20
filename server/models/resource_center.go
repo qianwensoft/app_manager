@@ -9,6 +9,7 @@ import "time"
 //   - workorder_mgmt  工单管理节点（ConfigJSON 含 type_codes/detail_perms）
 //   - scada           组态预览节点（ConfigJSON 含 scada_id/scada_code/open_mode）
 //   - form_app        表单应用节点（ConfigJSON 含 form_code/open_mode）
+//   - doc_project     文档项目节点（ConfigJSON 含 project_code/open_mode）
 //   - link            自定义链接节点（ConfigJSON 含 url/open_mode）
 type ResourceNode struct {
 	ID         uint           `gorm:"primaryKey" json:"id"`
@@ -87,8 +88,10 @@ type ResourceNodeConfig struct {
 	ScadaCode string `json:"scada_code,omitempty"`
 	// form_app（表单应用）
 	FormCode string `json:"form_code,omitempty"`
+	// doc_project（文档项目）
+	ProjectCode string `json:"project_code,omitempty"`
 	// link（自定义链接）
 	URL string `json:"url,omitempty"`
-	// scada/form_app/link 通用：嵌入方式 iframe（默认，内嵌）| blank（新标签页打开）
+	// scada/form_app/doc_project/link 通用：嵌入方式 iframe（默认，内嵌）| blank（新标签页打开）
 	OpenMode string `json:"open_mode,omitempty"`
 }

@@ -161,3 +161,17 @@ export function setGlobalEventBlocked(blocked: boolean) {
     }
   } catch { /* ignore */ }
 }
+
+/**
+ * 通知 Agent 与服务器：阻塞/恢复该设备的工作流触发。
+ * 用于独占扫码模式：form-app 进入前台时阻塞，退出时恢复。
+ * 仅在 Agent WebView 环境中生效。
+ */
+export function setWorkflowBlocked(blocked: boolean) {
+  try {
+    const bridge = (window as any).AndroidBridge
+    if (bridge?.blockWorkflows) {
+      bridge.blockWorkflows(blocked)
+    }
+  } catch { /* ignore */ }
+}

@@ -110,24 +110,32 @@ class AgentWebSocket(
         }
     }
 
-    fun send(obj: Any) {
-        try {
+    /**
+     * 发送 JSON 消息。
+     * @return true=消息已成功入队；false=发送失败（WS 未连接/已关闭/队列满/异常），调用方需自行处理重试
+     */
+    fun send(obj: Any): Boolean {
+        return try {
             val json = gson.toJson(obj)
-            val result = ws?.send(json)
-            if (result != true) Log.w(TAG, "Send failed (ws closed?)")
+            val ok = ws?.send(json) == true
+            if (!ok) Log.w(TAG, "Send failed (ws closed?): ${obj.javaClass.simpleName}")
+            ok
         } catch (e: Exception) {
             Log.e(TAG, "send failed: $e", e)
+            false
         }
     }
 
     /** 二进制帧（如投屏 JPEG），避免 Base64 + JSON 膨胀与主线程 Gson 压力。 */
-    fun sendBinary(bytes: ByteArray) {
-        try {
+    fun sendBinary(bytes: ByteArray): Boolean {
+        return try {
             val payload = Buffer().write(bytes).readByteString()
-            val result = ws?.send(payload)
-            if (result != true) Log.w(TAG, "sendBinary failed (ws closed?)")
+            val ok = ws?.send(payload) == true
+            if (!ok) Log.w(TAG, "sendBinary failed (ws closed?)")
+            ok
         } catch (e: Exception) {
             Log.e(TAG, "sendBinary failed: $e", e)
+            false
         }
     }
 

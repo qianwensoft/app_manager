@@ -12,6 +12,7 @@ import (
 	"app-manager/mqtt"
 	"app-manager/outbound"
 	"app-manager/scada"
+	"app-manager/systemsettings"
 	"app-manager/task"
 	"context"
 	"fmt"
@@ -69,6 +70,10 @@ func main() {
 		database.SeedAdmin(database.DB)
 		datastack.StartBufferPollers(database.DB)
 		outbound.InitTriggerManager(database.DB)
+		// 加载运行时系统配置（MinIO 等），把 DB 中的配置应用到各子系统。
+		if err := systemsettings.Get().LoadFromDB(); err != nil {
+			log.Printf("system-settings load failed: %v", err)
+		}
 		api.StartMetricsAggregator()
 		api.StartStompStatsPublisher()
 		api.StartWorkOrderAutoArchiver()

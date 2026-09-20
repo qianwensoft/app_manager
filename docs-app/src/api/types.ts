@@ -101,6 +101,8 @@ export interface DocumentProject {
   category_id?: number | null
   sort_order: number
   root_node_id?: number | null
+  publish_status?: 0 | 1
+  share_token?: string
   created_by?: number
   created_at?: string
   updated_at?: string

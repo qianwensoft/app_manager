@@ -32,7 +32,7 @@ func SyncDeviceStatus(deviceID string, connected bool) {
 	}
 	if connected {
 		updates["status"] = "online"
-		updates["last_seen_at"] = time.Now()
+		// last_seen_at 移至内存缓存，不再写入 Device 表
 	} else {
 		updates["status"] = "offline"
 	}
@@ -43,6 +43,12 @@ func SyncDeviceStatus(deviceID string, connected bool) {
 	}
 	if connected {
 		persistAgentConnectionKey(deviceID)
+		// 更新内存中的 last_seen_at
+		if dbID, ok := ResolveConnDeviceID(deviceID); ok {
+			UpdateRealtimeStatus(dbID, map[string]interface{}{
+				"last_seen_at": time.Now(),
+			})
+		}
 	}
 	// 首次上线：库中尚无对应行时自动建一条；连接键为硬件机器码时同时写入 android_serial
 	if connected && result.RowsAffected == 0 {
@@ -73,7 +79,7 @@ func SyncDeviceStatus(deviceID string, connected bool) {
 // 或 readPump 异常未走到 Unregister 等边缘情况。
 const staleDeviceTimeout = 3 * time.Minute
 
-// StartStaleDeviceReaper 定期把 agent_connected=true 但 last_seen_at 已过期、
+// StartStaleDeviceReaper 定期把 agent_connected=true 但内存 last_seen_at 已过期、
 // 且当前并无活跃 Hub 连接的设备标记为离线，并推送状态变更。在 main.go DB 就绪后启动。
 func StartStaleDeviceReaper() {
 	go func() {
@@ -88,18 +94,28 @@ func StartStaleDeviceReaper() {
 func reapStaleDevices() {
 	cutoff := time.Now().Add(-staleDeviceTimeout)
 	var devices []models.Device
-	// last_seen_at 为空也视为过期（上线时会写入；为空说明从未真正心跳过）。
-	err := database.DB.Where("agent_connected = ? AND (last_seen_at IS NULL OR last_seen_at < ?)", true, cutoff).
-		Find(&devices).Error
+	// 查询所有标记为在线的设备
+	err := database.DB.Where("agent_connected = ?", true).Find(&devices).Error
 	if err != nil {
 		log.Printf("reapStaleDevices query failed: %v", err)
 		return
 	}
+
+	changed := false
 	for _, d := range devices {
-		// 仍有活跃连接则跳过（避免误杀：心跳字段未及时刷新但连接仍在）。
+		// 仍有活跃连接则跳过（避免误杀：连接仍在）
 		if AgentHub.LiveConnectionKeyForDeviceID(d.ID) != "" {
 			continue
 		}
+
+		// 检查内存中的 last_seen_at 是否过期
+		status, hasCache := GetRealtimeStatus(d.ID)
+		if hasCache && status.LastSeenAt.After(cutoff) {
+			// 内存中有最近的心跳，跳过
+			continue
+		}
+
+		// last_seen_at 过期或不存在，标记为离线
 		if err := database.DB.Model(&models.Device{}).Where("id = ?", d.ID).
 			Updates(map[string]interface{}{
 				"agent_connected": false,
@@ -108,10 +124,19 @@ func reapStaleDevices() {
 			log.Printf("reapStaleDevices mark offline [%d] failed: %v", d.ID, err)
 			continue
 		}
-		log.Printf("Device %d marked offline by stale reaper", d.ID)
+
+		// 同步更新内存状态
+		UpdateRealtimeStatus(d.ID, map[string]interface{}{
+			"agent_connected": false,
+			"status":          "offline",
+		})
+
+		log.Printf("Device %d marked offline by stale reaper (last_seen_at expired)", d.ID)
 		PublishDeviceProfileUpdated(d.ID)
+		changed = true
 	}
-	if len(devices) > 0 {
+
+	if changed {
 		PublishAgentConnectionChange()
 	}
 }
@@ -165,33 +190,51 @@ func ensureAgentDevice(deviceKey, androidSerial string) error {
 		var existing models.Device
 		err := database.DB.Where("android_serial = ?", sn).First(&existing).Error
 		if err == nil && existing.ID > 0 {
-			return database.DB.Model(&existing).Updates(map[string]interface{}{
+			err := database.DB.Model(&existing).Updates(map[string]interface{}{
 				"agent_token":     key,
 				"serial":          "agent-" + key,
 				"agent_connected": true,
 				"status":          "online",
-				"last_seen_at":    now,
 			}).Error
+			if err == nil {
+				// 更新内存中的 last_seen_at
+				UpdateRealtimeStatus(existing.ID, map[string]interface{}{
+					"last_seen_at": now,
+				})
+			}
+			return err
 		}
 		var byTok models.Device
 		if err := database.DB.Where("agent_token = ?", key).First(&byTok).Error; err == nil {
-			return database.DB.Model(&byTok).Updates(map[string]interface{}{
+			err := database.DB.Model(&byTok).Updates(map[string]interface{}{
 				"android_serial":  sn,
 				"serial":          "agent-" + key,
 				"agent_connected": true,
 				"status":          "online",
-				"last_seen_at":    now,
 			}).Error
+			if err == nil {
+				// 更新内存中的 last_seen_at
+				UpdateRealtimeStatus(byTok.ID, map[string]interface{}{
+					"last_seen_at": now,
+				})
+			}
+			return err
 		}
 		d := models.Device{
 			Serial:        "agent-" + key,
 			Name:          "Agent 设备",
 			AgentToken:    key,
 			AndroidSerial: sn,
-			LastSeenAt:    &now,
 			CreatedAt:     now,
 		}
-		return database.DB.Create(&d).Error
+		if err := database.DB.Create(&d).Error; err != nil {
+			return err
+		}
+		// 创建后立即更新内存中的 last_seen_at
+		UpdateRealtimeStatus(d.ID, map[string]interface{}{
+			"last_seen_at": now,
+		})
+		return nil
 	}
 
 	// 显式查找：优先按 serial，其次按 agent_token
@@ -201,21 +244,29 @@ func ensureAgentDevice(deviceKey, androidSerial string) error {
 	// 先按 serial 查找
 	err := database.DB.Where("serial = ?", serial).First(&existing).Error
 	if err == nil && existing.ID > 0 {
-		// 找到了，更新 agent_token 和时间戳
-		return database.DB.Model(&existing).Updates(map[string]interface{}{
-			"agent_token":  key,
-			"last_seen_at": now,
-		}).Error
+		// 找到了，更新 agent_token
+		err := database.DB.Model(&existing).Update("agent_token", key).Error
+		if err == nil {
+			// 更新内存中的 last_seen_at
+			UpdateRealtimeStatus(existing.ID, map[string]interface{}{
+				"last_seen_at": now,
+			})
+		}
+		return err
 	}
 
 	// 再按 agent_token 查找
 	err = database.DB.Where("agent_token = ?", key).First(&existing).Error
 	if err == nil && existing.ID > 0 {
-		// 找到了，更新 serial 和时间戳
-		return database.DB.Model(&existing).Updates(map[string]interface{}{
-			"serial":       serial,
-			"last_seen_at": now,
-		}).Error
+		// 找到了，更新 serial
+		err := database.DB.Model(&existing).Update("serial", serial).Error
+		if err == nil {
+			// 更新内存中的 last_seen_at
+			UpdateRealtimeStatus(existing.ID, map[string]interface{}{
+				"last_seen_at": now,
+			})
+		}
+		return err
 	}
 
 	// 都没找到，创建新记录
@@ -223,7 +274,6 @@ func ensureAgentDevice(deviceKey, androidSerial string) error {
 		Serial:     serial,
 		Name:       "Agent 设备",
 		AgentToken: key,
-		LastSeenAt: &now,
 		CreatedAt:  now,
 	}
 	err = database.DB.Create(&d).Error
@@ -231,6 +281,12 @@ func ensureAgentDevice(deviceKey, androidSerial string) error {
 		// 并发冲突：在我们检查和插入之间，另一个 goroutine 已创建了该设备
 		// 此时设备已存在，静默返回成功（后续心跳会更新状态）
 		return nil
+	}
+	if err == nil {
+		// 创建后立即更新内存中的 last_seen_at
+		UpdateRealtimeStatus(d.ID, map[string]interface{}{
+			"last_seen_at": now,
+		})
 	}
 	return err
 }
@@ -243,7 +299,7 @@ func strFromInfo(v interface{}) (string, bool) {
 	return s, ok
 }
 
-// HandleHeartbeat updates last_seen_at on heartbeat
+// HandleHeartbeat updates device status on heartbeat
 func HandleHeartbeat(deviceID string, info map[string]interface{}) {
 	dbID, haveID := ResolveConnDeviceID(deviceID)
 	var old models.Device
@@ -253,9 +309,9 @@ func HandleHeartbeat(deviceID string, info map[string]interface{}) {
 
 	now := time.Now()
 
-	// 高频更新字段：写入实时状态表，避免频繁更新 Device 主表
+	// 高频更新字段：只更新内存缓存，避免频繁写入数据库
 	realtimeUpdates := map[string]interface{}{
-		"last_seen_at":    now, // 仅在内存中记录，不写数据库
+		"last_seen_at":    now, // 仅在内存中保存
 		"agent_connected": true,
 		"status":          "online",
 	}
@@ -445,6 +501,12 @@ func PublishAgentConnectionChange() {
 	agents := make([]map[string]interface{}, 0, len(keys))
 	for _, k := range keys {
 		if d, ok := LookupDeviceByConnectionKey(k); ok {
+			// 优先从内存缓存读取 last_seen_at
+			lastSeenAt := d.LastSeenAt
+			if cached, cacheOk := GetRealtimeStatus(d.ID); cacheOk && !cached.LastSeenAt.IsZero() {
+				lastSeenAt = &cached.LastSeenAt
+			}
+			
 			agent := map[string]interface{}{
 				"device_id":          d.ID,
 				"conn_key":           k,
@@ -453,7 +515,7 @@ func PublishAgentConnectionChange() {
 				"android_serial":     d.AndroidSerial,
 				"os_version":         d.OSVersion,
 				"status":             d.Status,
-				"last_seen_at":       d.LastSeenAt,
+				"last_seen_at":       lastSeenAt,
 				"foreground_package": d.ForegroundPackage,
 				"agent_version":      d.AgentVersion,
 				"webview_version":    d.WebViewVersion,

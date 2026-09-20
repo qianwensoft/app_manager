@@ -10,6 +10,12 @@ import (
 
 // TriggerFromCustomEvent 从自定义事件触发工作流（兼容原有事件系统）
 func TriggerFromCustomEvent(workflowID uint, eventKey string, eventData map[string]interface{}, deviceID *uint) {
+	// 检查设备是否被阻塞（form-app 独占扫码模式）
+	if deviceID != nil && IsWorkflowBlocked(*deviceID) {
+		log.Printf("[Workflow] Workflow %d blocked: device %d has workflow block active", workflowID, *deviceID)
+		return
+	}
+
 	// 加载 Workflow
 	var workflow models.WorkflowDefinition
 	if err := database.DB.First(&workflow, workflowID).Error; err != nil {

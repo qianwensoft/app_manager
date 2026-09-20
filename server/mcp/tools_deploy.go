@@ -55,6 +55,13 @@ func listDevices(raw json.RawMessage) (any, *RPCError) {
 		q = q.Where("status = 'online'")
 	}
 	q.Order("id ASC").Find(&rows)
+	// last_seen_at 已不再写入 devices 表，仅在内存缓存中维护，这里回填以保持接口语义不变。
+	for i := range rows {
+		if cached, ok := agent.GetRealtimeStatus(rows[i].ID); ok && !cached.LastSeenAt.IsZero() {
+			t := cached.LastSeenAt
+			rows[i].LastSeenAt = &t
+		}
+	}
 	return map[string]any{"items": rows}, nil
 }
 

@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"sort"
 	"strconv"
@@ -74,10 +75,39 @@ func ListAgentMenuItems(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": rows})
 }
 
+// validateMenuTarget 校验菜单引用的目标资源是否合法：
+//   - doc_project: 项目必须存在、publish_status=1、share_token 非空；
+//     否则 Agent 端永远拿不到菜单（buildMenuPayloadForDevice 会 skip）。
+//   - 其它类型目前放过，由后端字段按需校验（如 scada_preview 要求 PublishStatus）。
+//
+// 返回 (ok, hint)：ok=false 时 hint 是给前端的友好错误消息。
+func validateMenuTarget(targetType, targetRef string) (bool, string) {
+	switch targetType {
+	case "doc_project":
+		code := strings.TrimSpace(targetRef)
+		if code == "" {
+			return false, "doc_project 类型菜单必须指定 target_ref（文档项目 code）"
+		}
+		var proj models.DocumentProject
+		if err := database.DB.Where("code = ?", code).First(&proj).Error; err != nil {
+			return false, "文档项目 code=" + code + " 不存在"
+		}
+		if proj.PublishStatus != 1 || strings.TrimSpace(proj.ShareToken) == "" {
+			return false, "文档项目「" + proj.Name + "」尚未发布，请先在文档管理中点击「发布」"
+		}
+		return true, ""
+	}
+	return true, ""
+}
+
 func CreateAgentMenuItem(c *gin.Context) {
 	var body models.AgentMenuItem
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if ok, hint := validateMenuTarget(body.TargetType, body.TargetRef); !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": hint})
 		return
 	}
 	// 归属创建者；admin 创建的菜单同样归属其账号（便于矩阵管理）。
@@ -95,6 +125,10 @@ func UpdateAgentMenuItem(c *gin.Context) {
 	var body models.AgentMenuItem
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if ok, hint := validateMenuTarget(body.TargetType, body.TargetRef); !ok {
+		c.JSON(http.StatusBadRequest, gin.H{"error": hint})
 		return
 	}
 	if !isAdmin(c) {
@@ -175,6 +209,40 @@ func bumpAgentMenuRevisionForDevices(deviceIDs []uint) {
 		database.DB.Model(&dev).Update("agent_menu_revision", dev.AgentMenuRevision)
 		pushAgentMenuSync(did, dev.AgentMenuRevision)
 	}
+}
+
+// bumpAgentMenuRevisionForDocProject 把所有引用了指定文档项目 code 的 Agent 菜单所属设备的
+// menu revision 自增并 WS push。用于文档项目发布/取消发布后立即让 Agent 端菜单发生变化：
+//
+//	- 发布后 buildMenuPayloadForDevice 不再 skip 该菜单，需要让 Agent 立即拉到新菜单；
+//	- 取消发布后该菜单会被 skip，需要让 Agent 端立即消失。
+//
+// 在 buildMenuPayloadForDevice 中 doc_project 是否下发取决于 publish_status 与 share_token，
+// 因此只要项目状态变化就必须重新评估相关设备的菜单集合。
+func bumpAgentMenuRevisionForDocProject(projectCode string) {
+	code := strings.TrimSpace(projectCode)
+	if code == "" {
+		return
+	}
+	// 找到所有引用该 code 的菜单 ID（doc_project 类型），再找被分配的设备去重。
+	var menuIDs []uint
+	database.DB.Model(&models.AgentMenuItem{}).
+		Where("target_type = ? AND target_ref = ?", "doc_project", code).
+		Pluck("id", &menuIDs)
+	if len(menuIDs) == 0 {
+		return
+	}
+	var deviceIDs []uint
+	database.DB.Model(&models.AgentMenuAssignment{}).
+		Where("menu_id IN ?", menuIDs).
+		Distinct("device_id").
+		Pluck("device_id", &deviceIDs)
+	if len(deviceIDs) == 0 {
+		return
+	}
+	log.Printf("[agent-menu] bump revision for doc_project=%s, affected menus=%d devices=%d",
+		code, len(menuIDs), len(deviceIDs))
+	bumpAgentMenuRevisionForDevices(deviceIDs)
 }
 
 // DeployAgentMenus 绑定菜单到设备并递增 revision、推送 WS。
@@ -330,15 +398,29 @@ func SetAgentMenuAssignments(c *gin.Context) {
 
 func pushAgentMenuSync(deviceID uint, revision uint) {
 	key, err := agent.AgentConnectionKey(fmt.Sprintf("%d", deviceID))
-	if err != nil || !agent.AgentHub.IsConnected(key) {
+	if err != nil {
+		log.Printf("[agent-menu] push: resolve key for device %d failed: %v", deviceID, err)
+		return
+	}
+	if !agent.AgentHub.IsConnected(key) {
+		log.Printf("[agent-menu] push: device %d not connected (key=%s); will re-fetch on next reconnect", deviceID, key)
 		return
 	}
 	bundle := buildMenuBundleForDevice(deviceID, revision)
+	if bundle == nil {
+		log.Printf("[agent-menu] push: build bundle for device %d returned nil", deviceID)
+		return
+	}
+	menus, _ := bundle["menus"].([]map[string]interface{})
 	msg := map[string]interface{}{
 		"type": "agent_menu_sync",
 		"data": bundle,
 	}
-	_ = agent.AgentHub.Send(key, msg)
+	if sendErr := agent.AgentHub.Send(key, msg); sendErr != nil {
+		log.Printf("[agent-menu] push: send to %s failed: %v", key, sendErr)
+		return
+	}
+	log.Printf("[agent-menu] push: device=%d key=%s revision=%d menus=%d", deviceID, key, revision, len(menus))
 }
 
 func versionGE(agentVersion, minVersion string) bool {
@@ -468,6 +550,27 @@ func buildMenuPayloadForDevice(deviceID uint) []map[string]interface{} {
 		// webview_url 类型：target_ref 直接是完整 URL，下发给 Agent
 		if m.TargetType == "webview_url" && strings.TrimSpace(m.TargetRef) != "" {
 			previewPath = strings.TrimSpace(m.TargetRef)
+		}
+		// doc_project 类型：target_ref 是项目 code，拼装为文档直链路由。
+		// docs-app 的节点树/内容接口默认要求登录 JWT，Agent WebView 没有登录态，
+		// 因此必须像 SCADA/表单应用一样先「发布」生成 ShareToken，才能免登录只读打开；
+		// 未发布则跳过该菜单，避免 Agent 打开后因 401 而空白。
+		if m.TargetType == "doc_project" && strings.TrimSpace(m.TargetRef) != "" {
+			var docProject models.DocumentProject
+			if err := database.DB.Where("code = ?", strings.TrimSpace(m.TargetRef)).First(&docProject).Error; err == nil {
+				if docProject.PublishStatus == 1 && docProject.ShareToken != "" {
+					// 下发相对路径 /docs-app/d/:code?share=<token>（docs-app SPA 挂载在
+					// /docs-app 前缀下，内部路由 basename 也是 /docs-app，缺少前缀会被服务端
+					// SPA 回退错误地当作 Vue 管理端路由处理，导致 Agent WebView 打开空白页）。
+					previewPath = "/docs-app/d/" + docProject.Code + "?share=" + docProject.ShareToken
+					contentVer = int64(docProject.UpdatedAt.Unix())
+				} else {
+					continue
+				}
+			} else {
+				// 项目不存在或 code 错误，跳过该菜单
+				continue
+			}
 		}
 		formCode := strings.TrimSpace(m.FormAppCode)
 		if formCode == "" {

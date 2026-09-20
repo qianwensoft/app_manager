@@ -27,6 +27,10 @@ import {
   downloadUrl,
   fetchNodeByCode,
   fetchProjectByCode,
+  fetchSharedProjectByCode,
+  fetchSharedNodes,
+  fetchSharedContent,
+  downloadSharedUrl,
 } from '../api/documents'
 import type { DocumentNode, DocumentProject } from '../api/types'
 
@@ -37,6 +41,10 @@ export default function ProjectDocsPage() {
   const navigate = useNavigate()
   const params = useParams<{ code: string }>()
   const projectCode = params.code!
+
+  // 分享模式（由 App.tsx 从 URL ?share= 解析后写入 store）
+  const shareMode = useDocsStore((s) => s.shareMode)
+  const shareToken = useDocsStore((s) => s.shareToken)
 
   const selectedNode = useDocsStore((s) => s.selectedNode)
   const setSelectedNode = useDocsStore((s) => s.setSelectedNode)
@@ -50,34 +58,46 @@ export default function ProjectDocsPage() {
   const [selection, setSelection] = useState('')
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
-  // 获取项目信息
+  // 获取项目信息（分享模式用免登录接口）
   const { data: project, isLoading: projectLoading, error: projectError } = useQuery({
-    queryKey: ['doc-project', projectCode],
-    queryFn: () => fetchProjectByCode(projectCode),
+    queryKey: ['doc-project', projectCode, shareToken],
+    queryFn: () =>
+      shareMode
+        ? fetchSharedProjectByCode(projectCode, shareToken)
+        : fetchProjectByCode(projectCode),
   })
 
-  // 获取全部节点树
-  const { data: nodesRaw } = useQuery({ queryKey: ['doc-nodes'], queryFn: fetchNodes })
-  const { data: permsRaw } = useQuery({ queryKey: ['doc-perms'], queryFn: fetchPortalPermissions })
-  const nodes = useMemo(() => nodesRaw ?? EMPTY_NODES, [nodesRaw])
-  const perms = permsRaw ?? null
+  // 获取节点树（分享模式用免登录接口；不拉取权限，恒为只读）
+  const { data: nodesRaw } = useQuery({
+    queryKey: ['doc-nodes', projectCode, shareToken],
+    queryFn: () =>
+      shareMode
+        ? fetchSharedNodes(projectCode, shareToken)
+        : fetchNodes(),
+    enabled: !projectLoading,
+  })
+
+  // 分享模式下固定只读权限
+  const perms = shareMode
+    ? ({ is_admin: false, perms: {} })
+    : useDocsStore((s) => s.perms)
 
   useEffect(() => {
-    if (perms) setPerms(perms)
-  }, [perms, setPerms])
+    if (!shareMode && perms) setPerms(perms)
+  }, [perms, shareMode, setPerms])
 
-  const isAdmin = perms?.is_admin ?? false
+  const isAdmin = shareMode ? false : (perms?.is_admin ?? false)
 
   // 过滤：只显示该项目关联的 root_node 及其子树
   const projectNodes = useMemo(() => {
-    if (!project?.root_node_id || nodes.length === 0) return []
-    const rootNode = findNode(nodes, project.root_node_id)
+    if (!project?.root_node_id || nodesRaw?.length === 0) return []
+    const rootNode = findNode(nodesRaw ?? [], project.root_node_id)
     return rootNode ? [rootNode] : []
-  }, [project, nodes])
+  }, [project, nodesRaw])
 
-  const canEditSelected = selectedNode ? (isAdmin || can(selectedNode.id, 'edit')) : false
-  const canDeleteSelected = selectedNode ? (isAdmin || can(selectedNode.id, 'delete')) : false
-  const canDownloadSelected = selectedNode ? (isAdmin || can(selectedNode.id, 'download')) : false
+  const canEditSelected = selectedNode ? can(selectedNode.id, 'edit') : false
+  const canDeleteSelected = selectedNode ? can(selectedNode.id, 'delete') : false
+  const canDownloadSelected = selectedNode ? can(selectedNode.id, 'download') : false
 
   const selectedIdRef = useRef<number | null>(selectedNode?.id ?? null)
 
@@ -96,7 +116,7 @@ export default function ProjectDocsPage() {
   }, [selectedNode])
 
   function refresh() {
-    qc.invalidateQueries({ queryKey: ['doc-nodes'] })
+    qc.invalidateQueries({ queryKey: ['doc-nodes', projectCode, shareToken] })
   }
 
   function handleTreeSelect(n: DocumentNode) {
@@ -132,11 +152,14 @@ export default function ProjectDocsPage() {
     await uploadFile(selectedNode.id, file)
     e.target.value = ''
     refresh()
-    const fresh = await fetchNodes()
+    const fresh = shareMode
+      ? await fetchSharedNodes(projectCode, shareToken)
+      : await fetchNodes()
     const found = findNode(fresh, selectedNode.id)
     if (found) setSelectedNode(found)
   }
 
+  // 分享模式下内容通过 DocViewer 内部按需读取，不走全局 loading 态
   if (projectLoading) {
     return (
       <div className="docs-layout">
@@ -150,7 +173,9 @@ export default function ProjectDocsPage() {
       <div className="docs-layout">
         <div className="empty-hint" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
           <span>未找到项目「{projectCode}」</span>
-          <button className="btn" onClick={() => navigate('/')}>返回项目首页</button>
+          {!shareMode && (
+            <button className="btn" onClick={() => navigate('/')}>返回项目首页</button>
+          )}
         </div>
       </div>
     )
@@ -171,10 +196,15 @@ export default function ProjectDocsPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             {project.icon && <span style={{ fontSize: 18 }}>{project.icon}</span>}
             <span>{project.name}</span>
+            {shareMode && (
+              <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 4 }}>只读分享</span>
+            )}
           </div>
-          <button className="btn icon" title="返回项目首页" onClick={() => navigate('/')}>
-            <Home size={16} />
-          </button>
+          {!shareMode && (
+            <button className="btn icon" title="返回项目首页" onClick={() => navigate('/')}>
+              <Home size={16} />
+            </button>
+          )}
         </div>
         <div className="docs-tree-body">
           <DocTree nodes={projectNodes} selectedId={selectedNode?.id ?? null} onSelect={handleTreeSelect} />
@@ -192,50 +222,70 @@ export default function ProjectDocsPage() {
             )}
           </div>
           <div className="toolbar-spacer" />
-          {selectedNode && isAdmin && selectedNode.node_type !== 'form_app' && (
+          {/* 分享模式下隐藏所有写操作按钮 */}
+          {!shareMode && selectedNode && isAdmin && selectedNode.node_type !== 'form_app' && (
             <button className="btn icon" title="在此新建子节点" onClick={() => setModalMode('create')}>
               <Plus size={16} />
             </button>
           )}
-          {selectedNode && isAdmin && (
+          {!shareMode && selectedNode && isAdmin && (
             <button className="btn icon" title="编辑节点" onClick={() => setModalMode('edit')}>
               <Pencil size={16} />
             </button>
           )}
-          {selectedNode && selectedNode.node_type === 'doc' && canEditSelected && (
+          {!shareMode && selectedNode && selectedNode.node_type === 'doc' && canEditSelected && (
             <button className="btn icon" title="上传/替换文件" onClick={() => fileInputRef.current?.click()}>
               <Upload size={16} />
             </button>
           )}
-          {selectedNode && selectedNode.node_type === 'doc' && selectedNode.storage_path && canDownloadSelected && (
-            <a className="btn icon" title="下载" href={downloadUrl(selectedNode.id)}>
+          {selectedNode && selectedNode.node_type === 'doc' && (
+            <a
+              className="btn icon"
+              title="下载"
+              href={
+                shareMode && selectedNode
+                  ? downloadSharedUrl(selectedNode.id, projectCode, shareToken)
+                  : downloadUrl(selectedNode.id)
+              }
+              download
+            >
               <Download size={16} />
             </a>
           )}
-          {selectedNode && selectedNode.node_type === 'doc' && (
+          {!shareMode && selectedNode && selectedNode.node_type === 'doc' && (
             <button className="btn icon" title="版本历史" onClick={() => setShowVersions(true)}>
               <History size={16} />
             </button>
           )}
-          {selectedNode && canDeleteSelected && (
+          {!shareMode && selectedNode && canDeleteSelected && (
             <button className="btn icon danger" title="删除" onClick={handleDelete}>
               <Trash2 size={16} />
             </button>
           )}
-          <button className={'btn icon' + (aiOpen ? ' primary' : '')} title="AI 助手" onClick={toggleAI}>
-            <Sparkles size={16} />
-          </button>
+          {/* AI 助手在分享模式下隐藏 */}
+          {!shareMode && (
+            <button className={'btn icon' + (aiOpen ? ' primary' : '')} title="AI 助手" onClick={toggleAI}>
+              <Sparkles size={16} />
+            </button>
+          )}
         </div>
 
         <div className="docs-main-body" style={{ display: 'flex' }}>
           <div style={{ flex: 1, overflow: 'auto', position: 'relative' }}>
             {selectedNode ? (
-              <DocViewer node={selectedNode} canEdit={canEditSelected} onSelectionChange={setSelection} />
+              <DocViewer
+                node={selectedNode}
+                canEdit={canEditSelected}
+                onSelectionChange={setSelection}
+                shareMode={shareMode}
+                shareToken={shareToken}
+                projectCode={projectCode}
+              />
             ) : (
-              <div className="empty-hint">从左侧选择一个文档开始查看或编辑</div>
+              <div className="empty-hint">从左侧选择一个文档开始查看</div>
             )}
           </div>
-          {aiOpen && (
+          {aiOpen && !shareMode && (
             <AIPanel
               docTitle={selectedNode?.name}
               selection={selection}

@@ -8,11 +8,15 @@ interface DocViewerProps {
   node: DocumentNode
   canEdit: boolean
   onSelectionChange?: (text: string) => void
+  /** 免登录分享模式（由 ProjectDocsPage 从 URL ?share= 解析后传入） */
+  shareMode?: boolean
+  shareToken?: string
+  projectCode?: string
 }
 
 // 按节点类型 / DocType 分发到对应渲染器。
 // 所有节点（含 folder）都可承载内容：folder 无上传文件时默认进入 Markdown 协同编辑。
-export default function DocViewer({ node, canEdit, onSelectionChange }: DocViewerProps) {
+export default function DocViewer({ node, canEdit, onSelectionChange, shareMode, shareToken, projectCode }: DocViewerProps) {
   if (node.node_type === 'form_app') {
     return <FormAppViewer node={node} />
   }
@@ -33,13 +37,45 @@ export default function DocViewer({ node, canEdit, onSelectionChange }: DocViewe
     case 'ppt':
       return <OnlyOfficeViewer nodeId={node.id} />
     case 'pdf':
-      return <PdfViewer nodeId={node.id} />
+      return (
+        <PdfViewer
+          nodeId={node.id}
+          shareMode={shareMode}
+          shareToken={shareToken}
+          projectCode={projectCode}
+        />
+      )
     case 'image':
-      return <ImageViewer nodeId={node.id} name={node.name} />
+      return (
+        <ImageViewer
+          nodeId={node.id}
+          name={node.name}
+          shareMode={shareMode}
+          shareToken={shareToken}
+          projectCode={projectCode}
+        />
+      )
     case 'video':
-      return <VideoViewer nodeId={node.id} />
+      return (
+        <VideoViewer
+          nodeId={node.id}
+          shareMode={shareMode}
+          shareToken={shareToken}
+          projectCode={projectCode}
+        />
+      )
     default:
       // markdown / 空 / 未知类型：默认进入协同 Markdown 编辑器，右侧始终可编辑。
-      return <MarkdownEditor nodeId={node.id} canEdit={canEdit} onSelectionChange={onSelectionChange} />
+      // 分享模式下关闭协同和写操作，改为只读。
+      return (
+        <MarkdownEditor
+          nodeId={node.id}
+          canEdit={canEdit && !shareMode}
+          onSelectionChange={onSelectionChange}
+          shareMode={shareMode}
+          shareToken={shareToken}
+          projectCode={projectCode}
+        />
+      )
   }
 }

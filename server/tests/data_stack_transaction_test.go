@@ -156,12 +156,13 @@ func setupTransactionFixture(t *testing.T) txFixture {
 		t.Fatal(err)
 	}
 
+	dsID := ds.ID
 	iface := models.DataInterface{
 		Code:      ifaceCode,
 		Slug:      ifaceCode,
 		Name:      "TX E2E Interface",
 		Kind:      "transaction",
-		DatasetID: ds.ID,
+		DatasetID: &dsID,
 		Enabled:   true,
 		Method:    "POST",
 		StepsJSON: steps,

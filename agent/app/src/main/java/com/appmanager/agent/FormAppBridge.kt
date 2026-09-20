@@ -159,6 +159,20 @@ class FormAppBridge(
     }
 
     /**
+     * 由 form-app 运行时调用：通知服务器该设备的工作流触发应被阻塞/恢复。
+     * 用于独占扫码模式下，避免扫码同时触发其他工作流/出站连接器。
+     * form-app 在前台时调用 blockWorkflows(true)，退出时调用 blockWorkflows(false)。
+     */
+    @JavascriptInterface
+    fun blockWorkflows(blocked: Boolean) {
+        if (blocked) {
+            WorkflowBlocker.block()
+        } else {
+            WorkflowBlocker.unblock()
+        }
+    }
+
+    /**
      * form-app 触发蓝牙打印。payloadJson 见 ProtocolBuilder 注释约定。
      * 在 @JavascriptInterface 后台线程同步执行，返回 {"success":bool,"error":string} JSON。
      */

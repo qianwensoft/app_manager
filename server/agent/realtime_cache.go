@@ -74,8 +74,9 @@ func UpdateRealtimeStatus(deviceID uint, updates map[string]interface{}) {
 		cached.DirtyFields["foreground_package"] = true
 	}
 	if lastSeen, ok := updates["last_seen_at"].(time.Time); ok {
-		// last_seen_at 只在内存中更新，不写入数据库
+		// last_seen_at 只在内存中更新，不写入数据库，不标记为脏字段
 		cached.Status.LastSeenAt = lastSeen
+		cached.LastUpdate = time.Now()
 	}
 	if connected, ok := updates["agent_connected"].(bool); ok && cached.Status.AgentConnected != connected {
 		cached.Status.AgentConnected = connected
@@ -89,7 +90,7 @@ func UpdateRealtimeStatus(deviceID uint, updates map[string]interface{}) {
 	cached.LastUpdate = time.Now()
 }
 
-// GetRealtimeStatus 获取内存中的实时状态（用于 API 查询）
+// GetRealtimeStatus 获取内存中的实时状态（用于 API 查询和离线判定）
 func GetRealtimeStatus(deviceID uint) (models.DeviceRealTimeStatus, bool) {
 	realtimeCache.mu.RLock()
 	defer realtimeCache.mu.RUnlock()
@@ -99,6 +100,18 @@ func GetRealtimeStatus(deviceID uint) (models.DeviceRealTimeStatus, bool) {
 		return models.DeviceRealTimeStatus{}, false
 	}
 	return cached.Status, true
+}
+
+// GetLastSeenAt 专用于获取内存中的 last_seen_at（优化性能）
+func GetLastSeenAt(deviceID uint) (time.Time, bool) {
+	realtimeCache.mu.RLock()
+	defer realtimeCache.mu.RUnlock()
+
+	cached, exists := realtimeCache.data[deviceID]
+	if !exists || cached.Status.LastSeenAt.IsZero() {
+		return time.Time{}, false
+	}
+	return cached.Status.LastSeenAt, true
 }
 
 // StartRealtimeCacheFlusher 启动后台刷新器，定期将脏数据批量写入数据库

@@ -23,3 +23,16 @@ export const updateClaudeConfig = (data) => http.put('/settings/claude', data)
 // OnlyOffice Document Server 配置
 export const getOnlyOfficeConfig = () => http.get('/settings/onlyoffice')
 export const updateOnlyOfficeConfig = (data) => http.put('/settings/onlyoffice', data)
+
+// 系统运行时配置（MinIO / S3 兼容对象存储等）
+export const listSystemSettings = () => http.get('/system/settings')
+export const getSystemSetting = (key) => http.get(`/system/settings/${key}`)
+export const upsertSystemSetting = (key, data) => http.put(`/system/settings/${key}`, data)
+export const deleteSystemSetting = (key) => http.delete(`/system/settings/${key}`)
+
+// MinIO 专用端点
+export const getMinIOStatus = () => http.get('/system/minio/status')
+export const testMinIOConnection = (data) => http.post('/system/minio/test', data)
+export const ensureMinIODefaultBucket = () => http.post('/system/minio/ensure-default')
+export const presignMinIOUpload = (data) => http.post('/system/minio/presign-upload', data)
+export const presignMinIODownload = (data) => http.post('/system/minio/presign-download', data)

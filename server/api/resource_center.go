@@ -55,7 +55,7 @@ type resourceNodeBody struct {
 
 func normalizeNodeType(t string) string {
 	switch t {
-	case "group", "device_mgmt", "workorder_mgmt", "scada", "form_app", "link":
+	case "group", "device_mgmt", "workorder_mgmt", "scada", "form_app", "doc_project", "link":
 		return t
 	default:
 		return "group"
@@ -657,6 +657,19 @@ func buildEnrichedPortalTree(all []models.ResourceNode, parent *uint) []gin.H {
 		case "form_app":
 			node["form_code"] = cfg.FormCode
 			node["open_mode"] = cfg.OpenMode
+		case "doc_project":
+			node["project_code"] = cfg.ProjectCode
+			node["open_mode"] = cfg.OpenMode
+			// 附带文档项目的发布状态与分享令牌，前台优先用免登录分享地址（/docs-app/d/:code?share=<token>），
+			// 未发布时提示用户先发布项目。
+			if cfg.ProjectCode != "" {
+				var proj models.DocumentProject
+				if err := database.DB.Where("code = ?", cfg.ProjectCode).Select("publish_status", "share_token", "name").First(&proj).Error; err == nil {
+					node["publish_status"] = proj.PublishStatus
+					node["share_token"] = proj.ShareToken
+					node["project_name"] = proj.Name
+				}
+			}
 		case "link":
 			node["url"] = cfg.URL
 			node["open_mode"] = cfg.OpenMode

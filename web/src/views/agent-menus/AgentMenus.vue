@@ -86,6 +86,7 @@
             <el-option label="表单页面" value="form_app" />
             <el-option label="表单预览" value="form_app_preview" />
             <el-option label="扫码入口" value="form_app_scan_entry" />
+            <el-option label="文档项目" value="doc_project" />
             <el-option label="网页" value="webview_url" />
           </el-select>
         </el-form-item>
@@ -116,6 +117,20 @@
               :key="f.code"
               :label="`${f.name}（${f.code}）`"
               :value="f.code"
+            />
+          </el-select>
+          <el-select
+            v-else-if="form.target_type === 'doc_project'"
+            v-model="form.target_ref"
+            filterable
+            placeholder="选择文档项目"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="p in docProjects"
+              :key="p.code"
+              :label="`${p.name}（${p.code}）`"
+              :value="p.code"
             />
           </el-select>
           <el-input v-else v-model="form.target_ref" placeholder="URL" />
@@ -171,6 +186,7 @@ const items = ref([])
 const devices = ref([])
 const publishedScadas = ref([])
 const publishedForms = ref([])
+const docProjects = ref([])
 const dlg = ref(false)
 const form = ref({
   id: null,
@@ -206,6 +222,12 @@ const load = async () => {
     publishedScadas.value = (scadaRes.data || []).filter(s => s.publish_status === 1 && s.share_token)
     const formRes = await http.get('/form-app/infos')
     publishedForms.value = (formRes.data || []).filter(f => f.publish_status === 1)
+    // 仅展示已发布且生成了 ShareToken 的项目；未发布项目的菜单无法送达 Agent，
+    // docs-app 节点接口需要 JWT 登录，Agent WebView 没有登录态，必须凭 ShareToken 免登录打开。
+    const docRes = await http.get('/docs/projects')
+    docProjects.value = (docRes.data || []).filter(p =>
+      p.code && p.code.trim() && p.publish_status === 1 && p.share_token
+    )
   } finally {
     loading.value = false
   }

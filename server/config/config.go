@@ -26,6 +26,21 @@ type Config struct {
 	Cluster    ClusterConfig    `yaml:"cluster"`
 	WebRTC     WebRTCConfig     `yaml:"webrtc"`
 	SSO        SSOConfig        `yaml:"sso"`
+	MinIO      MinIOConfig      `yaml:"minio"`
+}
+
+// MinIOConfig MinIO / S3 兼容对象存储配置（YAML 兜底）。
+// 生产环境推荐在 Web 系统管理页面写入 system_settings 表，运行时热生效。
+// YAML / 环境变量仅在启动阶段生效，且不包含 SecretKey（凭据只走 DB）。
+type MinIOConfig struct {
+	Enabled       bool   `yaml:"enabled"`
+	Endpoint      string `yaml:"endpoint"`       // host:port，例如 127.0.0.1:9000
+	PublicHost    string `yaml:"public_host"`    // 浏览器侧访问 Endpoint（用于拼预签名 URL）；可与 Endpoint 不同
+	AccessKey     string `yaml:"access_key"`     // 启动兜底凭据；运行时应由系统管理页面覆盖
+	UseSSL        bool   `yaml:"use_ssl"`
+	Region        string `yaml:"region"`
+	DefaultBucket string `yaml:"default_bucket"` // 启动时自动 ensure 存在的 bucket
+	BucketPrefix  string `yaml:"bucket_prefix"`  // 多租户前缀
 }
 
 // WebRTCConfig 摄像头/投屏 WebRTC 的 ICE 配置。
@@ -478,6 +493,44 @@ func Load(path string) error {
 	// SSO 安全配置
 	if v := os.Getenv("SSO_HMAC_SECRET"); v != "" {
 		C.SSO.HMACSecret = v
+	}
+	// MinIO / S3 兼容存储（启动兜底，运行时应由系统管理页面覆盖 SecretKey）
+	if v := os.Getenv("MINIO_ENABLED"); v != "" {
+		switch v {
+		case "1", "true", "TRUE", "True", "yes", "on":
+			C.MinIO.Enabled = true
+		case "0", "false", "FALSE", "False", "no", "off":
+			C.MinIO.Enabled = false
+		}
+	}
+	if v := os.Getenv("MINIO_ENDPOINT"); v != "" {
+		C.MinIO.Endpoint = v
+	}
+	if v := os.Getenv("MINIO_PUBLIC_HOST"); v != "" {
+		C.MinIO.PublicHost = v
+	}
+	if v := os.Getenv("MINIO_ACCESS_KEY"); v != "" {
+		C.MinIO.AccessKey = v
+	}
+	if v := os.Getenv("MINIO_SECRET_KEY"); v != "" {
+		// SecretKey 仅从环境变量读，写入运行时单例时使用；不持久化到 DB。
+		// 系统启动后若 DB 中已有配置，则 env 不覆盖（由调用方 LoadFromDB 决定）。
+		C.MinIO.AccessKey = v
+	}
+	if v := os.Getenv("MINIO_USE_SSL"); v != "" {
+		switch v {
+		case "1", "true", "TRUE", "True", "yes", "on":
+			C.MinIO.UseSSL = true
+		}
+	}
+	if v := os.Getenv("MINIO_REGION"); v != "" {
+		C.MinIO.Region = v
+	}
+	if v := os.Getenv("MINIO_DEFAULT_BUCKET"); v != "" {
+		C.MinIO.DefaultBucket = v
+	}
+	if v := os.Getenv("MINIO_BUCKET_PREFIX"); v != "" {
+		C.MinIO.BucketPrefix = v
 	}
 	return nil
 }

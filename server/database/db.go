@@ -295,6 +295,7 @@ func initSchema(db *gorm.DB) error {
 		MigrateUserThirdParty,
 		MigrateThirdPartyOutbound,
 		MigrateThirdPartySSOSecurity,
+		MigrateSystemSettings,
 		migrations.MigrateDeviceX5Fields,
 		func(db *gorm.DB) { migrations.AddWorkflowInterfaceFields(db) },
 		MigrateWorkOrderSettledAt,

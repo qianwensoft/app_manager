@@ -13,6 +13,7 @@ import (
 	"app-manager/screen"
 	"app-manager/shell"
 	"app-manager/stomp"
+	wf "app-manager/workflow"
 	wrtc "app-manager/webrtc"
 	"encoding/base64"
 	"encoding/json"
@@ -464,6 +465,11 @@ func init() {
 			eventData, _ := msg["eventData"].(string)
 			if eventType != "" {
 				if devID, ok := agent.ResolveDeviceID(deviceID); ok {
+					// 检查设备是否被阻塞（form-app 独占扫码模式）
+					if wf.IsWorkflowBlocked(devID) {
+						log.Printf("[Workflow] Skipping device event: device %d has workflow block active", devID)
+						return
+					}
 					event.RecordAnalyzeDeviceEvent(devID, eventData)
 					rec := models.DeviceEvent{
 						DeviceID:  devID,
@@ -481,6 +487,16 @@ func init() {
 						go datastack.DispatchEventToEventBoundDatasets(database.DB, rec.EventType, rec.EventData)
 					}
 				}
+			}
+		case "set_workflow_blocked":
+			// Agent 端 form-app 独占扫码时通知服务器阻塞/恢复工作流触发
+			if devID, ok := agent.ResolveDeviceID(deviceID); ok {
+				blocked := true
+				if b, ok := msg["blocked"].(bool); ok {
+					blocked = b
+				}
+				wf.SetWorkflowBlocked(devID, blocked)
+				log.Printf("[Workflow] Device %d workflow blocked=%v", devID, blocked)
 			}
 		case "screenshot_result":
 			reqID, _ := msg["request_id"].(string)

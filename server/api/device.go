@@ -117,13 +117,16 @@ func CreateDevice(c *gin.Context) {
 	uid := c.GetUint("user_id")
 	now := time.Now()
 	device := models.Device{
-		UserID:     &uid,
-		Serial:     req.Serial,
-		Name:       req.Name,
-		LastSeenAt: &now,
-		CreatedAt:  now,
+		UserID:    &uid,
+		Serial:    req.Serial,
+		Name:      req.Name,
+		CreatedAt: now,
 	}
 	database.DB.Create(&device)
+	// 更新内存中的 last_seen_at
+	agent.UpdateRealtimeStatus(device.ID, map[string]interface{}{
+		"last_seen_at": now,
+	})
 	c.JSON(http.StatusOK, gin.H{"data": device})
 }
 
@@ -204,10 +207,18 @@ func ScanDevices(c *gin.Context) {
 		var device models.Device
 		result := database.DB.Where("serial = ?", serial).First(&device)
 		if result.Error != nil {
-			device = models.Device{Serial: serial, Name: serial, Status: "online", LastSeenAt: &now}
+			device = models.Device{Serial: serial, Name: serial, Status: "online"}
 			database.DB.Create(&device)
+			// 更新内存中的 last_seen_at
+			agent.UpdateRealtimeStatus(device.ID, map[string]interface{}{
+				"last_seen_at": now,
+			})
 		} else {
-			database.DB.Model(&device).Updates(map[string]interface{}{"status": "online", "last_seen_at": now})
+			database.DB.Model(&device).Update("status", "online")
+			// 更新内存中的 last_seen_at
+			agent.UpdateRealtimeStatus(device.ID, map[string]interface{}{
+				"last_seen_at": now,
+			})
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{"data": serials})
@@ -237,14 +248,22 @@ func ConnectDevice(c *gin.Context) {
 	if strings.Contains(outLow, "connected") && !strings.Contains(outLow, "failed") && !strings.Contains(outLow, "cannot") && !strings.Contains(outLow, "error") {
 		serial := fmt.Sprintf("%s:%d", req.IP, req.Port)
 		now := time.Now()
-		database.DB.Model(&models.Device{}).
+		var device models.Device
+		result := database.DB.Model(&models.Device{}).
 			Where("ip = ? OR serial = ?", req.IP, serial).
 			Updates(map[string]interface{}{
 				"status":              "online",
-				"last_seen_at":        now,
 				"wireless_adb_port":   req.Port,
 				"wireless_adb_serial": "",
 			})
+		if result.Error == nil && result.RowsAffected > 0 {
+			// 查找设备 ID 并更新内存中的 last_seen_at
+			if err := database.DB.Where("ip = ? OR serial = ?", req.IP, serial).First(&device).Error; err == nil {
+				agent.UpdateRealtimeStatus(device.ID, map[string]interface{}{
+					"last_seen_at": now,
+				})
+			}
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": out})
@@ -312,7 +331,11 @@ func GetDeviceInfo(c *gin.Context) {
 		"os_version": info.OSVersion, "sdk_version": info.SDKVersion,
 		"cpu_info": info.CPUInfo, "total_memory": info.TotalMemory,
 		"total_storage": info.TotalStorage, "resolution": info.Resolution,
-		"ip_address": info.IPAddress, "last_seen_at": time.Now(),
+		"ip_address": info.IPAddress,
+	})
+	// 更新内存中的 last_seen_at
+	agent.UpdateRealtimeStatus(device.ID, map[string]interface{}{
+		"last_seen_at": time.Now(),
 	})
 	c.JSON(http.StatusOK, gin.H{"data": info})
 }
@@ -1300,12 +1323,15 @@ func AdbConnectByAgentIP(c *gin.Context) {
 		"wireless_adb_port":   req.Port,
 		"wireless_adb_serial": "",
 		"status":              "online",
-		"last_seen_at":        now,
 	}
 	if !serialUsableWithAdb(device.Serial) || strings.Contains(device.Serial, ":") {
 		dbUpdates["serial"] = serial
 	}
 	_ = database.DB.Model(&models.Device{}).Where("id = ?", device.ID).Updates(dbUpdates).Error
+	// 更新内存中的 last_seen_at
+	agent.UpdateRealtimeStatus(device.ID, map[string]interface{}{
+		"last_seen_at": now,
+	})
 
 	logAudit(c, "ADB 无线连接", fmt.Sprintf("设备 %d adb connect %s → %s", device.ID, serial, out), &device.ID)
 	c.JSON(http.StatusOK, gin.H{"message": out, "ip": ip, "port": req.Port, "serial": serial})

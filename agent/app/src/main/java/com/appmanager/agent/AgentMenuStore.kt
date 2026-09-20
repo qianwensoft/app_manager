@@ -155,6 +155,22 @@ object AgentMenuStore {
             .putExtra("page_key", pageKey)
             .putExtra("server_url", getServerUrl(context))
         if (menuFormBase.isNotEmpty()) intent.putExtra("form_app_base_url", menuFormBase)
+
+        // 检测独占扫码模式：扫描配置为 exclusive 时，阻塞工作流触发
+        val cfgRaw = (m["scan_config_json"] as? String)?.trim().orEmpty()
+        var exclusiveMode = false
+        if (cfgRaw.isNotEmpty()) {
+            val cfg = runCatching { Gson().fromJson(cfgRaw, JsonObject::class.java) }.getOrNull()
+            val mode = cfg?.get("mode")?.asString?.trim().orEmpty().ifEmpty { "router" }
+            if (mode == "exclusive") {
+                exclusiveMode = true
+            }
+        }
+        if (exclusiveMode) {
+            intent.putExtra(FormAppActivity.EXTRA_EXCLUSIVE_SCAN_MODE, true)
+            android.util.Log.i("AgentMenuStore", "Launching form-app $code in exclusive scan mode")
+        }
+
         if (newTask) intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
         context.startActivity(intent)
     }

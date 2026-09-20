@@ -111,6 +111,11 @@ func SetupRouter() *gin.Engine {
 	r.POST("/api/scada/share/endpoints/:id/call", CallScadaShareEndpoint)
 	// 免登录：表单分享
 	r.GET("/api/form-app/info/share/:token", GetFormAppByShareToken)
+	// 免登录：文档项目分享（供 Agent App 菜单只读打开；凭 ?share=<token> 校验，仅限已发布项目关联子树）
+	r.GET("/api/docs/share/projects/code/:code", GetSharedDocumentProject)
+	r.GET("/api/docs/share/projects/code/:code/nodes", GetSharedDocumentNodes)
+	r.GET("/api/docs/share/projects/code/:code/nodes/:id/content", GetSharedDocumentContent)
+	r.GET("/api/docs/share/projects/code/:code/nodes/:id/download", DownloadSharedDocumentFile)
 	// 工单报告分享（免登录访问基础信息，需登录模式下需要 JWT）
 	r.GET("/api/share/work-order-reports/:token", auth.OptionalAuthMiddleware(), GetWorkOrderReportShare)
 	r.GET("/api/share/work-order-reports/:token/work-orders", auth.OptionalAuthMiddleware(), GetSharedWorkOrders)
@@ -263,6 +268,21 @@ func SetupRouter() *gin.Engine {
 		// OnlyOffice Document Server 配置
 		settings.GET("/onlyoffice", GetOnlyOfficeSettings)
 		settings.PUT("/onlyoffice", UpdateOnlyOfficeSettings)
+	}
+
+	// 运行时系统配置（MinIO / S3 兼容对象存储、邮件等）
+	sys := r.Group("/api/system", auth.AuthMiddleware(), auth.RequireRole("admin"))
+	{
+		sys.GET("/settings", ListSystemSettings)
+		sys.GET("/settings/:key", GetSystemSetting)
+		sys.PUT("/settings/:key", UpsertSystemSetting)
+		sys.DELETE("/settings/:key", DeleteSystemSetting)
+		// MinIO 专用端点（健康检查 + 预签名 URL）
+		sys.GET("/minio/status", PingMinIO)
+		sys.POST("/minio/test", TestMinIOConnection)
+		sys.POST("/minio/ensure-default", EnsureMinIODefaultBucket)
+		sys.POST("/minio/presign-upload", PresignMinIOUpload)
+		sys.POST("/minio/presign-download", PresignMinIODownload)
 	}
 
 	// 用户管理（仅 admin）
@@ -964,6 +984,8 @@ func SetupRouter() *gin.Engine {
 		docs.POST("/projects", auth.RequireRole("admin", "operator"), CreateDocumentProject)
 		docs.PUT("/projects/:id", auth.RequireRole("admin", "operator"), UpdateDocumentProject)
 		docs.DELETE("/projects/:id", auth.RequireRole("admin", "operator"), DeleteDocumentProject)
+		docs.POST("/projects/:id/publish", auth.RequireRole("admin", "operator"), PublishDocumentProject)
+		docs.POST("/projects/:id/unpublish", auth.RequireRole("admin", "operator"), UnpublishDocumentProject)
 
 		// 锚点管理
 		docs.PUT("/nodes/:id/anchors", auth.RequireDocumentPermission("edit"), UpdateDocumentAnchors)

@@ -234,6 +234,46 @@ export function initialsOf(name: string, max = 2): string {
   return chars.slice(-max).join('')
 }
 
+// ---- 免登录分享 API（供 Agent App 菜单只读打开）----
+
+// 从 URL query 解析 share token（兼容主应用代理和 docs-app 独立部署两种场景）。
+export function getShareToken(): string {
+  const params = new URLSearchParams(window.location.search)
+  return params.get('share') || ''
+}
+
+// 免登录：按 code + share token 返回项目基础信息。
+// 对应服务端 GET /api/docs/share/projects/code/:code
+export async function fetchSharedProjectByCode(code: string, shareToken: string): Promise<import('./types').DocumentProject | null> {
+  try {
+    const { data } = await api.get(`/docs/share/projects/code/${encodeURIComponent(code)}?share=${encodeURIComponent(shareToken)}`)
+    return data.data || null
+  } catch (e: any) {
+    if (e?.response?.status === 404) return null
+    throw e
+  }
+}
+
+// 免登录：返回分享项目关联根节点及其整棵子树（只读）。
+// 对应服务端 GET /api/docs/share/projects/code/:code/nodes
+export async function fetchSharedNodes(code: string, shareToken: string): Promise<DocumentNode[]> {
+  const { data } = await api.get(`/docs/share/projects/code/${encodeURIComponent(code)}/nodes?share=${encodeURIComponent(shareToken)}`)
+  return data.data || []
+}
+
+// 免登录：读取分享子树内某文本节点的内容（Markdown 只读展示）。
+// 对应服务端 GET /api/docs/share/nodes/:id/content
+export async function fetchSharedContent(id: number, code: string, shareToken: string): Promise<string> {
+  const { data } = await api.get(`/docs/share/projects/code/${encodeURIComponent(code)}/nodes/${id}/content?share=${encodeURIComponent(shareToken)}`)
+  return data.content || ''
+}
+
+// 免登录下载分享子树内节点的文件。
+// 对应服务端 GET /api/docs/share/nodes/:id/download
+export function downloadSharedUrl(id: number, code: string, shareToken: string): string {
+  return `/api/docs/share/projects/code/${encodeURIComponent(code)}/nodes/${id}/download?share=${encodeURIComponent(shareToken)}`
+}
+
 // ---- 项目管理（Document Projects）----
 
 export async function fetchProjectCategories(): Promise<import('./types').DocumentProjectCategory[]> {
@@ -320,6 +360,18 @@ export async function updateProject(
 
 export async function deleteProject(id: number): Promise<void> {
   await api.delete(`/docs/projects/${id}`)
+}
+
+// 发布项目：生成 share_token，开启免登录只读分享（供 Agent App 菜单打开）。
+// 发布后 docs-app 的 /d/:code?share=<token> 路由可被 Agent WebView 无 JWT 直接打开。
+// 重复发布会保留原 share_token；取消发布会清空 token 并关闭免登录访问。
+export async function publishProject(id: number): Promise<import('./types').DocumentProject> {
+  const { data } = await api.post(`/docs/projects/${id}/publish`)
+  return data.data
+}
+
+export async function unpublishProject(id: number): Promise<void> {
+  await api.post(`/docs/projects/${id}/unpublish`)
 }
 
 export async function updateDocumentAnchors(id: number, anchors: import('./types').DocumentAnchor[]): Promise<void> {
