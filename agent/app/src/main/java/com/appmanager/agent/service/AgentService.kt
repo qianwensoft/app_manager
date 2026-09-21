@@ -337,9 +337,6 @@ class AgentService : LifecycleService() {
                 heartbeatManager.start()
                 deviceInfoCollector.start()
 
-                // WebSocket 重新建立后，补发工作流阻塞状态，确保与服务器侧一致
-                com.appmanager.agent.WorkflowBlocker.flushIfNeeded()
-
                 // 启动前台应用监听器（实时上报前台应用变化）
                 if (foregroundAppMonitor == null) {
                     foregroundAppMonitor = ForegroundAppMonitor(this@AgentService) { packageName ->
@@ -412,7 +409,7 @@ class AgentService : LifecycleService() {
         detachInstallCallback(this)
         // 清除单例引用
         instanceRef = null
-        // 重置工作流阻塞状态
+        // 重置本地工作流阻塞状态（纯本地，无需通知服务端）
         com.appmanager.agent.WorkflowBlocker.reset()
         super.onDestroy()
         serviceJob.cancel()

@@ -159,9 +159,10 @@ class FormAppBridge(
     }
 
     /**
-     * 由 form-app 运行时调用：通知服务器该设备的工作流触发应被阻塞/恢复。
+     * 由 form-app 运行时调用：通知 agent 本地工作流阻塞/恢复。
      * 用于独占扫码模式下，避免扫码同时触发其他工作流/出站连接器。
      * form-app 在前台时调用 blockWorkflows(true)，退出时调用 blockWorkflows(false)。
+     * 纯本地状态，agent 不发 device_event 即可，无需同步服务端。
      */
     @JavascriptInterface
     fun blockWorkflows(blocked: Boolean) {
