@@ -551,7 +551,8 @@ func buildMenuPayloadForDevice(deviceID uint) []map[string]interface{} {
 		if m.TargetType == "webview_url" && strings.TrimSpace(m.TargetRef) != "" {
 			previewPath = strings.TrimSpace(m.TargetRef)
 		}
-		// doc_project 类型：target_ref 是项目 code，拼装为文档直链路由。
+		// doc_project 类型：target_ref 是项目 code，拼装为 Agent 端专用只读预览路由。
+		// 使用 /preview/doc/:code 而非 /d/:code，避免路由冲突和分享模式下的协同编辑/权限检查问题。
 		// docs-app 的节点树/内容接口默认要求登录 JWT，Agent WebView 没有登录态，
 		// 因此必须像 SCADA/表单应用一样先「发布」生成 ShareToken，才能免登录只读打开；
 		// 未发布则跳过该菜单，避免 Agent 打开后因 401 而空白。
@@ -559,10 +560,9 @@ func buildMenuPayloadForDevice(deviceID uint) []map[string]interface{} {
 			var docProject models.DocumentProject
 			if err := database.DB.Where("code = ?", strings.TrimSpace(m.TargetRef)).First(&docProject).Error; err == nil {
 				if docProject.PublishStatus == 1 && docProject.ShareToken != "" {
-					// 下发相对路径 /docs-app/d/:code?share=<token>（docs-app SPA 挂载在
-					// /docs-app 前缀下，内部路由 basename 也是 /docs-app，缺少前缀会被服务端
-					// SPA 回退错误地当作 Vue 管理端路由处理，导致 Agent WebView 打开空白页）。
-					previewPath = "/docs-app/d/" + docProject.Code + "?share=" + docProject.ShareToken
+					// 下发相对路径 /docs-app/preview/doc/:code?share=<token>
+					// AgentDocPreview 页面专门适配 Agent WebView：纯只读、无协同、无 AI 助手
+					previewPath = "/docs-app/preview/doc/" + docProject.Code + "?share=" + docProject.ShareToken
 					contentVer = int64(docProject.UpdatedAt.Unix())
 				} else {
 					continue
