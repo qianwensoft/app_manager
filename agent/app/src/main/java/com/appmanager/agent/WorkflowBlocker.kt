@@ -5,45 +5,91 @@ import android.util.Log
 /**
  * 工作流阻塞器：form-app 独占扫码模式下，阻止 agent 上报 device_event。
  *
- * 当 form-app 配置为独占模式（scan_config_json.mode = "exclusive"）时，
- * 在 form-app 进入前台时调用 block()，退出时调用 unblock()。
+ * 每个 form-app 独立引用计数（formCode → count），只有当"当前有 exclusive form-app
+ * 可见"时才阻塞——即：
+ *   - form-app 的 config 指定独占模式（exclusive_scan_mode = true）
+ *   - 该 form-app 处于可见状态（onStart / onStop 生命周期，而非 onResume / onPause）
+ *   - agent 不在其它 form-app 中（无 exclusive form-app 可见）
+ *
  * EventReporter.report() 在发事件前查此处状态，阻塞时直接丢弃。
  *
- * 纯本地状态，无 WS 通信，服务端无需维护 block 状态——
- * agent 不发 event 本身即等价于阻塞，无需跨进程同步。
+ * 纯本地状态，无 WS 通信，服务端无需维护 block 状态。
  */
 object WorkflowBlocker {
     private const val TAG = "WorkflowBlocker"
 
-    /** true = 阻塞（form-app 独占扫码中），false = 正常 */
+    /** formCode → 阻塞计数（0 = 该 form-app 不阻塞）。非 exclusive 的 form-app 不会调用 block()。 */
+    private val blockedCounts = mutableMapOf<String, Int>()
+
+    /** 当前是否有任意 exclusive form-app 处于可见状态。 */
     @Volatile
-    private var blocked: Boolean = false
+    private var anyBlocked: Boolean = false
 
     /**
-     * 阻塞：独占扫码开始，停止上报 device_event。
+     * 请求阻塞：exclusive form-app 进入可见状态时调用。
+     * 可重入（同一 formCode 多次调用），由对应 unblock() 调用次数平衡。
+     *
+     * @param formCode 发起阻塞的 form-app 代码
      */
-    fun block() {
-        blocked = true
-        Log.i(TAG, "blocked=true (exclusive scan started)")
+    fun block(formCode: String) {
+        val prev = anyBlocked
+        synchronized(blockedCounts) {
+            val cnt = (blockedCounts[formCode] ?: 0) + 1
+            blockedCounts[formCode] = cnt
+            anyBlocked = blockedCounts.values.any { it > 0 }
+        }
+        Log.i(TAG, "block(code=$formCode, anyBlocked=$anyBlocked, was=$prev)")
     }
 
     /**
-     * 取消阻塞：独占扫码结束，恢复上报 device_event。
+     * 取消阻塞：exclusive form-app 退出可见状态时调用。
+     *
+     * @param formCode 对应 block() 时的 formCode
      */
-    fun unblock() {
-        blocked = false
-        Log.i(TAG, "blocked=false (exclusive scan ended)")
+    fun unblock(formCode: String) {
+        val prev = anyBlocked
+        synchronized(blockedCounts) {
+            val cnt = (blockedCounts[formCode] ?: 0) - 1
+            if (cnt <= 0) {
+                blockedCounts.remove(formCode)
+            } else {
+                blockedCounts[formCode] = cnt
+            }
+            anyBlocked = blockedCounts.values.any { it > 0 }
+        }
+        Log.i(TAG, "unblock(code=$formCode, anyBlocked=$anyBlocked, was=$prev)")
     }
 
     /**
-     * 当前本地阻塞状态。
+     * 安全强制解除阻塞（onDestroy 兜底）。
+     * 与 onStop 的 unblock 互斥：仅当该 formCode 仍有计数时才会真正解除。
      */
-    fun isBlocked(): Boolean = blocked
+    fun forceUnblock(formCode: String) {
+        synchronized(blockedCounts) {
+            if (!blockedCounts.containsKey(formCode)) {
+                Log.i(TAG, "forceUnblock(code=$formCode): already not blocked, skip")
+                return
+            }
+            blockedCounts.remove(formCode)
+            anyBlocked = blockedCounts.values.any { it > 0 }
+        }
+        Log.i(TAG, "forceUnblock(code=$formCode, anyBlocked=$anyBlocked)")
+    }
+
+    /**
+     * 当前是否有任意 exclusive form-app 可见。
+     * EventReporter.report() 查询此值决定是否丢弃事件。
+     */
+    fun isBlocked(): Boolean = anyBlocked
 
     /**
      * 重置（AgentService 销毁时调用）。
      */
     fun reset() {
-        blocked = false
+        synchronized(blockedCounts) {
+            blockedCounts.clear()
+            anyBlocked = false
+        }
+        Log.i(TAG, "reset")
     }
 }

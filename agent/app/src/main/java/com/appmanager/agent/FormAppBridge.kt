@@ -163,13 +163,19 @@ class FormAppBridge(
      * 用于独占扫码模式下，避免扫码同时触发其他工作流/出站连接器。
      * form-app 在前台时调用 blockWorkflows(true)，退出时调用 blockWorkflows(false)。
      * 纯本地状态，agent 不发 device_event 即可，无需同步服务端。
+     *
+     * 传入 this.formAppCode 作为 formCode，保证多 form-app 共存时各自分别计数，
+     * 与 FormAppActivity.onStart/onStop 的生命周期管控互为补充。
+     *
+     * 使用 forceUnblock(false) 兜底：若 JS 与 Android 生命周期双重调用导致重复 unblock，
+     * 也不会产生计数器为负的异常状态。
      */
     @JavascriptInterface
     fun blockWorkflows(blocked: Boolean) {
         if (blocked) {
-            WorkflowBlocker.block()
+            WorkflowBlocker.block(formAppCode)
         } else {
-            WorkflowBlocker.unblock()
+            WorkflowBlocker.forceUnblock(formAppCode)
         }
     }
 

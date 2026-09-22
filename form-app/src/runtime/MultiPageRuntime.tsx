@@ -10,7 +10,7 @@ import { resolveLibrary } from './endResolver'
 import { fieldDefsToSchema } from '@/pages/schemaConverter'
 import ListRenderer from './ListRenderer'
 import DetailRenderer from './DetailRenderer'
-import { setupEventListener, setGlobalEventBlocked } from './EventHandler'
+import { setupEventListener, setGlobalEventBlocked, setWorkflowBlocked } from './EventHandler'
 import { navigationManager } from './NavigationManager'
 import { createAppState } from './appState'
 import { AppStateContext } from './AppStateContext'
@@ -258,13 +258,20 @@ export default function MultiPageRuntime({ formAppCode, entryPageKey = 'form' }:
     })
   }, [app, formAppCode, appState, navigate])
 
-  // 切换页面时根据 block_global_events 配置通知 Agent 屏蔽/恢复全局事件
+  // 切换页面时根据 block_global_events / block_workflows 配置通知 Agent 屏蔽/恢复全局事件和工作流触发
   useEffect(() => {
     const page = pages.find(p => p.page_key === currentPageKey)
     if (!page) return
     const cfg = page.config_json ? JSON.parse(page.config_json) : {}
     setGlobalEventBlocked(!!cfg.block_global_events)
-    return () => setGlobalEventBlocked(false)
+    // block_workflows：独占扫码模式下，阻止 agent 上报 device_event。
+    // 与 exclusive_scan_mode Intent extra 的 onStart/onStop 控制互补；
+    // 此处处理页面级的精细化控制（可由服务端数据结构通过 config_json 下发）。
+    setWorkflowBlocked(!!cfg.block_workflows)
+    return () => {
+      setGlobalEventBlocked(false)
+      setWorkflowBlocked(false)
+    }
   }, [currentPageKey, pages])
 
   const goBack = () => {

@@ -170,14 +170,20 @@ class FormAppActivity : AppCompatActivity() {
         }
     }
 
-    override fun onResume() {
-        super.onResume()
-        // 独占扫码模式下，阻塞工作流触发
+    override fun onStart() {
+        super.onStart()
+        // 独占扫码模式下，form-app 进入可见状态时阻塞工作流触发。
+        // 使用 onStart（而非 onResume）避免对话框/相机预览覆盖导致的瞬时 onPause 干扰。
         if (exclusiveScanMode) {
-            WorkflowBlocker.block()
+            WorkflowBlocker.block(formAppCode)
             Log.i(tag, "Workflow blocked for exclusive scan mode")
         }
+    }
 
+    override fun onResume() {
+        super.onResume()
+        // 硬件扫码广播接收器：仅在 Activity 处于交互前台时注册，
+        // onPause 时注销（onStop 不一定立即触发，onDestroy 可能延迟）。
         val filter = ScanBroadcastHelper.createScanIntentFilter(this)
         // Android 14（targetSdk 34）起，注册接收外部应用（扫码服务）广播的 receiver 必须显式声明导出标志，
         // 否则 registerReceiver 抛 SecurityException 导致 PDA 头扫广播完全收不到（摄像头扫码走直连不受影响）。
@@ -188,12 +194,18 @@ class FormAppActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
-        // 独占扫码模式下，退出时恢复工作流触发
-        if (exclusiveScanMode) {
-            WorkflowBlocker.unblock()
-            Log.i(tag, "Workflow unblocked on pause")
-        }
+        // Activity 失去交互前台，注销扫码广播接收器。
         try { unregisterReceiver(hardwareScanReceiver) } catch (_: Exception) {}
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // 独占扫码模式下，form-app 退出可见状态时取消阻塞。
+        // onStop 在 onPause 之后执行，此时 receiver 已注销，不会影响扫描接收。
+        if (exclusiveScanMode) {
+            WorkflowBlocker.unblock(formAppCode)
+            Log.i(tag, "Workflow unblocked on stop")
+        }
     }
 
     fun launchBarcodeScan() {
@@ -238,10 +250,12 @@ class FormAppActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        // 独占扫码模式下，确保退出时恢复工作流触发
+        // 安全兜底：确保退出时解除阻塞。
+        // 正常流程由 onStop 处理；但进程被系统销毁时可能跳过 onStop 直接到这里，
+        // 此时 onStop 的 unblock 未执行，必须在此补一次 forceUnblock。
         if (exclusiveScanMode) {
-            WorkflowBlocker.unblock()
-            Log.i(tag, "Workflow unblocked on destroy")
+            WorkflowBlocker.forceUnblock(formAppCode)
+            Log.i(tag, "Workflow force-unblocked on destroy")
         }
         if (::bridge.isInitialized) bridge.release()
         // 从跨 app 事件中继注册表移除（第 7a 步）
