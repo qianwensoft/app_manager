@@ -1,13 +1,17 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
+	"log"
+	"net/http"
+	"strings"
+	"time"
+
 	"app-manager/database"
 	"app-manager/minio"
 	"app-manager/models"
 	"app-manager/systemsettings"
-	"net/http"
-	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 )
@@ -35,11 +39,17 @@ func adminSystemMiddleware() gin.HandlerFunc {
 // ListSystemSettings 列出所有运行时配置（secret 字段被屏蔽）。
 func ListSystemSettings(c *gin.Context) {
 	out := systemsettings.Get().List()
+	for i := range out {
+		if out[i].SecretEncrypted {
+			out[i].ValueJSON = maskSecretFieldsInJSON(out[i].ValueJSON, secretFieldNamesFor(out[i].Key))
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{"data": out})
 }
 
-// GetSystemSetting 读取单条配置（不含 secret 明文）。
-// 配合 secret_encrypted 字段，前端可显示「已配置」状态但不可读取明文。
+// GetSystemSetting 读取单条配置（仅 secret 字段被屏蔽，其余字段原样回填）。
+// 修复：原实现会把整个 ValueJSON 替换为 "***"，导致前端页面刷新后
+// endpoint/access_key 等所有字段都被清空（用户报告的"刷新没有回填 MinIO 配置"）。
 func GetSystemSetting(c *gin.Context) {
 	key := c.Param("key")
 	if key == "" {
@@ -56,9 +66,9 @@ func GetSystemSetting(c *gin.Context) {
 		}})
 		return
 	}
-	// 真实场景：返回快照，避免泄漏 secret。
+	// 仅屏蔽 secret 字段，其余字段原样返回，前端可正常回填。
 	if setting.SecretEncrypted {
-		setting.ValueJSON = "***"
+		setting.ValueJSON = maskSecretFieldsInJSON(setting.ValueJSON, secretFieldNamesFor(key))
 	}
 	c.JSON(http.StatusOK, gin.H{"data": setting})
 }
@@ -84,16 +94,23 @@ func UpsertSystemSetting(c *gin.Context) {
 		return
 	}
 
-	// 检测 secret：基于已知 schema 判断（避免每次都让前端手动声明）。
-	secretEncrypted := strings.TrimSpace(body.ValueJSON) == "***"
-	if secretEncrypted {
-		// 用户在编辑表单上选择「不修改 secret」，ValueJSON 透传 "*" 由服务端跳过覆盖。
-		existing, ok := systemsettings.Get().Get(key)
-		if !ok {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "secret not set, please input value"})
-			return
+	// secret 保留逻辑：
+	//  - sentinel: body.ValueJSON == "***"（前端无需保留旧字段时发出的信号）
+	//  - JSON 内 secret_key 空字符串/缺失：保留原值，避免前端因表单没有回填 secret
+	//    导致每次保存都把 secret 清空。
+	hasSecret, secretFieldNames := secretFieldNamesForWithFlag(key)
+	if hasSecret {
+		trimmed := strings.TrimSpace(body.ValueJSON)
+		if trimmed == "***" {
+			existing, ok := systemsettings.Get().Get(key)
+			if !ok {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "secret not set, please input value"})
+				return
+			}
+			body.ValueJSON = existing.ValueJSON
+		} else {
+			body.ValueJSON = retainExistingSecretsInJSON(c, key, body.ValueJSON, secretFieldNames)
 		}
-		body.ValueJSON = existing.ValueJSON // 保留原 secret
 	}
 
 	userID := c.GetUint("user_id")
@@ -155,6 +172,13 @@ type MinIOTestConnectionBody struct {
 }
 
 // TestMinIOConnection 不落库，临时构造客户端执行 ListBuckets。
+//
+// 关键行为：
+//  1. 请求 body 的 SecretKey 为空时，自动复用 DB 中已保存的 secret_key（与 UpsertSystemSetting 的 "***" 占位语义一致）。
+//     当前端已保存过凭据但用户没重新输入时，仍可测试连接。
+//  2. 校验失败时精确指出缺失的字段名（不再笼统报"三个都必填"）。
+//  3. ListBuckets 走 10s 超时 ctx，避免网络不可达时挂死（minio-go 默认超时可能远超前端 axios 30s 上限）。
+//  4. 失败时服务端打日志（含 endpoint / ssl / region / 错误），便于运维通过日志二次定位。
 func TestMinIOConnection(c *gin.Context) {
 	var body MinIOTestConnectionBody
 	if err := c.ShouldBindJSON(&body); err != nil {
@@ -170,17 +194,51 @@ func TestMinIOConnection(c *gin.Context) {
 		Region:        body.Region,
 		DefaultBucket: body.DefaultBucket,
 	}
-	if !cfg.IsValid() {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "endpoint / access_key / secret_key 必填"})
+
+	// (1) SecretKey 为空时，回退到 DB 中已保存的凭据。
+	if strings.TrimSpace(cfg.SecretKey) == "" {
+		if existing, ok := systemsettings.Get().Get(models.SystemSettingKeyMinIO); ok {
+			var stored minio.Config
+			if jerr := json.Unmarshal([]byte(existing.ValueJSON), &stored); jerr == nil && stored.SecretKey != "" {
+				cfg.SecretKey = stored.SecretKey
+				log.Printf("[minio] test connection: secret_key 留空，已使用 DB 中已保存凭据进行测试")
+			}
+		}
+	}
+
+	// (2) 校验：精确定位缺失字段。
+	var missing []string
+	if strings.TrimSpace(cfg.Endpoint) == "" {
+		missing = append(missing, "endpoint")
+	}
+	if strings.TrimSpace(cfg.AccessKey) == "" {
+		missing = append(missing, "access_key")
+	}
+	if strings.TrimSpace(cfg.SecretKey) == "" {
+		missing = append(missing, "secret_key")
+	}
+	if len(missing) > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "以下字段必填：" + strings.Join(missing, ", ")})
 		return
 	}
+
 	raw, err := minio.NewTempClient(cfg)
 	if err != nil {
+		log.Printf("[minio] test connection failed (endpoint=%s, ssl=%v, region=%q): new client: %v",
+			cfg.Endpoint, cfg.UseSSL, cfg.Region, err)
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
-	buckets, err := raw.ListBuckets(c.Request.Context())
+
+	// (3) 强制 10s 超时，避免无界挂起。
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+
+	buckets, err := raw.ListBuckets(ctx)
 	if err != nil {
+		// (4) 服务端日志：包含连接定位信息（不含凭据）。
+		log.Printf("[minio] test connection failed (endpoint=%s, ssl=%v, region=%q): list buckets: %v",
+			cfg.Endpoint, cfg.UseSSL, cfg.Region, err)
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
@@ -310,5 +368,116 @@ func configMinIODefaultBucket() string {
 	return snap.DefaultBucket
 }
 
+// ============================================================================
+// Secret masking / preservation helpers
+// ============================================================================
+
+// secretFieldNamesFor 返回某 key 对应的 secret JSON 字段名列表。
+//
+// 关键约束：包含 secret 的配置项必须在此维护，避免「忘记加白名单」导致 secret
+// 字段意外回显到前端。当前已知仅 MinIO 一项。
+func secretFieldNamesFor(key string) []string {
+	_, names := secretFieldNamesForWithFlag(key)
+	return names
+}
+
+// secretFieldNamesForWithFlag 返回 (是否含 secret, 字段名列表)。
+func secretFieldNamesForWithFlag(key string) (bool, []string) {
+	switch key {
+	case models.SystemSettingKeyMinIO:
+		return true, []string{"secret_key"}
+	default:
+		return false, nil
+	}
+}
+
+// maskSecretFieldsInJSON 把 secret 字段的值清空（前端展示为占位），其余字段保留。
+// JSON 不合法时退化为 "***"（保底防泄漏）。
+func maskSecretFieldsInJSON(valueJSON string, secretFields []string) string {
+	if len(secretFields) == 0 {
+		return valueJSON
+	}
+	if strings.TrimSpace(valueJSON) == "" {
+		return ""
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal([]byte(valueJSON), &raw); err != nil {
+		// JSON 损坏：保守起见整段遮蔽。
+		log.Printf("[system-settings] maskSecretFieldsInJSON: json parse failed, masking entirely: %v", err)
+		return "***"
+	}
+	touched := false
+	for _, f := range secretFields {
+		if _, ok := raw[f]; ok {
+			raw[f] = ""
+			touched = true
+		}
+	}
+	if !touched {
+		return valueJSON
+	}
+	out, err := json.Marshal(raw)
+	if err != nil {
+		return "***"
+	}
+	return string(out)
+}
+
+// retainExistingSecretsInJSON 对于 JSON 中 secret 字段为空的情况，从 DB 现有配置中
+// 拷贝原值注入，避免前端表单没回填 secret 时保存把 secret 静默清空。
+//
+//   - 字段缺失 / 空字符串：拷贝 existing
+//   - 字段非空（用户主动新输入）：保留新输入
+//   - 解析失败：原样返回
+func retainExistingSecretsInJSON(c *gin.Context, key, valueJSON string, secretFields []string) string {
+	if len(secretFields) == 0 {
+		return valueJSON
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal([]byte(valueJSON), &raw); err != nil {
+		log.Printf("[system-settings] retainExistingSecretsInJSON: json parse failed: %v", err)
+		return valueJSON
+	}
+	existing, ok := systemsettings.Get().Get(key)
+	if !ok {
+		return valueJSON
+	}
+	var existingMap map[string]interface{}
+	if err := json.Unmarshal([]byte(existing.ValueJSON), &existingMap); err != nil {
+		return valueJSON
+	}
+	for _, f := range secretFields {
+		v, present := raw[f]
+		empty := !present || v == nil || v == ""
+		if empty {
+			if old, ok2 := existingMap[f].(string); ok2 {
+				raw[f] = old
+				log.Printf("[system-settings] retain secret field %s for key %s (user input was empty)", f, key)
+			}
+		}
+	}
+	out, err := json.Marshal(raw)
+	if err != nil {
+		return valueJSON
+	}
+	return string(out)
+}
+
 // 防止未使用导入警告（database 在其它 system API 中使用）。
 var _ = database.DB
+
+// ============================================================================
+// 仅测试用的导出入口（让 tests 包能直接覆盖 mask/retain 逻辑，无需启 HTTP）
+// ============================================================================
+
+// MaskSecretFieldsInJSONForTest 是 maskSecretFieldsInJSON 的测试入口。
+// 暴露给 tests 包做端到端断言（覆盖"刷新后 endpoint 等字段是否回填"）。
+func MaskSecretFieldsInJSONForTest(valueJSON string, secretFields []string) string {
+	return maskSecretFieldsInJSON(valueJSON, secretFields)
+}
+
+// RetainExistingSecretsInJSONForTest 是 retainExistingSecretsInJSON 的测试入口。
+// 暴露给 tests 包做端到端断言（覆盖"空 secret_key 提交时是否被现有 secret 覆盖回去"）。
+func RetainExistingSecretsInJSONForTest(key, valueJSON string, secretFields []string) string {
+	return retainExistingSecretsInJSON(nil, key, valueJSON, secretFields)
+}

@@ -98,10 +98,13 @@ func TestSystemSettings_PutGetList(t *testing.T) {
 	_, err := systemsettings.Get().Set(models.SystemSettingKeyMinIO, string(js), true, "test", 1)
 	require.NoError(t, err)
 
-	// 列表中 secret 应被屏蔽
+	// 列表中 secret_key 字段应被清空，endpoint 等其它字段保留（避免 list 接口只看到 "***"）。
 	list := systemsettings.Get().List()
 	require.Len(t, list, 1)
-	assert.Equal(t, "***", list[0].ValueJSON)
+	assert.NotEqual(t, "***", list[0].ValueJSON, "list 不应把整段 JSON 遮蔽，应该只清空 secret_key")
+	assert.NotContains(t, list[0].ValueJSON, `"secret_key":"sk"`, "secret_key plaintext must not appear in list output")
+	assert.Contains(t, list[0].ValueJSON, `"endpoint":"127.0.0.1:9000"`, "endpoint should be preserved in list")
+	assert.Contains(t, list[0].ValueJSON, `"access_key":"ak"`, "access_key should be preserved in list")
 	assert.True(t, list[0].SecretEncrypted)
 
 	// 内部 Get 应拿到明文

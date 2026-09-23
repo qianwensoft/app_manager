@@ -67,7 +67,7 @@ func ensureScopedAPIKeys(t *testing.T, userID uint) {
 		t.Fatal(err)
 	}
 	var writeKey models.ApiKey
-	if err := database.DB.Where("key = ?", phaseDTxWriteAPIKey).First(&writeKey).Error; err != nil {
+	if err := database.DB.Where("`key` = ?", phaseDTxWriteAPIKey).First(&writeKey).Error; err != nil {
 		if err := database.DB.Create(&models.ApiKey{
 			UserID:      userID,
 			Name:        "phase-d-tx-write",
@@ -82,7 +82,7 @@ func ensureScopedAPIKeys(t *testing.T, userID uint) {
 		t.Fatal(err)
 	}
 	var queryKey models.ApiKey
-	if err := database.DB.Where("key = ?", phaseDTxQueryAPIKey).First(&queryKey).Error; err != nil {
+	if err := database.DB.Where("`key` = ?", phaseDTxQueryAPIKey).First(&queryKey).Error; err != nil {
 		if err := database.DB.Create(&models.ApiKey{
 			UserID:      userID,
 			Name:        "phase-d-tx-query",

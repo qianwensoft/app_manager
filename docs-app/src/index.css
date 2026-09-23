@@ -173,28 +173,45 @@ a { color: var(--primary); text-decoration: none; }
 }
 .md-editor-status .collab-dot.on { background: #22c55e; }
 
-/* 协同参与者头像组：每个头像显示用户名缩写，悬停 title 展示完整名。 */
+/* 协同参与者头像组：每个头像显示用户名缩写 + 名字，悬停 title 展示完整名。 */
 .md-editor-participants {
   display: inline-flex; align-items: center;
   margin-left: 4px;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.md-editor-participant {
+  display: inline-flex; align-items: center;
+  gap: 4px;
+  padding: 2px 8px 2px 2px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.04);
+  transition: background 0.15s, transform 0.15s;
+  max-width: 160px;
+}
+.md-editor-participant:hover {
+  background: rgba(15, 23, 42, 0.08);
+  transform: translateY(-1px);
 }
 .md-editor-avatar {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 24px; height: 24px; border-radius: 50%;
-  margin-left: -6px;
+  width: 22px; height: 22px; border-radius: 50%;
+  margin-left: 0;
   border: 2px solid var(--panel, #fff);
   font-size: 10px; font-weight: 600; color: #fff;
   text-transform: uppercase;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
   user-select: none;
-  transition: transform 0.15s, z-index 0s;
+  flex-shrink: 0;
   position: relative;
 }
-.md-editor-avatar:first-child { margin-left: 0; }
-.md-editor-avatar:hover {
-  transform: translateY(-2px);
-  z-index: 10;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+.md-editor-participant-name {
+  font-size: 12px;
+  color: var(--fg, #0f172a);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 .md-editor-status .saving-hint { margin-left: 8px; color: var(--primary, #3b82f6); }
 .md-editor-publish {
@@ -251,7 +268,16 @@ a { color: var(--primary); text-decoration: none; }
 .pm-host .ProseMirror hr {
   border: none; border-top: 1px solid var(--border); margin: 18px 0;
 }
-.pm-host .ProseMirror a { color: var(--primary, #3b82f6); text-decoration: underline; }
+.pm-host .ProseMirror a { color: var(--primary, #3b82f6); text-decoration: underline; cursor: pointer; }
+.doc-embed-node { display: block; width: 100%; margin: 16px 0; padding: 8px; border: 1px solid var(--border, #d1d5db); background: var(--panel, #fff); }
+.doc-embed-frame { display: block; width: 100%; height: 520px; border: 0; background: #fff; }
+.doc-embed-modal-backdrop { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: rgba(15, 23, 42, .35); }
+.doc-embed-modal { width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; padding: 20px; background: var(--panel, #fff); border: 1px solid var(--border, #d1d5db); box-shadow: 0 12px 36px rgba(15, 23, 42, .2); }
+.doc-embed-modal h3 { margin: 0 0 16px; }
+.doc-embed-modal label { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; font-size: 13px; }
+.doc-embed-modal input, .doc-embed-modal select, .doc-embed-modal textarea { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid var(--border, #d1d5db); font: inherit; }
+.doc-embed-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.doc-embed-error { color: #dc2626; font-size: 12px; }
 /* y-prosemirror 远程协同光标 */
 .pm-host .ProseMirror .ProseMirror-yjs-cursor {
   position: relative; margin-left: -1px; margin-right: -1px;
@@ -661,6 +687,101 @@ a { color: var(--primary); text-decoration: none; }
   height: 1px;
   background: var(--border);
   margin: 4px 0;
+}
+
+/* ---- 文档树右键菜单 ---- */
+.doc-context-menu {
+  position: fixed;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  min-width: 160px;
+  padding: 4px;
+  z-index: 200;
+}
+.doc-context-menu .menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text);
+  user-select: none;
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+}
+.doc-context-menu .menu-item:hover:not(:disabled) {
+  background: #f1f5f9;
+}
+.doc-context-menu .menu-item:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+.doc-context-menu .menu-item.danger {
+  color: var(--danger);
+}
+.doc-context-menu .menu-item.danger:hover:not(:disabled) {
+  background: #fef2f2;
+}
+.doc-context-menu .menu-icon {
+  flex-shrink: 0;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+}
+.doc-context-menu .menu-item.danger .menu-icon {
+  color: var(--danger);
+}
+.doc-context-menu .menu-label {
+  flex: 1;
+}
+
+/* ---- 文档树拖拽落点指示器 ---- */
+/* 拖拽到节点上方：在节点上方显示一条蓝色指示线 */
+.tree-node.drop-before {
+  position: relative;
+}
+.tree-node.drop-before::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: 6px;
+  right: 6px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--primary, #3b82f6);
+}
+
+/* 拖拽到节点下方：在节点下方显示一条蓝色指示线 */
+.tree-node.drop-after {
+  position: relative;
+}
+.tree-node.drop-after::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 6px;
+  right: 6px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--primary, #3b82f6);
+}
+
+/* 拖拽到 folder 节点内：整行高亮（半透明蓝色背景） */
+.tree-node.drop-into {
+  background: rgba(59, 130, 246, 0.12) !important;
+  border-radius: 6px;
+}
+
+/* 正在被拖动的节点：淡化显示 */
+.tree-node.dragging-self {
+  opacity: 0.45;
+  cursor: grabbing;
 }
 
 /* ---- 项目首页 ---- */

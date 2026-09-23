@@ -1,7 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
 import * as Y from 'yjs'
 import type { WebsocketProvider } from 'y-websocket'
-import { EditorState, type Command } from 'prosemirror-state'
+import { EditorState, Plugin, type Command } from 'prosemirror-state'
 import { EditorView } from 'prosemirror-view'
 import { keymap } from 'prosemirror-keymap'
 import { baseKeymap, toggleMark, setBlockType, wrapIn } from 'prosemirror-commands'
@@ -92,6 +92,7 @@ export interface ProseMirrorEditorProps {
   onSelectionChange?: (text: string) => void
   // 文档节点树（用于文档链接选择器）
   docNodes?: DocumentNode[]
+  documentContext?: { globalContext?: Record<string, any>; pageContext?: Record<string, any> }
 }
 
 // ProseMirrorEditor：使用 notionSchema 的协同富文本编辑器，集成 Notion 风格特性。
@@ -104,6 +105,7 @@ export default function ProseMirrorEditor({
   onMarkdownChange,
   onSelectionChange,
   docNodes = [],
+  documentContext,
 }: ProseMirrorEditorProps) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const viewRef = useRef<EditorView | null>(null)
@@ -144,6 +146,49 @@ export default function ProseMirrorEditor({
       buildInputRules(),
       dropCursor(),
       gapCursor(),
+      new Plugin({
+        props: {
+          nodeViews: {
+            doc_embed(node) {
+              const dom = document.createElement('div')
+              dom.className = 'doc-embed-node'
+              const rawConfig = (() => { try { return JSON.parse(node.attrs.config || '{}') } catch { return {} } })()
+              const context: Record<string, Record<string, any>> = {
+                global: { ...(documentContext?.globalContext || {}), ...(rawConfig.globalContext || {}) },
+                page: { ...(documentContext?.pageContext || {}), ...(rawConfig.pageContext || {}) },
+                doc: documentContext?.pageContext || {},
+              }
+              const resolveValue = (value: any): any => {
+                if (typeof value === 'string') return value.replace(/\$\{(global|page|doc)\.([^}]+)\}/g, (_m, scope: string, key: string) => String(context[scope]?.[key] ?? ''))
+                if (Array.isArray(value)) return value.map(resolveValue)
+                if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, resolveValue(v)]))
+                return value
+              }
+              const config = resolveValue(rawConfig)
+              if (config.globalContext || config.pageContext) {
+                config.globalContext = resolveValue(config.globalContext || {})
+                config.pageContext = resolveValue(config.pageContext || {})
+              }
+              const frame = document.createElement('iframe')
+              frame.className = 'doc-embed-frame'
+              frame.title = config.kind === 'scada' ? '已发布组态' : 'form-app'
+              frame.src = config.kind === 'scada'
+                ? `/scada-editor/share/${encodeURIComponent(config.shareToken || '')}`
+                : (() => {
+                    const query = new URLSearchParams({ embed: '1' })
+                    if (config.pageKey) query.set('page', config.pageKey)
+                    const values = { ...(config.globalContext || {}), ...(config.pageContext || {}), ...(config.params || {}) }
+                    Object.entries(values).forEach(([key, value]) => { if (value != null) query.set(`p_${key}`, String(value)) })
+                    return `/form-app/runtime/${encodeURIComponent(config.formCode || '')}?${query.toString()}`
+                  })()
+              frame.setAttribute('loading', 'lazy')
+              frame.setAttribute('allow', 'fullscreen')
+              dom.appendChild(frame)
+              return { dom }
+            },
+          },
+        },
+      }),
     ]
 
     const state = EditorState.create({ schema: notionSchema, plugins })
@@ -325,6 +370,7 @@ export default function ProseMirrorEditor({
           pos={slashMenuState.pos}
           query={slashMenuState.query}
           onClose={() => closeSlashMenu(viewRef.current!)}
+          documentContext={documentContext}
         />
       )}
       {canEdit && <FloatingMenu view={viewRef.current} />}

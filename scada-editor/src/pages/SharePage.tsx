@@ -22,6 +22,8 @@ export default function SharePage() {
   const containerRef = useRef<HTMLDivElement>(null)
   const [needLandscape, setNeedLandscape] = useState(false)
   const { toast, node: toastNode } = useToastHost()
+  const urlParams = new URLSearchParams(window.location.search)
+  const embeddedParams = Object.fromEntries(Array.from(urlParams.entries()).filter(([key]) => key.startsWith('p_')).map(([key, value]) => [key.slice(2), value]))
 
   useEffect(() => {
     resetGlobalContext()
@@ -96,7 +98,10 @@ export default function SharePage() {
     httpPollEnabled: false,
     interfaceEnabled: true,
     shareToken: token,
-    globalParams: project?.globalParams,
+    globalParams: [
+      ...(project?.globalParams || []).filter((param) => !Object.prototype.hasOwnProperty.call(embeddedParams, param.key)),
+      ...Object.entries(embeddedParams).map(([key, value]) => ({ key, type: 'string' as const, value })),
+    ],
     customFunctions: project?.customFunctions,
   })
 

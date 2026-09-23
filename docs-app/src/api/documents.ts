@@ -20,6 +20,20 @@ export async function deleteNode(id: number): Promise<void> {
   await api.delete(`/docs/nodes/${id}`)
 }
 
+// 复制节点（folder 递归克隆整棵子树；doc 同步复制文件并写一条新版本）。
+// 后端：POST /api/docs/nodes/:id/copy
+export async function copyNode(id: number): Promise<DocumentNode> {
+  const { data } = await api.post(`/docs/nodes/${id}/copy`)
+  return data.data
+}
+
+// 移动 / 重排节点（修改 parent_id 与 sort_order）。
+// 后端在 parent_id 变化时做了环检测（不能移到自身或自身的后代之下）。
+export async function moveNode(id: number, body: { parent_id: number | null; sort_order: number }): Promise<DocumentNode> {
+  const { data } = await api.put(`/docs/nodes/${id}`, body)
+  return data.data
+}
+
 // 按 code 解析节点（用于 /d/:code 路由 deep-link），未命中返回 null。
 export async function fetchNodeByCode(code: string): Promise<DocumentNode | null> {
   try {

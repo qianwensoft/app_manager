@@ -52,7 +52,7 @@ func PublishDeviceCustomEventSTOMP(rec models.DeviceEvent, d *models.Device) {
 
 func forwardToMQTT(rec models.DeviceEvent, payload map[string]interface{}) {
 	var def models.CustomEventDefinition
-	if err := database.DB.Preload("Group").Where("key = ?", rec.EventType).First(&def).Error; err != nil {
+	if err := database.DB.Preload("Group").Where("`key` = ?", rec.EventType).First(&def).Error; err != nil {
 		return
 	}
 

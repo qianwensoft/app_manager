@@ -111,11 +111,61 @@ const nodes = baseSchema.spec.nodes
   })
   // 添加表格节点（使用 prosemirror-tables）
   .append(tableNodes({ tableGroup: 'block', cellContent: 'block+', cellAttributes: {} }))
+  .addBefore('code_block', 'doc_embed', {
+    group: 'block',
+    atom: true,
+    selectable: true,
+    attrs: {
+      kind: { default: 'form-app' },
+      config: { default: '{}' },
+    },
+    parseDOM: [{
+      tag: 'div.doc-embed',
+      getAttrs(dom) {
+        const el = dom as HTMLElement
+        return { kind: el.dataset.kind || 'form-app', config: el.dataset.config || '{}' }
+      },
+    }],
+    toDOM(node) {
+      return ['div', {
+        class: 'doc-embed',
+        'data-kind': node.attrs.kind,
+        'data-config': node.attrs.config,
+      }]
+    },
+  })
 
 // 使用扩展后的节点和原有 marks 创建新 schema
 export const notionSchema = new Schema({
   nodes,
-  marks: baseSchema.spec.marks,
+  marks: baseSchema.spec.marks.update('link', {
+    attrs: {
+      href: {},
+      title: { default: null },
+    },
+    inclusive: false,
+    parseDOM: [
+      {
+        tag: 'a[href]',
+        getAttrs(dom) {
+          const element = dom as HTMLAnchorElement
+          return {
+            href: element.getAttribute('href'),
+            title: element.getAttribute('title'),
+          }
+        },
+      },
+    ],
+    toDOM(mark) {
+      const attrs: Record<string, string> = {
+        href: mark.attrs.href,
+        target: '_blank',
+        rel: 'noopener noreferrer',
+      }
+      if (mark.attrs.title) attrs.title = mark.attrs.title
+      return ['a', attrs, 0]
+    },
+  }),
 })
 
 // ============ Markdown Parser ============
@@ -151,10 +201,26 @@ const tokens = {
   toggle_content: { block: 'toggle_content' },
 }
 
+function createNotionMarkdown() {
+  const md = new MarkdownIt({ html: true })
+  md.block.ruler.before('html_block', 'doc_embed', (state: any, startLine: number, endLine: number, silent: boolean) => {
+    const line = state.src.slice(state.bMarks[startLine], state.eMarks[startLine]).trim()
+    if (!line.startsWith('<div class="doc-embed"') || !line.endsWith('</div>')) return false
+    if (silent) return true
+    const token = state.push('doc_embed', 'div', 0)
+    token.block = true
+    token.content = line
+    token.map = [startLine, startLine + 1]
+    state.line = startLine + 1
+    return true
+  })
+  return md
+}
+
 // 创建自定义 Markdown 解析器
 export const notionMarkdownParser = new MarkdownParser(
   notionSchema,
-  new MarkdownIt({ html: true }),
+  createNotionMarkdown(),
   {
     blockquote: { block: 'blockquote' },
     paragraph: { block: 'paragraph' },
@@ -202,6 +268,17 @@ export const notionMarkdownParser = new MarkdownParser(
       getAttrs: (tok: any) => ({
         type: tok.info || tok.attrGet('data-type') || 'info',
       }),
+    },
+    doc_embed: {
+      node: 'doc_embed',
+      getAttrs: (tok: any) => {
+        const info = tok.content || ''
+        const kind = info.match(/data-kind="([^"]+)"/)?.[1] || 'form-app'
+        const encodedConfig = info.match(/data-config="([^"]*)"/)?.[1] || ''
+        let config = '{}'
+        try { config = decodeURIComponent(encodedConfig) } catch { config = '{}' }
+        return { kind, config }
+      },
     },
     html_block: {
       node: 'paragraph',
@@ -357,6 +434,11 @@ export const notionMarkdownSerializer = new MarkdownSerializer(
     },
     table_header(state, node) {
       state.renderInline(node)
+    },
+    doc_embed(state, node) {
+      const encoded = encodeURIComponent(JSON.stringify(node.attrs.config ? JSON.parse(node.attrs.config) : {}))
+      state.write(`<div class="doc-embed" data-kind="${state.esc(node.attrs.kind)}" data-config="${state.esc(encoded)}"></div>`)
+      state.closeBlock(node)
     },
   },
   {

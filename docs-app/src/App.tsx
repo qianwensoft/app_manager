@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useEffect } from 'react'
 import DocsPage from './pages/DocsPage'
 import RolesPage from './pages/RolesPage'
@@ -9,13 +9,18 @@ import { useDocsStore } from './store'
 import { getShareToken } from './api/documents'
 
 export default function App() {
-  // 初始化分享模式：在 docs-app SPA 挂载时统一读取一次 ?share= 参数，
-  // 写入 store；ProjectDocsPage 及各组件由此判断是否进入只读分享模式。
+  // 同步分享模式：监听 location.search，确保 SPA 内部路由跳转（含 query 增删）后
+  // shareMode 与当前 URL 的 ?share= 一致。仅在 App 首次挂载时读取一次会导致：
+  // 用户先打开带 ?share=<token> 的链接（Agent 菜单预览、分享链接等），再在同一 SPA 内
+  // 跳转到不带 share 的页面时，shareMode 残留为 true，整个 docs-app 被锁定为只读。
+  // 这里以 location.search 作为依赖触发即可：项目主页 / 登录用户编辑页 / 分享预览页
+  // 三种入口的 query 互不影响，依赖收敛且不会引入额外副作用。
   const setShareMode = useDocsStore((s) => s.setShareMode)
+  const location = useLocation()
   useEffect(() => {
     const token = getShareToken()
     setShareMode(token)
-  }, [])
+  }, [location.search, setShareMode])
 
   return (
     <Routes>

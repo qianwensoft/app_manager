@@ -127,7 +127,7 @@ type ApiKey struct {
 	ID          uint       `gorm:"primaryKey" json:"id"`
 	UserID      uint       `json:"user_id"`
 	Name        string     `gorm:"size:100" json:"name"`
-	Key         string     `gorm:"uniqueIndex;size:64" json:"key"`
+	Key         string     `gorm:"column:key;uniqueIndex;size:64" json:"key"`
 	Permissions string     `gorm:"type:text" json:"permissions"` // JSON 数组，open:* 范围；空表示兼容旧版「全部开放 API」
 	ExpiresAt   *time.Time `json:"expires_at"`
 	LastUsedAt  *time.Time `json:"last_used_at"`

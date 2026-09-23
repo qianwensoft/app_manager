@@ -331,7 +331,7 @@ func OAuthIntrospect(c *gin.Context) {
 		return
 	}
 	var apiKey models.ApiKey
-	if err := database.DB.Where("key = ?", token).First(&apiKey).Error; err != nil {
+	if err := database.DB.Where("`key` = ?", token).First(&apiKey).Error; err != nil {
 		c.JSON(http.StatusOK, gin.H{"active": false})
 		return
 	}

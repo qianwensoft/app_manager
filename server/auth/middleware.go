@@ -158,7 +158,7 @@ func APIKeyMiddleware() gin.HandlerFunc {
 			return
 		}
 		var apiKey models.ApiKey
-		if err := database.DB.Where("key = ? AND revoked = false", key).First(&apiKey).Error; err != nil {
+		if err := database.DB.Where("`key` = ? AND revoked = false", key).First(&apiKey).Error; err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid api key"})
 			c.Abort()
 			return

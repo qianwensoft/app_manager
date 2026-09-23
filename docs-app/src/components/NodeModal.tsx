@@ -32,6 +32,18 @@ export default function NodeModal({ parent, node, onSubmit, onClose }: NodeModal
       return 'iframe'
     }
   })
+  const [globalContext, setGlobalContext] = useState(() => {
+    try {
+      const value = node?.config_json ? JSON.parse(node.config_json).global_context : undefined
+      return JSON.stringify(value || {}, null, 2)
+    } catch { return '{}' }
+  })
+  const [pageContext, setPageContext] = useState(() => {
+    try {
+      const value = node?.config_json ? JSON.parse(node.config_json).page_context : undefined
+      return JSON.stringify(value || {}, null, 2)
+    } catch { return '{}' }
+  })
 
   // 新建模式下，编码字段默认随名称实时生成（用户未手动改过时）。
   useEffect(() => {
@@ -50,8 +62,14 @@ export default function NodeModal({ parent, node, onSubmit, onClose }: NodeModal
     // 仅在用户填了值时才下发 code（允许清空）；
     // 与同级已有的 code 冲突由后端追加 -2/-3… 后缀。
     if (code.trim()) body.code = code.trim()
+    let globalContextValue: Record<string, any> = {}
+    let pageContextValue: Record<string, any> = {}
+    try { globalContextValue = JSON.parse(globalContext || '{}') } catch { return }
+    try { pageContextValue = JSON.parse(pageContext || '{}') } catch { return }
     if (nodeType === 'form_app') {
-      body.config_json = JSON.stringify({ form_code: formCode.trim(), open_mode: openMode })
+      body.config_json = JSON.stringify({ form_code: formCode.trim(), open_mode: openMode, global_context: globalContextValue, page_context: pageContextValue })
+    } else {
+      body.config_json = JSON.stringify({ global_context: globalContextValue, page_context: pageContextValue })
     }
     onSubmit(body)
   }
@@ -100,18 +118,30 @@ export default function NodeModal({ parent, node, onSubmit, onClose }: NodeModal
           <option value="form_app">表单应用（嵌入 form-app）</option>
         </select>
       </div>
-      {nodeType === 'form_app' && (
+      {nodeType !== 'folder' && (
         <>
+          {nodeType === 'form_app' && (
+            <>
+              <div className="form-row">
+                <label>表单编码（form_code）</label>
+                <input value={formCode} onChange={(e) => setFormCode(e.target.value)} placeholder="form-app 的表单 code" />
+              </div>
+              <div className="form-row">
+                <label>打开方式</label>
+                <select value={openMode} onChange={(e) => setOpenMode(e.target.value)}>
+                  <option value="iframe">内嵌 iframe</option>
+                  <option value="blank">新标签页打开</option>
+                </select>
+              </div>
+            </>
+          )}
           <div className="form-row">
-            <label>表单编码（form_code）</label>
-            <input value={formCode} onChange={(e) => setFormCode(e.target.value)} placeholder="form-app 的表单 code" />
+            <label>文档全局上下文（JSON）</label>
+            <textarea value={globalContext} onChange={(e) => setGlobalContext(e.target.value)} rows={3} placeholder='{"projectCode":"A01"}' />
           </div>
           <div className="form-row">
-            <label>打开方式</label>
-            <select value={openMode} onChange={(e) => setOpenMode(e.target.value)}>
-              <option value="iframe">内嵌 iframe</option>
-              <option value="blank">新标签页打开</option>
-            </select>
+            <label>单页面上下文（JSON）</label>
+            <textarea value={pageContext} onChange={(e) => setPageContext(e.target.value)} rows={3} placeholder='{"recordId":"..."}' />
           </div>
         </>
       )}

@@ -516,6 +516,9 @@
           </el-form-item>
           <el-form-item label="Endpoint">
             <el-input v-model="minioForm.endpoint" placeholder="如 127.0.0.1:9000" clearable />
+            <span v-if="minioEndpointWarn" class="form-tip" style="color: #e6a23c">
+              {{ minioEndpointWarn }}
+            </span>
           </el-form-item>
           <el-form-item label="PublicHost">
             <el-input v-model="minioForm.public_host" placeholder="浏览器侧访问的 host（CDN/反向代理），留空使用 Endpoint" clearable />
@@ -987,6 +990,20 @@ const presignKey = ref('')
 const presignResult = ref('')
 const presignLoading = ref(false)
 
+// 端口启发式提示：9001 容易被误填为 S3 API（实际是 MinIO Web Console 默认端口）。
+// 不强制拦截，只在 UI 上提示，避免误操作。
+const minioEndpointWarn = computed(() => {
+  const ep = (minioForm.value.endpoint || '').trim()
+  const m = ep.match(/:(\d+)\s*$/)
+  if (!m) return ''
+  const port = Number(m[1])
+  if (port === 9001) {
+    return '提示：9001 通常是 MinIO Web Console 端口，S3 API 默认是 9000。请确认端口无误。'
+  }
+  if (port === 9000) return ''
+  return ''
+})
+
 const loadMinIOConfig = async () => {
   try {
     const res = await getSystemSetting('minio')
@@ -1054,10 +1071,13 @@ const saveMinIOConfig = async () => {
     const res = await upsertSystemSetting('minio', payload)
     minioSecretSet.value = !!res.data?.secret_encrypted
     minioForm.value.secret_key = ''
-    ElMessage.success('保存成功')
-    await refreshMinIOStatus()
+    ElMessage.success('保存成功（MinIO 连通性在后台异步校验，可点「测试连接」或「确保默认 bucket」立即验证）')
+    // 不阻塞等待 refreshMinIOStatus，给 apply 后台跑的时间
+    setTimeout(() => refreshMinIOStatus(), 500)
   } catch (e) {
-    // http 拦截器已提示
+    // 全局 http 拦截器已通过 ElMessage 提示。这里把详情打到 console 便于排查。
+    const detail = e?.response?.data?.error || e?.message
+    if (detail) console.error('[minio] save failed:', detail)
   } finally {
     minioSaving.value = false
   }
@@ -1070,11 +1090,14 @@ const testMinIOConnection = async () => {
     return
   }
   minioTesting.value = true
+  minioBuckets.value = []
   try {
     const res = await testMinIOConnection_API({
       endpoint: f.endpoint,
       access_key: f.access_key,
-      secret_key: f.secret_key || '', // 后端如为空字符串会使用已存值
+      // secret_key 留空时，后端会自动复用 DB 中已保存的凭据；
+      // 详见 server/api/system_settings.go:TestMinIOConnection 的回退逻辑。
+      secret_key: f.secret_key || '',
       use_ssl: !!f.use_ssl,
       region: f.region || '',
       default_bucket: f.default_bucket || '',
@@ -1082,7 +1105,12 @@ const testMinIOConnection = async () => {
     minioBuckets.value = res.buckets || []
     ElMessage.success(`连接成功，共 ${minioBuckets.value.length} 个 bucket`)
   } catch (e) {
-    minioBuckets.value = []
+    // 全局 axios 拦截器已通过 ElMessage.error 展示后端返回的 error 字段。
+    // 这里额外把详情打到 console，方便排查（前端 UI 已被 toast 占用）。
+    const detail = e?.response?.data?.error || e?.message
+    if (detail) {
+      console.error('[minio] test connection failed:', detail)
+    }
   } finally {
     minioTesting.value = false
   }

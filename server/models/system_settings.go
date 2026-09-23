@@ -15,7 +15,7 @@ import "time"
 //   - 写入后由 SystemSettingsService 通知订阅者热生效
 type SystemSetting struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
-	Key       string    `gorm:"size:64;uniqueIndex;not null" json:"key"`
+	Key       string    `gorm:"column:key;size:64;uniqueIndex;not null" json:"key"`
 	ValueJSON string    `gorm:"type:text" json:"value_json"` // JSON 字符串；空字符串表示未配置
 	// SecretEncrypted 是否含敏感凭据（仅用于审计与前端展示，真实加密在 service 层完成）。
 	SecretEncrypted bool `gorm:"default:false" json:"secret_encrypted"`

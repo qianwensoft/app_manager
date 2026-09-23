@@ -53,6 +53,7 @@ func newCodeRouter() *gin.Engine {
 		docs.GET("/nodes", GetDocumentNodes)
 		docs.POST("/nodes", CreateDocumentNode)
 		docs.PUT("/nodes/:id", UpdateDocumentNode)
+		docs.POST("/nodes/:id/copy", CopyDocumentNode)
 		docs.GET("/nodes/code/:code", resolveDocNodeByCode)
 	}
 	return r
@@ -339,3 +340,120 @@ func TestUpdateNodeCodeUnique(t *testing.T) {
 
 // 静态检查：使用 auth.DocumentPerms（确保 import 生效）。
 var _ = auth.DocumentPerms
+
+// TestCopyDocumentNode_BasicFolder 验证 folder 节点复制：递归克隆 children，新 code 在同级唯一。
+func TestCopyDocumentNode_BasicFolder(t *testing.T) {
+	setupCodeDB(t)
+	r := newCodeRouter()
+	mkNode := func(name, code string, parent *uint) uint {
+		body, _ := json.Marshal(map[string]any{
+			"name": name, "code": code, "node_type": "folder", "parent_id": parent,
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/docs/nodes", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("create %s: %d %s", name, w.Code, w.Body.String())
+		}
+		var resp struct {
+			Data models.DocumentNode `json:"data"`
+		}
+		_ = json.Unmarshal(w.Body.Bytes(), &resp)
+		return resp.Data.ID
+	}
+	rootID := mkNode("Root", "root", nil)
+	folderID := mkNode("Docs", "docs", &rootID)
+	_ = mkNode("Spec", "spec", &folderID)
+	_ = mkNode("Readme", "readme", &folderID)
+
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/docs/nodes/%d/copy", folderID), nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("copy: %d %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Data models.DocumentNode `json:"data"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.Data.Name != "Docs - 副本" {
+		t.Errorf("复制后 name 应为「Docs - 副本」, got %q", resp.Data.Name)
+	}
+	if resp.Data.Code != "docs-2" {
+		t.Errorf("复制后 code 应为 docs-2（同 root 下 docs 已存在）, got %q", resp.Data.Code)
+	}
+
+	// children 应该被递归克隆
+	var clonedChildren []models.DocumentNode
+	database.DB.Where("parent_id = ?", resp.Data.ID).Order("sort_order ASC, id ASC").Find(&clonedChildren)
+	if len(clonedChildren) != 2 {
+		t.Fatalf("复制 folder 应包含 2 个子节点, got %d", len(clonedChildren))
+	}
+	wantNames := map[string]bool{"Spec - 副本 (1)": false, "Readme - 副本 (2)": false}
+	for _, c := range clonedChildren {
+		if _, ok := wantNames[c.Name]; ok {
+			wantNames[c.Name] = true
+		} else {
+			t.Errorf("意外的子节点: %s", c.Name)
+		}
+	}
+	for n, seen := range wantNames {
+		if !seen {
+			t.Errorf("缺少子节点: %s", n)
+		}
+	}
+}
+
+// TestUpdateNodeParentCycle 验证拖拽循环：把节点拖到自己 / 自己的后代之下应 400。
+func TestUpdateNodeParentCycle(t *testing.T) {
+	setupCodeDB(t)
+	r := newCodeRouter()
+	mkNode := func(name, code string, parent *uint) uint {
+		body, _ := json.Marshal(map[string]any{
+			"name": name, "code": code, "node_type": "folder", "parent_id": parent,
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/docs/nodes", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		var resp struct {
+			Data models.DocumentNode `json:"data"`
+		}
+		_ = json.Unmarshal(w.Body.Bytes(), &resp)
+		return resp.Data.ID
+	}
+	rootID := mkNode("Root", "root", nil)
+	folderID := mkNode("Folder", "folder", &rootID)
+	childID := mkNode("Child", "child", &folderID)
+
+	// 试图把 folder 移到自身之下 → 400
+	body1, _ := json.Marshal(map[string]any{"name": "Folder", "parent_id": folderID})
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/docs/nodes/%d", folderID), bytes.NewReader(body1))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("把节点移动到自身应 400, got %d", w.Code)
+	}
+
+	// 试图把 folder 移到自己的 child 之下 → 400
+	body2, _ := json.Marshal(map[string]any{"name": "Folder", "parent_id": childID})
+	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/docs/nodes/%d", folderID), bytes.NewReader(body2))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("把节点移动到后代之下应 400, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	// 把 folder 移到 root 之上（保持原状）应 200
+	body3, _ := json.Marshal(map[string]any{"name": "Folder", "parent_id": rootID})
+	req = httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/docs/nodes/%d", folderID), bytes.NewReader(body3))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("把节点移动到合法位置应 200, got %d body=%s", w.Code, w.Body.String())
+	}
+}

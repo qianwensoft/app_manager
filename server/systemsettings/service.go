@@ -62,14 +62,13 @@ func (s *Service) List() []models.SystemSetting {
 	defer s.mu.RUnlock()
 	out := make([]models.SystemSetting, 0, len(s.settings))
 	for _, v := range s.settings {
-		// 列表接口也不返回真实 secret，前端按 secret_encrypted 标记判断是否需要输入。
-		if v.SecretEncrypted {
-			cp := v
-			cp.ValueJSON = "***"
-			out = append(out, cp)
-		} else {
-			out = append(out, v)
+		// 仅屏蔽 secret 字段，保留 endpoint/access_key/default_bucket 等可观测字段
+		// （旧实现把整段 ValueJSON 替换为 "***"，导致列表接口也不可见关键状态）。
+		cp := v
+		if cp.SecretEncrypted {
+			cp.ValueJSON = maskSecretFieldsInService(cp.Key, cp.ValueJSON)
 		}
+		out = append(out, cp)
 	}
 	return out
 }
@@ -83,12 +82,15 @@ func (s *Service) Get(key string) (models.SystemSetting, bool) {
 }
 
 // Set 写入并应用。secret 字段由 caller 自行决定是否加密落库（本服务透明保存）。
+//
+// apply 走后台 goroutine：HTTP 响应不应被 MinIO 网络连通性阻塞。
+// 失败仅记日志；用户可通过 /api/system/minio/ensure-default 手动重试默认 bucket。
 func (s *Service) Set(key string, valueJSON string, secretEncrypted bool, note string, userID uint) (models.SystemSetting, error) {
 	var setting models.SystemSetting
 	err := database.DB.Transaction(func(tx *gorm.DB) error {
 		// upsert
 		setting = models.SystemSetting{Key: key}
-		if e := tx.Where("key = ?", key).First(&setting).Error; e != nil {
+		if e := tx.Where("`key` = ?", key).First(&setting).Error; e != nil {
 			if !errors.Is(e, gorm.ErrRecordNotFound) {
 				return e
 			}
@@ -104,24 +106,38 @@ func (s *Service) Set(key string, valueJSON string, secretEncrypted bool, note s
 		return tx.Save(&setting).Error
 	})
 	if err != nil {
+		// 落库失败：打日志便于排查（之前没打，运维定位 DB 错误只能干瞪眼）。
+		log.Printf("[system-settings] Set(%s) DB error: %v", key, err)
 		return setting, err
 	}
 
-	// 应用到运行时（失败回滚 DB 仅记录日志，避免下次启动冲突）。
-	if err := s.apply(key, valueJSON); err != nil {
-		log.Printf("[system-settings] apply %s failed: %v (DB 已保存，下次启动会重试)", key, err)
-	}
-
+	// 立即更新内存缓存（DB 已落盘，运行时配置对其他读路径可见）。
 	s.mu.Lock()
 	s.settings[key] = setting
-	s.lastApply[key] = time.Now()
 	s.mu.Unlock()
+
+	// 异步 apply：MinIO 不可达 / DNS 卡住 / 端口错误时也不会让 PUT 卡 10s。
+	go func() {
+		applyCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = applyCtx // 当前 apply 回调内部自带 10s 超时；此处 ctx 用于未来扩展。
+
+		if applyErr := s.apply(key, valueJSON); applyErr != nil {
+			log.Printf("[system-settings] async apply %s failed: %v (DB 已保存，可手动调用 /api/system/minio/ensure-default 重试)", key, applyErr)
+		} else {
+			log.Printf("[system-settings] async apply %s succeeded", key)
+		}
+		s.mu.Lock()
+		s.lastApply[key] = time.Now()
+		s.mu.Unlock()
+	}()
+
 	return setting, nil
 }
 
 // Delete 删除配置并通知子系统重置（MinIO 走 Reset → 回到 local storage 兜底）。
 func (s *Service) Delete(key string, userID uint) error {
-	if err := database.DB.Where("key = ?", key).Delete(&models.SystemSetting{}).Error; err != nil {
+	if err := database.DB.Where("`key` = ?", key).Delete(&models.SystemSetting{}).Error; err != nil {
 		return err
 	}
 	if err := s.apply(key, ""); err != nil {
@@ -189,4 +205,47 @@ func applyMinIOConfig(valueJSON string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return minio.Get().EnsureDefaultBucket(ctx)
+}
+
+// maskSecretFieldsInService 按 key 决定 secret 字段名并调用通用 mask 逻辑。
+//
+// 集中维护避免 list / get 两条路径出现不一致的 mask 行为。当前已知：
+//   - minio → secret_key
+//   - 其它配置项 → 无 secret 字段
+func maskSecretFieldsInService(key, valueJSON string) string {
+	fields := secretFieldsForKey(key)
+	if len(fields) == 0 {
+		// 该 key 不含 secret 字段，但 SecretEncrypted 仍为 true 时，不应抹掉数据
+		// （保护未在白名单里的 secret 配置不被错误暴露；同时不影响非 secret 配置）。
+		return valueJSON
+	}
+	var raw map[string]interface{}
+	if err := json.Unmarshal([]byte(valueJSON), &raw); err != nil {
+		return "***" // JSON 异常时保守全遮蔽
+	}
+	touched := false
+	for _, f := range fields {
+		if _, ok := raw[f]; ok {
+			raw[f] = ""
+			touched = true
+		}
+	}
+	if !touched {
+		return valueJSON
+	}
+	out, err := json.Marshal(raw)
+	if err != nil {
+		return "***"
+	}
+	return string(out)
+}
+
+// secretFieldsForKey 返回某 key 的 secret JSON 字段名列表。集中维护。
+func secretFieldsForKey(key string) []string {
+	switch key {
+	case models.SystemSettingKeyMinIO:
+		return []string{"secret_key"}
+	default:
+		return nil
+	}
 }

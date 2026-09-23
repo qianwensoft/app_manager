@@ -72,7 +72,7 @@ func ensureAdminUser(t *testing.T) {
 		}
 	}
 	var existing models.ApiKey
-	if err := database.DB.Where("key = ?", testAPIKey).First(&existing).Error; err != nil {
+	if err := database.DB.Where("`key` = ?", testAPIKey).First(&existing).Error; err != nil {
 		if err := database.DB.Create(&models.ApiKey{
 			UserID: user.ID,
 			Name:   "phase-a-test",

@@ -75,6 +75,7 @@ export default function DocViewer({ node, canEdit, onSelectionChange, shareMode,
           shareMode={shareMode}
           shareToken={shareToken}
           projectCode={projectCode}
+          documentConfig={node.config_json}
         />
       )
   }

@@ -17,6 +17,7 @@ interface AndroidSpeakBridge {
 function getBridge(): AndroidSpeakBridge | null {
   if (typeof window === 'undefined') return null
   const b = (window as any).AndroidBridge as AndroidSpeakBridge | undefined
+  console.debug('[speakBridge] AndroidBridge exists:', !!b, 'speak method exists:', typeof b?.speak)
   return b && typeof b.speak === 'function' ? b : null
 }
 
@@ -26,7 +27,11 @@ function pickChineseVoice(synth: SpeechSynthesis): SpeechSynthesisVoice | undefi
 }
 
 function speakBrowser(msg: string): boolean {
-  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return false
+  console.debug('[speakBridge] speakBrowser called with:', msg)
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+    console.warn('[speakBridge] Browser speechSynthesis not available')
+    return false
+  }
   const synth = window.speechSynthesis
   const utter = () => {
     try {
@@ -34,13 +39,17 @@ function speakBrowser(msg: string): boolean {
       u.lang = 'zh-CN'
       const zh = pickChineseVoice(synth)
       if (zh) u.voice = zh
+      console.debug('[speakBridge] Browser TTS: speaking with voice:', zh?.name || 'default')
       // 部分浏览器在长时间不发声后进入 paused 态，先 resume 再 speak。
       try { synth.resume() } catch { /* ignore */ }
       synth.speak(u)
-    } catch { /* ignore */ }
+    } catch (e) {
+      console.warn('[speakBridge] Browser TTS error:', e)
+    }
   }
   // voices 尚未就绪时，等 voiceschanged 再播；同时兜底直接尝试（事件可能已触发过）。
   if ((synth.getVoices() || []).length === 0) {
+    console.debug('[speakBridge] Browser TTS: voices not loaded, waiting for voiceschanged')
     const once = () => { synth.onvoiceschanged = null; utter() }
     synth.onvoiceschanged = once
     setTimeout(utter, 250)
@@ -55,11 +64,21 @@ function speakBrowser(msg: string): boolean {
  */
 export function speak(text: string): boolean {
   const msg = (text ?? '').toString().trim()
+  console.debug('[speakBridge] speak called with:', msg)
   if (!msg) return false
 
   const bridge = getBridge()
   if (bridge?.speak) {
-    try { bridge.speak(msg); return true } catch { /* 落到浏览器降级 */ }
+    console.debug('[speakBridge] Calling AndroidBridge.speak...')
+    try {
+      bridge.speak(msg)
+      console.debug('[speakBridge] AndroidBridge.speak called successfully')
+      return true
+    } catch (e) {
+      console.warn('[speakBridge] AndroidBridge.speak threw:', e, ', falling back to browser TTS')
+    }
+  } else {
+    console.debug('[speakBridge] No AndroidBridge.speak, falling back to browser TTS')
   }
 
   return speakBrowser(msg)
@@ -67,6 +86,9 @@ export function speak(text: string): boolean {
 
 /** 当前环境是否存在可用的语音通道（Agent 桥或浏览器 TTS）。 */
 export function isSpeakAvailable(): boolean {
-  if (getBridge()) return true
-  return typeof window !== 'undefined' && 'speechSynthesis' in window
+  const bridge = getBridge()
+  const browserTts = typeof window !== 'undefined' && 'speechSynthesis' in window
+  console.debug('[speakBridge] isSpeakAvailable: bridge=', !!bridge, 'browserTts=', browserTts)
+  if (bridge) return true
+  return browserTts
 }

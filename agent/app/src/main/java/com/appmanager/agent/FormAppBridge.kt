@@ -19,6 +19,7 @@ class FormAppBridge(
     private val webView: WebViewWrapper,
     private val formAppCode: String
 ) {
+    private val tag = "FormAppBridge"
     // ── 语音播报（TextToSpeech，懒初始化，中文优先） ──────────────────
     @Volatile private var tts: TextToSpeech? = null
     @Volatile private var ttsReady = false
@@ -28,20 +29,26 @@ class FormAppBridge(
         if (tts != null) return
         synchronized(this) {
             if (tts != null) return
+            Log.d(tag, "ensureTts: 开始初始化 TTS")
             tts = TextToSpeech(context.applicationContext) { status ->
+                Log.d(tag, "ensureTts: TTS 初始化回调, status=$status")
                 if (status == TextToSpeech.SUCCESS) {
                     // 优先简体中文，缺数据时回退默认语言，避免静默失败
-                    runCatching {
+                    val langResult = runCatching {
                         val r = tts?.setLanguage(Locale.SIMPLIFIED_CHINESE)
+                        Log.d(tag, "ensureTts: setLanguage(SIMPLIFIED_CHINESE) => $r")
                         if (r == TextToSpeech.LANG_MISSING_DATA || r == TextToSpeech.LANG_NOT_SUPPORTED) {
-                            tts?.setLanguage(Locale.getDefault())
+                            val defaultResult = tts?.setLanguage(Locale.getDefault())
+                            Log.d(tag, "ensureTts: 回退到 Locale.getDefault() => $defaultResult")
                         }
                     }
                     ttsReady = true
+                    Log.d(tag, "ensureTts: TTS 就绪，pendingSpeak 队列长度=${pendingSpeak.size}")
                     synchronized(pendingSpeak) {
                         pendingSpeak.forEachIndexed { idx, t ->
                             // 第一条 flush 清队列，其余追加，避免互相顶掉只剩最后一条
                             val mode = if (idx == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+                            Log.d(tag, "ensureTts: 播放队列中的消息[$idx]: $t, mode=$mode")
                             tts?.speak(t, mode, null, "form-app-speak-$idx")
                         }
                         pendingSpeak.clear()
@@ -50,7 +57,7 @@ class FormAppBridge(
                     // 初始化失败（设备无 TTS 引擎/被包可见性过滤/引擎被禁用）：
                     // 否则文本会一直堆在队列里，表现为完全没声音又无任何提示。
                     // 丢弃队列并提示用户，避免「静默失败」难以排查。
-                    Log.w("FormAppBridge", "TTS init failed, status=$status")
+                    Log.w(tag, "TTS init failed, status=$status")
                     synchronized(pendingSpeak) { pendingSpeak.clear() }
                     runCatching { tts?.shutdown() }
                     tts = null
@@ -65,6 +72,7 @@ class FormAppBridge(
     }
 
     private fun flushSpeak(text: String) {
+        Log.d(tag, "flushSpeak: 调用 TTS speak, text='$text'")
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "form-app-speak")
     }
 
@@ -75,12 +83,14 @@ class FormAppBridge(
     @JavascriptInterface
     fun speak(text: String) {
         val msg = text.trim()
+        Log.d(tag, "speak 被调用: msg='$msg', ttsReady=$ttsReady, tts=${tts != null}")
         if (msg.isEmpty()) return
         ensureTts()
         if (ttsReady) {
             flushSpeak(msg)
         } else {
             synchronized(pendingSpeak) { pendingSpeak.add(msg) }
+            Log.d(tag, "speak: TTS 未就绪，消息已加入待播队列，当前队列长度=${pendingSpeak.size}")
         }
     }
 

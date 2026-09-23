@@ -8,7 +8,9 @@ import (
 	"app-manager/storage"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -265,6 +267,25 @@ func UpdateDocumentNode(c *gin.Context) {
 		return
 	}
 
+	// parent_id 变化时做两件事：
+	//   1) 防止把节点移动到自身或自身的后代之下（避免形成环）；
+	//   2) 与同级 code 唯一性做交叉校验（parent 改了，code 冲突域也跟着变）。
+	if body.ParentID != nil && *body.ParentID == node.ID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "不能把节点移动到自身之下"})
+		return
+	}
+	if body.ParentID != nil {
+		var allNodes []models.DocumentNode
+		database.DB.Select("id, parent_id").Find(&allNodes)
+		descendants := collectDocDescendants(allNodes, node.ID)
+		for _, did := range descendants {
+			if did == *body.ParentID {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "不能把节点移动到自身的后代之下"})
+				return
+			}
+		}
+	}
+
 	updates := map[string]interface{}{
 		"parent_id":   body.ParentID,
 		"name":        strings.TrimSpace(body.Name),
@@ -360,6 +381,140 @@ func collectDocDescendants(all []models.DocumentNode, parentID uint) []uint {
 		}
 	}
 	return out
+}
+
+// CopyDocumentNode 深拷贝文档节点：
+//   - folder：递归克隆整棵子树，children 的 code 在同名时由生成器去重。
+//   - doc：复制当前 storage_path 的字节到新文件，并写入新的 DocumentVersion。
+//   - form_app：仅克隆元数据（嵌入的表单页由 form-app 自身管理）。
+//
+// 复制后默认追加「 - 副本」后缀；同 parent_id 下若重名，由 generateUniqueDocCode 自动追加 -2/-3。
+// 不连带复制原节点的 DocumentRoleNode 授权表，避免越权扩散。
+func CopyDocumentNode(c *gin.Context) {
+	id := c.Param("id")
+	var src models.DocumentNode
+	if err := database.DB.First(&src, id).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	}
+	var newRoot models.DocumentNode
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		cloned, err := copyDocNodeRecursive(tx, &src, src.ParentID, "")
+		if err != nil {
+			return err
+		}
+		newRoot = cloned
+		return nil
+	})
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": newRoot})
+}
+
+// copyDocNodeRecursive 在事务内递归克隆节点；parentID 为 nil 时复制为同父，suffix 用于 name 去重。
+// 文件型节点同步复制 storage_path 字节并写一条新的 DocumentVersion（保持历史可追溯）。
+func copyDocNodeRecursive(tx *gorm.DB, src *models.DocumentNode, parentID *uint, suffix string) (models.DocumentNode, error) {
+	newName := src.Name + " - 副本" + suffix
+	baseCode := normalizeDocCode(src.Name)
+	if baseCode == "" {
+		baseCode = "untitled"
+	}
+	clone := models.DocumentNode{
+		ParentID:   parentID,
+		Name:       newName,
+		NodeType:   src.NodeType,
+		DocType:    src.DocType,
+		Icon:       src.Icon,
+		SortOrder:  src.SortOrder,
+		ConfigJSON: src.ConfigJSON,
+		CreatedBy:  src.CreatedBy,
+	}
+	// 在新 parent_id 下保证 code 唯一；冲突自动追加 -2/-3…
+	clone.Code = generateUniqueDocCode(tx, parentID, baseCode)
+
+	if err := tx.Create(&clone).Error; err != nil {
+		return models.DocumentNode{}, err
+	}
+
+	// doc 节点：复制文件字节并新建版本记录。
+	if src.NodeType == "doc" && src.StoragePath != "" {
+		newPath, size, err := copyLocalFile(src.StoragePath)
+		if err != nil {
+			return models.DocumentNode{}, fmt.Errorf("复制文件失败: %w", err)
+		}
+		ver := models.DocumentVersion{
+			NodeID:      clone.ID,
+			Version:     1,
+			StoragePath: newPath,
+			SizeBytes:   size,
+			MimeType:    src.MimeType,
+			ChangedBy:   clone.CreatedBy,
+			Comment:     fmt.Sprintf("复制自节点 #%d", src.ID),
+		}
+		if err := tx.Create(&ver).Error; err != nil {
+			return models.DocumentNode{}, err
+		}
+		clone.StoragePath = newPath
+		clone.MimeType = src.MimeType
+		clone.SizeBytes = size
+		clone.CurrentVersionID = &ver.ID
+		if err := tx.Model(&clone).Updates(map[string]interface{}{
+			"storage_path":       newPath,
+			"mime_type":          src.MimeType,
+			"size_bytes":         size,
+			"current_version_id": ver.ID,
+		}).Error; err != nil {
+			return models.DocumentNode{}, err
+		}
+	}
+
+	// folder：递归克隆 children；非 folder 不递归（避免把无关子树也带过来）。
+	if src.NodeType == "folder" {
+		var children []models.DocumentNode
+		if err := tx.Where("parent_id = ?", src.ID).Order("sort_order ASC, id ASC").Find(&children).Error; err != nil {
+			return models.DocumentNode{}, err
+		}
+		for i := range children {
+			pid := clone.ID
+			childSuffix := fmt.Sprintf(" (%d)", i+1)
+			if _, err := copyDocNodeRecursive(tx, &children[i], &pid, childSuffix); err != nil {
+				return models.DocumentNode{}, err
+			}
+		}
+	}
+	return clone, nil
+}
+
+// copyLocalFile 把 srcPath 指向的文件复制到 docs 目录下新的时间戳路径。
+// 返回新路径 + 文件大小。源文件不存在时返回 error。
+func copyLocalFile(srcPath string) (string, int64, error) {
+	if srcPath == "" {
+		return "", 0, fmt.Errorf("源文件路径为空")
+	}
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return "", 0, err
+	}
+	defer src.Close()
+	dir := filepath.Join(config.C.Storage.Path, "docs")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", 0, err
+	}
+	ext := filepath.Ext(srcPath)
+	dstPath := filepath.Join(dir, fmt.Sprintf("%d%s", time.Now().UnixNano(), ext))
+	dst, err := os.Create(dstPath)
+	if err != nil {
+		return "", 0, err
+	}
+	defer dst.Close()
+	size, err := io.Copy(dst, src)
+	if err != nil {
+		_ = os.Remove(dstPath)
+		return "", 0, err
+	}
+	return dstPath, size, nil
 }
 
 // DeleteDocumentNode 删除文档节点（递归子树 + 版本记录 + 角色-节点分配）。

@@ -23,7 +23,7 @@ type CustomEventDefinition struct {
 	ID                   uint             `gorm:"primaryKey" json:"id"`
 	GroupID              uint             `gorm:"index;not null" json:"group_id"`
 	Group                CustomEventGroup `gorm:"foreignKey:GroupID" json:"group,omitempty"`
-	Key                  string           `gorm:"size:80;uniqueIndex;not null" json:"key"`
+	Key                  string           `gorm:"column:key;size:80;uniqueIndex;not null" json:"key"`
 	Name                 string           `gorm:"size:120;not null" json:"name"`
 	Description          string           `gorm:"type:text" json:"description"`
 	Enabled              bool             `gorm:"default:true" json:"enabled"`

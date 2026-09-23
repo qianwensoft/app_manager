@@ -83,6 +83,10 @@ func SetupRouter() *gin.Engine {
 	// 安装状态检查（正常模式）
 	r.GET("/api/setup/status", GetSetupStatus)
 
+	// 兼容旧路径：原 /api/me 在历史重构中迁到了 /api/auth/me，部分早期前端仍按旧路径调用。
+	// 用同一 Me handler 复用，避免再次引发 docs-app 协同 awareness 显示 user-?。
+	r.GET("/api/me", auth.AuthMiddleware(), Me)
+
 	// Agent 上传录屏（凭 X-Device-Token，无需登录）
 	r.POST("/api/agent/recordings/upload", AgentRecordingUpload)
 	// Agent 测速 HTTP（凭 X-Device-Token）
@@ -951,6 +955,7 @@ func SetupRouter() *gin.Engine {
 		docs.POST("/nodes", auth.RequireRole("admin", "operator"), CreateDocumentNode)
 		docs.PUT("/nodes/:id", auth.RequireDocumentPermission("edit"), UpdateDocumentNode)
 		docs.DELETE("/nodes/:id", auth.RequireDocumentPermission("delete"), DeleteDocumentNode)
+		docs.POST("/nodes/:id/copy", auth.RequireDocumentPermission("edit"), CopyDocumentNode)
 		docs.POST("/nodes/:id/upload", auth.RequireDocumentPermission("edit"), UploadDocumentFile)
 		docs.GET("/nodes/:id/download", auth.RequireDocumentPermission("download"), DownloadDocumentFile)
 		docs.GET("/nodes/:id/content", auth.RequireDocumentPermission("read"), GetDocumentContent)
