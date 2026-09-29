@@ -11,10 +11,13 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.webkit.WebSettings
+import android.webkit.WebView as SystemWebView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+import com.appmanager.agent.R
 import com.appmanager.agent.config.AgentConfig
 import com.appmanager.agent.util.ScanBroadcastHelper
 import com.appmanager.agent.x5.WebViewWrapper
@@ -27,6 +30,7 @@ class FormAppActivity : AppCompatActivity() {
     private val tag = "FormAppActivity"
     private lateinit var webViewWrapper: WebViewWrapper
     private lateinit var bridge: FormAppBridge
+    private var swipeRefresh: SwipeRefreshLayout? = null
     private var formAppCode: String = ""
     /** 是否为独占扫码模式（需要阻塞工作流） */
     private var exclusiveScanMode: Boolean = false
@@ -68,7 +72,27 @@ class FormAppActivity : AppCompatActivity() {
 
         // 使用 X5WebViewFactory 创建 WebView
         webViewWrapper = X5WebViewFactory.createWebView(this)
-        setContentView(webViewWrapper.getView())
+
+        // 外层用 SwipeRefreshLayout 包裹，统一支持「下拉刷新」
+        val swipe = SwipeRefreshLayout(this).apply {
+            setColorSchemeColors(
+                ContextCompat.getColor(this@FormAppActivity, R.color.agent_secondary),
+                ContextCompat.getColor(this@FormAppActivity, R.color.agent_primary),
+            )
+            setOnRefreshListener(SwipeRefreshLayout.OnRefreshListener {
+                // 下拉刷新：重新加载当前页面
+                webViewWrapper.reload()
+            })
+        }
+        swipeRefresh = swipe
+        swipe.addView(
+            webViewWrapper.getView(),
+            android.view.ViewGroup.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            ),
+        )
+        setContentView(swipe)
 
         // 显示使用的 WebView 类型
         val webViewType = X5WebViewFactory.getCurrentWebViewType(this)
@@ -125,6 +149,12 @@ class FormAppActivity : AppCompatActivity() {
         if (X5WebViewFactory.isUsingX5(this)) {
             // X5 WebView
             webViewWrapper.setWebViewClient(object : com.tencent.smtt.sdk.WebViewClient() {
+                override fun onPageFinished(view: com.tencent.smtt.sdk.WebView?, url: String?) {
+                    super.onPageFinished(view, url)
+                    // 下拉刷新：结束刷新动画
+                    swipeRefresh?.isRefreshing = false
+                }
+
                 override fun onReceivedError(
                     view: com.tencent.smtt.sdk.WebView?,
                     errorCode: Int,
@@ -133,6 +163,8 @@ class FormAppActivity : AppCompatActivity() {
                 ) {
                     super.onReceivedError(view, errorCode, description, failingUrl)
                     Log.e(tag, "X5 WebView error: $description ($errorCode) for $failingUrl")
+                    // 主文档错误时也结束刷新动画
+                    swipeRefresh?.isRefreshing = false
                 }
             })
 
@@ -147,6 +179,12 @@ class FormAppActivity : AppCompatActivity() {
         } else {
             // 系统 WebView
             webViewWrapper.setWebViewClient(object : android.webkit.WebViewClient() {
+                override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
+                    super.onPageFinished(view, url)
+                    // 下拉刷新：结束刷新动画
+                    swipeRefresh?.isRefreshing = false
+                }
+
                 override fun onReceivedError(
                     view: android.webkit.WebView?,
                     request: android.webkit.WebResourceRequest?,
@@ -155,6 +193,9 @@ class FormAppActivity : AppCompatActivity() {
                     super.onReceivedError(view, request, error)
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                         Log.e(tag, "System WebView error: ${error?.description} (${error?.errorCode}) for ${request?.url}")
+                    }
+                    if (request?.isForMainFrame == true) {
+                        swipeRefresh?.isRefreshing = false
                     }
                 }
             })
@@ -257,6 +298,9 @@ class FormAppActivity : AppCompatActivity() {
             WorkflowBlocker.forceUnblock(formAppCode)
             Log.i(tag, "Workflow force-unblocked on destroy")
         }
+        // 结束下拉刷新动画，避免旋转泄漏到下一帧
+        swipeRefresh?.isRefreshing = false
+        swipeRefresh = null
         if (::bridge.isInitialized) bridge.release()
         // 从跨 app 事件中继注册表移除（第 7a 步）
         if (::webViewWrapper.isInitialized && formAppCode.isNotEmpty()) {

@@ -1,6 +1,7 @@
 package com.appmanager.agent.command
 
 import android.app.PendingIntent
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
@@ -131,26 +132,142 @@ object AppCommandHandler {
             // 下载完成阶段
             AgentService.sendInstallTaskProgress(commandId, "downloading", 100, "APK 下载完成")
 
-            val intent = Intent(Intent.ACTION_VIEW)
-            intent.setDataAndType(
-                androidx.core.content.FileProvider.getUriForFile(
-                    service,
-                    "${service.packageName}.fileprovider",
-                    apkFile
-                ),
-                "application/vnd.android.package-archive"
-            )
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            // 通知前端进入「系统安装界面」阶段
+            // MDM 模式已开启 且 本 App 已是 Device Owner → 走 PackageInstaller Session 静默安装
+            // （无系统安装弹窗；安装结果由 InstallStatusReceiver 异步回调）
+            if (MdmCommandHandler.canSilentInstall(service) && installSilently(service, commandId, apkFile)) {
+                return
+            }
+
+            // 无 MDM 静默安装权限 或 静默提交失败 → 回退拉起系统安装界面
             AgentService.sendInstallTaskProgress(commandId, "opening", 0, "正在拉起系统安装界面")
-            service.startActivity(intent)
+            val err = openSystemInstallUi(service, apkFile)
+            if (err != null) {
+                apkFile.delete()
+                AgentService.sendInstallTaskResult(commandId, false, "", err)
+                return
+            }
             AgentService.sendInstallTaskResult(commandId, true, "已打开安装界面", "")
         } catch (e: Exception) {
             Log.e(TAG, "Install error", e)
             apkFile.delete()
             AgentService.sendInstallTaskResult(commandId, false, "", e.message ?: "安装失败")
         }
+    }
+
+    /**
+     * 拉起系统安装界面（无 MDM 权限、或静默安装被系统拒绝时的降级路径）。
+     * @return 成功拉起返回 null，失败返回错误信息
+     */
+    fun openSystemInstallUi(context: Context, apkFile: File): String? {
+        return try {
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(
+                    androidx.core.content.FileProvider.getUriForFile(
+                        context,
+                        "${context.packageName}.fileprovider",
+                        apkFile
+                    ),
+                    "application/vnd.android.package-archive"
+                )
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(intent)
+            null
+        } catch (e: Exception) {
+            Log.e(TAG, "openSystemInstallUi", e)
+            e.message ?: "无法拉起系统安装界面"
+        }
+    }
+
+    /**
+     * 通过 [PackageInstaller] Session 静默安装（Device Owner 专属，无系统弹窗）。
+     *
+     * - Android 12（API 31）起需显式声明 [PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED]
+     *   才会跳过用户确认。
+     * - API 26-30 上 Device Owner 提交 Session 本身就无系统安装界面，无需声明。
+     *
+     * @return true  = 已提交 install_app，最终结果由 [InstallStatusReceiver] 异步回调
+     *         false = 静默提交失败（如无 Device Owner 权限），调用方应回退到系统安装界面
+     */
+    private fun installSilently(
+        service: AgentService,
+        commandId: String,
+        apkFile: File
+    ): Boolean {
+        if (!apkFile.isFile || apkFile.length() <= 0) {
+            Log.w(TAG, "installSilently: invalid apk file (path=${apkFile.absolutePath})")
+            return false
+        }
+        // 提前探测 APK 包名 + 是否为更新，更友好地给前端展示「静默安装/更新」文案
+        val archive = try {
+            service.packageManager.getPackageArchiveInfo(apkFile.absolutePath, 0)
+        } catch (_: Exception) {
+            null
+        }
+        val pkgName = archive?.packageName
+        val isUpdate = pkgName != null && isInstalled(service, pkgName)
+        AgentService.sendInstallTaskProgress(
+            commandId, "installing", 0,
+            if (isUpdate) "MDM 静默更新 $pkgName 中（Device Owner，无系统弹窗）"
+            else "MDM 静默安装中（Device Owner，无系统弹窗）"
+        )
+
+        val installer = service.packageManager.packageInstaller
+        val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+            }
+            setSize(apkFile.length())
+        }
+
+        var sessionId = -1
+        var pending: PendingIntent? = null
+        return try {
+            sessionId = installer.createSession(params)
+            val callback = Intent(service, InstallStatusReceiver::class.java).apply {
+                action = InstallStatusReceiver.ACTION_INSTALL_RESULT
+                // 非导出的 BroadcastReceiver，显式指定组件，避免 Android 14 隐式广播限制
+                putExtra(InstallStatusReceiver.EXTRA_COMMAND_ID, commandId)
+                putExtra(InstallStatusReceiver.EXTRA_APK_PATH, apkFile.absolutePath)
+                putExtra(InstallStatusReceiver.EXTRA_SILENT, true)
+            }
+            // PackageInstaller 需要回填 result extras，PendingIntent 必须可变
+            val flags = PendingIntent.FLAG_UPDATE_CURRENT or
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0
+            pending = PendingIntent.getBroadcast(service, sessionId, callback, flags)
+
+            installer.openSession(sessionId).use { session ->
+                val out = session.openWrite("base.apk", 0L, apkFile.length())
+                try {
+                    apkFile.inputStream().use { input -> input.copyTo(out) }
+                    session.fsync(out)
+                } finally {
+                    out.close()
+                }
+                session.commit(pending!!.intentSender)
+            }
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "installSilently failed, fallback to system installer", e)
+            // 防止 commit 半路异常后系统仍发广播触发双重安装
+            try { pending?.cancel() } catch (_: Exception) {}
+            if (sessionId >= 0) {
+                try { installer.abandonSession(sessionId) } catch (_: Exception) {}
+            }
+            AgentService.sendInstallTaskProgress(
+                commandId, "installing", 0,
+                "MDM 静默安装不可用（${e.message ?: e.javaClass.simpleName}），回退系统安装界面"
+            )
+            false
+        }
+    }
+
+    private fun isInstalled(service: AgentService, packageName: String): Boolean = try {
+        service.packageManager.getApplicationInfo(packageName, 0)
+        true
+    } catch (_: PackageManager.NameNotFoundException) {
+        false
     }
 
     fun uninstall(msg: Message, service: AgentService) {

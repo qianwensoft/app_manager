@@ -884,15 +884,18 @@ func mapInstallAgentPhaseToOverall(phase string, pct int) int {
 	case "downloading":
 		// 50 - 90 区间
 		return 50 + (p * 40 / 100)
+	case "installing":
+		// 90 - 98 区间（MDM 静默安装走 PackageInstaller Session 的实际执行阶段）
+		return 90 + (p * 8 / 100)
 	case "opening":
-		// 90 - 95 区间
-		return 90 + (p * 5 / 100)
+		// 98 - 99 区间（回退到系统安装界面）
+		return 98 + (p * 1 / 100)
 	case "done":
 		return 100
 	case "failed":
 		return 100
 	default:
-		// 未知阶段：clamp 到 [overall, 95]
+		// 未知阶段：clamp 到 [overall, 98]
 		return p
 	}
 }

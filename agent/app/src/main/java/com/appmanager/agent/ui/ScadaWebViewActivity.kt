@@ -21,6 +21,8 @@ import android.widget.FrameLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.appmanager.agent.R
 import com.appmanager.agent.ScadaBridge
 import com.appmanager.agent.util.ScanBroadcastHelper
@@ -32,6 +34,7 @@ class ScadaWebViewActivity : AppCompatActivity() {
     private val tag = "ScadaWebViewActivity"
     private lateinit var statusView: TextView
     private var webView: WebView? = null
+    private var swipeRefresh: SwipeRefreshLayout? = null
     private lateinit var bridge: ScadaBridge
 
     /** 摄像头扫码 launcher */
@@ -62,10 +65,41 @@ class ScadaWebViewActivity : AppCompatActivity() {
         // 启用 WebView 远程调试（chrome://inspect）
         WebView.setWebContentsDebuggingEnabled(true)
 
-        val root = FrameLayout(this)
+        val root = SwipeRefreshLayout(this).apply {
+            // 下拉刷新：重新加载当前页面
+            setColorSchemeColors(
+                ContextCompat.getColor(this@ScadaWebViewActivity, R.color.agent_secondary),
+                ContextCompat.getColor(this@ScadaWebViewActivity, R.color.agent_primary),
+            )
+            setOnRefreshListener {
+                val wv = webView
+                if (wv != null) {
+                    val current = wv.url
+                    if (!current.isNullOrBlank()) {
+                        wv.reload()
+                    } else {
+                        // 没有可刷新的地址，直接结束刷新态
+                        isRefreshing = false
+                    }
+                } else {
+                    isRefreshing = false
+                }
+            }
+        }
+        swipeRefresh = root
+
+        val container = FrameLayout(this)
+        root.addView(
+            container,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            ),
+        )
+
         val wv = WebView(this)
         webView = wv
-        root.addView(
+        container.addView(
             wv,
             FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -83,7 +117,7 @@ class ScadaWebViewActivity : AppCompatActivity() {
             textSize = 12f
             setPadding(24, 24, 24, 24)
         }
-        root.addView(
+        container.addView(
             statusView,
             FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -114,6 +148,8 @@ class ScadaWebViewActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView?, u: String?) {
                 // 页面加载完成后隐藏诊断浮层（成功路径）
                 statusView.postDelayed({ statusView.visibility = View.GONE }, 800)
+                // 下拉刷新：结束刷新动画
+                swipeRefresh?.isRefreshing = false
             }
 
             override fun onReceivedError(
@@ -125,6 +161,8 @@ class ScadaWebViewActivity : AppCompatActivity() {
                 if (request?.isForMainFrame == true) {
                     statusView.visibility = View.VISIBLE
                     statusView.text = "加载失败\nURL: ${request.url}\n错误: ${error?.errorCode} ${error?.description}"
+                    // 错误也要结束刷新动画，避免一直转
+                    swipeRefresh?.isRefreshing = false
                 }
             }
 
@@ -136,6 +174,7 @@ class ScadaWebViewActivity : AppCompatActivity() {
                 if (request?.isForMainFrame == true) {
                     statusView.visibility = View.VISIBLE
                     statusView.text = "HTTP 错误 ${errorResponse?.statusCode}\nURL: ${request.url}\n${errorResponse?.reasonPhrase}"
+                    swipeRefresh?.isRefreshing = false
                 }
             }
         }
@@ -151,6 +190,8 @@ class ScadaWebViewActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        swipeRefresh?.isRefreshing = false
+        swipeRefresh = null
         try {
             unregisterReceiver(hardwareScanReceiver)
         } catch (e: Exception) {

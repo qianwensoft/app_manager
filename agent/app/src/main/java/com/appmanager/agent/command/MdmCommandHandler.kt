@@ -34,6 +34,8 @@ object MdmCommandHandler {
             val canDisableCamera = isDeviceOwner && apiLevel >= 26
             val canWipeDevice = isDeviceOwner
             val canSetKeyguard = isDeviceOwner
+            // 静默安装：需要 MDM 模式已开启 且本 App 已被激活为 Device Owner
+            val canSilentInstall = isMdmEnabled(service) && isDeviceOwner
 
             val caps = JSONObject().apply {
                 put("is_device_owner", isDeviceOwner)
@@ -46,6 +48,7 @@ object MdmCommandHandler {
                 put("can_disable_camera", canDisableCamera)
                 put("can_wipe_device", canWipeDevice)
                 put("can_set_keyguard", canSetKeyguard)
+                put("can_silent_install", canSilentInstall)
             }
             CommandDispatcher.sendResult(service, msg.commandId, true, caps.toString())
         } catch (e: Exception) {
@@ -124,8 +127,24 @@ object MdmCommandHandler {
         }
     }
 
-    fun isMdmEnabled(service: AgentService): Boolean {
-        return service.getSharedPreferences(MDM_PREFS, Context.MODE_PRIVATE)
+    fun isMdmEnabled(service: AgentService): Boolean = isMdmEnabled(service as Context)
+
+    fun isMdmEnabled(context: Context): Boolean =
+        context.getSharedPreferences(MDM_PREFS, Context.MODE_PRIVATE)
             .getBoolean(KEY_MDM_ENABLED, false)
+
+    /**
+     * 是否可走 MDM 静默安装（[PackageInstaller] Session + Device Owner）。
+     * 条件：MDM 模式已开启 且 本 App 已是 Device Owner。
+     */
+    fun canSilentInstall(context: Context): Boolean {
+        if (!isMdmEnabled(context)) return false
+        return try {
+            val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+            dpm.isDeviceOwnerApp(context.packageName)
+        } catch (e: Exception) {
+            Log.w(TAG, "canSilentInstall check failed", e)
+            false
+        }
     }
 }

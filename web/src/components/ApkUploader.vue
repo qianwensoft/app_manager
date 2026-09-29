@@ -207,6 +207,8 @@ function agentPhaseText(phase) {
       return '任务派发到 Agent…'
     case 'downloading':
       return 'Agent 正在下载 APK…'
+    case 'installing':
+      return 'MDM 静默安装中（Device Owner，无系统弹窗）'
     case 'opening':
       return '正在拉起系统安装界面'
     case 'done':

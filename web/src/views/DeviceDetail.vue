@@ -2480,6 +2480,7 @@ const mdmCapabilityList = computed(() => {
   return [
     { key: 'is_device_owner',            label: 'Device Owner',   value: c.is_device_owner },
     { key: 'has_write_secure_settings',  label: 'WRITE_SECURE_SETTINGS', value: c.has_write_secure_settings },
+    { key: 'can_silent_install',         label: 'MDM 静默安装/更新', value: c.can_silent_install },
     { key: 'can_set_ntp',                label: '设置 NTP',        value: c.can_set_ntp },
     { key: 'can_set_system_time',        label: '设置系统时间',     value: c.can_set_system_time },
     { key: 'can_set_password_policy',    label: '密码策略',         value: c.can_set_password_policy },
