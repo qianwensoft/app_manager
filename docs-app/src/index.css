@@ -955,3 +955,321 @@ a { color: var(--primary); text-decoration: none; }
   color: white;
 }
 
+/* ============ AgentDocPreview 只读 Markdown 渲染样式 ============ */
+/* 作用域：仅作用于 AgentDocPreview 页面（class="agent-md-body"），
+   与编辑器端 .pm-host .ProseMirror 视觉一致，但选择器隔离，避免污染 docs-app 其它页面。 */
+.agent-md-body {
+  color: var(--text);
+  word-break: break-word;
+}
+.agent-md-body > *:first-child { margin-top: 0; }
+.agent-md-body > *:last-child { margin-bottom: 0; }
+.agent-md-body .agent-md-h1,
+.agent-md-body .agent-md-h2,
+.agent-md-body .agent-md-h3,
+.agent-md-body .agent-md-h4,
+.agent-md-body .agent-md-h5,
+.agent-md-body .agent-md-h6 {
+  font-weight: 700;
+  color: #111827;
+  line-height: 1.3;
+  margin: 18px 0 8px;
+}
+.agent-md-body .agent-md-h1 { font-size: 1.6em; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+.agent-md-body .agent-md-h2 { font-size: 1.35em; }
+.agent-md-body .agent-md-h3 { font-size: 1.15em; font-weight: 600; }
+.agent-md-body .agent-md-h4 { font-size: 1.05em; font-weight: 600; }
+.agent-md-body .agent-md-h5,
+.agent-md-body .agent-md-h6 { font-size: 1em; font-weight: 600; color: var(--muted); }
+.agent-md-body .agent-md-p {
+  margin: 8px 0;
+  color: #374151;
+}
+.agent-md-body ul,
+.agent-md-body ol {
+  margin: 8px 0;
+  padding-left: 26px;
+}
+.agent-md-body li { margin: 4px 0; color: #374151; }
+.agent-md-body li > p { margin: 4px 0; }
+.agent-md-body strong { font-weight: 600; color: #111827; }
+.agent-md-body em { font-style: italic; }
+.agent-md-body del { color: var(--muted); }
+.agent-md-body a { color: var(--primary); text-decoration: underline; word-break: break-word; }
+.agent-md-body .agent-md-img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  margin: 8px 0;
+  display: block;
+  cursor: zoom-in;
+}
+.agent-md-body .agent-md-img:hover {
+  box-shadow: 0 2px 12px rgba(15, 23, 42, 0.08);
+}
+.agent-md-body .agent-md-hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 18px 0;
+}
+.agent-md-body .agent-md-quote {
+  border-left: 3px solid var(--border);
+  margin: 12px 0;
+  padding: 4px 14px;
+  color: var(--muted);
+  background: rgba(15, 23, 42, 0.02);
+  border-radius: 0 4px 4px 0;
+}
+.agent-md-body .agent-md-quote > *:first-child { margin-top: 0; }
+.agent-md-body .agent-md-quote > *:last-child { margin-bottom: 0; }
+.agent-md-body .agent-md-code-inline {
+  background: #f1f5f9;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #b91c1c;
+}
+.agent-md-body .agent-md-pre {
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  overflow: auto;
+  font-size: 13px;
+  line-height: 1.55;
+  margin: 12px 0;
+}
+.agent-md-body .agent-md-pre code {
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+}
+
+/* 表格 */
+.agent-md-body .agent-md-table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+  margin: 12px 0;
+  font-size: 0.95em;
+  display: block;
+  overflow-x: auto;
+}
+.agent-md-body .agent-md-table th,
+.agent-md-body .agent-md-table td {
+  border: 1px solid var(--border);
+  padding: 8px 12px;
+  vertical-align: top;
+  text-align: left;
+}
+.agent-md-body .agent-md-table th {
+  font-weight: 600;
+  background: #f9fafb;
+}
+
+/* 任务列表 */
+.agent-md-body .agent-md-task-list {
+  list-style: none;
+  padding-left: 0;
+}
+.agent-md-body .agent-md-task-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 0;
+  list-style: none;
+}
+.agent-md-body .agent-md-task-checkbox {
+  margin-top: 4px;
+  flex-shrink: 0;
+  cursor: default;
+}
+.agent-md-body .agent-md-task-item.checked .agent-md-task-content {
+  text-decoration: line-through;
+  color: var(--muted);
+  opacity: 0.7;
+}
+.agent-md-body .agent-md-task-content {
+  flex: 1;
+  min-width: 0;
+}
+.agent-md-body .agent-md-task-content > p { margin: 0; }
+
+/* 折叠块 */
+.agent-md-body .agent-md-toggle {
+  margin: 10px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.agent-md-body .agent-md-toggle-summary {
+  cursor: pointer;
+  font-weight: 500;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+}
+.agent-md-body .agent-md-toggle-summary::-webkit-details-marker { display: none; }
+.agent-md-body .agent-md-toggle-summary::before {
+  content: '▶';
+  display: inline-block;
+  margin-right: 8px;
+  transition: transform 0.2s;
+  font-size: 0.8em;
+  color: var(--muted);
+}
+.agent-md-body .agent-md-toggle[open] > .agent-md-toggle-summary::before {
+  transform: rotate(90deg);
+}
+.agent-md-body .agent-md-toggle[open] > *:not(.agent-md-toggle-summary) {
+  margin-top: 8px;
+  padding-left: 20px;
+}
+
+/* Callout 提示框（编辑器 :::type 语法扩展） */
+.agent-md-body .agent-md-callout {
+  display: flex;
+  gap: 12px;
+  padding: 12px 16px;
+  margin: 12px 0;
+  border-radius: 8px;
+  border-left: 3px solid;
+  background: #eff6ff;
+  border-left-color: #3b82f6;
+}
+.agent-md-body .agent-md-callout.callout-info {
+  background: #eff6ff;
+  border-left-color: #3b82f6;
+}
+.agent-md-body .agent-md-callout.callout-warning {
+  background: #fefce8;
+  border-left-color: #eab308;
+}
+.agent-md-body .agent-md-callout.callout-error {
+  background: #fef2f2;
+  border-left-color: #ef4444;
+}
+.agent-md-body .agent-md-callout.callout-success {
+  background: #f0fdf4;
+  border-left-color: #22c55e;
+}
+.agent-md-body .agent-md-callout-icon {
+  flex-shrink: 0;
+  font-size: 18px;
+  line-height: 1;
+  margin-top: 2px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+.agent-md-body .agent-md-callout-content {
+  flex: 1;
+  min-width: 0;
+}
+.agent-md-body .agent-md-callout-content > *:first-child { margin-top: 0; }
+.agent-md-body .agent-md-callout-content > *:last-child { margin-bottom: 0; }
+
+/* ============ 图片放大查看器（ImageLightbox） ============ */
+/* 同时供 AgentDocPreview 与编辑器侧 SharedMarkdownView 使用：覆盖全屏，固定定位。
+   触控 / 鼠标手势都在 host 内通过 React 处理，CSS 只负责视觉布局与过渡。 */
+.image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  background: rgba(0, 0, 0, 0.92);
+  display: flex;
+  flex-direction: column;
+  animation: image-lightbox-fade-in 0.16s ease-out;
+  touch-action: none; /* 禁止浏览器默认手势（pinch-zoom / pull-to-refresh）干扰自定义手势 */
+  -webkit-user-select: none;
+  user-select: none;
+}
+@keyframes image-lightbox-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.image-lightbox-stage {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.image-lightbox-img {
+  max-width: 100%;
+  max-height: 100%;
+  transform-origin: center center;
+  /* will-change 提示浏览器提升合成层；动画过程保持 60fps */
+  will-change: transform;
+  /* 关闭浏览器自带的图片拖拽，避免和我们的手势冲突 */
+  -webkit-user-drag: none;
+  user-drag: none;
+  /* 禁用默认双击缩放 */
+  touch-action: none;
+}
+
+.image-lightbox-toolbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.5), transparent);
+  color: #fff;
+  z-index: 2;
+  font-size: 14px;
+}
+
+.image-lightbox-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 18px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.image-lightbox-toolbar button:hover {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.32);
+}
+.image-lightbox-toolbar button:active {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.image-lightbox-close {
+  margin-left: auto;
+}
+
+.image-lightbox-scale {
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.85);
+  min-width: 52px;
+  text-align: center;
+  padding: 0 4px;
+}
+
+/* ============ 编辑器端 Markdown 预览的图片 ============ */
+/* 编辑器渲染走的也是 .pm-host .ProseMirror 上下文；这里的样式与 .agent-md-img 同步，
+   让编辑器内的内嵌图片也有「可点击放大」的视觉提示。 */
+.pm-host .ProseMirror img {
+  cursor: zoom-in;
+}
+.pm-host .ProseMirror img:hover {
+  box-shadow: 0 2px 12px rgba(15, 23, 42, 0.08);
+}
+

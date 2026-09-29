@@ -17,9 +17,12 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import type { UrlTransform as ReactMarkdownUrlTransform } from 'react-markdown'
+import { openImageLightbox } from '../components/ImageLightbox'
 import {
   ChevronRight,
-  Download,
   BookOpen,
   FileText,
   Folder,
@@ -32,7 +35,6 @@ import {
   fetchSharedProjectByCode,
   fetchSharedNodes,
   fetchSharedContent,
-  downloadSharedUrl,
   getShareToken,
 } from '../api/documents'
 import type { DocumentNode, DocumentProject } from '../api/types'
@@ -201,27 +203,31 @@ export default function AgentDocPreview() {
 
   const handleNodeClick = (node: TreeNode) => {
     setSelectedNode(node)
-    if (node.node_type === 'folder') {
+    const hasChildren = !!node.children && node.children.length > 0
+    if (hasChildren) {
       toggleFolder(node.id)
-      if (node.children && node.children.length > 0) {
-        // 选中文件夹时默认显示第一个子节点内容
-        const firstChild = findFirstLeaf(node)
-        if (firstChild) {
-          setSelectedNode(firstChild)
-          loadContent(firstChild)
-        }
+      // 选中父节点时默认显示第一个子节点内容，让右侧有内容可看
+      const firstChild = findFirstLeaf(node)
+      if (firstChild && firstChild.id !== node.id) {
+        setSelectedNode(firstChild)
+        loadContent(firstChild)
+      } else if (node.node_type !== 'folder') {
+        // 根节点本身就是 doc 但挂着子节点（非典型结构），先选中自身再让用户继续展开
+        loadContent(node)
       }
     } else {
       loadContent(node)
     }
-    // 移动端：点击节点后自动关闭抽屉，让用户看到内容
-    if (isMobile) {
-      setDrawerOpen(false)
-    }
+    // 抽屉（移动端侧栏）保持打开，方便用户连续浏览多个文档。
+    // 关闭入口：
+    //  - 顶部汉堡按钮（drawerOpen 时显示为 X 图标）
+    //  - 点击抽屉外的半透明遮罩
+    // 之前会自动 setDrawerOpen(false)，但实际使用中用户经常需要切换多篇文档，
+    // 自动收起会强制重新点开抽屉，UX 不顺。
   }
 
   const findFirstLeaf = (node: TreeNode): TreeNode | null => {
-    if (node.node_type !== 'folder' || !node.children?.length) return node
+    if (!node.children?.length) return node
     return findFirstLeaf(node.children[0])
   }
 
@@ -397,19 +403,6 @@ export default function AgentDocPreview() {
         <main style={styles.content}>
           {selectedNode ? (
             <>
-              <div style={styles.contentHeader}>
-                <span style={styles.contentTitle}>{selectedNode.name}</span>
-                {selectedNode.node_type !== 'folder' && selectedNode.storage_path && (
-                  <a
-                    style={styles.downloadBtn}
-                    href={downloadSharedUrl(selectedNode.id, code, shareToken)}
-                    download
-                  >
-                    <Download size={14} />
-                    {!isMobile && <span>下载</span>}
-                  </a>
-                )}
-              </div>
               <div
                 style={{
                   ...styles.contentBody,
@@ -436,7 +429,7 @@ export default function AgentDocPreview() {
                       maxWidth: isMobile ? '100%' : 720,
                     }}
                   >
-                    <MarkdownView content={contentState.content} isMobile={isMobile} />
+                    <MarkdownView content={contentState.content} isMobile={isMobile} code={code} shareToken={shareToken} />
                   </div>
                 )}
               </div>
@@ -468,6 +461,8 @@ export default function AgentDocPreview() {
 
   function renderTreeNode(node: TreeNode, depth: number): React.ReactNode {
     const isFolder = node.node_type === 'folder'
+    // 只要有 children（不论 node_type）都允许展开 —— 项目根节点可能是 doc 类型但仍挂着子节点。
+    const hasChildren = !!node.children && node.children.length > 0
     const isExpanded = expandedFolders.has(node.id)
     const isSelected = selectedNode?.id === node.id
 
@@ -492,7 +487,7 @@ export default function AgentDocPreview() {
           }}
           onClick={() => handleNodeClick(node)}
         >
-          {isFolder && (
+          {hasChildren ? (
             <ChevronRight
               size={14}
               style={{
@@ -502,12 +497,13 @@ export default function AgentDocPreview() {
               }}
               color="#9ca3af"
             />
+          ) : (
+            <span style={{ width: 14, flexShrink: 0 }} />
           )}
-          {!isFolder && <span style={{ width: 14, flexShrink: 0 }} />}
           {icon}
           <span style={styles.nodeName}>{node.name}</span>
         </div>
-        {isFolder && isExpanded && node.children && (
+        {hasChildren && isExpanded && node.children && (
           <div>
             {node.children.map((child) => renderTreeNode(child, depth + 1))}
           </div>
@@ -555,61 +551,386 @@ function SidebarRail({
 }
 
 // ---------------------------------------------------------------------------
-// Markdown 渲染（简化版，纯文本 + 标题）
+// Markdown 渲染：使用 react-markdown + remark-gfm，与编辑器端的 SharedMarkdownContent
+// 保持一致，确保 Agent WebView 上能看到表格、任务列表、代码块、Callout、折叠块、
+// Doc Embed 等所有插件扩展。
 // ---------------------------------------------------------------------------
 
-function MarkdownView({ content, isMobile }: { content: string; isMobile: boolean }) {
-  const lines = content.split('\n')
+function MarkdownView({ content, isMobile, code, shareToken }: { content: string; isMobile: boolean; code: string; shareToken: string }) {
   const baseFontSize = isMobile ? 15 : 14
+  const lineHeight = isMobile ? 1.65 : 1.7
+
+  // 文档上下文：Agent 端无登录态，但 embed iframe 仍需要 pageContext.documentId 才能
+  // 让内嵌 form-app 拿到正确的运行参数。这里从内容里抓不出配置，只能给个空对象兜底。
+  const documentContext = useMemo(
+    () => ({ globalContext: {} as Record<string, any>, pageContext: {} as Record<string, any> }),
+    [],
+  )
+
   return (
     <div
+      className="agent-md-body"
       style={{
         ...styles.markdown,
         fontSize: baseFontSize,
-        lineHeight: isMobile ? 1.65 : 1.7,
+        lineHeight,
       }}
     >
-      {lines.map((line, i) => {
-        if (line.startsWith('# '))
-          return (
-            <h1
-              key={i}
-              style={{
-                ...styles.h1,
-                fontSize: isMobile ? 20 : 22,
-                margin: isMobile ? '14px 0 6px' : '16px 0 8px',
-              }}
-            >
-              {line.slice(2)}
-            </h1>
-          )
-        if (line.startsWith('## '))
-          return (
-            <h2
-              key={i}
-              style={{
-                ...styles.h2,
-                fontSize: isMobile ? 17 : 18,
-                margin: isMobile ? '12px 0 4px' : '14px 0 6px',
-              }}
-            >
-              {line.slice(3)}
-            </h2>
-          )
-        if (line.startsWith('### '))
-          return (
-            <h3
-              key={i}
-              style={{ ...styles.h3, fontSize: isMobile ? 15 : 15 }}
-            >
-              {line.slice(4)}
-            </h3>
-          )
-        if (line.startsWith('- ') || line.startsWith('* '))
-          return <li key={i} style={styles.li}>{line.slice(2)}</li>
-        if (line.trim() === '') return <br key={i} />
-        return <p key={i} style={styles.p}>{line}</p>
+      <SharedMarkdownContent markdown={content} documentContext={documentContext} code={code} shareToken={shareToken} />
+    </div>
+  )
+}
+
+/**
+ * 与 MarkdownEditor.tsx::SharedMarkdownContent 等价的实现：
+ * - 用 `<ReactMarkdown remarkPlugins={[remarkGfm]}>` 渲染 GFM（表格、任务列表、
+ *   删除线、自动链接等）以及标准 markdown
+ * - 编辑器扩展（callout `:::info ... :::`、toggle `<details>...</details>`、
+ *   doc-embed `<div class="doc-embed">`）在 markdown 解析前先切片为独立块，
+ *   用专用 React 组件渲染。这些语法不在 CommonMark / GFM 标准里，
+ *   `react-markdown` 默认会按普通段落渲染甚至转义 HTML，因此必须预处理。
+ */
+function SharedMarkdownContent({
+  markdown,
+  documentContext,
+  code,
+  shareToken,
+}: {
+  markdown: string
+  documentContext: { globalContext?: Record<string, any>; pageContext?: Record<string, any> }
+  code: string
+  shareToken: string
+}) {
+  // 三类扩展块：callout / toggle / doc-embed。用同一套 sliceParts 把它们从 markdown 里
+  // 切出来，剩下的纯 markdown 段落统一交给 ReactMarkdown。
+  const parts = useMemo(() => sliceNotionBlocks(markdown), [markdown])
+  // 工厂依赖 code/shareToken，仅在它们变化时重新构造组件映射（图片 URL 改写需要它们）。
+  const components = useMemo(() => createMarkdownComponents(code, shareToken), [code, shareToken])
+
+  // react-markdown v9 内置 `defaultUrlTransform` 仅放行 http(s)/irc(s)/mailto/xmpp 协议，
+  // 会把 `data:image/png;base64,...` 整段截成空串 —— 表现就是「内嵌 base64 图片在 Agent 端
+  // 不显示」。这里自定义 urlTransform 原样放行所有协议（含 data:、blob:），具体协议净化留给
+  // components.img 的字符串替换处理（登录态下载链接 → 分享态免登录链接）。这样比把所有
+  // URL 处理都堆在 urlTransform 里更清晰，职责单一。
+  const urlTransform = useMemo<ReactMarkdownUrlTransform>(
+    () => (value) => value,
+    [],
+  )
+
+  return (
+    <>
+      {parts.map((part, index) => {
+        switch (part.type) {
+          case 'callout': {
+            return (
+              <div
+                key={index}
+                className={`agent-md-callout callout-${part.kind}`}
+                data-type={part.kind}
+              >
+                <div className="agent-md-callout-icon" aria-hidden="true">
+                  {CALLOUT_ICON[part.kind] || CALLOUT_ICON.info}
+                </div>
+                <div className="agent-md-callout-content">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={components} urlTransform={urlTransform}>
+                    {part.body}
+                  </ReactMarkdown>
+                </div>
+              </div>
+            )
+          }
+          case 'toggle': {
+            return (
+              <details
+                key={index}
+                className="agent-md-toggle"
+                {...(part.open ? { open: true } : {})}
+              >
+                <summary className="agent-md-toggle-summary">{part.summary}</summary>
+                <div className="agent-md-toggle-content">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={components} urlTransform={urlTransform}>
+                    {part.body}
+                  </ReactMarkdown>
+                </div>
+              </details>
+            )
+          }
+          case 'embed': {
+            return (
+              <DocEmbedFrame
+                key={index}
+                kind={part.kind}
+                config={part.config}
+                documentContext={documentContext}
+              />
+            )
+          }
+          case 'markdown':
+          default:
+            return (
+              <ReactMarkdown
+                key={index}
+                remarkPlugins={[remarkGfm]}
+                components={components}
+                urlTransform={urlTransform}
+              >
+                {part.value}
+              </ReactMarkdown>
+            )
+        }
       })}
+    </>
+  )
+}
+
+type SlicePart =
+  | { type: 'markdown'; value: string }
+  | { type: 'callout'; kind: string; body: string }
+  | { type: 'toggle'; open: boolean; summary: string; body: string }
+  | { type: 'embed'; kind: string; config: Record<string, any> }
+
+/**
+ * 把 markdown 文本里的编辑器扩展块（callout / toggle / doc-embed）切片出来，
+ * 剩余的普通 markdown 段落保留在 markdown 类型的 part 中。
+ *
+ * 顺序很重要：先匹配多行的 `<details>...</details>` 和 `:::type ... :::`，再匹配
+ * 单行的 `<div class="doc-embed" ...>`。所有正则都要求块首尾独占一行，避免误匹配嵌入
+ * 在段落里的代码片段。
+ */
+function sliceNotionBlocks(md: string): SlicePart[] {
+  const parts: SlicePart[] = []
+  // 用一个游标顺序扫描，遇到首个匹配就切片并前进游标
+  const blockPatterns: Array<{
+    test: (s: string, start: number) => { match: RegExpExecArray; length: number } | null
+  }> = [
+    // 1) :::type\n...\n::: — callout
+    {
+      test(s, start) {
+        const rest = s.slice(start)
+        // 必须从行首开始；info/warning/error/success 是已知类型
+        const m = /^:::([a-z]+)\n([\s\S]*?)\n:::(?=\n|$)/m.exec(rest)
+        if (!m) return null
+        return { match: m, length: m[0].length }
+      },
+    },
+    // 2) <details ...>\n...\n</details> — toggle
+    {
+      test(s, start) {
+        const rest = s.slice(start)
+        // 匹配 <details> 或 <details open> 开头的多行块
+        const m = /^<details(\s[^>]*)?>\n([\s\S]*?)\n<\/details>(?=\n|$)/m.exec(rest)
+        if (!m) return null
+        return { match: m, length: m[0].length }
+      },
+    },
+    // 3) <div class="doc-embed" data-kind=... data-config=...></div>
+    {
+      test(s, start) {
+        const rest = s.slice(start)
+        const m = /^<div class="doc-embed" data-kind="([^"]+)" data-config="([^"]*)"><\/div>(?=\n|$)/m.exec(
+          rest,
+        )
+        if (!m) return null
+        return { match: m, length: m[0].length }
+      },
+    },
+  ]
+
+  let cursor = 0
+  while (cursor < md.length) {
+    let earliest: { absIndex: number; match: RegExpExecArray; length: number; patternIdx: number } | null = null
+    for (let i = 0; i < blockPatterns.length; i++) {
+      const sub = md.slice(cursor)
+      const r = blockPatterns[i].test(sub, 0)
+      if (!r) continue
+      // `r.match.index` 是相对于 sub 的位置（即绝对位置 = cursor + m.index）。
+      const absIndex = cursor + r.match.index
+      if (!earliest || absIndex < earliest.absIndex) {
+        earliest = { absIndex, match: r.match, length: r.length, patternIdx: i }
+      }
+    }
+    if (!earliest) break
+    // 把 match 之前的 markdown 累积到一个 markdown 段
+    if (earliest.absIndex > cursor) {
+      const between = md.slice(cursor, earliest.absIndex)
+      pushMarkdown(parts, between)
+    }
+    const m = earliest.match
+    switch (earliest.patternIdx) {
+      case 0: {
+        parts.push({ type: 'callout', kind: m[1] || 'info', body: (m[2] || '').trim() })
+        break
+      }
+      case 1: {
+        const attrs = (m[1] || '').trim()
+        const open = /\bopen\b/.test(attrs)
+        const inner = (m[2] || '').trim()
+        const { summary, body } = splitToggle(inner)
+        parts.push({ type: 'toggle', open, summary, body })
+        break
+      }
+      case 2: {
+        let config: Record<string, any> = {}
+        try {
+          config = JSON.parse(decodeURIComponent(m[2] || ''))
+        } catch {
+          /* ignore invalid embed */
+        }
+        parts.push({ type: 'embed', kind: m[1] || 'form-app', config })
+        break
+      }
+    }
+    cursor = earliest.absIndex + earliest.length
+  }
+  if (cursor < md.length) {
+    pushMarkdown(parts, md.slice(cursor))
+  }
+  if (parts.length === 0) parts.push({ type: 'markdown', value: md })
+  return parts
+}
+
+function pushMarkdown(parts: SlicePart[], chunk: string) {
+  const value = chunk.trim()
+  if (!value) return
+  parts.push({ type: 'markdown', value })
+}
+
+/**
+ * toggle 序列化格式：`<summary>title</summary>\ncontent\n`
+ * 把 summary 单独抽出来，剩下的作为内容体。
+ */
+function splitToggle(inner: string): { summary: string; body: string } {
+  const summaryRe = /^<summary>([\s\S]*?)<\/summary>\s*(?:\n|$)/
+  const m = summaryRe.exec(inner)
+  if (!m) return { summary: inner, body: '' }
+  return { summary: m[1], body: inner.slice(m[0].length).trim() }
+}
+
+const CALLOUT_ICON: Record<string, string> = {
+  info: 'ℹ️',
+  warning: '⚠️',
+  error: '⛔',
+  success: '✅',
+}
+
+/**
+ * react-markdown 的 components 映射：把常见 markdown 元素映射到带 className 的标签，
+ * 由 `index.css` 中的 `.agent-md-body` 选择器统一样式（与编辑端的 `.pm-host .ProseMirror`
+ * 风格一致，但作用域隔离，避免污染 docs-app 其它页面）。
+ *
+ * 工厂函数：传入项目 code 与分享 token，让 img 渲染器把编辑态写入的登录态下载链接
+ * `/api/docs/nodes/:id/download?token=...` 改写为分享态免登录链接
+ * `/api/docs/share/projects/code/:code/nodes/:id/download?share=<token>`，
+ * 否则 Agent WebView 在无 JWT 场景下图片无法加载。
+ */
+function createMarkdownComponents(code: string, shareToken: string) {
+  // 匹配 `/api/docs/nodes/<id>/download?...`，捕获节点 id；其余形态（http(s)/data/绝对路径）原样保留。
+  const AUTH_DOWNLOAD_RE = /^\/api\/docs\/nodes\/(\d+)\/download(\?.*)?$/
+  return {
+    a: ({ node: _node, ...props }: any) => <a {...props} target="_blank" rel="noopener noreferrer" />,
+    table: ({ node: _node, ...props }: any) => <table className="agent-md-table" {...props} />,
+    th: ({ node: _node, ...props }: any) => <th {...props} />,
+    td: ({ node: _node, ...props }: any) => <td {...props} />,
+    // 让 GitHub 风格任务列表（- [ ] / - [x]）渲染为带 className 的 ul/li，便于 CSS 美化。
+    ul: ({ node: _node, className, ...props }: any) => {
+      const isTask = /task-list/.test(className || '')
+      return <ul className={isTask ? 'agent-md-task-list' : undefined} {...props} />
+    },
+    li: ({ node: _node, className, children, ...props }: any) => {
+      const isTaskItem = /task-item/.test(className || '')
+      if (isTaskItem) {
+        const checked = /checked/.test(className || '')
+        return (
+          <li className={checked ? 'agent-md-task-item checked' : 'agent-md-task-item'} {...props}>
+            <input type="checkbox" checked={checked} readOnly className="agent-md-task-checkbox" />
+            <span className="agent-md-task-content">{children}</span>
+          </li>
+        )
+      }
+      return <li {...props}>{children}</li>
+    },
+    // 折叠块：react-markdown 直接吐出 <details>/<summary>，加 className 让 CSS 接管样式。
+    details: ({ node: _node, ...props }: any) => <details className="agent-md-toggle" {...props} />,
+    summary: ({ node: _node, ...props }: any) => <summary className="agent-md-toggle-summary" {...props} />,
+    // 代码：让 ```` ``` ```` 围栏渲染为带 className 的 pre。
+    pre: ({ node: _node, ...props }: any) => <pre className="agent-md-pre" {...props} />,
+    code: ({ node: _node, className, ...props }: any) => {
+      const isBlock = /language-/.test(className || '')
+      return isBlock ? <code className={className} {...props} /> : <code className="agent-md-code-inline" {...props} />
+    },
+    // 引用、分割线、标题交给 CSS。
+    blockquote: ({ node: _node, ...props }: any) => <blockquote className="agent-md-quote" {...props} />,
+    hr: ({ node: _node, ...props }: any) => <hr className="agent-md-hr" {...props} />,
+    h1: ({ node: _node, ...props }: any) => <h1 className="agent-md-h1" {...props} />,
+    h2: ({ node: _node, ...props }: any) => <h2 className="agent-md-h2" {...props} />,
+    h3: ({ node: _node, ...props }: any) => <h3 className="agent-md-h3" {...props} />,
+    h4: ({ node: _node, ...props }: any) => <h4 className="agent-md-h4" {...props} />,
+    h5: ({ node: _node, ...props }: any) => <h5 className="agent-md-h5" {...props} />,
+    h6: ({ node: _node, ...props }: any) => <h6 className="agent-md-h6" {...props} />,
+    p: ({ node: _node, ...props }: any) => <p className="agent-md-p" {...props} />,
+    img: ({ node: _node, src, alt, ...props }: any) => {
+      const rewritten = typeof src === 'string'
+        ? src.replace(AUTH_DOWNLOAD_RE, (_match, id: string, qs: string | undefined) => {
+            const extra = qs && qs.length > 0 ? `&${qs.slice(1)}` : ''
+            return `/api/docs/share/projects/code/${encodeURIComponent(code)}/nodes/${id}/download?share=${encodeURIComponent(shareToken)}${extra}`
+          })
+        : src
+      const altText = typeof alt === 'string' ? alt : ''
+      return (
+        <img
+          className="agent-md-img"
+          src={rewritten}
+          alt={altText}
+          loading="lazy"
+          // 点击触发全局 ImageLightbox：黑底全屏 + 旋转/缩放/拖动/双指捏合。
+          // stopPropagation 防止冒泡到外层容器；空 src（被 urlTransform 吞掉的）不响应。
+          onClick={(e) => {
+            if (typeof rewritten === 'string' && rewritten.length > 0) {
+              e.stopPropagation()
+              openImageLightbox(rewritten, altText)
+            }
+          }}
+          {...props}
+        />
+      )
+    },
+  }
+}
+
+function DocEmbedFrame({
+  kind,
+  config,
+  documentContext,
+}: {
+  kind: string
+  config: Record<string, any>
+  documentContext: { globalContext?: Record<string, any>; pageContext?: Record<string, any> }
+}) {
+  const values = {
+    ...(documentContext.globalContext || {}),
+    ...(documentContext.pageContext || {}),
+    ...(config.params || {}),
+    ...(config.globalContext || {}),
+    ...(config.pageContext || {}),
+  }
+  const query = new URLSearchParams({ embed: '1' })
+  if (config.pageKey) query.set('page', String(config.pageKey))
+  Object.entries(values).forEach(([key, value]) => {
+    if (value != null) query.set(`p_${key}`, String(value))
+  })
+  const src =
+    kind === 'scada'
+      ? `/scada-editor/share/${encodeURIComponent(config.shareToken || '')}?${query.toString()}`
+      : `/form-app/runtime/${encodeURIComponent(config.formCode || '')}?${query.toString()}`
+  return (
+    <div className="doc-embed-node">
+      <iframe
+        className="doc-embed-frame"
+        src={src}
+        title={kind === 'scada' ? '已发布组态' : 'form-app'}
+        loading="lazy"
+        allow="fullscreen"
+      />
     </div>
   )
 }
@@ -619,24 +940,16 @@ function MarkdownView({ content, isMobile }: { content: string; isMobile: boolea
 // ---------------------------------------------------------------------------
 
 function ensureTreeStructure(nodes: DocumentNode[]): TreeNode[] {
-  const map = new Map<number, TreeNode>()
-  nodes.forEach((n) => map.set(n.id, { ...n, children: [] }))
-  const roots: TreeNode[] = []
-  nodes.forEach((n) => {
-    const treeNode = map.get(n.id)!
-    if (n.parent_id == null) {
-      roots.push(treeNode)
-    } else {
-      const parent = map.get(n.parent_id)
-      if (parent) {
-        parent.children = parent.children || []
-        parent.children.push(treeNode)
-      } else {
-        roots.push(treeNode)
-      }
+  // 后端返回的是嵌套结构：每个节点的 children 已经塞好了子树。
+  // 直接递归深拷贝即可，**不要**重置 children 或基于 parent_id 重组 —— 共享项目接口
+  // 只返回项目根节点这一项，平铺重组会让所有后代丢失。
+  function copy(n: DocumentNode): TreeNode {
+    return {
+      ...n,
+      children: n.children?.map(copy) || [],
     }
-  })
-  return roots
+  }
+  return nodes.map(copy)
 }
 
 // ---------------------------------------------------------------------------
@@ -866,40 +1179,6 @@ const styles: Record<string, React.CSSProperties> = {
     overflow: 'hidden',
     minWidth: 0,
   },
-  contentHeader: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '12px 20px',
-    borderBottom: '1px solid #e5e7eb',
-    background: '#fff',
-    flexShrink: 0,
-    gap: 8,
-  },
-  contentTitle: {
-    fontSize: 15,
-    fontWeight: 600,
-    color: '#111827',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    flex: 1,
-    minWidth: 0,
-  },
-  downloadBtn: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 4,
-    padding: '6px 10px',
-    fontSize: 12,
-    color: '#374151',
-    background: '#f3f4f6',
-    borderRadius: 4,
-    textDecoration: 'none',
-    cursor: 'pointer',
-    flexShrink: 0,
-    minHeight: 32,
-  },
   contentBody: {
     flex: 1,
     overflow: 'auto',
@@ -940,11 +1219,6 @@ const styles: Record<string, React.CSSProperties> = {
     lineHeight: 1.7,
     wordBreak: 'break-word',
   },
-  h1: { fontWeight: 700, color: '#111827', borderBottom: '1px solid #e5e7eb', paddingBottom: 8 },
-  h2: { fontWeight: 600, color: '#1f2937' },
-  h3: { fontWeight: 600, color: '#374151' },
-  p: { margin: '4px 0', color: '#4b5563' },
-  li: { margin: '3px 0 3px 20px', color: '#4b5563' },
   btn: {
     padding: '6px 16px',
     fontSize: 13,

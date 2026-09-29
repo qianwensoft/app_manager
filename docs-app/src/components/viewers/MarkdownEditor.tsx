@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { Users } from 'lucide-react'
 import ProseMirrorEditor from '../collab/ProseMirrorEditor'
 import { useYjsCollab } from '../../hooks/useYjsCollab'
 import { fetchContent, saveContent, fetchSharedContent, initialsOf, fetchNodes } from '../../api/documents'
+import { openImageLightbox } from '../ImageLightbox'
 
 // MarkdownEditor：文档 Markdown 协同编辑器。
 // 底座为 prosemirror-markdown + y-prosemirror 绑定 Y.XmlFragment，外加与后端的 Markdown 拉取/保存链路。
@@ -204,8 +206,33 @@ function SharedMarkdownContent({ markdown, documentContext }: { markdown: string
   if (last < markdown.length) parts.push({ type: 'markdown', value: markdown.slice(last) })
   if (parts.length === 0) parts.push({ type: 'markdown', value: markdown })
 
+  // react-markdown v9 默认 urlTransform 会吞掉 data: / blob: 等非 http 协议的图片 URL。
+  // 编辑器侧（已登录态）允许文档里嵌入 data:image/* 等 base64 图片，因此同样放行。
+  // 同时给图片加 onClick：触发全局 ImageLightbox 全屏查看 + 旋转/缩放。
+  const urlTransform = (value: string) => value
+  const components = {
+    img: ({ node: _node, src, alt, ...props }: any) => {
+      const altText = typeof alt === 'string' ? alt : ''
+      const finalSrc = typeof src === 'string' ? src : ''
+      return (
+        <img
+          {...props}
+          src={finalSrc}
+          alt={altText}
+          loading="lazy"
+          onClick={(e: React.MouseEvent<HTMLImageElement>) => {
+            if (finalSrc.length > 0) {
+              e.stopPropagation()
+              openImageLightbox(finalSrc, altText)
+            }
+          }}
+        />
+      )
+    },
+  }
+
   return <>{parts.map((part, index) => part.type === 'markdown'
-    ? <ReactMarkdown key={index}>{part.value}</ReactMarkdown>
+    ? <ReactMarkdown key={index} remarkPlugins={[remarkGfm]} urlTransform={urlTransform} components={components}>{part.value}</ReactMarkdown>
     : <DocEmbedFrame key={index} kind={part.kind || 'form-app'} config={part.config || {}} documentContext={documentContext} />)}</>
 }
 

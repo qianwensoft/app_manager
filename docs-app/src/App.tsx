@@ -5,6 +5,7 @@ import RolesPage from './pages/RolesPage'
 import ProjectsPage from './pages/ProjectsPage'
 import ProjectDocsPage from './pages/ProjectDocsPage'
 import AgentDocPreview from './pages/AgentDocPreview'
+import { ImageLightbox } from './components/ImageLightbox'
 import { useDocsStore } from './store'
 import { getShareToken } from './api/documents'
 
@@ -23,18 +24,23 @@ export default function App() {
   }, [location.search, setShareMode])
 
   return (
-    <Routes>
-      {/* 项目首页 */}
-      <Route path="/" element={<ProjectsPage />} />
-      {/* 文档浏览页 */}
-      <Route path="/docs" element={<DocsPage />} />
-      {/* /d/:code → 项目独立文档管理/查看页面（支持 ?share= 免登录只读模式） */}
-      <Route path="/d/:code" element={<ProjectDocsPage />} />
-      <Route path="/d/:code/*" element={<ProjectDocsPage />} />
-      {/* /preview/doc/:code → Agent 端专用只读预览（专门适配 Agent WebView，无协同编辑） */}
-      <Route path="/preview/doc/:code" element={<AgentDocPreview />} />
-      <Route path="/roles" element={<RolesPage />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <>
+      <Routes>
+        {/* 项目首页 */}
+        <Route path="/" element={<ProjectsPage />} />
+        {/* 文档浏览页 */}
+        <Route path="/docs" element={<DocsPage />} />
+        {/* /d/:code → 项目独立文档管理/查看页面（支持 ?share= 免登录只读模式） */}
+        <Route path="/d/:code" element={<ProjectDocsPage />} />
+        <Route path="/d/:code/*" element={<ProjectDocsPage />} />
+        {/* /preview/doc/:code → Agent 端专用只读预览（专门适配 Agent WebView，无协同编辑） */}
+        <Route path="/preview/doc/:code" element={<AgentDocPreview />} />
+        <Route path="/roles" element={<RolesPage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+      {/* 全局图片放大查看器：单例，订阅模块级 openImageLightbox() 事件。
+          渲染在 Routes 之外、fixed 定位覆盖整个视屏；任何路由下点图都生效。 */}
+      <ImageLightbox />
+    </>
   )
 }
