@@ -364,11 +364,10 @@ export default function ProseMirrorEditor({
       <div className="pm-host" ref={hostRef} />
       
       {/* Notion 风格交互组件 */}
-      {canEdit && slashMenuState.active && viewRef.current && (
+      {canEdit && viewRef.current && (
         <SlashMenu
           view={viewRef.current}
-          pos={slashMenuState.pos}
-          query={slashMenuState.query}
+          pluginState={slashMenuState}
           onClose={() => closeSlashMenu(viewRef.current!)}
           documentContext={documentContext}
         />

@@ -86,7 +86,7 @@ function TreeItem({
   onMove,
   isDraggingSelf,
 }: TreeItemProps) {
-  const [open, setOpen] = useState(depth < 1)
+  const [open, setOpen] = useState(depth < 2)
   const [dropZone, setDropZone] = useState<DropZone | null>(null)
   const itemRef = useRef<HTMLDivElement | null>(null)
   // 当前 TreeItem 是否正在被拖动（用于自节点高亮淡化）

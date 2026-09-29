@@ -9,6 +9,7 @@ import { notionSchema } from '../../schema/notionSchema'
 import { setBlockType, wrapIn } from 'prosemirror-commands'
 import { wrapInList } from 'prosemirror-schema-list'
 import { api } from '../../api/client'
+import type { SlashMenuState } from '../../plugins/slashMenuPlugin'
 
 interface MenuItem {
   id: string
@@ -21,8 +22,7 @@ interface MenuItem {
 
 interface SlashMenuProps {
   view: EditorView
-  pos: number
-  query: string
+  pluginState: SlashMenuState
   onClose: () => void
   documentContext?: { globalContext?: Record<string, any>; pageContext?: Record<string, any> }
 }
@@ -84,7 +84,8 @@ function EmbedModal({ initialKind, onClose, onInsert }: { initialKind: 'form-app
   </div>
 }
 
-export default function SlashMenu({ view, pos, query, onClose, documentContext }: SlashMenuProps) {
+export default function SlashMenu({ view, pluginState, onClose, documentContext }: SlashMenuProps) {
+  const { active, pos, query } = pluginState
   const [selectedIndex, setSelectedIndex] = useState(0)
   const menuRef = useRef<HTMLDivElement>(null)
   const [coords, setCoords] = useState<{ top: number; left: number } | null>(null)
@@ -125,12 +126,37 @@ export default function SlashMenu({ view, pos, query, onClose, documentContext }
   const selectItem = (item: MenuItem) => {
     const { state, dispatch } = view
     dispatch(state.tr.delete(pos - query.length - 1, pos))
-    setTimeout(() => {
-      item.action(view)
-      view.focus()
-      if (!item.id.startsWith('embed-')) onClose()
-    }, 0)
+    // 嵌入项会打开 EmbedModal（非命令式渲染），所以保留组件挂载，
+    // 不在这里调用 onClose()。其余项命令式插入 block 后立即关闭菜单。
+    item.action(view)
+    view.focus()
+    if (!item.id.startsWith('embed-')) onClose()
   }
-  if (!coords || !filteredItems.length) return null
-  return <><div className="slash-menu" ref={menuRef} style={{ position: 'fixed', top: coords.top, left: coords.left }}>{filteredItems.map((item, i) => { const Icon = item.icon; return <div key={item.id} className={'slash-menu-item' + (i === selectedIndex ? ' selected' : '')} onClick={() => selectItem(item)} onMouseEnter={() => setSelectedIndex(i)}><div className="slash-menu-icon"><Icon size={18} /></div><div className="slash-menu-text"><div className="slash-menu-title">{item.title}</div><div className="slash-menu-desc">{item.description}</div></div></div> })}</div>{embedOpen && <EmbedModal initialKind={embedKind} onClose={() => setEmbedOpen(false)} onInsert={insertEmbed} />}</>
+  if (!coords) return null
+  // 既没有激活 slash 菜单，也没有打开嵌入选择框 → 不渲染。
+  if (!active && !embedOpen) return null
+  return <>
+    {active && filteredItems.length > 0 && (
+      <div className="slash-menu" ref={menuRef} style={{ position: 'fixed', top: coords.top, left: coords.left }}>
+        {filteredItems.map((item, i) => {
+          const Icon = item.icon
+          return (
+            <div
+              key={item.id}
+              className={'slash-menu-item' + (i === selectedIndex ? ' selected' : '')}
+              onClick={() => selectItem(item)}
+              onMouseEnter={() => setSelectedIndex(i)}
+            >
+              <div className="slash-menu-icon"><Icon size={18} /></div>
+              <div className="slash-menu-text">
+                <div className="slash-menu-title">{item.title}</div>
+                <div className="slash-menu-desc">{item.description}</div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    )}
+    {embedOpen && <EmbedModal initialKind={embedKind} onClose={() => { setEmbedOpen(false); onClose() }} onInsert={insertEmbed} />}
+  </>
 }
