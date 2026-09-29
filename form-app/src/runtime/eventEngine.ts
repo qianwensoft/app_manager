@@ -7,7 +7,7 @@
  * - setupPageEvents：为每个事件源注册监听，返回清理函数
  * - migrateScannerToEvents：把旧 ScannerConfig 适配成等价 PageEvent[]，保证存量页面零迁移
  */
-import type { StateScope } from './pageState'
+import type { StateScope, FieldProp } from './pageState'
 import { eventManager } from './EventHandler'
 import { navigationManager } from './NavigationManager'
 import { speak } from './speakBridge'
@@ -145,8 +145,13 @@ export interface ScriptApi {
   get: (field: string) => any
   /** 写入字段值 */
   set: (field: string, value: any) => void
-  /** 设置字段展示属性：visible/disabled/readOnly(boolean) 或 background/color/title(string) */
-  setProp: (field: string, prop: string, value: any) => void
+  /**
+   * 设置字段展示属性。
+   * - visible / disabled / readOnly：boolean
+   * - background / color / title：string
+   * 拼写错误会在 Formily 适配器里 dev 期 console.warn。
+   */
+  setProp: (field: string, prop: FieldProp, value: any) => void
   /** 调接口：type 默认 internal；third_party 用 endpointId */
   callInterface: (
     interfaceCode: string,
@@ -187,7 +192,7 @@ function buildScriptApi(
     set: (field, value) => { if (field) deps.pageState.set(field, value) },
     setProp: (field, prop, value) => {
       if (!field || !prop) return
-      deps.pageState.setProp(field, prop as any, value)
+      deps.pageState.setProp(field, prop, value)
     },
     callInterface: async (interfaceCode, params = {}, type = 'internal', endpointId) => {
       if (!deps.onScanInterface) return undefined

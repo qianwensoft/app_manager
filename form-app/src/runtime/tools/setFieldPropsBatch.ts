@@ -9,7 +9,7 @@ registerTool({
     for (const { field, prop, value_src } of a.mappings) {
       if (!field || !prop) continue
       const val = resolve(value_src)
-      scope.setProp(field, prop as any, val)
+      scope.setProp(field, prop, val)
     }
   },
 })

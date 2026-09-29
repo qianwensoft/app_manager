@@ -10,6 +10,12 @@ import type { Form as FormilyForm } from '@formily/core'
 import { onFieldValueChange } from '@formily/core'
 import type { StateScope, FieldProp } from './pageState'
 
+const KNOWN_FIELD_PROPS: readonly FieldProp[] = ['visible', 'disabled', 'readOnly', 'background', 'color', 'title']
+
+const isDev = (() => {
+  try { return Boolean((import.meta as any)?.env?.DEV) } catch { return false }
+})()
+
 const truthy = (v: any): boolean => {
   if (typeof v === 'boolean') return v
   const s = String(v ?? '').trim().toLowerCase()
@@ -55,14 +61,39 @@ export function createFormilyPageState(
             break
           case 'background':
           case 'color': {
-            // 写入组件 style，运行时反映到表单控件外观
-            const prevProps = state.componentProps || {}
-            const prevStyle = prevProps.style || {}
-            state.componentProps = {
-              ...prevProps,
-              style: { ...prevStyle, [prop]: value == null ? '' : String(value) },
+            // 写入 FormItem 容器（decoratorProps.style）。
+            // Formily 的 ReactiveField 渲染 FormItem 时：toJS(field.decoratorProps) → 整个对象展开传给 FormItem
+            // → FormItem 外层 div 拿到 style.background 生效。
+            // 同步也写入 componentProps.style 兜底（无装饰器字段或想同时影响内部组件时仍然有效）。
+            const cssValue = value == null ? '' : String(value)
+            const prevDeco = state.decoratorProps || {}
+            state.decoratorProps = {
+              ...prevDeco,
+              style: { ...(prevDeco.style || {}), [prop]: cssValue },
             }
+            const prevComp = state.componentProps || {}
+            state.componentProps = {
+              ...prevComp,
+              style: { ...(prevComp.style || {}), [prop]: cssValue },
+            }
+            // eslint-disable-next-line no-console
+            console.debug(
+              `[form-app] setProp: ${prop}="${value}" → field="${path}"`,
+              { decoratorStyle: state.decoratorProps.style, componentStyle: state.componentProps.style },
+            )
             break
+          }
+          default: {
+            // 未知 prop（拼写错误最常见，例如 "backgroud" → "background"）：
+            // 静默吞掉会让事件看上去"不生效"，开发期主动报出来。
+            // 不抛错，避免线上脚本带错 prop 时整个页面崩。
+            if (isDev) {
+              // eslint-disable-next-line no-console
+              console.warn(
+                `[form-app] setProp: 未知字段属性 "${prop}"（path=${path}）。`
+                  + `可用值：${KNOWN_FIELD_PROPS.join(', ')}。`,
+              )
+            }
           }
         }
       })

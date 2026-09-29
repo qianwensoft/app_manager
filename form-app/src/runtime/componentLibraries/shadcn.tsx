@@ -49,6 +49,7 @@ const FormilyTextarea = connect(
 /**
  * shadcn Input 适配 Formily
  * - value/onChange 自动映射
+ * - runtime setProp("field", "background"/"color", value) → Formily 把 componentProps 展开成 props.style → 这里透传给 Input
  * - readPretty 模式显示纯文本
  */
 const FormilyInput = connect(
@@ -71,11 +72,10 @@ const FormilyInput = connect(
  */
 const FormilySelect = connect(
   (props: any) => {
-    const { value, onChange, options = [], placeholder } = props
-    console.log('[FormilySelect] props:', { value, options, placeholder, allProps: props })
+    const { value, onChange, options = [], placeholder, ...rest } = props
     return (
       <Select value={value ? String(value) : undefined} onValueChange={onChange}>
-        <SelectTrigger>
+        <SelectTrigger {...rest}>
           <SelectValue placeholder={placeholder || '请选择'} />
         </SelectTrigger>
         <SelectContent>
@@ -103,13 +103,14 @@ const FormilySelect = connect(
  */
 const FormilyCheckbox = connect(
   (props: any) => {
-    const { value, onChange, children } = props
+    const { value, onChange, children, style, ...rest } = props
     return (
-      <div className="flex items-center space-x-2">
+      <div className="flex items-center space-x-2" style={style}>
         <Checkbox
           checked={!!value}
           onCheckedChange={onChange}
           id={props.id}
+          {...rest}
         />
         {children && <Label htmlFor={props.id}>{children}</Label>}
       </div>
@@ -135,20 +136,16 @@ const FormilySwitch = connect(
  * NumberPicker 简单实现（Input type=number）
  */
 const FormilyNumberPicker = connect(
-  (props: any) => {
-    const { value, onChange, ...rest } = props
-    return (
-      <Input
-        {...rest}
-        type="number"
-        value={value ?? ''}
-        onChange={(e) => {
-          const num = e.target.value === '' ? undefined : Number(e.target.value)
-          onChange?.(num)
-        }}
-      />
-    )
-  },
+  Input,
+  mapProps((props: any) => ({
+    ...props,
+    type: 'number',
+    value: props.value ?? '',
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
+      const num = e.target.value === '' ? undefined : Number(e.target.value)
+      props.onChange?.(num)
+    },
+  })),
   mapReadPretty((props: any) => <span>{props.value ?? '-'}</span>)
 )
 
@@ -156,7 +153,12 @@ const FormilyNumberPicker = connect(
  * Password 密码输入
  */
 const FormilyPassword = connect(
-  (props: any) => <Input {...props} type="password" value={props.value ?? ''} />,
+  Input,
+  mapProps((props: any) => ({
+    ...props,
+    type: 'password',
+    value: props.value ?? '',
+  })),
   mapReadPretty(() => <span>******</span>)
 )
 

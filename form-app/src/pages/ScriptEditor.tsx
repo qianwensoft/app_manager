@@ -18,7 +18,7 @@ const CTX_MEMBERS: Array<{ label: string; apply: string; detail: string }> = [
   { label: 'values', apply: 'values', detail: '当前表单值快照' },
   { label: 'get', apply: "get('')", detail: '读取字段值 get(field)' },
   { label: 'set', apply: "set('', )", detail: '写入字段值 set(field, value)' },
-  { label: 'setProp', apply: "setProp('', '', )", detail: '设字段属性 setProp(field, prop, value)' },
+  { label: 'setProp', apply: "setProp('', 'background', '')", detail: '设字段属性 setProp(field, prop, value)；prop ∈ visible | disabled | readOnly | background | color | title' },
   { label: 'callInterface', apply: "await ctx.callInterface('', {})", detail: '调接口（返回 Promise）' },
   { label: 'print', apply: "await ctx.print('')", detail: '打印模板 print(templateId, extra?)' },
   { label: 'navigate', apply: "navigate('', {})", detail: '跳转页面 navigate(pageKey, params?)' },
