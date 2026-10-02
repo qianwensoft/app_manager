@@ -211,18 +211,16 @@ class FormAppActivity : AppCompatActivity() {
         }
     }
 
-    override fun onStart() {
-        super.onStart()
-        // 独占扫码模式下，form-app 进入可见状态时阻塞工作流触发。
-        // 使用 onStart（而非 onResume）避免对话框/相机预览覆盖导致的瞬时 onPause 干扰。
-        if (exclusiveScanMode) {
-            WorkflowBlocker.block(formAppCode)
-            Log.i(tag, "Workflow blocked for exclusive scan mode")
-        }
-    }
-
     override fun onResume() {
         super.onResume()
+        // 独占扫码模式下，form-app 取得前台焦点时阻塞工作流触发。
+        // 使用 onResume（而非 onStart）确保仅当 form-app 真正"当前"（获得输入焦点、
+        // 无其他 Activity 覆盖）时才阻塞；其他 Activity / 相机扫描 / 透明 Activity
+        // 覆盖造成 onPause 时立即放开阻塞，避免长时间失焦状态下事件被错误吞掉。
+        if (exclusiveScanMode) {
+            WorkflowBlocker.block(formAppCode)
+            Log.i(tag, "Workflow blocked on resume (current)")
+        }
         // 硬件扫码广播接收器：仅在 Activity 处于交互前台时注册，
         // onPause 时注销（onStop 不一定立即触发，onDestroy 可能延迟）。
         val filter = ScanBroadcastHelper.createScanIntentFilter(this)
@@ -235,17 +233,24 @@ class FormAppActivity : AppCompatActivity() {
 
     override fun onPause() {
         super.onPause()
+        // Activity 失去前台焦点（任何其它 Activity 覆盖、CameraActivity 弹出、
+        // 用户按 Home、扫码进行中等场景），立即放开工作流阻塞。
+        // 下一轮 onResume 重新 block；onStop 不一定立即触发，用 onPause 更及时。
+        if (exclusiveScanMode) {
+            WorkflowBlocker.unblock(formAppCode)
+            Log.i(tag, "Workflow unblocked on pause (not current)")
+        }
         // Activity 失去交互前台，注销扫码广播接收器。
         try { unregisterReceiver(hardwareScanReceiver) } catch (_: Exception) {}
     }
 
     override fun onStop() {
         super.onStop()
-        // 独占扫码模式下，form-app 退出可见状态时取消阻塞。
-        // onStop 在 onPause 之后执行，此时 receiver 已注销，不会影响扫描接收。
+        // 兜底：onPause 已 unblock，onStop 这里再幂等调用一次 forceUnblock，
+        // 避免 onPause 路径与 onDestroy 兜底逻辑之间存在未配对的残留计数。
         if (exclusiveScanMode) {
-            WorkflowBlocker.unblock(formAppCode)
-            Log.i(tag, "Workflow unblocked on stop")
+            WorkflowBlocker.forceUnblock(formAppCode)
+            Log.i(tag, "Workflow force-unblocked on stop (safety net)")
         }
     }
 

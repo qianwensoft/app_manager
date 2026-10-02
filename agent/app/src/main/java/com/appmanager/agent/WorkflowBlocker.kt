@@ -6,10 +6,12 @@ import android.util.Log
  * 工作流阻塞器：form-app 独占扫码模式下，阻止 agent 上报 device_event。
  *
  * 每个 form-app 独立引用计数（formCode → count），只有当"当前有 exclusive form-app
- * 可见"时才阻塞——即：
+ * 真正处于前台（current / 获得输入焦点）"时才阻塞——即：
  *   - form-app 的 config 指定独占模式（exclusive_scan_mode = true）
- *   - 该 form-app 处于可见状态（onStart / onStop 生命周期，而非 onResume / onPause）
- *   - agent 不在其它 form-app 中（无 exclusive form-app 可见）
+ *   - 该 form-app 处于 onResume（前台）生命周期
+ *   - 一旦其它 Activity 覆盖、按 Home 键、CameraActivity 弹出等任何导致 onPause 的场景
+ *     立即 unblock，避免失焦状态下事件被错误吞掉
+ *   - onStop / onDestroy 再次 forceUnblock 作为兜底
  *
  * EventReporter.report() 在发事件前查此处状态，阻塞时直接丢弃。
  *
@@ -21,12 +23,15 @@ object WorkflowBlocker {
     /** formCode → 阻塞计数（0 = 该 form-app 不阻塞）。非 exclusive 的 form-app 不会调用 block()。 */
     private val blockedCounts = mutableMapOf<String, Int>()
 
-    /** 当前是否有任意 exclusive form-app 处于可见状态。 */
+    /**
+     * 当前是否有任意 exclusive form-app 处于前台（onResume）。
+     * EventReporter.report() 查询此值决定是否丢弃事件。
+     */
     @Volatile
     private var anyBlocked: Boolean = false
 
     /**
-     * 请求阻塞：exclusive form-app 进入可见状态时调用。
+     * 请求阻塞：exclusive form-app 进入前台（onResume / 获得输入焦点）时调用。
      * 可重入（同一 formCode 多次调用），由对应 unblock() 调用次数平衡。
      *
      * @param formCode 发起阻塞的 form-app 代码
@@ -42,7 +47,8 @@ object WorkflowBlocker {
     }
 
     /**
-     * 取消阻塞：exclusive form-app 退出可见状态时调用。
+     * 取消阻塞：exclusive form-app 失去前台焦点（onPause）时调用。
+     * 平衡对应 block() 的次数；也可由 onStop / onDestroy 通过 [forceUnblock] 兜底。
      *
      * @param formCode 对应 block() 时的 formCode
      */
